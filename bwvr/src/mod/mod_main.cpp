@@ -540,8 +540,10 @@ float g_fake_roll = 0.0f;
 bool g_fake_sweep = false;
 // The player key "controllers" turns the whole controller path off.
 bool g_controllers = true;
-// The player key "left_hand": -1 follows the game's own option, 0 makes the
-// right controller the Hand, 1 the left controller.
+// The key "left_hand": -1 follows the game's own option, 0 makes the right
+// controller the Hand, 1 the left controller. With hand_follow_game=1 (the
+// default) the game's own option always chooses the Hand, and left_hand
+// does not act: the window and the launcher have no row for it.
 int g_left_hand = -1;
 bool g_controller_swap_buttons = false;
 bool g_controller_hints = true;
@@ -1370,6 +1372,14 @@ void ReadSettings() {
   // Player keys: which hand points, which trigger is which button, pulses.
   g_left_hand = GetPrivateProfileIntA("bwvr", "left_hand", -1, path);
   if (g_left_hand < -1 || g_left_hand > 1) g_left_hand = -1;
+  if (GetPrivateProfileIntA("bwvr", "hand_follow_game", 1, path) != 0) {
+    if (g_left_hand != -1) {
+      ModLog("controllers  : hand_follow_game=1, so the left hand option of "
+             "the game chooses the Hand, and left_hand=%d does not act",
+             g_left_hand);
+    }
+    g_left_hand = -1;
+  }
   g_controller_swap_buttons =
       GetPrivateProfileIntA("bwvr", "controller_swap_buttons", 0, path) != 0;
   g_controller_haptics =

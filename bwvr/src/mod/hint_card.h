@@ -58,5 +58,10 @@ void HintCardMovesToggle(const char* by);
 // world_grab.cpp, far_grab.cpp and creature_command.cpp. This file sees the
 // take, the drop and the ring itself.
 void HintCardLearnDone(int skill, const char* how);
+
+// controller_hints.cpp, once a frame: the ToolTips option of the game
+// (TOOLTIP_LEVEL, 0 to 3). With hints_follow_game=1 it chooses whether a line
+// of a card goes away when the player knows it (hint_learn_math.h).
+void HintCardFollowTooltips(int tooltip_level);
 // Once a report window.
 void HintCardReport();

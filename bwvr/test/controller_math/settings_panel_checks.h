@@ -211,6 +211,54 @@ inline void SettingsPanelChecks() {
   Check(WelcomeShows(1, 0) && !WelcomeShows(1, 1) && !WelcomeShows(0, 0),
         "the welcome page shows with welcome_page=1 and no welcome_done=1, "
         "and never with welcome_page=0", 0, 0);
+
+  // THE LEAN WINDOW (settings_lean=1): the rows that a player changes, in
+  // the tabs Moving and Hands. The group Cards has no row and no tab.
+  {
+    int lean_rows = 0;
+    bool hidden_ok = true;
+    for (int i = 0; i < kSettings; ++i) {
+      if (InWindow(i, true)) ++lean_rows;
+      if (!InWindow(i, false)) hidden_ok = false;
+    }
+    const bool gone = !InWindow(kTeleport, true) &&
+                      !InWindow(kRecenterHold, true) &&
+                      !InWindow(kLeftHand, true) &&
+                      !InWindow(kOpenStroke, true) &&
+                      !InWindow(kHintLearn, true) &&
+                      !InWindow(kCardStyle, true) &&
+                      !InWindow(kSubtitleCard, true);
+    Check(lean_rows == 9 && gone && hidden_ok,
+          "the lean window has 9 rows, with no Teleport, Recenter hold, Hand, "
+          "Open hand stroke, Hints, Card look or Subtitle card, and the old "
+          "window has each row", lean_rows, 9);
+    Check(TabCount(true) == 2 && TabCount(false) == 3 &&
+              GroupOfTab(0, true) == kGroupMoving &&
+              GroupOfTab(1, true) == kGroupHands &&
+              GroupOfTab(2, true) == -1 &&
+              TabOfGroup(kGroupCards, true) == -1 &&
+              TabOfGroup(kGroupCards, false) == 2,
+          "the lean window has the tabs Moving and Hands, and the old window "
+          "also has Cards", TabCount(true), 2);
+  }
+
+  // THE RESTART. A change of a row that acts at the next start asks for a
+  // restart until it is back at the value of the start.
+  {
+    int start[kSettings], now[kSettings];
+    for (int i = 0; i < kSettings; ++i) start[i] = now[i] = kTable[i].fallback;
+    const bool none = !RestartNeeded(start, now);
+    now[kSnapTurn] = 3;
+    const bool live = !RestartNeeded(start, now);
+    now[kGrabHand] = 2;
+    const bool later = RestartNeeded(start, now);
+    now[kGrabHand] = start[kGrabHand];
+    const bool back = !RestartNeeded(start, now);
+    Check(none && live && later && back && wcslen(kRestartLine) < 48,
+          "the bottom row asks for a restart after a change of Grab the "
+          "world, not after a change that acts at once, and not when the "
+          "value is back", later, 1);
+  }
 }
 
 }  // namespace settings_panel_checks

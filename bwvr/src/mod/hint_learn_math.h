@@ -9,6 +9,12 @@
 // play, the line shows again, and the next use takes it away again. While a
 // lesson of the tutorial runs, each line shows. hint_learn=0 shows each line
 // always.
+//
+// THE GAME'S OPTION (hints_follow_game=1). The ToolTips option of the game
+// (Options, Help Options) chooses the rule: All ToolTips shows each line
+// always, as the game shows each tooltip always. Intelligent ToolTips (the
+// default of the game), Minimum ToolTips and No ToolTips take a line away
+// when the player knows it. hint_learn then does not act.
 
 #pragma once
 
@@ -16,6 +22,13 @@
 #include <stdlib.h>
 
 namespace hint_learn_math {
+
+// The rule of the ToolTips option of the game (TOOLTIP_LEVEL: 0 No, 1
+// Minimum, 2 Intelligent, 3 All ToolTips): 1 a line goes away when the
+// player knows it, 0 each line always shows.
+inline int LearnOfTooltips(int tooltip_level) {
+  return tooltip_level == 3 ? 0 : 1;
+}
 
 // THE ACTIONS that a line of a card teaches.
 enum Skill {

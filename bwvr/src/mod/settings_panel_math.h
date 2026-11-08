@@ -8,14 +8,21 @@
 // THE TABLE has one line for each setting. The words are the words of the
 // launcher (launcher.cpp, kSettings): a player knows them from there. A line
 // has the group (the tab), the ini key, the label of the row, the first line
-// of the note, the values, the default of the mod, when a change acts, and
-// what the setting does.
+// of the note, the values, the default of the mod, when a change acts, what
+// the setting does, and whether the window shows it with settings_lean=1.
 //
 // THE VALUES are a list of "word=value" with "|" between them, as the rows
 // kValues of the launcher. The ini gets the value, not the place in the
 // list. A row with two values is a toggle: the first value is the value
 // that is "off", so the knob is at the left for it. A row with more values
 // has two arrows, and a step goes round the list.
+//
+// THE LEAN WINDOW (settings_lean=1) has only the rows that a player changes:
+// the turn, the walk, the zoom, the comfort, the grab of the world and the
+// trail. The other lines of the table stay for settings_lean=0, and their
+// keys still act. The Hand and the hints follow the options of the game
+// (hand_follow_game, hints_follow_game), and the other keys have one value
+// that each player uses.
 
 #pragma once
 
@@ -69,6 +76,7 @@ struct Setting {
   int fallback;           // the default of the mod
   int when;
   const wchar_t* tip;
+  bool lean;  // a row of the lean window
 };
 
 const Setting kTable[kSettings] = {
@@ -77,76 +85,129 @@ const Setting kTable[kSettings] = {
      L"Push the stick of your Hand left or right to turn. You stay where you "
      L"are. 30, 45 or 90 degrees: one push turns you in one step. Smooth: "
      L"you turn while you hold the stick, and a larger push turns faster. "
-     L"Off: the stick does not turn you."},
+     L"Off: the stick does not turn you.", true},
     {kTurnSpeed, kGroupMoving, "smooth_turn_speed", L"Turn speed",
      L"Speed of the smooth turn", L"Slow=45|Normal=90|Fast=135|Very fast=180",
      90, kNow,
      L"How fast the smooth turn turns you at a full push of the stick. "
-     L"Normal is a quarter turn each second. It acts when Turn is Smooth."},
+     L"Normal is a quarter turn each second. It acts when Turn is Smooth.", true},
     {kTeleport, kGroupMoving, "teleport", L"Teleport", L"Teleport",
      L"Off=0|On=1", 1, kNow,
      L"Hold A to aim an arc. Let go of A to go to the ring at its end. B "
-     L"stops the aim. Off: A does a jump, as in the game."},
+     L"stops the aim. Off: A does a jump, as in the game.", false},
     {kMoveStick, kGroupMoving, "move_stick", L"Stick walk",
      L"Move with the other stick", L"Off=0|Head=1|Controller=2", 1, kNow,
      L"Push the stick of your other hand to move over the land. Head: "
      L"forward is where your head faces. Controller: forward is where that "
-     L"controller points. Off: the stick does not move you."},
+     L"controller points. Off: the stick does not move you.", true},
     {kMoveSpeed, kGroupMoving, "move_stick_speed_cm", L"Walk speed",
      L"Speed of the stick walk",
      L"Slow=75|Normal=150|Fast=250|Very fast=400", 150, kNow,
      L"How fast the stick of your other hand moves you at a full push. "
-     L"Normal is 1.5 m of the room each second."},
+     L"Normal is 1.5 m of the room each second.", true},
     {kZoomSmooth, kGroupMoving, "god_zoom_smooth", L"Smooth zoom",
      L"Zoom with the stick", L"In steps=0|Smooth=1", 0, kNow,
      L"In steps: one push of the stick of your Hand forward or back is one "
-     L"zoom step. Smooth: the zoom changes while you hold the stick."},
+     L"zoom step. Smooth: the zoom changes while you hold the stick.", true},
     {kVignette, kGroupMoving, "comfort_vignette", L"Comfort vignette",
      L"Comfort vignette", L"Off=0|Gentle=1|Strong=2", 0, kNow,
      L"The edges of your view go dark while a control moves you. The middle "
-     L"of the view stays clear. Some people feel less ill with it."},
+     L"of the view stays clear. Some people feel less ill with it.", true},
     {kBlink, kGroupMoving, "blink", L"Blink", L"Blink when you jump or turn",
      L"Off=0|Short=1|Long=2", 0, kNow,
      L"Shows black for a moment when you jump or turn. Short is 0.1 seconds "
-     L"and long is 0.2 seconds."},
+     L"and long is 0.2 seconds.", true},
     {kRecenterHold, kGroupMoving, "recenter_hold", L"Recenter hold",
      L"Recenter with a hold of the stick", L"Off=0|Other hand=1|Hand=2", 1,
      kNow,
      L"Hold the stick click for 1 second, with the stick at rest, to "
      L"recenter the view. Other hand: the stick of your other hand. Hand: "
-     L"the stick of your Hand. Off: no hold recenters."},
+     L"the stick of your Hand. Off: no hold recenters.", false},
     {kLeftHand, kGroupHands, "left_hand", L"Hand", L"Hand",
      L"Game=-1|Right=0|Left=1", -1, kNow,
      L"Which controller is the Hand. Game: the left handed option of the "
-     L"game chooses it. The Hand changes when you let go of each button."},
+     L"game chooses it. The Hand changes when you let go of each button.", false},
     {kGrabHand, kGroupHands, "grab_hand", L"Grab the world",
      L"Grab the world", L"Off=0|Other grip=1|Either grip=2", 1, kNextStart,
      L"Hold the grip of your other hand and move that hand to pull the "
      L"world. Either grip: the grip of your Hand also grabs the world when "
-     L"the Hand is empty. Off: the grips do not move the world."},
+     L"the Hand is empty. Off: the grips do not move the world.", true},
     {kGestureTrail, kGroupHands, "gesture_trail", L"Gesture trail",
      L"Trail for gestures", L"Off=0|On=1", 1, kNow,
      L"While you draw a gesture, a gold ribbon follows the tip of your index "
-     L"finger. It shows what you draw."},
+     L"finger. It shows what you draw.", true},
     {kOpenStroke, kGroupHands, "creature_stroke_open", L"Open hand stroke",
      L"Stroke with the open hand", L"Off=0|On=1", 1, kNow,
      L"Put your open hand on your Creature for a moment, then move it slowly "
-     L"to stroke the Creature. Off: only the grip strokes the Creature."},
+     L"to stroke the Creature. Off: only the grip strokes the Creature.", false},
     {kHintLearn, kGroupCards, "hint_learn", L"Hints", L"Hints",
      L"Always=0|Until learned=1", 1, kNow,
      L"The cards beside your wrists show what each button does. Until "
      L"learned: a line goes away after you do its action 3 times. Always: "
-     L"each line always shows."},
+     L"each line always shows.", false},
     {kCardStyle, kGroupCards, "hint_card_style", L"Card look", L"Card look",
      L"Plain=0|Scroll=1", 1, kNow,
      L"The look of the cards, the ring, the spell book and these windows. "
      L"Scroll: parchment with dark letters. Plain: dark cards with white "
-     L"letters."},
+     L"letters.", false},
     {kSubtitleCard, kGroupCards, "subtitle_card", L"Subtitle card",
      L"Subtitles on a card", L"Off=0|On=1", 1, kNextStart,
      L"The subtitles and the help text of the game show on a card in front "
-     L"of you. Off: they show in the picture of the game."},
+     L"of you. Off: they show in the picture of the game.", false},
 };
+
+// --- the tabs --------------------------------------------------------------------
+
+// A row of the table shows in the window: each row with settings_lean=0,
+// and the rows of the lean window with 1.
+inline bool InWindow(int id, bool lean) {
+  return id >= 0 && id < kSettings && (!lean || kTable[id].lean);
+}
+
+// THE TABS of the rows: the groups that have a row in the window, in their
+// order. With settings_lean=1 the group Cards has no row, so it has no tab.
+inline bool GroupShows(int group, bool lean) {
+  for (int i = 0; i < kSettings; ++i) {
+    if (kTable[i].group == group && InWindow(i, lean)) return true;
+  }
+  return false;
+}
+inline int TabCount(bool lean) {
+  int n = 0;
+  for (int g = 0; g < kGroups; ++g) n += GroupShows(g, lean) ? 1 : 0;
+  return n;
+}
+// The group of a tab, or -1.
+inline int GroupOfTab(int tab, bool lean) {
+  int n = 0;
+  for (int g = 0; g < kGroups; ++g) {
+    if (!GroupShows(g, lean)) continue;
+    if (n == tab) return g;
+    ++n;
+  }
+  return -1;
+}
+// The tab of a group, or -1 when the group has no tab.
+inline int TabOfGroup(int group, bool lean) {
+  if (group < 0 || group >= kGroups || !GroupShows(group, lean)) return -1;
+  int n = 0;
+  for (int g = 0; g < group; ++g) n += GroupShows(g, lean) ? 1 : 0;
+  return n;
+}
+
+// --- the restart ------------------------------------------------------------------
+
+// THE RESTART. A row that acts at the next start (kNextStart) has no words
+// of its own. While its value is not the value of the start of this game,
+// the bottom row of the window says kRestartLine at its left.
+const wchar_t* const kRestartLine = L"Restart the game to use the changes.";
+inline bool RestartNeeded(const int at_start[kSettings],
+                          const int now[kSettings]) {
+  for (int i = 0; i < kSettings; ++i) {
+    if (kTable[i].when == kNextStart && at_start[i] != now[i]) return true;
+  }
+  return false;
+}
 
 // --- the values ------------------------------------------------------------------
 

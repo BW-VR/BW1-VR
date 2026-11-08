@@ -253,6 +253,7 @@ struct Model {
   int body_read;      // the triangles of the body in the file
   int body_kept;      // and after SimplifyBody
   float body_cell;    // the cell of SimplifyBody in meters, or 0
+  signed char* triangle_control;  // for a picture of a panel, or null
 };
 
 void FreeModel(Model* m) {
@@ -268,6 +269,7 @@ void FreeModel(Model* m) {
   free(m->grip_nrm);
   free(m->grip_shell);
   free(m->part_moving);
+  free(m->triangle_control);
   free(m);
 }
 
@@ -952,9 +954,9 @@ const char* WantedId(int side) {
                             ControllersSystemName());
 }
 
-bool Ready(int side) {
+bool Ready(int side, bool any_style = false) {
   ReadSettings();
-  if (g_style != 2 || side < 0 || side > 1) return false;
+  if ((g_style != 2 && !any_style) || side < 0 || side > 1) return false;
   TakeLoad(side);
   const char* id = WantedId(side);
   if (!g_said_profile[side] ||
@@ -1844,6 +1846,63 @@ bool HintModelHasControl(int side, int control) {
 }
 
 // The palm corners of hint_card_math::HandOutline.
+bool HintModelPanelMesh(int side, HintModelMesh* out, bool* none) {
+  *none = false;
+  if (side < 0 || side > 1) {
+    *none = true;
+    return false;
+  }
+  if (!Ready(side, true)) {
+    ReadSettings();
+    const char* id = WantedId(side);
+    *none = id == nullptr || strcmp(g_failed[side], id) == 0;
+    return false;
+  }
+  Model* m = g_model[side];
+  if (m->triangle_control == nullptr) {
+    m->triangle_control = static_cast<signed char*>(
+        malloc(m->triangles > 0 ? m->triangles : 1));
+    if (m->triangle_control == nullptr) {
+      *none = true;
+      return false;
+    }
+    // The stick and its click have one node: the triangles are the stick's.
+    static const int kOrder[] = {art::kTrigger, art::kGrip,   art::kStick,
+                                 art::kFirst,   art::kSecond, art::kMenu,
+                                 art::kPad,     art::kStickClick};
+    for (int t = 0; t < m->triangles; ++t) {
+      const int owner = m->node[m->part[m->triangle_part[t]].node].owner;
+      signed char c = -1;
+      for (int k = 0; k < art::kControls && c < 0 && owner >= 0; ++k) {
+        if (m->value_node[kOrder[k]] == owner) {
+          c = static_cast<signed char>(kOrder[k]);
+        }
+      }
+      m->triangle_control[t] = c;
+    }
+  }
+  memset(out, 0, sizeof(*out));
+  out->id = m->id;
+  out->vertices = m->vertices;
+  out->position = m->grip_pos;
+  out->normal = m->grip_nrm;
+  out->triangles = m->triangles;
+  out->index = m->index;
+  out->control = m->triangle_control;
+  for (int c = 0; c < art::kControls && c < 8; ++c) {
+    out->has[c] = m->value_node[c] >= 0;
+    for (int k = 0; k < 3; ++k) {
+      out->anchor[c][k] = m->anchor[c][k];
+      out->half[c][k] = m->anchor_half[c][k];
+    }
+  }
+  for (int k = 0; k < 3; ++k) {
+    out->low[k] = m->low[k];
+    out->high[k] = m->high[k];
+  }
+  return true;
+}
+
 const int kPalmCorners = 8;
 
 bool HintModelPlace(int which, const HintModelCard* cards, int count,

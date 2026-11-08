@@ -966,7 +966,8 @@ the help options of the game, so a player with "No ToolTips" sees them too.
 | `hint_palm_check` | 1 | 1 a grip hint of the game over the land does not show while the search at the palm is off, because a press there acts on no object. 0 it shows (9.9) |
 | `text_click` | 1 | 1 shows the prompt of a text that waits for a click in each view, and makes the trigger that click. 0 gives that prompt the rule of each other hint of the left button (section 10) |
 | `prompt_moves` | 1 | 1 the prompt of the land has the line of the walk with the stick while a push moves the player, and the line of A shows only while a press of A can move the player. 0 no line for the walk, and the line of A shows in each case (9.4) |
-| `hint_learn` | 1 | 1 a line of a prompt that teaches an action goes away after the player did the action 3 times, and comes back after 10 minutes of play with no use of it. Each line shows in a lesson of the tutorial. 0 each line shows always, and the mod counts nothing (9.10). The launcher row "Hints": "Until learned" is 1, "Always" is 0 |
+| `hints_follow_game` | 1 | 1 the ToolTips option of the game chooses the rule of `hint_learn`: All ToolTips is 0, the other options are 1 (9.10). 0 `hint_learn` chooses. Not in the launcher |
+| `hint_learn` | 1 | With `hints_follow_game=0`: 1 a line of a prompt that teaches an action goes away after the player did the action 3 times, and comes back after 10 minutes of play with no use of it. Each line shows in a lesson of the tutorial. 0 each line shows always, and the mod counts nothing (9.10). Not in the launcher |
 | `hint_counts_test_file` | empty | Test key. The full path of the file of the counts. Empty is `bwvr-hint-counts.ini` beside `bwvr.ini` (9.10) |
 | `hint_card_style` | 1 | 1 each card is a parchment scroll with dark ink and a wax seal for each button word (9.11). 0 the plain dark card with white Segoe UI letters. The launcher row "Card look": "Scroll" is 1, "Plain" is 0. The same key sets the look of the spell book (`miracles.md`), of the ring (`controllers.md`, 10.4) and of the keyboard in the headset (`ui-layer.md`, section 21) |
 | `hint_card_pictures` | 1 | 1 each line of a button has a small picture of the controller with that button lit, before the badge or the seal (9.13). 0 the button word only. The launcher row "Button pictures on the cards" |
@@ -1205,9 +1206,17 @@ Code: `src/mod/hint_learn_math.h` (the count, the time to come back, the
 lesson, the take and the drop), `LearnFrame` and `LearnFilter` in
 `src/mod/hint_card.cpp`, and the calls of `HintCardLearnDone`.
 
-With `hint_learn=1` (the default, the launcher row "Hints", "Until learned"),
-a line of a prompt that teaches an action goes away when the player knows the
-action:
+The ToolTips option of the game (Options, Help Options) chooses the rule,
+with `hints_follow_game=1` (the default): All ToolTips shows each line
+always, and Intelligent ToolTips (the default of the game), Minimum ToolTips
+and No ToolTips take a line away when the player knows it. The mod reads the
+option once a frame (`HintCardFollowTooltips`), and a change in the options
+of the game acts at once. With `hints_follow_game=0` the key `hint_learn`
+chooses, as below. The launcher and the VR Settings window have no row for
+it.
+
+With `hint_learn=1` a line of a prompt that teaches an action goes away when
+the player knows the action:
 
 1. The mod counts each use of the action that worked (the table below).
 2. After 3 uses the line does not show.
@@ -1288,7 +1297,7 @@ take), the drop, a start of the ring, the grab, the walk, and the values of
 the file. The desktop runs:
 
 - Six takes at the store of Land 1, in the test save `pen`:
-  `hand_run.ps1 -Kind one -Set "seek_plan=hold,hold,hold,hold,hold,hold;near_test_flips=4610;hint_learn=1"`.
+  `hand_run.ps1 -Kind one -Set "seek_plan=hold,hold,hold,hold,hold,hold;near_test_flips=4610;hint_learn=1;hints_follow_game=0"`.
   Each seek goes to the nearest object that the Hand can hold, and the flip
   at 4610 gives `near_rule=2` before the first seek. The card has "Grip Take"
   for the first three takes, and no line for the grip at the next three. The
@@ -1409,7 +1418,7 @@ before a player can open a panel. When a panel waits, the log says so.
 `hint_card_save_test=1`, and loads the fonts from the staged folder of its
 worktree (`package.ps1 -StageOnly`, then `hint_card_fonts_test_dir`). The
 run is the six takes at the store of Land 1 (9.10), with the keys
-`hint_learn=0;prompts=2;hint_card_save_test=1;hint_card_fonts_test_dir=<folder>`
+`hint_learn=0;hints_follow_game=0;prompts=2;hint_card_save_test=1;hint_card_fonts_test_dir=<folder>`
 added to `-Set`. With `hint_card_style=1` the pictures show the scroll, the
 seals and the ink, and the log line `card scroll` names Alegreya and
 Alegreya SC. With `hint_card_style=0` the pictures are the plain cards. In
@@ -1524,7 +1533,7 @@ picture of a card gives the count of its pictures of buttons.
 
 **Tests.** A desktop run with `hint_card_save_test=1` saves each new
 picture of a card (9.11). The run is the six takes at the store of Land 1
-(9.10) with `hint_learn=0;prompts=2`, one time for each kind with
+(9.10) with `hint_learn=0;hints_follow_game=0;prompts=2`, one time for each kind with
 `hint_profile`, and one time with `hint_card_pictures=0`. A desktop run has
 the fake controller only, which is a Touch controller, so the other kinds
 come from `hint_profile`.

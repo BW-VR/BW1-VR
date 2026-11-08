@@ -10,6 +10,58 @@
 
 #include <stdint.h>
 
+namespace panel_kit {
+struct Canvas;
+}
+
+// A LIST THAT DROPS DOWN under a part of a page: the words of its items, the
+// item that is in use now, and the box of the part on the page (x0, y0, x1,
+// y1, in pixels of the page). The window draws the list and gives the item
+// that the ray and the trigger pick.
+const int kPageListMost = 8;
+struct PageList {
+  int count;
+  int now;  // the item in use, or -1
+  wchar_t word[kPageListMost][28];
+  int box[4];
+};
+
+// A PAGE: a group of the window that is one picture in place of rows (the
+// page Controls of the settings). The page is the box of the list and of
+// the scroll bar: kPageWidth by kView pixels (debug_window_math.h). Its parts
+// are 0 to kPageParts - 1.
+struct WindowPage {
+  // Draws the page into the card of the canvas, in the box (x0, y0, x1, y1)
+  // of the window. The box has the paper of the page. hover is the part
+  // under the ray, open the part whose list shows, flash the part that the
+  // trigger pressed, or -1 each. style is hint_card_style: 1 the parchment,
+  // 0 the dark look into the GDI picture of the canvas.
+  void (*draw)(panel_kit::Canvas* canvas, const int box[4], int style,
+               int hover, int open, int flash);
+  // A number for what the page shows: a new number draws the page again.
+  unsigned (*value)(int hover, int open, int flash);
+  // The part at x, y of the page (pixels from its top left), or -1.
+  int (*hit)(float x, float y);
+  // The box of a part on the page (x0, y0, x1, y1), for the scripted
+  // controller. False for a part that the page does not have.
+  bool (*box)(int part, int out[4]);
+  // The list of a part. False for a part with no list (a press then does
+  // nothing).
+  bool (*list)(int part, PageList* out);
+  // The player picked item `item` of the list of `part`. The answer is true
+  // when it changed a setting. status gets the words of the bottom row.
+  bool (*choose)(int part, int item, wchar_t* status, int size);
+  // The words of the bottom row while the ray is on a part.
+  void (*status)(int part, wchar_t* out, int size);
+  // The word of the button of the page at the bottom of the window, at the
+  // left of Close.
+  const wchar_t* button;
+  // False when a press of the button does nothing now: it is dim.
+  bool (*button_can)();
+  // A press of the button. status gets the words of the bottom row.
+  void (*button_press)(wchar_t* status, int size);
+};
+
 // THE ROWS of the window. The window shows one list at a time: the switches
 // of the debug page (debug_menu.cpp), or the settings of the player
 // (settings_panel.cpp). The layout, the parts, the bake and the closes are
@@ -46,6 +98,12 @@ struct WindowRows {
   // Null, or the word of a row that cannot change (value kDebugCannot), in
   // the place of "not now": the job of a control that stays fixed.
   const wchar_t* (*fixed_word)(int i);
+  // Null, or the words of the bottom row while no change shows, in place
+  // of `idle`: for example the line that asks for a restart of the game.
+  const wchar_t* (*idle_now)();
+  // Null, or the page of a group that is one picture, else null for a
+  // group of rows.
+  const WindowPage* (*page)(int group);
 };
 const int kWindowSlots = 2;
 

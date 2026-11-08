@@ -194,6 +194,7 @@ if ($Kind -eq 'one') {
     # and "lmenu" the menu button of the right controller. The first Esc
     # opens the game menu, and the second "menu" closes it.
     $extra.left_hand = 1
+    $extra.hand_follow_game = 0
     $extra.fake_head_pitch = -25
     $extra.seek_plan = 'open'
     $extra.fake_controller_points = "$first -16,-30,45"

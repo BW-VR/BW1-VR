@@ -208,7 +208,9 @@ int g_timing = 1;            // prompt_timing, and its test key
 int g_words = 3;             // hint_words, and its test key
 int g_held_latch = 1;        // hint_held_latch
 int g_moves = 1;             // prompt_moves, and its test key
-int g_learn = 1;             // hint_learn
+int g_learn = 1;             // hint_learn, or the game's ToolTips option
+bool g_learn_game = true;    // hints_follow_game
+int g_learn_level = -1;      // the ToolTips option that g_learn follows
 bool g_palm_check = true;    // hint_palm_check (GameHintTrue, palm_off)
 int g_style = 1;             // hint_card_style
 int g_pictures = 1;          // hint_card_pictures
@@ -337,7 +339,11 @@ void ReadSettings() {
                "with no words keeps the words of the frame before for 0.10 s"
              : "each frame has the words of its own context");
   g_moves = IniKey("prompt_moves", 1) != 0 ? 1 : 0;
-  g_learn = IniKey("hint_learn", 1) != 0 ? 1 : 0;
+  g_learn_game = IniKey("hints_follow_game", 1) != 0;
+  // With hints_follow_game=1 the game's ToolTips option chooses the rule
+  // (HintCardFollowTooltips). Until the game has its options, a line goes
+  // away when the player knows it, as with the default option of the game.
+  g_learn = g_learn_game ? 1 : (IniKey("hint_learn", 1) != 0 ? 1 : 0);
   g_size_pct = IniKey("hint_card_size_pct", 100);
   g_palm_check = IniKey("hint_palm_check", 1) != 0;
   ModLog("hint card    : hint_palm_check=%d, %s", g_palm_check ? 1 : 0,
@@ -405,6 +411,12 @@ void ReadSettings() {
                         "of A shows only while a press of A can move the player"
                       : "the prompt of the land has no line for the walk with "
                         "the stick, and the line of A shows in each case");
+  if (g_learn_game) {
+    ModLog("hint card    : hints_follow_game=1, the ToolTips option of the "
+           "game chooses whether a line goes away when the player knows it. "
+           "All ToolTips: each line shows always. The other options: a line "
+           "goes away. hint_learn does not act");
+  }
   if (g_learn == 0) {
     ModLog("hint card    : hint_learn=0, each line of the cards shows always. "
            "The mod counts no actions and writes no file of the counts");
@@ -3392,6 +3404,21 @@ void HintCardSetLearn(int learn, const char* by) {
   ModLog("hint card    : %s: hint_learn is %d now (%s)", by, g_learn,
          g_learn != 0 ? "a line goes away after its action 3 times"
                       : "each line always shows");
+}
+
+void HintCardFollowTooltips(int tooltip_level) {
+  ReadSettings();
+  if (!g_learn_game || tooltip_level == g_learn_level) return;
+  g_learn_level = tooltip_level;
+  const int learn = hint_learn_math::LearnOfTooltips(tooltip_level);
+  if (learn != g_learn) {
+    g_learn = learn;
+    for (int h = 0; h < kSlots; ++h) g_cards[h].drawn.count = -1;
+  }
+  ModLog("hint card    : the ToolTips option of the game is %d, so %s",
+         tooltip_level,
+         g_learn != 0 ? "a line goes away after its action 3 times"
+                      : "each line always shows (All ToolTips)");
 }
 
 void HintCardSetStyle(int style, const char* by) {

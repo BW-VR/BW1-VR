@@ -60,6 +60,31 @@ float HintModelHandOpacity(int side);
 int HintModelDraw(IDirect3DDevice7* device, const float camera[12],
                   float near_plane, float half_x, float half_y);
 
+// THE MODEL FOR A PICTURE of a panel (the page Controls of the settings
+// window, controls_page.cpp): the mesh of the controller of one hand (0 the
+// left hand, 1 the right hand) at rest, in its grip space (meters, y up, -z
+// ahead). The first call starts the load on a thread, with each hint_style.
+// The arrays belong to the model: a caller on another thread copies them on
+// the frame thread first.
+struct HintModelMesh {
+  const char* id;  // the folder of the model, for example
+                   // meta-quest-touch-plus
+  int vertices;
+  const float* position;  // 3 floats a vertex
+  const float* normal;
+  int triangles;
+  const uint32_t* index;         // 3 a triangle
+  const signed char* control;    // the control of each triangle
+                                 // (controller_art::Control), -1 the body
+  bool has[8];                   // the model has a node for the control
+  float anchor[8][3];            // the middle of each control
+  float half[8][3];              // the half size of the box of a control
+  float low[3], high[3];         // the box of the model
+};
+// False while the load runs, and when no model fits the profile of that
+// hand: then *none is true.
+bool HintModelPanelMesh(int side, HintModelMesh* out, bool* none);
+
 // The test key (Ctrl Shift H with test_keys=1): hint_style 2 or 1.
 void HintModelPollKey();
 

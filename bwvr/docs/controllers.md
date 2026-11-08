@@ -1057,7 +1057,8 @@ default. Each control has one job, and one button opens the game menu.
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `controllers` | 1 | Use tracked controllers when the headset has them |
-| `left_hand` | -1 | Which controller is the Hand (5.6). -1 follows the left handed option of the game, 0 the right controller, 1 the left controller. The launcher row "Hand" |
+| `hand_follow_game` | 1 | 1: the left handed option of the game always chooses the Hand (5.6), and `left_hand` does not act. 0: `left_hand` chooses |
+| `left_hand` | -1 | With `hand_follow_game=0`: which controller is the Hand (5.6). -1 follows the left handed option of the game, 0 the right controller, 1 the left controller. Not in the launcher |
 | `controller_swap_buttons` | 0 | 1 makes the grip the left button and the trigger the right |
 | `controller_haptics` | 1 | Short pulses on presses and turns |
 | `controller_hand` | 1 | 1 puts the Hand at the controller (the direct hand). 0 keeps the pointer mode of section 3. Not in the launcher, and a save of the launcher removes the key |
@@ -1093,7 +1094,7 @@ default. Each control has one job, and one button opens the game menu.
 | `zoom_step` | 2 | 5.4 |
 | `menu_stops_turn` | 1 | 1: while a dialog box is up, the stick does not turn and does not zoom the God view. 0: it does (`god-view.md`, section 5.8). The switch "Menu turn" of the debug page. Not in the launcher |
 | `recenter_hold` | 1 | 1: a hold of 1 s of the stick click of the hand that does not point, with the stick at rest, recenters the view. 2: the stick click of the pointing hand. 0: no hold recenters (`god-view.md`, section 5.8). The switch "Recenter hold" of the debug page. Not in the launcher |
-| `button_map_hand`, `button_map_other` | 1234, 1234 | The map of the buttons (5.7). The page Controls of the settings window writes them. Not in the launcher |
+| `button_map_hand`, `button_map_other` | 1234, 1234 | The map of the buttons (5.7). The page Controls of the VR Settings window writes them. Not in the launcher |
 
 The other keys of the Hand (the reach, the size, the throw, the Creature) are
 in `hand.md`, `throw.md` and `creature.md`. The keys of the grab of the world
@@ -1206,10 +1207,12 @@ and `GPlayer::InitReal`) and the packet `0x64` call `CHand::ToggleLeftRight`
 (`0x0046C260`) until `CHand+0x484C` is 0 for a left hand and 1 for a right
 hand. The game does not swap the mouse buttons.
 
-**The key.** `left_hand` chooses which controller is the Hand. With -1 (the
-default) the option of the game chooses, so the player sets it in one place.
-0 makes the right controller the Hand, and 1 the left controller. The
-launcher row "Hand" has the three values.
+**The keys.** With `hand_follow_game=1` (the default) the option of the
+game always chooses the Hand, so the player sets it in one place, and the
+launcher and the VR Settings window have no row for it. With
+`hand_follow_game=0` the key `left_hand` chooses: -1 the option of the game,
+0 the right controller, 1 the left controller. A desktop run of the left
+hand gives `hand_follow_game=0` and `left_hand=1`.
 
 **The change of sides.** `UpdateHandSide` in `controllers.cpp` reads the
 option once a frame, at the start of `ControllersFrame`. When the side
@@ -1300,8 +1303,11 @@ not change.
   the ring with `button_layout=0`. `controller_swap_buttons` swaps the
   trigger and the grip of the Hand.
 
-The page Controls of the settings window makes the map (`ui-layer.md`,
-24.6). The hint words follow it (`controller-hints.md`, 8.3).
+The page Controls of the VR Settings window makes the map (`ui-layer.md`,
+24.6): a list for each button gives it a job of the same controller, and
+Reset Defaults gives each button its job as made. The hint words follow it
+(`controller-hints.md`, 8.3). The trigger, the grip and the sticks show on
+the page with their jobs, and they have no list.
 
 | Key | Default | Meaning |
 | --- | --- | --- |
@@ -2263,14 +2269,15 @@ the files of a session (`eye` and `xr`) and the note on the card.
 
 ### 10.10 The settings window and the welcome page
 
-The item `settings` of page 2 opens the settings window: the debug window of
-10.8 with the settings that a player changes most, in the words of the
-launcher, in three tabs (Moving, Hands, Cards), and the tab Controls: a
-drawing of the controllers of the player and a job for each button (5.7). A
+The item `settings` of page 2 opens the VR Settings window: the debug
+window of 10.8 with the settings that a player changes, in the words of the
+launcher, in two tabs (Moving, Hands), and the tab Controls: the models of
+the controllers of the player, and a list of jobs for each button (5.7). A
 change writes its key into `bwvr.ini` at once, and most settings act at
-once. The welcome page shows one
-time, at the first start: two lines about the mod, three controls, and the
-buttons Settings and Play. The ray and the trigger of the pointing hand, B
+once. A change that acts at the next start puts the line "Restart the game
+to use the changes." at the bottom left of the window. The welcome page shows
+one time, at the first start: two lines about the mod, three controls, and
+the buttons VR Settings and Play. The ray and the trigger of the pointing hand, B
 and the menu button work as on the debug window, and the word `aimdebug` of
 the scripted controller aims at the parts of the window that is open
 (`debug_test_parts`), or at the buttons of the welcome page

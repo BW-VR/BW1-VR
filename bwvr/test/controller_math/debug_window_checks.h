@@ -279,6 +279,49 @@ inline void DebugWindowChecks() {
             fabsf(kPitch + 12.0f * 3.14159265f / 180.0f) < 0.0001f,
         "the window is 1 m out, 12 degrees down and 56 cm across", kMeters,
         0.56);
+
+  // A PAGE: its parts and the items of its list are parts of their own, the
+  // words of the scripted controller name them, and a list fits on the page
+  // under its part, or above it at the foot of the page.
+  {
+    using namespace debugwin_math;
+    Check(PagePartOf(kFirstPagePart + 3) == 3 &&
+              PagePartOf(kParts - 1) == -1 &&
+              ListItemOf(kFirstListPart + 2) == 2 &&
+              ListItemOf(kFirstPagePart) == -1 && RowOf(kFirstPagePart) == -1,
+          "the parts of a page and of a list are apart from the rows", 0, 0);
+    int parts[8];
+    const int n = ParseParts("tab2 page5 item1 reset", parts, 8);
+    Check(n == 4 && parts[1] == kFirstPagePart + 5 &&
+              parts[2] == kFirstListPart + 1 && parts[3] == kPartButton,
+          "the words page5, item1 and reset", n, 4);
+    const int high[4] = {380, 120, 532, 182};
+    int list[4];
+    ListPlace(high, 4, list);
+    int first[4], last[4];
+    ListItemRect(list, 0, first);
+    ListItemRect(list, 3, last);
+    const bool under =
+        list[1] >= high[3] && list[3] <= kView && list[0] >= 0 &&
+        list[2] <= kPageWidth && first[2] >= high[2] - high[0] &&
+        ListItemAt(list, 4, first[0] + 5.0f, first[1] + 5.0f) == 0 &&
+        ListItemAt(list, 4, last[0] + 5.0f, last[1] + last[3] - 2.0f) == 3;
+    const int low[4] = {380, 640, 532, 702};
+    ListPlace(low, 4, list);
+    const bool above = list[3] <= low[1] && list[1] >= 0;
+    Check(under && above,
+          "a list goes under its part, as wide as the part, and above it at "
+          "the foot of the page, and a point of each item finds the item",
+          under, 1);
+    int button[4], note[4], close[4];
+    PageButtonRect(button);
+    NoteBoxBeside(true, note);
+    CloseRect(close);
+    Check(note[2] < button[0] && button[0] + button[2] < close[0] &&
+              note[2] - note[0] > 420,
+          "the button of a page is between the note and Close", note[2],
+          button[0]);
+  }
 }
 
 }  // namespace debug_window_checks

@@ -32,6 +32,12 @@
 //   settings_panel=1      1: page 2 of the ring as made has the item
 //                         "settings" in the slot of "names". 0: page 2 has
 //                         "names", and the word "settings" is an empty slot
+//   settings_lean=1       1: the window has only the rows that a player
+//                         changes (settings_math::kTable, lean). 0: it also
+//                         has Teleport, Recenter hold, Hand, Open hand
+//                         stroke, Hints, Card look and Subtitle card, with
+//                         the tab Cards, and the words "at the next start"
+//                         under a row that acts at the next start
 //   welcome_page=1        0: the welcome page never shows
 //   welcome_done=0        the mod writes 1 after the welcome page
 //   welcome_test_save=0   N: saves the first N pictures of the welcome page
@@ -91,14 +97,16 @@ namespace {
 using namespace settings_math;
 namespace kit = panel_kit;
 
-const char* const kBy = "the settings window";
+const char* const kBy = "the VR Settings window";
 
 // --- the ini ---------------------------------------------------------------------
 
 bool g_read = false;
 char g_ini[MAX_PATH] = "";
 bool g_on = true;
+bool g_lean = true;  // settings_lean
 int g_value[kSettings];
+int g_start[kSettings];  // the values of the start of this game
 int g_welcome_page = 1;
 int g_welcome_done = 0;
 int g_welcome_save = 0;
@@ -129,8 +137,10 @@ void ReadSettings() {
                : fallback;
   };
   g_on = key("settings_panel", 1) != 0;
+  g_lean = key("settings_lean", 1) != 0;
   for (int i = 0; i < kSettings; ++i) {
     g_value[i] = key(kTable[i].key, kTable[i].fallback);
+    g_start[i] = g_value[i];
   }
   g_welcome_page = key("welcome_page", 1);
   g_welcome_done = key("welcome_done", 0);
@@ -153,10 +163,13 @@ void ReadSettings() {
     }
     p = end;
   }
-  ModLog("settings     : settings_panel=%d: %s. welcome_page=%d, "
-         "welcome_done=%d: %s", g_on ? 1 : 0,
+  ModLog("settings     : settings_panel=%d: %s. settings_lean=%d: %s. "
+         "welcome_page=%d, welcome_done=%d: %s", g_on ? 1 : 0,
          g_on ? "page 2 of the ring as made has the item \"settings\""
               : "the ring has no item \"settings\"",
+         g_lean ? 1 : 0,
+         g_lean ? "the window has the rows that a player changes"
+                : "the window has each row of the table",
          g_welcome_page, g_welcome_done,
          WelcomeShows(g_welcome_page, g_welcome_done)
              ? "the welcome page shows at this start"
@@ -225,22 +238,28 @@ void Narrow(const wchar_t* in, char* out, size_t size) {
 // (controls_page.cpp) as the last group, with controls_page=1. A row i of
 // kSettings or more is row i - kSettings of that page.
 
-const int kControlsGroup = kGroups;
+// The tab of the page Controls: after the tabs of the rows.
+int ControlsTab() { return TabCount(g_lean); }
 bool IsControls(int i) { return i >= kSettings; }
 
-int Groups() { return kGroups + (ControlsPageOn() ? 1 : 0); }
+int Groups() {
+  ReadSettings();
+  return TabCount(g_lean) + (ControlsPageOn() ? 1 : 0);
+}
 const wchar_t* GroupName(int g) {
-  if (g == kControlsGroup) return L"Controls";
-  return g >= 0 && g < kGroups ? kGroupName[g] : L"";
+  if (g == ControlsTab()) return L"Controls";
+  const int group = GroupOfTab(g, g_lean);
+  return group >= 0 ? kGroupName[group] : L"";
 }
 int Count() {
   return kSettings + (ControlsPageOn() ? ControlsRowCount() : 0);
 }
 int GroupOf(int i) {
-  return IsControls(i) ? kControlsGroup : kTable[i].group;
+  return IsControls(i) ? ControlsTab() : TabOfGroup(kTable[i].group, g_lean);
 }
-bool InWindow(int i) {
-  return IsControls(i) ? ControlsRowIn(i - kSettings) : true;
+bool InWindowRow(int i) {
+  return IsControls(i) ? ControlsRowIn(i - kSettings)
+                       : settings_math::InWindow(i, g_lean);
 }
 const wchar_t* Label(int i) {
   return IsControls(i) ? ControlsRowLabel(i - kSettings) : kTable[i].label;
@@ -251,19 +270,29 @@ const wchar_t* Name(int i) {
 const wchar_t* Tip(int i) {
   return IsControls(i) ? ControlsRowTip(i - kSettings) : kTable[i].tip;
 }
+// A row that acts at the next start has no words of its own in the lean
+// window: the bottom row asks for the restart (IdleNow).
 const wchar_t* RowNote(int i) {
-  if (IsControls(i)) return nullptr;
+  if (IsControls(i) || g_lean) return nullptr;
   return kTable[i].when == kNextStart ? L"at the next start" : nullptr;
 }
 
+// The note of a setting has no last line: a player needs no key.
 void LastLine(int i, wchar_t* out, int size) {
   if (IsControls(i)) {
     ControlsRowLastLine(i - kSettings, out, size);
     return;
   }
-  swprintf_s(out, size, L"Key: %hs. A change acts %s.", kTable[i].key,
-             kTable[i].when == kNextStart ? L"at the next start of the game"
-                                          : L"at once");
+  if (size > 0) out[0] = 0;
+}
+
+const wchar_t* IdleNow() {
+  ReadSettings();
+  return RestartNeeded(g_start, g_value) ? kRestartLine : nullptr;
+}
+
+const WindowPage* PageOf(int group) {
+  return group == ControlsTab() ? ControlsPage() : nullptr;
 }
 
 // The value of a row is the place of the ini value in the list of its
@@ -343,13 +372,13 @@ bool Step(int i, bool back) {
 const WindowRows kSettingsRows = {
     1,
     "settings     ",
-    L"Settings",
-    L"Point at a setting to read what it does",
+    L"VR Settings",
+    L"Point at a setting to read what it does.",
     Groups,
     GroupName,
     Count,
     GroupOf,
-    InWindow,
+    InWindowRow,
     Label,
     Name,
     Tip,
@@ -361,6 +390,8 @@ const WindowRows kSettingsRows = {
     RowNote,
     Picture,
     FixedWord,
+    IdleNow,
+    PageOf,
 };
 
 // --- the welcome page ------------------------------------------------------------
@@ -405,7 +436,7 @@ const wchar_t* const kTitle = L"Welcome to the Black & White VR Mod";
 const wchar_t* const kWords[2] = {
     L"You can change the settings at any time.",
     L"The mod is a work in progress, so expect some bugs."};
-const wchar_t* const kButtonWord[kWelcomeParts] = {L"Settings", L"Play"};
+const wchar_t* const kButtonWord[kWelcomeParts] = {L"VR Settings", L"Play"};
 
 // The three controls. The ring button follows button_layout, the hand that
 // does not point and the map of its buttons (button_map_math.h).
@@ -427,7 +458,7 @@ void ControlLines(wchar_t lines[kWelcomeControls][96]) {
   }
   wcscpy_s(lines[0], 96, L"Grip of your Hand: take, hold and throw");
   wcscpy_s(lines[1], 96, L"Grip of your other hand: pull the land to move");
-  swprintf_s(lines[2], 96, L"%s: open the ring. Settings is on its page 2",
+  swprintf_s(lines[2], 96, L"%s: open the ring. VR Settings is in the ring",
              ring);
 }
 
@@ -602,8 +633,12 @@ int SettingsPanelWarmRows(int group, int* switches, int* values, int most) {
   slash[1] = 0;
   strcat_s(path, MAX_PATH, "bwvr.ini");
   int n = 0;
+  ReadSettings();
+  const int wanted = GroupOfTab(group, g_lean);
   for (int i = 0; i < kSettings && n < most; ++i) {
-    if (kTable[i].group != group) continue;
+    if (kTable[i].group != wanted || !settings_math::InWindow(i, g_lean)) {
+      continue;
+    }
     const int v = static_cast<int>(GetPrivateProfileIntA(
         "bwvr", kTable[i].key, kTable[i].fallback, path));
     switches[n] = i;
@@ -639,7 +674,7 @@ bool WelcomePageTestTarget(float out[3]) {
   kit::PointOf(g_room, u, v, out);
   ModLog("settings     : the word aimdebug aims at the button %s of the "
          "welcome page, at %.3f %.3f %.3f m",
-         part == kWelcomeSettings ? "Settings" : "Play", out[0], out[1],
+         part == kWelcomeSettings ? "VR Settings" : "Play", out[0], out[1],
          out[2]);
   return true;
 }
@@ -708,7 +743,7 @@ void WelcomePageFrame() {
   const int pressed = kit::Step(&g_room, &HitPart, nullptr, &trigger);
   if (g_room.hover != before && g_room.hover >= 0) {
     ModLog("settings     : the ray is on the button %s of the welcome page, "
-           "frame %llu", g_room.hover == kWelcomeSettings ? "Settings" : "Play",
+           "frame %llu", g_room.hover == kWelcomeSettings ? "VR Settings" : "Play",
            frame);
   }
   if (pressed == kWelcomePlay) {
@@ -719,8 +754,8 @@ void WelcomePageFrame() {
   }
   if (pressed == kWelcomeSettings) {
     kit::Pressed(&g_room, pressed);
-    ModLog("settings     : the trigger presses Settings, frame %llu", frame);
-    Close("the player pressed Settings", true, true);
+    ModLog("settings     : the trigger presses VR Settings, frame %llu", frame);
+    Close("the player pressed VR Settings", true, true);
     if (!DebugWindowOpenWith(&kSettingsRows)) {
       ModLog("settings     : the settings window does not open: the head has "
              "no pose, frame %llu", frame);

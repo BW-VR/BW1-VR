@@ -17,6 +17,8 @@
 #include "controller_hints.h"
 
 extern void ModLog(const char* format, ...);
+// hint_card.cpp
+void HintCardFollowTooltips(int tooltip_level);
 
 namespace {
 
@@ -692,12 +694,16 @@ void HelpOptions() {
                           : "");
   }
   if (g_help_test < 0) g_help_test = TestKey("help_test") != 0 ? 1 : 0;
-  if (g_help_test == 0) return;
+  if (g_help_test == 0) {
+    HintCardFollowTooltips(*tooltips);
+    return;
+  }
   if (*tooltips == 3 && *text == 2 && *level == 3 && *creature == 1) return;
   *tooltips = 3;
   *text = 2;
   *level = 3;
   *creature = 1;
+  HintCardFollowTooltips(*tooltips);
   if (!g_said_help_test) {
     g_said_help_test = true;
     ModLog("hints        : test key help_test=1, so the game shows All "

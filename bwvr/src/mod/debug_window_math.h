@@ -25,6 +25,11 @@
 //
 // The rows are kRowPitch pixels high, and the list moves by whole pixels
 // under the view (panel_kit_math.h, "The list that scrolls").
+//
+// A PAGE is a group that is one picture in place of rows (the page Controls
+// of the settings window): the box of the list and of the scroll bar. A part
+// of a page can have a list that drops down under it, and the page can have
+// a button in the bottom row, at the left of Close.
 
 #pragma once
 
@@ -169,6 +174,27 @@ inline void NoteBox(int out[4]) {
   out[3] = kBottomTop + kBottomHeight;
 }
 
+// THE BUTTON OF A PAGE, at the left of Close, and the box of the note with
+// it.
+const int kPageButtonWidth = 250;
+inline void PageButtonRect(int out[4]) {
+  Rect(kRight - kCloseWidth - 16 - kPageButtonWidth, kBottomTop,
+       kPageButtonWidth, kBottomHeight, out);
+}
+inline void NoteBoxBeside(bool page_button, int out[4]) {
+  NoteBox(out);
+  if (page_button) out[2] = kRight - kCloseWidth - 16 - kPageButtonWidth - 12;
+}
+
+// THE PAGE: the box of the list and of the scroll bar.
+const int kPageWidth = kRight - kWellLeft;
+inline void PageBox(int out[4]) {
+  out[0] = kWellLeft;
+  out[1] = kWellTop;
+  out[2] = kRight;
+  out[3] = kWellBottom;
+}
+
 // --- the scroll ------------------------------------------------------------------
 
 inline int ContentOf(int rows) { return rows * kRowPitch; }
@@ -214,9 +240,26 @@ inline int OffsetToShow(int r, int rows, int offset) {
 const int kPartClose = kMostTabs;
 const int kPartTrack = kMostTabs + 1;
 const int kPartThumb = kMostTabs + 2;
+const int kPartButton = kMostTabs + 3;  // the button of a page
 const int kFirstRowPart = 16;
 enum RowPart { kOnRow = 0, kOnLeft = 1, kOnRight = 2, kRowParts = 3 };
 const int kParts = kFirstRowPart + kMostRows * kRowParts;
+// The parts of a page, then the items of a list that drops down.
+const int kPageParts = 40;
+const int kFirstPagePart = kParts;
+const int kListMost = 8;
+const int kFirstListPart = kFirstPagePart + kPageParts;
+const int kAllParts = kFirstListPart + kListMost;
+
+inline int PagePartOf(int part) {
+  return part >= kFirstPagePart && part < kFirstPagePart + kPageParts
+             ? part - kFirstPagePart
+             : -1;
+}
+inline int ListItemOf(int part) {
+  return part >= kFirstListPart && part < kAllParts ? part - kFirstListPart
+                                                    : -1;
+}
 
 inline int RowPartOf(int row, int on) {
   return kFirstRowPart + row * kRowParts + on;
@@ -340,6 +383,61 @@ inline int PageOffset(int rows, int offset, float y) {
   return panel_kit_math::ClampOffset(to, ContentOf(rows), kView);
 }
 
+// --- the list that drops down ----------------------------------------------------
+
+// THE LIST of a part of a page: a small scroll of paper under the part, with
+// one item for each choice, in the pixels of the page. The items are a little
+// wider than the part (kListLeast at least), and the paper has kListSide at
+// each side
+// for its rolls and kListPad above and below. The list goes above the part
+// when it does not fit below it in the page, with its rolls and its shadow.
+// x0, y0, x1, y1 of the paper.
+const int kListItem = 46;
+const int kListPad = 14;
+const int kListSide = 34;
+const int kListLeast = 180;
+// The rolls and the shadow of the paper go this far past the paper, and
+// they stay on the page.
+const int kListAbove = 12;
+const int kListBelow = 22;
+inline void ListPlace(const int part_box[4], int count, int out[4]) {
+  if (count < 1) count = 1;
+  if (count > kListMost) count = kListMost;
+  int items = part_box[2] - part_box[0] + 24;
+  if (items < kListLeast) items = kListLeast;
+  const int width = items + 2 * kListSide;
+  const int height = count * kListItem + 2 * kListPad;
+  int x0 = (part_box[0] + part_box[2]) / 2 - width / 2;
+  if (x0 + width > kPageWidth) x0 = kPageWidth - width;
+  if (x0 < 0) x0 = 0;
+  int y0 = part_box[3] + 2;
+  if (y0 + height + kListBelow > kView) y0 = part_box[1] - 2 - height;
+  if (y0 < kListAbove) y0 = kListAbove;
+  out[0] = x0;
+  out[1] = y0;
+  out[2] = x0 + width;
+  out[3] = y0 + height;
+}
+// The rect (x, y, w, h) of item i in a list at `list` (ListPlace).
+inline void ListItemRect(const int list[4], int i, int out[4]) {
+  Rect(list[0] + kListSide, list[1] + kListPad + i * kListItem + 3,
+       list[2] - list[0] - 2 * kListSide, kListItem - 6, out);
+}
+// The item at x, y of the page, or -1.
+inline int ListItemAt(const int list[4], int count, float x, float y) {
+  for (int i = 0; i < count && i < kListMost; ++i) {
+    int r[4];
+    ListItemRect(list, i, r);
+    // The gap between two items belongs to the nearer one.
+    const int top = r[1] - 3, bottom = r[1] + r[3] + 3;
+    if (x >= r[0] && x < r[0] + r[2] && y >= top && y < bottom) return i;
+  }
+  return -1;
+}
+inline bool InList(const int list[4], float x, float y) {
+  return x >= list[0] && x < list[2] && y >= list[1] && y < list[3];
+}
+
 // --- the note --------------------------------------------------------------------
 
 // THE NOTE of a row (its tooltip) is `height` pixels high and kNoteWidth
@@ -373,8 +471,9 @@ const double kNoteRestMs = 350.0;
 // The words of debug_test_parts for the word "aimdebug" of the scripted
 // controller: "tab3" (the tab of group 3, from 0), "row5", "left5",
 // "right5" (row 5 of the group shown, from 0), "thumb", "trackend" (the end
-// of the track that is farther from the thumb) and "close". A word that is
-// not known gives -1.
+// of the track that is farther from the thumb), "close", "page4" (part 4
+// of a page), "item2" (item 2 of the list that shows, from 0) and "reset"
+// (the button of a page). A word that is not known gives -1.
 inline int PartOfWord(const char* word, size_t length) {
   const auto is = [&](const char* w) {
     return length == strlen(w) && strncmp(word, w, length) == 0;
@@ -382,8 +481,10 @@ inline int PartOfWord(const char* word, size_t length) {
   if (is("thumb")) return kPartThumb;
   if (is("trackend")) return kPartTrack;
   if (is("close")) return kPartClose;
-  const char* const prefixes[4] = {"tab", "row", "left", "right"};
-  for (int k = 0; k < 4; ++k) {
+  if (is("reset")) return kPartButton;
+  const char* const prefixes[6] = {"tab", "row", "left", "right", "page",
+                                   "item"};
+  for (int k = 0; k < 6; ++k) {
     const size_t n = strlen(prefixes[k]);
     if (length <= n || length > n + 2 || strncmp(word, prefixes[k], n) != 0) {
       continue;
@@ -394,6 +495,8 @@ inline int PartOfWord(const char* word, size_t length) {
       number = number * 10 + (word[i] - '0');
     }
     if (k == 0) return number < kMostTabs ? number : -1;
+    if (k == 4) return number < kPageParts ? kFirstPagePart + number : -1;
+    if (k == 5) return number < kListMost ? kFirstListPart + number : -1;
     if (number >= kMostRows) return -1;
     return RowPartOf(number, k == 1 ? kOnRow : (k == 2 ? kOnLeft : kOnRight));
   }

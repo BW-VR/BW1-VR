@@ -605,7 +605,8 @@ section 7 for the size of the exact Hand.
 | `hand_reach_anchor_down_cm` | 20 | The reach anchor is the head center at the last recenter, this far down (0 to 100) |
 | `hand_real_cm` | 19 | The length of the real hand, from the wrist to the finger tips |
 | `hand_scale_pct` | 100 | The Hand's size in percent of the real hand |
-| `left_hand` | -1 | Which controller is the Hand (section 8). -1 follows the left handed option of the game, 0 the right controller, 1 the left controller |
+| `hand_follow_game` | 1 | 1: the left handed option of the game always chooses the Hand, and `left_hand` does not act (`controllers.md`, 5.6) |
+| `left_hand` | -1 | With `hand_follow_game=0`: which controller is the Hand (section 8). -1 follows the left handed option of the game, 0 the right controller, 1 the left controller |
 | `fake_controller_points` | | Test key. A list of `right,up,forward` in cm |
 
 Test script words (with the fake controller): `point@frame+frames` steps the

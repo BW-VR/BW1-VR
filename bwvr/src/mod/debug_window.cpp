@@ -231,6 +231,14 @@ int g_switch[kMostRows];
 unsigned char g_kind[kMostRows];
 int g_value[kMostRows];
 
+// The page of the group that shows (WindowRows::page), or null for a group
+// of rows, and the list that drops down from a part of the page.
+const WindowPage* g_page = nullptr;
+bool g_list_open = false;
+int g_list_part = -1;  // the part of the page whose list shows
+PageList g_list = {};
+int g_list_box[4] = {};  // the paper of the list, in pixels of the page
+
 // The scroll: whole pixels for the picture, and the stick adds parts of a
 // pixel.
 int g_offset = 0;
@@ -250,7 +258,7 @@ double g_rest_since = 0.0;
 int g_note_row = -1;
 
 // The words of the bottom row after a press, until then.
-wchar_t g_status[96] = L"";
+wchar_t g_status[128] = L"";
 ULONGLONG g_status_until = 0;
 const ULONGLONG kStatusMs = 2500;
 
@@ -323,9 +331,16 @@ void LayPicture(int i, int value, int style, uint8_t* dst, int y0, int y1) {
   LayPictureIn(g_src, i, value, style, dst, y0, y1);
 }
 
+void CloseList() {
+  g_list_open = false;
+  g_list_part = -1;
+}
+
 void FillGroup(int group) {
   g_group = group;
   g_rows = 0;
+  g_page = g_src->page != nullptr ? g_src->page(group) : nullptr;
+  CloseList();
   const int count = g_src->count();
   for (int i = 0; i < count && g_rows < kMostRows; ++i) {
     if (g_src->group(i) == group && g_src->in_window(i)) {
@@ -338,10 +353,35 @@ void FillGroup(int group) {
   g_stick_moving = false;
   g_rest_row = -1;
   g_note_row = -1;
+  if (g_page != nullptr) g_rows = 0;
   Latch();
 }
 
+// The part under the ray. An open list takes the ray first: the paper of the
+// list is no part, and a part out of the list only closes the list when the
+// trigger presses it (Act).
 int HitPart(float u, float v, void*) {
+  if (!(u >= 0.0f && u <= 1.0f && v >= 0.0f && v <= 1.0f)) return -1;
+  const float x = u * kWidth, y = v * kHeight;
+  if (g_list_open) {
+    const float px = x - kWellLeft, py = y - kWellTop;
+    const int item = ListItemAt(g_list_box, g_list.count, px, py);
+    if (item >= 0) return kFirstListPart + item;
+    if (InList(g_list_box, px, py)) return -1;
+  }
+  if (g_page != nullptr) {
+    int r[4];
+    if (g_page->button != nullptr) {
+      PageButtonRect(r);
+      if (InRect(x, y, r)) return kPartButton;
+    }
+    int box[4];
+    PageBox(box);
+    if (x >= box[0] && x < box[2] && y >= box[1] && y < box[3]) {
+      const int part = g_page->hit(x - kWellLeft, y - kWellTop);
+      return part >= 0 && part < kPageParts ? kFirstPagePart + part : -1;
+    }
+  }
   return PartAt(u, v, Groups(), g_rows, g_kind, g_offset);
 }
 
@@ -349,6 +389,18 @@ const char* PartName(int part, char* out, size_t size) {
   char label[40];
   if (part < 0) {
     sprintf_s(out, size, "no part");
+  } else if (ListItemOf(part) >= 0) {
+    const int item = ListItemOf(part);
+    Narrow(item < g_list.count ? g_list.word[item] : L"", label,
+           sizeof(label));
+    sprintf_s(out, size, "the item %d \"%s\" of the list", item, label);
+  } else if (PagePartOf(part) >= 0) {
+    sprintf_s(out, size, "the part %d of the page", PagePartOf(part));
+  } else if (part == kPartButton) {
+    Narrow(g_page != nullptr && g_page->button != nullptr ? g_page->button
+                                                          : L"",
+           label, sizeof(label));
+    sprintf_s(out, size, "the button %s", label);
   } else if (part < kMostTabs) {
     Narrow(g_src->group_name(part), label, sizeof(label));
     sprintf_s(out, size, "the tab %s", label);
@@ -381,6 +433,7 @@ void Close(const char* why, bool hold) {
   g_hold_after = hold;
   g_drag = false;
   g_note_row = -1;
+  CloseList();
   SetHolds();
   InterlockedExchange(&g_stick, 0);
   WinLog("the window closes: %s, frame %llu", why,
@@ -412,9 +465,18 @@ struct Look {
   int bar;  // the look of the thumb, or -1 with no scroll bar
   uint8_t tab[kMostTabs];
   uint8_t close;
-  wchar_t status[96];
+  wchar_t status[128];
   RowLook row[kMostRows];
+  // A page: what it shows (WindowPage::value), the part whose list shows,
+  // the look of each item of the list, and the look of the button of the
+  // page (kNoButton for none).
+  int page;
+  unsigned page_value;
+  int list_part;
+  uint8_t item[kListMost];
+  uint8_t button;
 };
+const uint8_t kNoButton = 255;
 Look g_drawn;
 bool g_have_drawn = false;
 uint32_t g_serial = 0;  // the number of the picture (panel_kit::StageLayer)
@@ -427,6 +489,9 @@ const int kTabParts = kMostTabs + 1;
 uint8_t* g_band = nullptr;     // the paper of a row, with no words
 uint8_t* g_scratch = nullptr;  // a row while it is drawn
 uint8_t* g_note = nullptr;     // the note while it is drawn
+uint8_t* g_list_paper = nullptr;  // the paper of a list while it is drawn
+const int kListPaperHeight = kListMost * kListItem + 2 * kListPad +
+                             card_scroll::kPaperTop + card_scroll::kPaperBottom;
 uint8_t* g_tile[kMostRows];    // each row of the group, as it shows now
 RowLook g_tile_look[kMostRows];
 bool g_tile_ok[kMostRows];
@@ -479,6 +544,8 @@ bool ParchmentStart() {
     g_scratch = new (std::nothrow) uint8_t[bytes];
     g_note = new (std::nothrow)
         uint8_t[static_cast<size_t>(kWidth) * kNoteMost * 4];
+    g_list_paper = new (std::nothrow)
+        uint8_t[static_cast<size_t>(kWidth) * kListPaperHeight * 4];
     if (g_band != nullptr) {
       memset(g_band, 0, bytes);
       // The paper of the first row of the list.
@@ -495,7 +562,7 @@ bool ParchmentStart() {
       g_label_font.font == nullptr || g_value_font.font == nullptr ||
       g_status_font.font == nullptr || g_note_title.font == nullptr ||
       g_note_font.font == nullptr || g_small_font.font == nullptr ||
-      g_band == nullptr ||
+      g_band == nullptr || g_list_paper == nullptr ||
       g_scratch == nullptr || g_note == nullptr ||
       !kit::MakeTiles(&g_tab_tiles[0], kTabParts, kit::kLooks) ||
       !kit::MakeTiles(&g_tab_tiles[1], kTabParts, kit::kLooks)) {
@@ -615,15 +682,18 @@ void DrawNote(int r, int offset) {
   wchar_t key[160];
   g_src->last_line(i, key, 160);
   const wchar_t* lines[3] = {g_src->name(i), g_src->tip(i), key};
-  int height = kit::NoteHeight(&g_canvas, kNoteWidth, lines, 3, g_note_title,
-                               g_note_font);
+  // A note with no last line has two lines.
+  const int count = key[0] != 0 ? 3 : 2;
+  int height = kit::NoteHeight(&g_canvas, kNoteWidth, lines, count,
+                               g_note_title, g_note_font);
   if (height > kNoteMost) height = kNoteMost;
   int box[4];
   NotePlace(RowTop(r, offset), height, box);
   const card_scroll::Picture note = {g_note, kWidth, kNoteWidth, height};
   const int which = g_src->slot * 1000 + i;
   if (g_note_switch != which || g_note_style != g_canvas.parchment_ready) {
-    kit::Note(&g_canvas, note, lines, 3, g_note_title, g_note_font, i + 11);
+    kit::Note(&g_canvas, note, lines, count, g_note_title, g_note_font,
+              i + 11);
     g_note_switch = which;
     g_note_style = g_canvas.parchment_ready;
   }
@@ -635,6 +705,57 @@ void BarBox(int out[4]) {
   out[1] = kWellTop - kit::kRim;
   out[2] = kBarRight + kit::kRim;
   out[3] = kWellBottom + kit::kRim;
+}
+
+// THE LIST of a page: a small scroll of paper over the page, with a key for
+// each item. The item in use is bright gold, as the tab that shows, and the
+// item under the ray is gold.
+void DrawList(const Look& look) {
+  kit::Canvas* c = &g_canvas;
+  int page[4];
+  PageBox(page);
+  const int x0 = page[0] + g_list_box[0], y0 = page[1] + g_list_box[1];
+  const int x1 = page[0] + g_list_box[2], y1 = page[1] + g_list_box[3];
+  const int w = x1 - x0 + card_scroll::kEdgeLeft + card_scroll::kEdgeRight;
+  const int h = y1 - y0 + card_scroll::kPaperTop + card_scroll::kPaperBottom;
+  if (h > kListPaperHeight || w > kWidth) return;
+  const card_scroll::Picture paper = {g_list_paper, kWidth, w, h};
+  card_scroll::Paper(paper, card_scroll::kEdgeLeft, card_scroll::kPaperTop,
+                     card_scroll::kEdgeLeft + (x1 - x0),
+                     card_scroll::kPaperTop + (y1 - y0), 17);
+  kit::Over(c, paper, x0 - card_scroll::kEdgeLeft, y0 - card_scroll::kPaperTop);
+  const card_scroll::Picture card = kit::CardPicture(c);
+  for (int i = 0; i < g_list.count && i < kListMost; ++i) {
+    int r[4];
+    ListItemRect(g_list_box, i, r);
+    const int b[4] = {page[0] + r[0], page[1] + r[1], page[0] + r[0] + r[2],
+                      page[1] + r[1] + r[3]};
+    const int item = look.item[i];
+    if (item != kit::kPlain) {
+      card_scroll::Key(card, b[0], b[1], b[2], b[3],
+                       item == kit::kHover ? card_scroll::kKeyHover
+                                           : card_scroll::kKeyFlash,
+                       i * 3 + 51);
+    }
+    kit::InkWordsIn(c, card, g_status_font, g_list.word[i], b, i * 3 + 52,
+                    kit::kCenter);
+  }
+}
+
+// The words of the bottom row in the box: one line in the middle of the
+// box, or two lines of a smaller font when they do not fit in one.
+void StatusWords(const card_scroll::Picture& to, const wchar_t* words,
+                 const int box[4]) {
+  kit::Canvas* c = &g_canvas;
+  const int one = kit::InkLines(c, to, g_status_font, L"Ag", box, 13, false);
+  if (kit::InkLines(c, to, g_status_font, words, box, 13, false) <= one) {
+    kit::InkWordsIn(c, to, g_status_font, words, box, 13, kit::kLeftAlign);
+    return;
+  }
+  const int all = kit::InkLines(c, to, g_note_font, words, box, 13, false);
+  const int top = box[1] + (box[3] - box[1] - all) / 2;
+  const int b[4] = {box[0], top < box[1] ? box[1] : top, box[2], box[3]};
+  kit::InkLines(c, to, g_note_font, words, b, 13, true);
 }
 
 // The parchment look: the parts that changed. The log says when only the
@@ -672,17 +793,23 @@ void Compose(const Look& look, uint64_t frame) {
       ++drawn;
     }
   }
-  if (first || wcscmp(look.status, g_drawn.status) != 0) {
+  if (first || wcscmp(look.status, g_drawn.status) != 0 ||
+      look.button != g_drawn.button) {
     int n[4];
     NoteBox(n);
     kit::PageToCard(c, n);
-    const card_scroll::Picture card = kit::CardPicture(c);
-    kit::InkWordsIn(c, card, g_status_font, look.status, n, 13,
-                    kit::kLeftAlign);
+    if (look.button != kNoButton && g_page != nullptr) {
+      int r[4];
+      PageButtonRect(r);
+      kit::Button(c, r, look.button, g_page->button, g_label_font, 41);
+    }
+    NoteBoxBeside(look.button != kNoButton, n);
+    StatusWords(kit::CardPicture(c), look.status, n);
     ++drawn;
   }
-  if (first || look.bar != g_drawn.bar ||
-      (look.bar >= 0 && look.offset != g_drawn.offset)) {
+  if (look.page == 0 &&
+      (first || look.bar != g_drawn.bar || look.page != g_drawn.page ||
+       (look.bar >= 0 && look.offset != g_drawn.offset))) {
     int b[4];
     BarBox(b);
     kit::PageToCard(c, b);
@@ -692,10 +819,26 @@ void Compose(const Look& look, uint64_t frame) {
     }
     ++drawn;
   }
-  bool well = first || look.group != g_drawn.group ||
-              look.offset != g_drawn.offset ||
-              look.note_row != g_drawn.note_row;
-  for (int r = 0; r < look.rows && !well; ++r) {
+  if (look.page != 0 && g_page != nullptr) {
+    if (first || look.page != g_drawn.page || look.group != g_drawn.group ||
+        look.page_value != g_drawn.page_value ||
+        look.list_part != g_drawn.list_part ||
+        memcmp(look.item, g_drawn.item, sizeof(look.item)) != 0) {
+      int box[4];
+      PageBox(box);
+      kit::PageToCard(c, box);
+      const int hover = g_list_open ? -1 : PagePartOf(g_room.hover);
+      g_page->draw(c, box, 1, hover, look.list_part,
+                   PagePartOf(kit::Flashing(&g_room)));
+      if (look.list_part >= 0) DrawList(look);
+      ++drawn;
+    }
+  }
+  bool well = look.page == 0 &&
+              (first || look.group != g_drawn.group ||
+               look.page != g_drawn.page || look.offset != g_drawn.offset ||
+               look.note_row != g_drawn.note_row);
+  for (int r = 0; r < look.rows && !well && look.page == 0; ++r) {
     const int top = RowTop(r, look.offset);
     if (top + kRowPitch <= kWellTop || top >= kWellBottom) continue;
     if (!SameRow(look.row[r], g_drawn.row[r])) well = true;
@@ -785,8 +928,39 @@ void RasterPlain(const Look& look) {
   CloseRect(r);
   kit::PlainButton(c, r, look.close, L"Close", g_plain_small);
   int n[4];
-  NoteBox(n);
-  PlainWords(g_plain_small, RGB(230, 190, 110), look.status, n, DT_LEFT);
+  NoteBoxBeside(look.button != kNoButton, n);
+  PlainWords(look.button != kNoButton ? g_plain_tiny : g_plain_small,
+             RGB(230, 190, 110), look.status, n, DT_LEFT);
+  if (look.button != kNoButton && g_page != nullptr) {
+    int b[4];
+    PageButtonRect(b);
+    kit::PlainButton(c, b, look.button, g_page->button, g_plain_small);
+  }
+  if (look.page != 0 && g_page != nullptr) {
+    int box[4];
+    PageBox(box);
+    kit::PlainFill(c, box, RGB(30, 33, 38));
+    GdiFlush();
+    g_page->draw(c, box, 0, g_list_open ? -1 : PagePartOf(g_room.hover),
+                 look.list_part, PagePartOf(kit::Flashing(&g_room)));
+    if (look.list_part >= 0) {
+      const int paper[4] = {box[0] + g_list_box[0], box[1] + g_list_box[1],
+                            box[0] + g_list_box[2], box[1] + g_list_box[3]};
+      kit::PlainFill(c, paper, RGB(70, 62, 44));
+      const int inner[4] = {paper[0] + 2, paper[1] + 2, paper[2] - 2,
+                            paper[3] - 2};
+      kit::PlainFill(c, inner, RGB(36, 34, 30));
+      for (int i = 0; i < g_list.count && i < kListMost; ++i) {
+        int item[4];
+        ListItemRect(g_list_box, i, item);
+        const int at[4] = {box[0] + item[0], box[1] + item[1], item[2],
+                           item[3]};
+        kit::PlainButton(c, at, look.item[i], g_list.word[i], g_plain_small);
+      }
+    }
+    kit::PlainDone(c);
+    return;
+  }
   // The rows, in the list only.
   HRGN clip = CreateRectRgn(kWellLeft, kWellTop, kWellRight, kWellBottom);
   SelectClipRgn(c->dc, clip);
@@ -939,8 +1113,44 @@ void BuildLook(Look* look) {
       l.right = part_look(kOnRight);
     }
   }
+  // The page: what it shows, its list and its button.
+  look->button = kNoButton;
+  look->list_part = -1;
+  if (g_page != nullptr) {
+    look->page = 1;
+    look->list_part = g_list_open ? g_list_part : -1;
+    for (int i = 0; i < kListMost; ++i) {
+      look->item[i] = static_cast<uint8_t>(
+          kFirstListPart + i == flash ? kit::kFlash
+          : kFirstListPart + i == hover ? kit::kHover
+          : i == g_list.now && g_list_open ? kit::kOn
+                                           : kit::kPlain);
+    }
+    look->page_value = g_page->value(g_list_open ? -1 : PagePartOf(hover),
+                                     look->list_part, PagePartOf(flash));
+    if (g_page->button != nullptr) {
+      look->button = static_cast<uint8_t>(
+          !g_page->button_can()   ? kit::kDim
+          : kPartButton == flash ? kit::kFlash
+          : kPartButton == hover ? kit::kHover
+                                 : kit::kPlain);
+    }
+  }
+  const wchar_t* idle_now =
+      g_src->idle_now != nullptr ? g_src->idle_now() : nullptr;
   if (g_status[0] != 0 && GetTickCount64() < g_status_until) {
     wcsncpy_s(look->status, g_status, _TRUNCATE);
+  } else if (g_page != nullptr && g_list_open) {
+    wcscpy_s(look->status, L"Point at a job and pull the trigger.");
+  } else if (g_page != nullptr && PagePartOf(hover) >= 0) {
+    g_page->status(PagePartOf(hover), look->status, 128);
+  } else if (g_page != nullptr && hover == kPartButton &&
+             !g_page->button_can()) {
+    wcscpy_s(look->status, L"Each button has its default job now.");
+  } else if (idle_now != nullptr) {
+    wcsncpy_s(look->status, idle_now, _TRUNCATE);
+  } else if (g_page != nullptr) {
+    g_page->status(-1, look->status, 128);
   } else if (hover_row >= 0 && hover_row < g_rows &&
              g_kind[hover_row] == kRowDim) {
     const int i = g_switch[hover_row];
@@ -955,6 +1165,11 @@ void BuildLook(Look* look) {
 }
 
 bool SameLook(const Look& a, const Look& b) {
+  if (a.page != b.page || a.page_value != b.page_value ||
+      a.list_part != b.list_part || a.button != b.button ||
+      memcmp(a.item, b.item, sizeof(a.item)) != 0) {
+    return false;
+  }
   if (a.style != b.style || a.slot != b.slot || a.group != b.group ||
       a.rows != b.rows ||
       a.offset != b.offset || a.note_row != b.note_row || a.bar != b.bar ||
@@ -977,6 +1192,11 @@ bool WorthSaving(const Look& look) {
     return true;
   }
   if (look.note_row >= 0 && look.note_row != s.note_row) return true;
+  if (look.page != 0 &&
+      (look.page_value != s.page_value || look.list_part != s.list_part ||
+       memcmp(look.item, s.item, sizeof(look.item)) != 0)) {
+    return true;
+  }
   const int moved = look.offset - s.offset;
   if (moved >= 3 * kRowPitch || -moved >= 3 * kRowPitch) return true;
   for (int r = 0; r < look.rows; ++r) {
@@ -996,6 +1216,60 @@ void Act(int part, uint64_t frame) {
   char name[64];
   PartName(part, name, sizeof(name));
   ++g_presses;
+  // An open list: an item picks a job, and a press out of the list closes
+  // it and does no more.
+  if (g_list_open) {
+    const int item = ListItemOf(part);
+    const int owner = g_list_part;
+    CloseList();
+    if (item < 0 || item >= g_list.count || g_page == nullptr) {
+      WinLog("the trigger presses %s, and the list closes, frame %llu", name,
+             frame);
+      return;
+    }
+    kit::Pressed(&g_room, kFirstPagePart + owner);
+    wchar_t words[128] = L"";
+    if (g_page->choose(owner, item, words, 128)) {
+      ++g_steps;
+      SetStatus(words);
+    }
+    WinLog("the trigger presses %s, frame %llu", name, frame);
+    return;
+  }
+  if (part == kPartButton && g_page != nullptr && g_page->button != nullptr) {
+    if (!g_page->button_can()) {
+      ++g_refused;
+      HapticsPulse(haptics_math::kRefused);
+      WinLog("the trigger presses %s, which does nothing now, frame %llu",
+             name, frame);
+      return;
+    }
+    kit::Pressed(&g_room, part);
+    wchar_t words[128] = L"";
+    g_page->button_press(words, 128);
+    ++g_steps;
+    SetStatus(words);
+    WinLog("the trigger presses %s, frame %llu", name, frame);
+    return;
+  }
+  if (PagePartOf(part) >= 0 && g_page != nullptr) {
+    PageList list;
+    if (!g_page->list(PagePartOf(part), &list) || list.count <= 0) {
+      ++g_refused;
+      HapticsPulse(haptics_math::kRefused);
+      WinLog("the trigger presses %s, which has no list, frame %llu", name,
+             frame);
+      return;
+    }
+    kit::Pressed(&g_room, part);
+    g_list = list;
+    g_list_part = PagePartOf(part);
+    g_list_open = true;
+    ListPlace(list.box, list.count, g_list_box);
+    WinLog("the trigger presses %s: its list of %d items opens, frame %llu",
+           name, list.count, frame);
+    return;
+  }
   if (part < kMostTabs) {
     kit::Pressed(&g_room, part);
     if (part != g_group) {
@@ -1186,7 +1460,38 @@ bool DebugWindowTestTarget(float out[3]) {
   char name[64];
   PartName(part, name, sizeof(name));
   float u = 0.0f, v = 0.0f;
-  if (!PartMiddle(part, Groups(), g_rows, g_kind, g_offset, &u, &v)) {
+  int r[4];
+  bool special = false, found = false;
+  if (part == kPartButton) {
+    special = true;
+    found = g_page != nullptr && g_page->button != nullptr;
+    PageButtonRect(r);
+    r[2] += r[0];
+    r[3] += r[1];
+  } else if (ListItemOf(part) >= 0) {
+    special = true;
+    found = g_list_open && ListItemOf(part) < g_list.count;
+    ListItemRect(g_list_box, ListItemOf(part), r);
+    r[0] += kWellLeft;
+    r[1] += kWellTop;
+    r[2] += r[0];
+    r[3] += r[1];
+  } else if (PagePartOf(part) >= 0) {
+    special = true;
+    found = g_page != nullptr && g_page->box(PagePartOf(part), r);
+    r[0] += kWellLeft;
+    r[2] += kWellLeft;
+    r[1] += kWellTop;
+    r[3] += kWellTop;
+  }
+  if (special) {
+    if (!found) {
+      WinLog("the word aimdebug: %s is not in the view now", name);
+      return false;
+    }
+    u = (r[0] + r[2]) * 0.5f / kWidth;
+    v = (r[1] + r[3]) * 0.5f / kHeight;
+  } else if (!PartMiddle(part, Groups(), g_rows, g_kind, g_offset, &u, &v)) {
     WinLog("the word aimdebug: %s is not in the view now",
            name);
     return false;

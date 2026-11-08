@@ -182,7 +182,8 @@ const ItemInfo kItemInfo[kItems] = {
      0, 0},
     // The item "debug" with debug_window=1 (radial_menu.cpp, PlaceDebug).
     {"debug_window", L"Debug", L"The debug window", kHowWindow, 0, 0, 0},
-    {"settings", L"Settings", L"The settings window", kHowSettings, 0, 0, 0},
+    {"settings", L"Settings", L"The VR Settings window", kHowSettings, 0, 0,
+     0},
 };
 
 // The rings as made. The order is how often a player needs an item, from the

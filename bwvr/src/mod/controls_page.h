@@ -37,3 +37,12 @@ void ControlsSetHoverRow(int k);
 
 // Once a report window.
 void ControlsPageReport();
+
+// THE PAGE WITH THE MODELS (controls_page_models=1): the page Controls as
+// one picture of the window (WindowPage, debug_window.h), with the models of
+// the controllers of the player, a box for each control with a leader of
+// ink to it, a list that drops down with the jobs of a button, and the
+// button Reset Defaults. Null with controls_page_models=0: then the page
+// has the rows of the functions above.
+struct WindowPage;
+const WindowPage* ControlsPage();

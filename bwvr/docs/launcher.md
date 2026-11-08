@@ -265,15 +265,24 @@ move the camera in steps.
 | Setting | Default | What it does |
 | --- | --- | --- |
 | Hints with the controller | Controller in the hand | Key `hint_style`, a value. 2 Controller in the hand: while a hand has a hint, a faint model of its controller shows in that hand, each button of the hint is lit in gold, and each lit button has its own small scroll card with a line of ink to the button. 1 Cards at the wrists: one card beside each wrist. A controller with no model has the cards at the wrists (`controller-hints.md`, 9.14). |
-| Card look | Scroll | Key `hint_card_style`, a value. 1 Scroll: each hint card is a parchment scroll with dark letters, and the button word is on a wax seal. The spell book and the keyboard in the headset are pages of the same parchment, and each item of the ring is a wax seal. 0 Plain: dark cards with white letters (`controller-hints.md`, 9.11, `miracles.md`, "The spell book", `controllers.md`, 10.4, and `ui-layer.md`, section 21). |
 | Button pictures on the cards | on | Key `hint_card_pictures`. 1: each line of a button on a hint card has a small picture of the controller with that button lit, beside the button word. 0: the button word only (`controller-hints.md`, 9.13). |
 | Glow at the Hand's point | off | Key `hand_glow`. A small glow at the tip of the index finger shows the point of the Hand that picks up and clicks. It shows while a press of the grip acts on something (`hand-model.md`). |
 | Trail for gestures | on | Key `gesture_trail`. While you hold the draw button and draw a gesture, a gold ribbon follows the tip of the index finger. It fades after 1.5 s and goes out when the button goes up (`miracles.md`, "The trail at the fingertip"). |
 | Glow on the rays | on | Key `ray_glow`. The ray of the menu, the tether of the far grab and the arc of the teleport get a soft glow and a light that runs along them from the hand (`hand-model.md`, "The glow ribbons"). |
 | Grab the world | Grip of the other hand | Key `grab_hand`, a value. 1 Hold the grip of your other hand and move that hand to pull the world. Hold both grips to turn the world and to zoom. 2 Either grip: the grip of the pointing hand also grabs the world when the Hand is empty and not over an object. 0 Off. |
-| Hand | Follow the game | Key `left_hand`, a value. -1 Follow the game: the left hand option of the game (`HAND_ORIENTATION` of the profile) chooses the controller of the Hand. 0 Right: the right controller is the Hand. 1 Left: the left controller is the Hand, and the two controllers swap each job (`controllers.md`, section 5.6). |
-| Stroke with the open hand | on | Key `creature_stroke_open`. 1: an open hand that stays in the body of your Creature for 0.2 s strokes it, with no grip. The open hand never slaps. A slap needs the grip. 0: only the grip strokes the Creature (`creature.md`, section 2.10). |
-| Hints | Until learned | Key `hint_learn`, a value. 1 Until learned: a line of a hint card that teaches an action goes away after you did the action 3 times, and comes back after 10 minutes of play with no use of it. In a lesson of the tutorial each line shows. 0 Always: each line always shows. The counts are in `bwvr-hint-counts.ini` beside `bwvr.ini`. Delete that file to show each line again (`controller-hints.md`, 9.10). |
+
+These settings have no row in the launcher and none in the VR Settings
+window. Their keys still act, with the default of the table of their area:
+
+| Key | Default | Why it has no row |
+| --- | --- | --- |
+| `hand_follow_game`, `left_hand` | 1, -1 | The left handed option of the game chooses the Hand (`controllers.md`, 5.6) |
+| `hints_follow_game`, `hint_learn` | 1, 1 | The ToolTips option of the game chooses whether a line of a hint card goes away when you know it (`controller-hints.md`, 9.10) |
+| `hint_card_style` | 1 | Each player has the scroll look |
+| `creature_stroke_open` | 1 | Each player has the stroke with the open hand (`creature.md`, section 2.10) |
+
+No tooltip of the launcher names a key, a file or a part of the program: a
+player needs none of them.
 
 See `controllers.md` for the full controls.
 

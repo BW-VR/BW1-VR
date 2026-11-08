@@ -134,7 +134,7 @@ const Setting kSettings[] = {
      "Only with the renderer Direct3D 9. The game draws through DXVK and "
      "Vulkan in place of the Direct3D 9 of Windows. This takes about half "
      "of the time of the driver off each frame. The mod uses it only when "
-     "your GPU has Vulkan 1.3 and the file dxvk\\d3d9.dll is in the game "
+     "your GPU has Vulkan 1.3 and DXVK is in the game "
      "folder. Else, and when a start with it fails, the game draws as "
      "before. The change counts from the next start."},
     {kBool, "xr_vulkan", "Headset session with Vulkan", nullptr, 0,
@@ -201,8 +201,8 @@ const Setting kSettings[] = {
      "works with motion controllers and with the mouse. Controllers: push "
      "the stick of your Hand forward or back to zoom. Hold the grip of your "
      "other hand and pull to move the land, across and up and down. Your "
-     "Hand is the right controller, or the left one with a left hand (see "
-     "Hand). Mouse: drag the "
+     "Hand is the right controller, or the left one when the game has its "
+     "left handed option. Mouse: drag the "
      "land to move it. Turn the "
      "wheel to zoom one step. Press a tilt key to move the ground up or "
      "down. Stereoscopic window: the game is on a 3D screen in front of "
@@ -354,11 +354,13 @@ const Setting kSettings[] = {
     //  "Direct hand: the Hand is where your controller is. Stretch your arm to "
     //  "reach far into the world. Pointer: the controller points a ray, and the "
     //  "Hand goes where the ray points."},
-    {kValues, "left_hand", "Hand", "Follow the game=-1|Right=0|Left=1", -1,
-     "Which controller is the Hand. Follow the game: the left handed option "
-     "in the options of the game chooses it. Right or Left: the controller "
-     "of that hand is the Hand. The other controller grabs the world, moves "
-     "you with its stick and opens the ring."},
+    // Not offered: the left handed option of the game chooses the Hand
+    // (hand_follow_game=1), so the player sets it in one place.
+    // {kValues, "left_hand", "Hand", "Follow the game=-1|Right=0|Left=1", -1,
+    //  "Which controller is the Hand. Follow the game: the left handed option "
+    //  "in the options of the game chooses it. Right or Left: the controller "
+    //  "of that hand is the Hand. The other controller grabs the world, moves "
+    //  "you with its stick and opens the ring."},
     {kBool, "hand_glow", "Glow at the Hand's point", nullptr, 0,
      "A small glow at the tip of the index finger shows the point of the "
      "Hand that picks up and clicks. It shows while a press of the grip "
@@ -378,12 +380,14 @@ const Setting kSettings[] = {
      "Hold both grips to turn the world and to zoom. Either grip: the grip "
      "of your pointing hand also grabs the world when the Hand is empty and "
      "not over an object. Off: the grips do not move the world."},
-    {kValues, "hint_learn", "Hints", "Until learned=1|Always=0", 1,
-     "The cards beside your wrists show what each button does. Until "
-     "learned: a line goes away after you do its action 3 times. It comes "
-     "back after 10 minutes of play without that action. In a lesson of the "
-     "tutorial, each line shows. Always: each line always shows. To show all "
-     "lines again, delete bwvr-hint-counts.ini in the game folder."},
+    // Not offered: the ToolTips option of the game chooses it
+    // (hints_follow_game=1).
+    // {kValues, "hint_learn", "Hints", "Until learned=1|Always=0", 1,
+    //  "The cards beside your wrists show what each button does. Until "
+    //  "learned: a line goes away after you do its action 3 times. It comes "
+    //  "back after 10 minutes of play without that action. In a lesson of the "
+    //  "tutorial, each line shows. Always: each line always shows. To show all "
+    //  "lines again, delete bwvr-hint-counts.ini in the game folder."},
     {kValues, "hint_style", "Hints with the controller",
      "Controller in the hand=2|Cards at the wrists=1", 2,
      "Controller in the hand: while a hand has a hint, a faint model of your "
@@ -392,31 +396,33 @@ const Setting kSettings[] = {
      "Cards at the wrists: one card beside each wrist, with a small picture "
      "of the button. A controller with no model has the cards at the "
      "wrists."},
-    {kValues, "hint_card_style", "Card look", "Scroll=1|Plain=0", 1,
-     "The look of the cards beside your wrists, of the spell book, of the "
-     "ring menu and of the keyboard for a name. Scroll: a small parchment "
-     "scroll with dark letters, and the button word on a wax seal (green for "
-     "the trigger, amber for the grip). The spell book and the keyboard are "
-     "pages of the same parchment. Each item of the ring is a wax seal. "
-     "Plain: dark cards with white letters."},
+    // Not offered: each player has the scroll look.
+    // {kValues, "hint_card_style", "Card look", "Scroll=1|Plain=0", 1,
+    //  "The look of the cards beside your wrists, of the spell book, of the "
+    //  "ring menu and of the keyboard for a name. Scroll: a small parchment "
+    //  "scroll with dark letters, and the button word on a wax seal (green for "
+    //  "the trigger, amber for the grip). The spell book and the keyboard are "
+    //  "pages of the same parchment. Each item of the ring is a wax seal. "
+    //  "Plain: dark cards with white letters."},
     {kBool, "hint_card_pictures", "Button pictures on the cards", nullptr, 1,
      "Each line of a button on the cards beside your wrists has a small "
      "picture of your controller, with that button lit. Off: the cards show "
      "the button words only."},
-    {kBool, "creature_stroke_open", "Stroke with the open hand", nullptr, 1,
-     "Put your open hand on your Creature and keep it there for a moment. "
-     "Then move the hand slowly to stroke the Creature. You do not need the "
-     "grip. The open hand never slaps. For a slap, close the grip. Off: only "
-     "the grip strokes the Creature."},
+    // Not offered: each player has the stroke with the open hand.
+    // {kBool, "creature_stroke_open", "Stroke with the open hand", nullptr, 1,
+    //  "Put your open hand on your Creature and keep it there for a moment. "
+    //  "Then move the hand slowly to stroke the Creature. You do not need the "
+    //  "grip. The open hand never slaps. For a slap, close the grip. Off: only "
+    //  "the grip strokes the Creature."},
 
     {kGroup, nullptr, "Launcher", nullptr, 0, nullptr},
     {kBool, "large_address", "Use 4 GB of memory", nullptr, 1,
      "The game is a 32 bit program. Without this, Windows gives it 2 GB of "
      "memory space. A large render can fill it, and then the game can crash "
      "or show white textures. On: before each start, the launcher sets a "
-     "flag in runblack.exe that gives the game 4 GB. Off: the launcher puts "
-     "the original runblack.exe back. The first change keeps a copy of the "
-     "original file as runblack.exe.before-bwvr."},
+     "flag in the program of the game that gives the game 4 GB. Off: the "
+     "launcher puts the original program back. The first change keeps a "
+     "copy of the original program in the game folder."},
     {kBool, "update_check", "Check for updates", nullptr, 1,
      "Each time the launcher opens, it asks GitHub for the latest version "
      "of the mod. When a newer version is out, the line at the bottom of "

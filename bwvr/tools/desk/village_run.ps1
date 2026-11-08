@@ -222,25 +222,28 @@ if ($Kind -eq 'totem') {
     }
     $keys = "$keys;spell_book_test_save=16"
 } elseif ($Kind -eq 'controls') {
-    # The page Controls of the settings window (bwvr/docs/ui-layer.md, "The
-    # page Controls", and bwvr/docs/controllers.md, "The map of the
+    # The page Controls of the VR Settings window (bwvr/docs/ui-layer.md,
+    # "The page Controls", and bwvr/docs/controllers.md, "The map of the
     # buttons"). The welcome page opens 3 s after the controllers can act
-    # (welcome_done=0), and the trigger presses its button Settings. In the
-    # settings window the trigger presses the tab Controls (tab3), then the
-    # right arrow of the row "Left Y" (right5): Y takes the job of the left
-    # stick click (the recenter hold), and the stick click takes the ring.
-    # The ray rests on the row "Right B" (row9), so the drawing lights B and
-    # the note shows. Close closes the window. Then a hold of the left stick
-    # click opens the ring, and a hold of Y recenters the view. Each new
-    # picture of the window is saved (debug_window_test_save).
+    # (welcome_done=0), and the trigger presses its button VR Settings. In
+    # the window the trigger presses the tab Controls (tab2), then the box
+    # "Y button" of the left controller (page1 with the models of
+    # bwvr/assets/controllers): its list opens. The trigger picks its item
+    # Recenter (item2): Y takes the job of the left stick click (the
+    # recenter hold), and the stick click takes the ring. The ray rests on
+    # the box "B button" of the right controller (page9), so the model
+    # lights B. Close closes the window. Then a hold of the left stick click
+    # opens the ring, and a hold of Y recenters the view. Each new picture of
+    # the window is saved (debug_window_test_save).
     # -Parts gives other parts of the window for the word aimdebug, and
-    # -Steps other steps. For the defaults: -Set "button_map_other=1324"
-    # -Parts "tab3 trackend row16 row11 close" and the steps of the comment
-    # in the desk README. -Set "hint_profile=valve/index_controller" draws
-    # Index controllers, and -Set "hint_card_style=0" the dark look.
+    # -Steps other steps. For Reset Defaults: -Set "button_map_other=1324"
+    # -Parts "tab2 reset close". -Set "hint_profile=valve/index_controller"
+    # draws Index controllers, -Set "hint_card_style=0" the dark look, and
+    # -Set "controls_page_models=0" the page with the drawing and the rows
+    # (then -Parts "tab2 right5 row9 close").
     if ($Plan -eq '') { $Plan = 'gosite' }
     if ($Census -eq '') { $Census = '890' }
-    if ($Parts -eq '') { $Parts = 'tab3 right5 row9 close' }
+    if ($Parts -eq '') { $Parts = 'tab2 page1 item2 page9 close' }
     if ($Steps -eq '') {
         $Steps = 'aimdebug@1400+1 trigger@1410+4 aimdebug@1460+1 trigger@1470+4 ' +
                  'aimdebug@1520+1 trigger@1530+4 aimdebug@1580+1 ' +
@@ -257,7 +260,7 @@ if ($Kind -eq 'totem') {
     # eyes and in front of the panel (the first point of the list is the
     # point of the Main Menu). The word aimdebug aims the ray at the button
     # Settings, and the eye pictures come while the ray rests there. The
-    # trigger presses Settings, which opens the settings window. The ray
+    # trigger presses VR Settings, which opens the VR Settings window. The ray
     # rests on the row 2 of the window until its note shows, more eye
     # pictures, and the trigger presses Close. The strip of the ray is saved
     # (ray_card_test_save), and so are the first pictures of the page and the

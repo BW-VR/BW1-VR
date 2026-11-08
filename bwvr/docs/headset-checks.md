@@ -141,11 +141,10 @@ want.
     of the ray that is hard to see on the paper. With
     `debug_menu=1`, also open the debug window, read a note, and scroll a
     long group with the stick. Wrong: rows or notes hard to read, arrows hard
-    to hit, or a scroll that is too fast or too slow. Open the settings
-    window from page 2 of the ring. Wrong: a label, a value or the words
-    "at the next start" that are hard to read, text that shimmers when the
-    head moves, or a drawing on the tab Controls that does not look like
-    your controllers.
+    to hit, or a scroll that is too fast or too slow. Open the VR
+    Settings window from page 2 of the ring. Wrong: a label or a value that
+    is hard to read, text that shimmers when the head moves, or models on the tab Controls that do not look like
+    your controllers, with leaders or boxes that are hard to follow.
 21. **The cards and the subtitles.** Read the hint cards at the wrist and the
     subtitle card while the hands work. Wrong: low contrast or a shimmer, a
     faint line around a card, a card that covers a hand or often changes side, a prompt that is late or
@@ -284,6 +283,11 @@ agents: the log does not tell the item yet.
 - **The place of the controller in the hand** (`controller-hints.md`, 9.15).
   Log: `view check   :` gives how far from the grip pose of the runtime the
   two eyes see the drawn grip, in cm and in pixels.
+- **The hints follow the ToolTips option of the game.** Log: `hint card    :
+  the ToolTips option of the game is N` after a change of the option in the
+  game, with "each line always shows" for All ToolTips.
+- **A new job for a button on the page Controls.** Log: `controls     : the
+  list of`, then `controllers  : the new map of the buttons acts now`.
 
 ## The miracles of the game
 

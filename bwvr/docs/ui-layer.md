@@ -2402,11 +2402,11 @@ The picture is 1024 by 1024 pixels:
 
 | Part | Where | What it is |
 | --- | --- | --- |
-| The title | The top | "Debug switches", or "Settings" for the settings window (section 24) |
+| The title | The top | "Debug switches", or "VR Settings" for the VR Settings window (section 24) |
 | The tabs | A column at the left, 196 by 62 px each | One for each group. The tab of the group that shows is bright gold (`kOn`) |
 | The list | 692 by 760 px, 10 rows of 76 px | The switches of the group, one row for each: the label at the left and the control at the right. An ink rule is at the foot of each row, and above and below the list |
 | The scroll bar | At the right of the list | Only for a group with more than 10 rows. The thumb is the share of the list in the view, at least 56 px |
-| The bottom row | Under the list | The words of the last press at the left, and Close at the right |
+| The bottom row | Under the list | The words of the last press at the left, and Close at the right. A page (24.6) can have a button of its own at the left of Close |
 | The note | Over the list | After a rest of 0.35 s on a row: the name of the switch, its note in one to three sentences, and its ini key. It goes below the row, or above the row when it does not fit below. It does not catch the ray |
 
 The control of a row:
@@ -2523,12 +2523,12 @@ and closes the window with B and with the menu button.
 
 The check in a headset is in `headset-checks.md`, check 23.
 
-## 24. The settings window and the welcome page
+## 24. The VR Settings window and the welcome page
 
-The settings window is the debug window of section 23 with the settings of
-the player as its rows. The item `settings` of page 2 of the ring opens it,
-and so does the button Settings of the welcome page. The welcome page shows
-one time, at the first start of the mod. The code is in
+The VR Settings window is the debug window of section 23 with the settings
+of the player as its rows. The item `settings` of page 2 of the ring opens
+it, and so does the button VR Settings of the welcome page. The welcome page
+shows one time, at the first start of the mod. The code is in
 `settings_panel.cpp` and `settings_panel_math.h`. The window code in
 `debug_window.cpp` takes its rows from a table of functions (`WindowRows`
 in `debug_window.h`): one for the debug switches, one for the settings.
@@ -2536,38 +2536,53 @@ in `debug_window.h`): one for the debug switches, one for the settings.
 ### 24.1 The rows
 
 The place, the parts, the look, the bake, the stick and the closes are those
-of section 23. The title is "Settings", and the bottom row says "Point at a
-setting to read what it does". The words are the words of the launcher
-(`launcher.md`), so a player knows them. The note of a row has the launcher
-label, what the setting does, and its key with "A change acts at once" or
-"A change acts at the next start of the game".
+of section 23. The title is "VR Settings". The words are the words of the
+launcher (`launcher.md`), so a player knows them. The note of a row has the
+launcher label and what the setting does. No player word of the window, of
+the welcome page or of the launcher names a key, a file or a part of the
+program.
 
 | Tab | Row | Key | Values |
 | --- | --- | --- | --- |
 | Moving | Turn | `snap_turn` | Off, 30, 45, 90 degrees, Smooth |
 | Moving | Turn speed | `smooth_turn_speed` | Slow 45, Normal 90, Fast 135, Very fast 180 (degrees a second) |
-| Moving | Teleport | `teleport` | Off, On |
 | Moving | Stick walk | `move_stick` | Off, Head, Controller |
 | Moving | Walk speed | `move_stick_speed_cm` | Slow 75, Normal 150, Fast 250, Very fast 400 |
 | Moving | Smooth zoom | `god_zoom_smooth` | In steps, Smooth |
 | Moving | Comfort vignette | `comfort_vignette` | Off, Gentle, Strong |
 | Moving | Blink | `blink` | Off, Short, Long |
-| Moving | Recenter hold | `recenter_hold` | Off, Other hand, Hand |
-| Hands | Hand | `left_hand` | Game, Right, Left |
 | Hands | Grab the world | `grab_hand` | Off, Other grip, Either grip. At the next start |
 | Hands | Gesture trail | `gesture_trail` | Off, On |
-| Hands | Open hand stroke | `creature_stroke_open` | Off, On |
-| Cards | Hints | `hint_learn` | Always, Until learned |
-| Cards | Card look | `hint_card_style` | Plain, Scroll |
-| Cards | Subtitle card | `subtitle_card` | Off, On. At the next start |
 | Controls | The page of 24.6 | `button_map_hand`, `button_map_other` | A job for each button |
 
 A row with two values is a toggle, with the "off" value first, so the knob
 is at the left for it. A row with more values has two arrows, and a step
 goes round the list. A value in `bwvr.ini` that the list does not have shows
-as its number, and the right arrow goes to the first value of the list. A
-row that acts at the next start has the small words "at the next start"
-under its label, and the bottom row adds them after a change.
+as its number, and the right arrow goes to the first value of the list.
+
+**The settings with no row.** These keys still act, and the window does not
+show them:
+
+| Key | Why it has no row |
+| --- | --- |
+| `teleport` | Each player uses the teleport |
+| `recenter_hold` | The page Controls gives the recenter to a button |
+| `left_hand` | The left handed option of the game chooses the Hand (`hand_follow_game`, `controllers.md`, 5.6) |
+| `creature_stroke_open` | Each player has the stroke with the open hand |
+| `hint_learn` | The ToolTips option of the game chooses it (`hints_follow_game`, `controller-hints.md`, 9.10) |
+| `hint_card_style` | Each player has the scroll look |
+| `subtitle_card` | Each player has the subtitle card |
+
+With `settings_lean=0` the window has these rows too, in the tabs Moving,
+Hands and Cards, as the table `settings_math::kTable` has them, and a row
+that acts at the next start has the small words "at the next start" under
+its label.
+
+**The restart.** A row that acts at the next start (`grab_hand`) has no
+words of its own. While its value is not the value of the start of the
+game, the bottom row of the window says "Restart the game to use the
+changes." at its left, in place of "Point at a setting to read what it
+does." The words of a change show there first for 2.5 s.
 
 ### 24.2 A change
 
@@ -2579,12 +2594,10 @@ which writes its own log line:
 | Key | The change function |
 | --- | --- |
 | `snap_turn`, `smooth_turn_speed`, `blink` | `ComfortCameraSetSnap`, `ComfortCameraSetTurnSpeed`, `ComfortCameraSetBlink` |
-| `teleport` | `TeleportSetOn` |
 | `move_stick`, `move_stick_speed_cm`, `god_zoom_smooth` | `TabletopGodSetMoveStick`, `TabletopGodSetMoveSpeed`, `TabletopGodSetZoomSmooth`. A walk or a hold of the zoom that runs stops |
 | `comfort_vignette` | `VignetteSet` |
-| `recenter_hold`, `left_hand`, `creature_stroke_open` | `ControllersSetRecenterHold`, `ControllersSetLeftHand`, `ControllersSetOpenStroke`. The Hand changes to the other controller when each button is up |
-| `hint_learn`, `hint_card_style` | `HintCardSetLearn`, `HintCardSetStyle`. The cards, the ring, the spell book and the windows take the new look in the next frame |
 | `gesture_trail` | `OverlaySetTrail` |
+| With `settings_lean=0`: `teleport`, `recenter_hold`, `left_hand`, `creature_stroke_open`, `hint_learn`, `hint_card_style` | `TeleportSetOn`, `ControllersSetRecenterHold`, `ControllersSetLeftHand`, `ControllersSetOpenStroke`, `HintCardSetLearn`, `HintCardSetStyle` |
 
 These functions do not need `test_keys=1`, and they give no pulse: the press
 of the row gives the pulse of the kit. The window never writes the registry
@@ -2597,22 +2610,22 @@ The page shows when `welcome_page=1` and `bwvr.ini` has no
 `welcome_done=1`. It waits until the controllers can act for 3 s, with no
 dialog box, no cut scene, no ring, no spell book and no other panel. It is
 a parchment page of 1024 by 640 pixels, 56 by 35 cm, at the place of the
-settings window:
+VR Settings window:
 
 - the title "Welcome to the Black & White VR Mod"
 - "You can change the settings at any time." and "The mod is a work in
   progress, so expect some bugs."
 - three controls: the grip of the Hand, the grip of the other hand, and the
-  button of the ring with "Settings is on its page 2". The button is Y, X, B
-  or A, as `button_layout`, the hand of the ring and the map of the buttons
-  (24.6) give it
-- the buttons Settings and Play
+  button of the ring with "VR Settings is in the ring". The button is Y, X,
+  B or A, as `button_layout`, the hand of the ring and the map of the
+  buttons (24.6) give it
+- the buttons VR Settings and Play
 
-Settings closes the page and opens the settings window. Play closes the
-page. A press of either button, B of the pointing hand and the menu button
-write `welcome_done=1`. The ring, the spell book, a dialog box and a cut
-scene close the page with no write, and it shows again when they are gone.
-The words are drawn one time into the page, and each button in each look is
+VR Settings closes the page and opens the window. Play closes the page. A
+press of either button, B of the pointing hand and the menu button write
+`welcome_done=1`. The ring, the spell book, a dialog box and a cut scene
+close the page with no write, and it shows again when they are gone. The
+words are drawn one time into the page, and each button in each look is
 copied, so a change under the ray copies one button.
 
 ### 24.4 Keys and the log
@@ -2620,128 +2633,149 @@ copied, so a change under the ray copies one button.
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `settings_panel` | 1 | 1: page 2 of the ring as made has the item `settings` in the slot of `names` (`controllers.md`, 10.2). 0: page 2 has `names`, and the word `settings` is an empty slot |
+| `settings_lean` | 1 | 1: the window has the rows of 24.1, and the restart line. 0: it also has the rows of the settings with no row, in the tabs Moving, Hands and Cards |
 | `welcome_page` | 1 | 0: the welcome page never shows |
 | `welcome_done` | 0 | The mod writes 1 after the welcome page. The desktop runs set 1 (`tools/desk/desk_test.ps1`) |
-| `welcome_test_save` | 0 | Test key. N saves the first N pictures of the welcome page as `bwvr-welcome-FFFFF.bmp`. The pictures of the settings window come from `debug_window_test_save` |
+| `welcome_test_save` | 0 | Test key. N saves the first N pictures of the welcome page as `bwvr-welcome-FFFFF.bmp`. The pictures of the window come from `debug_window_test_save` |
 | `welcome_test_parts` | | Test key. The buttons for the word `aimdebug` while the page is open: `settings`, `play` |
 
-The log has the tag `settings`, and the window lines of the settings window
-have it too:
+The log has the tag `settings`, and the window lines of the VR Settings
+window have it too:
 
 ```
-settings     : settings_panel=1: page 2 of the ring as made has the item "settings". welcome_page=1, welcome_done=0: the welcome page shows at this start
+settings     : settings_panel=1: page 2 of the ring as made has the item "settings". settings_lean=1: the window has the rows that a player changes. welcome_page=1, welcome_done=0: the welcome page shows at this start
 settings     : the welcome page opens, 0.56 by 0.35 m, its middle at 0.00 -0.21 -0.98 m, frame 412
-settings     : the welcome page closes: the player pressed Settings. welcome_done=1 is in bwvr.ini, so the page does not show again, frame 530
-settings     : the window opens, 0.56 by 0.56 m, its middle at 0.00 -0.21 -0.98 m, the group Moving with 9 switches, frame 531
+settings     : the welcome page closes: the player pressed VR Settings. welcome_done=1 is in bwvr.ini, so the page does not show again, frame 530
+settings     : the window opens, 0.56 by 0.56 m, its middle at 0.00 -0.21 -0.98 m, the group Moving with 7 switches, frame 531
 settings     : snap_turn goes from 2 to 3 (90 degrees), written to bwvr.ini. It acts at once, frame 650
-comfort      : the settings window: turn in steps of 90 degrees now
+comfort      : the VR Settings window: turn in steps of 90 degrees now
 ```
 
 ### 24.5 Tests and limits
 
 The math checks are in `test/controller_math/settings_panel_checks.h`: the
 table (each line in its group, a key of its own, the default among its
-values, labels and value words that fit), the words and numbers of the
-values, the step round a list, the text for `bwvr.ini`, the ring as made
-with `settings_panel` 1 and 0, and the layout of the welcome page.
+values, labels and value words that fit), the rows and the tabs of the lean
+window, the restart line, the words and numbers of the values, the step
+round a list, the text for `bwvr.ini`, the ring as made with
+`settings_panel` 1 and 0, and the layout of the welcome page.
 
-A setting that the area reads only at its start (`grab_hand`,
-`subtitle_card`) acts at the next start. The other settings of the launcher
-stay in the launcher.
+A setting that the area reads only at its start (`grab_hand`) acts at the
+next start. The other settings of the launcher stay in the launcher.
+
+**The pictures with no game.** An offline program (not in the repo) builds
+`debug_window.cpp`, `settings_panel.cpp`, `controls_page.cpp`,
+`panel_kit.cpp`, `card_scroll.cpp` and `hint_model.cpp` with stubs of the
+game and of the headset, and draws each page of the window to a picture
+with the fonts of the mod and the models of `bwvr/assets/controllers`.
 
 ### 24.6 The page Controls
 
-The tab Controls of the settings window shows the controllers of the player
-and gives a job of a controller to a different button of the same
-controller. The code is in `controls_page.cpp`, `button_map_math.h` (the
-kinds, the buttons, the map and the jobs) and `controller_art_math.h` (the
-shapes of the drawing). `controllers.md`, 5.7, has the map.
+The tab Controls of the VR Settings window shows the controllers of the
+player and gives a job of a controller to a different button of the same
+controller. The code is in `controls_page.cpp`, `controls_layout_math.h`
+(the layout of the page and the leaders), `button_map_math.h` (the kinds,
+the buttons, the map and the jobs), `panel_raster.h` (the drawing of a
+model on the CPU) and `hint_model.cpp` (the models). `controllers.md`, 5.7,
+has the map.
 
-**The rows**, from the top:
+**The page** is one picture in the box of the list and of the scroll bar,
+732 by 760 pixels, in place of rows (`WindowPage` in `debug_window.h`).
+Each controller has a half of the page:
 
-| Rows | What they are |
-| --- | --- |
-| The drawing | 4 rows, 692 by 304 pixels: the kind of the controllers at the top, the left and the right controller in ink, and a line of words for each control at the outer side: its name and its job, for example "B: Gesture". Under each controller: its side and "the Hand" or "other hand". The control of the row under the ray, and its line of words, are gold |
-| The buttons | One row for each button of the left and then of the right controller that a job can use: the first face button, the second face button, the stick click, the menu button. The label is the side and the button ("Left Y"), and the value is its job. The arrows give the button the next or the last job of the same controller |
-| Button defaults | A toggle. "In use" with the knob at the right when each button has its job as made. A press at "Changed" gives each button its job as made. A press at "In use" does nothing |
-| The fixed rows | The trigger, the grip and the stick of the left and of the right controller, dim, with their jobs in the place of "not now". The note of each row says why it stays |
+```
+| left model | left boxes | right boxes | right model |
+```
 
-A controller that has a button that the map cannot move, or only one
-button, shows that button as a dim row with its job: the pad click of a Vive
-wand and the menu button of a simple controller. The rows follow the kind of
-the controller at the press of the tab. A Vive wand and a Mixed Reality
-controller have no face buttons, so the ring is on the pad or the stick of
-the other hand with each layout (`controllers.md`, 5.1): the fixed row of
-that stick says "Ring", and its trigger says "Ring choice".
+- **The headers.** "Left" and "Right" over the two columns of boxes, and
+  under them "Hand" or "Other hand".
+- **The models** are the models of the controllers of the hints
+  (`hint_model.cpp`, the WebXR Input Profiles), drawn on the CPU: a faint
+  wash of ink for the body, a darker wash for the controls, the light from
+  above, and an outline of ink at the edges, in the look of the parchment.
+  The eye is above each controller and at its inner side, so the face
+  buttons show, and the trigger and the grip face the boxes. Each model fits
+  a box of 190 by 644 pixels at the outer side of its half. A controller
+  with no model has the drawing of `controller_art_math.h` in its place.
+- **The boxes**, one for each control of the kind: the trigger, the grip,
+  the stick, the stick click, the face buttons and the menu button. A box
+  has the name of the control in small capitals ("Y button", "Stick
+  click") over its job ("Ring"). The box of a button that can take a
+  different job is a key with a mark that points down. The box of a control
+  that keeps its job (the trigger, the grip, the stick, the pad click of a
+  Vive wand) has no key, and its words are lighter.
+- **The leaders.** A line of ink goes from each box to its control on the
+  model, with a dot of ink on the control. The dot is at the middle of the
+  pixels of that control in the picture, so it is on a part of the control
+  that the eye sees. The stick and the stick click share the stick: the
+  dot of the click is nearer to the top of the stick. A control that the
+  model does not have (the menu button of a Touch Plus model) has a box
+  with no leader. The boxes have fixed places in their column, round the
+  middle of the model, and the controls go to the boxes so that the sum of
+  the lengths of the leaders is the least (`LeaderOrder`). Two straight
+  lines of such an order never cross.
+- **Under the ray** a box is gold, and its leader and its control on the
+  model are gold too. The bottom row says the control and its job, and
+  "Pull the trigger to change it." or "This control always has this job."
 
-**A change.** The arrow of a button gives it the slot of the next button of
-the list, and that button takes the old slot of the first one. So each job
-keeps one button. The page writes `button_map_hand` or `button_map_other`
-into `bwvr.ini` at once, and `controllers.cpp` uses the new map when each of
-the four buttons of both controllers is up. The hint cards, the help words
-and the welcome page take the new buttons in the next frame
-(`controller-hints.md`, 8.3).
+**A change.** A pull of the trigger on the box of a button opens a list
+under the box (above it at the foot of the page): a small scroll of paper
+with one item for each job of that controller. The item in use is bright
+gold, and the item under the ray is gold. A pull on an item gives the button
+that job, and the button that had the job takes the old job of the first
+one, so each job keeps one button. The bottom row says both, for example
+"Left Y: Recenter. Left stick click: Ring". A pull out of the list closes
+it and does no more. The page writes `button_map_hand` or
+`button_map_other` into `bwvr.ini` at once, and `controllers.cpp` uses the
+new map when each of the four buttons of both controllers is up. The hint
+cards, the help words and the welcome page take the new buttons in the next
+frame (`controller-hints.md`, 8.3).
 
-**The drawing** is our own art: circles, capsules, rounded boxes and rings
-with a distance test, in the ink of the cards, with no logo and no outline of
-a product. Each kind has its own shapes (`ArtOf`): Touch (a round face with
-the stick, two face buttons and a menu button on the left), Index (a long
-body with a stick, A, B and a pad with no job), Vive wand (a ring, a pad
-and a menu button), Windows Mixed Reality (a ring, a stick, a pad with no
-job and a menu button) and simple (select and menu). The left controller is
-the mirror of the right one. A button with no job is pale. The trigger and
-the grip are tabs at the edge of the body. The page draws the picture one
-time for each look, and again when a job, a kind or the lit control
-changes: 1.2 to 1.9 ms, and 13 to 22 ms for the first picture with the first
-draw of each letter. Each row of the drawing is a band of that picture
-(`WindowRows::picture`).
+**Reset Defaults** is a button in the bottom row, at the left of Close,
+only on the page Controls. It gives each button its job as made. It is dim
+while each button has its job as made, and then a press does nothing.
 
-**The warm of the drawing.** With `panel_warm=1` the frame thread waits
-until the runtime gives the interaction profile of both controllers (or a
-`hint_profile`). Then it takes the state of that frame (the kinds, the maps,
-the hand that points and the jobs), and a thread of the mod draws the
-picture with no lit control (`ControlsPageWarmFrame`). When the page first
-shows the same state, it uses that picture. A change of the state before
-the open draws the picture again at the open. The page waits for the end of
-the thread before it uses the picture, and the log says when it waits. The
-font warm (`controller-hints.md`, 9.11) also has the three fonts of the
-drawing.
-
-**The window** has two parts for the page: a row whose `value_count` is -1
-is a band of a picture, with no control, no note and no press. A dim row can
-have a word of its own (`WindowRows::fixed_word`), and then the bottom row
-says "Right grip stays on its job".
+**The pictures of the models** are drawn one time for their models, with 3
+by 3 samples a pixel: 40 to 45 ms for each model on a PC of the owner. With
+`panel_warm=1` a thread of the mod draws them when the profiles of both
+controllers are known and both models are loaded
+(`ControlsPageWarmFrame`), so the first show of the page copies them. The
+page waits for the end of the thread before it uses them. A new picture of
+the page (a new box under the ray, a list, a change) lays the pictures, the
+leaders and the boxes again: about 4 ms.
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `controls_page` | 1 | 0: the settings window has no tab Controls. The keys of the map still act |
-| `panel_warm` | 1 | 1: a thread of the mod draws the drawing of the controllers when their profiles are known. 0: the first show of the page draws it on the frame thread |
+| `controls_page` | 1 | 0: the VR Settings window has no tab Controls. The keys of the map still act |
+| `controls_page_models` | 1 | 1: the page of this section. 0: the page with the drawing of `controller_art_math.h`, a row with two arrows for each button, the row "Button defaults" and a dim row for each control that keeps its job |
+| `panel_warm` | 1 | 1: a thread of the mod draws the pictures of the models when they are loaded. 0: the first show of the page draws them on the frame thread |
 | `button_map_hand`, `button_map_other` | 1234 | The map of the buttons (`controllers.md`, 5.7). 1234 is the layout as made |
-| `hint_profile` | | Test key (`controller-hints.md`, 8). The page draws the kind of this profile |
+| `hint_profile` | | Test key (`controller-hints.md`, 8). The page draws the kind and the model of this profile |
+| `debug_test_parts` | | Test key. The words `page4` (box 4 of the page: 0 to 7 the left controller, 8 to 15 the right controller, in the order of the log line of the parts), `item2` (item 2 of the list that shows) and `reset` |
 
 The log has the tag `controls`, and the map has lines of the tag
 `controllers`:
 
 ```
 controllers  : the right controller is a Quest Touch controller (profile "/interaction_profiles/oculus/touch_controller"). Its buttons for the jobs: A, B, Stick click, frame 2
-controls     : panel_warm=1: the profiles of the controllers are known (Quest Touch and Quest Touch), so a thread of the mod draws the drawing for the page Controls, frame N
-controls     : the drawing of the Quest Touch and Quest Touch controllers took 1.88 ms (parchment), frame 731, on the frame thread
-controls     : Left Y goes from Ring to Recenter, and Left stick click takes Ring. button_map_other=1324 is in bwvr.ini. It acts when each button is up, frame 760
-controllers  : the page Controls: button_map_other=1324: the page Controls moved jobs to other buttons, frame 760
+controls     : panel_warm=1: the models of the controllers are loaded (meta-quest-touch-plus and meta-quest-touch-plus), so a thread of the mod draws their pictures for the page Controls, frame N
+controls     : the page with the models (meta-quest-touch-plus and meta-quest-touch-plus, parchment): part 0 left Stick click: Recenter (a list), part 1 left Y button: Ring (a list), part 2 left Trigger: No job, ...
+controls     : a picture of the page took 3.65 ms, frame 731
+settings     : the trigger presses the part 1 of the page: its list of 4 items opens, frame 740
+controls     : the list of Left Y: it goes from Ring to Recenter, and Left stick click takes Ring. button_map_other=1324 is in bwvr.ini. It acts when each button is up, frame 760
 controllers  : the new map of the buttons acts now: button_map_hand=1234, button_map_other=1324, frame 761
-controls     : Button defaults: each button has its job as made. button_map_hand=1234 and button_map_other=1234 are in bwvr.ini, frame 902
+controls     : Reset Defaults: each button has its job as made. button_map_hand=1234 and button_map_other=1234 are in bwvr.ini, frame 902
 ```
 
-The math checks are in `test/controller_math/button_map_checks.h`: the kind
-of each profile, the buttons of each kind, the 24 maps and their numbers, a
-map that does not fit a controller, the steps round the buttons, the jobs as
-made and with `button_layout=0`, the words and the labels, the place of the
-two controllers and of their words, the shapes of each kind in the frame and
-on the body, and the lines of words that keep apart. The desktop run is
-`village_run.ps1 -Kind controls` (`tools/desk/README.md`). A desktop run has
-the fake controller, which is a Touch controller: `hint_profile` draws the
-other kinds, but only a headset gives the profile of a real Index, wand or
-Mixed Reality controller.
+The math checks are in `test/controller_math/controls_layout_checks.h` (the
+columns, the boxes, 300 sets of leaders with no two that cross, the parts,
+the view and the fit of a model), `panel_raster_checks.h` (the drawing on the
+CPU), `debug_window_checks.h` (the parts of a page, the list and the button)
+and `button_map_checks.h` (the kinds, the maps and the jobs). The desktop run
+is `village_run.ps1 -Kind controls` (`tools/desk/README.md`). A desktop run
+has the fake controller, which is a Touch controller: `hint_profile` draws
+the other kinds, but only a headset gives the profile of a real Index, wand
+or Mixed Reality controller.
 
 ## 25. The ray over the panels
 
@@ -2758,7 +2792,7 @@ quad layer of its own while a panel in the room is open. The code is in
 The ray goes over the panels while the menu ray shows
 (`ControllersMenuRay`) and one of these is open (`ControllersPanelRay`):
 
-- a panel of `panel_kit.cpp`: the panel of places (22), the settings window
+- a panel of `panel_kit.cpp`: the panel of places (22), the VR Settings window
   and the debug window (23, 24) and the welcome page (24.3)
 - the menus in the room in a frame with the scene: the menu panel and the
   keyboard (20, 21)
@@ -2827,8 +2861,8 @@ the picture).
 
 The desktop run is `village_run.ps1 -Kind rayover`. It puts the fake hand
 where a player holds it, 15 cm right, 25 cm down and 35 cm in front of the
-head, and rests the ray on the button Settings of the welcome page and on a
-row of the settings window. Before the word `point`, the fake hand is at the
+head, and rests the ray on the button VR Settings of the welcome page and on a
+row of the VR Settings window. Before the word `point`, the fake hand is at the
 point of the Main Menu, 1 m in front of the head and at the depth of the
 panel. Its ray then meets no panel, is 2 m long and points about 5 degrees
 from the line of sight, so the head sees the strip at 5 degrees from its

@@ -236,6 +236,14 @@ inline void LearnChecks() {
     Check(ok && back.count == 5 && back.last == 4321.0,
           "a written value reads back", back.count, 5);
   }
+
+  // THE GAME'S OPTION (hints_follow_game=1): All ToolTips shows each line
+  // always, and the other options take a line away when the player knows
+  // it.
+  Check(LearnOfTooltips(3) == 0 && LearnOfTooltips(2) == 1 &&
+            LearnOfTooltips(1) == 1 && LearnOfTooltips(0) == 1,
+        "the ToolTips option of the game chooses the rule of the lines",
+        LearnOfTooltips(2), 1);
 }
 
 }  // namespace learn_checks

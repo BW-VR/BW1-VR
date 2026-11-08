@@ -50,8 +50,10 @@ struct TabletopSettings {
   // scale of head_units_per_meter_x10 (docs/god-view.md, "The limits").
   int god_least_tenths = 10;     // god_near_units_per_meter_x10
   // A zoom step that would put the head into a house, a rock or a tree trunk
-  // stops 5 cm out of it, or is refused (docs/god-view.md, "The limits").
+  // stops 30 cm out of it, or is refused (docs/god-view.md, "The limits").
   int god_zoom_solid_stop = 1;   // god_zoom_solid_stop: 1 stops, 0 does not
+  // How far out of the solid the head stays, in cm of the room.
+  int god_zoom_solid_cm = 30;    // god_zoom_solid_cm: 5 to 200
   // Where the player goes when the game puts its own camera at a place
   // (docs/god-view.md, "The place at a camera of the game").
   int god_spawn = 1;             // god_spawn: 1 follows the game, 0 does not

@@ -732,7 +732,7 @@ if ($Kind -eq 'totem') {
     # of the left hand lowers the land 80 cm, to 1.4 m below the head, so the
     # eyes are at the height of the eyes of a villager. Then the Hand 15 cm
     # and 8 cm in front of the eyes (the near plane of 5 cm of the room). A
-    # step that would put the head into a house stops 5 cm out of it, or is
+    # step that would put the head into a house stops 30 cm out of it, or is
     # refused (god_zoom_solid_stop). Then the word "lean" puts the head 60 cm
     # forward for 60 frames, toward the house that stopped the zoom, so the
     # head blinder must cover the view there. Then five steps out, past the

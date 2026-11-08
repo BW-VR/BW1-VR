@@ -1617,14 +1617,17 @@ float ZoomClearHead(TablePose* pose, const float room[3],
 // god_zoom_about 1 and 2 a zoom step moves the head over the land, and with
 // each value a step in brings the head nearer to the land and to what stands
 // on it. Near the lowest scale a step can then put the head into a house. So
-// a step stops where the head is kSolidClearM out of the nearest solid, which
-// is where the overlay of the head blinder starts, or it is refused when it
-// cannot go at all. The solids are the ones near the hands and the head that
+// a step stops where the head is god_zoom_solid_cm (30) out of the nearest
+// solid, or it is refused when it cannot go at all. 30 cm leaves room for
+// the Hand between the eyes and the wall, and the eyes then see the wall
+// with the land beside it. The overlay of the head blinder starts at 5 cm,
+// so the stop is well before it. A value of 5 stops the step where the
+// overlay starts. The solids are the ones near the hands and the head that
 // the first eye pass of the frame before kept (hand_direct.cpp,
 // LatchSolids). Near the lowest scale the head wants them from
 // kZoomSolidReachM of the room (TabletopZoomSolidReachM), so a house that a
 // step brings to the head is in that list.
-const float kSolidClearM = 0.05f;
+float SolidClearM() { return g_settings.god_zoom_solid_cm * 0.01f; }
 const float kZoomSolidReachM = 1.5f;
 
 struct SolidStop {
@@ -1665,7 +1668,7 @@ float ZoomSolidRatio(const TablePose& pose, const float room[3],
     int which = -1;
     return HeadSolidClearance(next, room, head, solids, count, &which);
   };
-  const float share = zoom_math::StepShare(clear, kSolidClearM);
+  const float share = zoom_math::StepShare(clear, SolidClearM());
   if (share >= 1.0f) return ratio;
   TablePose full;
   GodZoomAbout(pose, pivot, ratio, low, high, &full);
@@ -1693,7 +1696,7 @@ void SayZoomSolid(const SolidStop& stop, bool refused, float from, float to,
            "the whole step puts your head %.1f cm %s the %s %p, so your head "
            "stays %.0f cm out of it (god_zoom_solid_stop=1)", by, to, from,
            fabsf(stop.full_cm), stop.full_cm < 0.0f ? "into" : "out of", name,
-           stop.object, kSolidClearM * 100.0f);
+           stop.object, SolidClearM() * 100.0f);
   }
 }
 
@@ -2977,6 +2980,8 @@ void TabletopSetOptions(const TabletopSettings& settings) {
   // 0 is the life size scale. 1 is a tenth of a unit for each meter, where
   // a villager is 16 m high.
   if (g_settings.god_least_tenths < 0) g_settings.god_least_tenths = 0;
+  if (g_settings.god_zoom_solid_cm < 5) g_settings.god_zoom_solid_cm = 5;
+  if (g_settings.god_zoom_solid_cm > 200) g_settings.god_zoom_solid_cm = 200;
   if (g_settings.god_least_tenths > 10 * g_settings.god_most_units) {
     g_settings.god_least_tenths = 10 * g_settings.god_most_units;
   }

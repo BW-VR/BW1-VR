@@ -249,10 +249,15 @@ rules keep a house from covering the view of a head that is not in it:
   brings the head nearer to the land, and with `god_zoom_about` 1 and 2 it
   also moves the head over the land. So near the lowest scale a step can put
   the head into a house. A step, and each frame of the smooth zoom, stops
-  where the head is 5 cm out of the nearest house, rock or trunk, which is
-  where the overlay of the head blinder starts (`StepShare` in
-  `zoom_math.h`). A step that cannot go at all is refused. A head that is
-  already nearer than 5 cm may zoom away from the solid, but not nearer. The
+  where the head is 30 cm of the room out of the nearest house, rock or
+  trunk (`god_zoom_solid_cm`, `StepShare` in `zoom_math.h`). That leaves
+  room for the Hand between the eyes and the wall, and the eyes see the
+  wall with the land beside it. The overlay of the head blinder starts at
+  5 cm, and a value of 5 stops the step there. A step that cannot go at all
+  is refused. A head that is already nearer than the limit may zoom away
+  from the solid, but not nearer. The eaves of the roof can be nearer than
+  the limit, because the box of a house below the life size scale is its
+  walls. The
   solids are the ones near the hands and the head of the frame before.
   Below twice the life size scale (15 units per meter) the head wants them
   from 1.5 m of the room, so a house that the next step brings to the head
@@ -269,7 +274,7 @@ zoom step that a solid stops logs one line, and a hold of the smooth zoom
 logs one line for each hold:
 
 ```
-god view     : the zoom step stops short at 1.93 units per meter, not 1.73: the whole step puts your head 38.8 cm into the Abode 13AF65F0, so your head stays 5 cm out of it (god_zoom_solid_stop=1)
+god view     : the zoom step stops short at 1.93 units per meter, not 1.73: the whole step puts your head 38.8 cm into the Abode 13AF65F0, so your head stays 30 cm out of it (god_zoom_solid_stop=1)
 god view     : the zoom step is refused at 1.93 units per meter: it puts your head 21.0 cm into the Abode 13AF65F0 (god_zoom_solid_stop=1)
 ```
 
@@ -1661,7 +1666,8 @@ section 5.8.
 | `god_zoom_about_test` | 0 | A test with no key press: at this frame of the controllers the test key of `god_zoom_about` acts. 0 is never |
 | `god_ground_step_cm` | 5 | One ground step, 1 to 50 |
 | `god_far_units_per_meter` | 4000 | The farthest zoom, 10 to 8000 |
-| `god_zoom_solid_stop` | 1 | 1: a zoom step stops 5 cm before the head goes into a house, a rock or a tree trunk, or it is refused (section 2, "Houses at a small scale"). 0: a zoom step can put the head into a house |
+| `god_zoom_solid_stop` | 1 | 1: a zoom step stops `god_zoom_solid_cm` before the head goes into a house, a rock or a tree trunk, or it is refused (section 2, "Houses at a small scale"). 0: a zoom step can put the head into a house |
+| `god_zoom_solid_cm` | 30 | How far out of the solid the head stays after a zoom step, in cm of the room, 5 to 200. 5 stops the step where the overlay of the head blinder starts |
 | `god_near_units_per_meter_x10` | 10 | The nearest zoom, in tenths of a unit per meter (section 2, "The limits"). 10: 1 unit per meter, where a villager is as high as the player. 75: the life size scale. 0: the life size scale of `head_units_per_meter_x10` |
 | `god_spawn` | 1 | 1: the player goes where the game puts its own camera (section 15). 0: the view is built at the start, a load and the end of a story only, with the focus under the recenter pose |
 | `god_spawn_ahead_cm` | 50 | How far the land point that the game camera looks at is in front of the head, 0 to 150 |
@@ -1769,7 +1775,7 @@ checks the pure functions at 7.5, 100 and 2000 units per meter:
 - The step that stops short of a solid (`zoom_checks.h`, `StepShareChecks`):
   a clearance that goes from 30 cm to -20 cm stops the step at its half, a
   step with no solid in the way goes all the way, and a head nearer than
-  5 cm may go away from the solid but not nearer. The walls of a house
+  the limit may go away from the solid but not nearer. The walls of a house
   (`solid_checks.h`): an inset of 20 percent makes the half width of a box of
   10 units 8 units and keeps its height, a head under the eave is out of the
   walls, a head deep in the house is still in them, a trunk does not change,

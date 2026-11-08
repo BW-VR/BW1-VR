@@ -47,3 +47,7 @@ The pictures stay on the laptop: C:\wt-zoom\bwvr\tools\desk\desk-zoomA7, zoomA8,
 ## game-sp1b and game-spvkb (job 63 again, more shots)
 
 The same save pictures, save card and guide (frames 3008 to 4217). The shots after the guide (4273, 4573) show the empty slot frames with the green pattern, not the land picture. No third save picture. spvkb: "4 copies from RGB into DXT1 blocks, and 0 copies of the blocks of a rect".
+
+## zoomA11 (job 71, agent/zoom 70e043d)
+
+`.\dev.ps1 build -Clean`: 6130 checks, 0 failed. RUN DONE. The zoom stops at 2.25 units per meter, 30 cm out of the Abode 13AF15F0, and three steps in are refused. The blinder shows in the lean (frames 1083 to 1158). Out: 3.4, 5.1, 7.6, 11.4, 17.1, with no "refused" or "stops short" line. Picture 2060: a normal view from higher up.

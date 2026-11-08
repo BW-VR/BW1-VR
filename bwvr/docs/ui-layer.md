@@ -1847,6 +1847,7 @@ draw a menu:
 | Menu | The frame | Without the menus in the room |
 | --- | --- | --- |
 | The Main Menu over the loaded game at the start (`backend.md`, "A test save") | A frame with the scene: `GGame::Loop` runs `Process3dEngine`, so the eye passes run [R] | In the eye pictures, with the interface shift: fixed to the head |
+| The start dialog of a new game (`SkipBox`, `backend.md`, "The start of the game"): start normally, skip to the Creature select, skip the Creature tutorial, or keep your old Creature | A frame with the scene: the game shows the box in `GGame::OnNewGame`, and `GGame::Loop` runs with the game paused | The same |
 | The game menu of Esc (`MainMenu`), the options, the load and save boxes in play | A frame with the scene | The same |
 | The boxes of the front end: the profile, the name of a new god, the land, the options of the front end | A frame with no scene: `FrontEnd::JustDoABox` `0x00544F90` draws the plasma, runs `FinishFrame` with the callbacks on, and then `LHScreen::Flip` | The whole frame, flat: on the projection layer at the eye poses of the last stereo frame, or on the screen of 1.4 before the first stereo frame |
 | `DoCitadelDraw`, the loop at `0x0053CD1F` and the other loops of 1.4 that show a box | A frame with no scene | The same |

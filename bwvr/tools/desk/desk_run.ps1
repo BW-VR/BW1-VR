@@ -20,7 +20,12 @@
 #    of the test save take the place of the files of slot 20, and the game
 #    starts with no -NEWGAME. The profile guard puts the slot back. The run
 #    has the test key registry_test_guard=1: the mod drops each write of the
-#    game to the registry, and the log names each one.
+#    game to the registry, and the log names each one. It also has
+#    start_new_game=0, so the mod does not make the start a new game, when
+#    -Extra does not give that key. -Args '-CONTINUE' gives the run that word
+#    (the launcher button "Play, continue"). Each other -Args becomes no word.
+# -EmptySave: the same as -Save, but slot 20 is empty in the run. The game
+#    then has no save of the exit, as in the first start of a profile.
 # -KeepSave <name>: when the game ended by itself in the run (the word "exit"
 #    of the scripted controller, or exit_test_frame), slot 20 holds the saved
 #    game of that moment. The script copies the files that the game wrote in
@@ -41,6 +46,7 @@ param(
     [int]$MinIdleMinutes = 10,
     [int]$WaitMinutes = 30,
     [string]$Save = '',
+    [switch]$EmptySave,
     [string]$KeepSave = '',
     [string]$VulkanPending = ''
 )
@@ -54,6 +60,8 @@ $pendingKeep = $null
 $lock = Join-Path (Get-BwvrDeskShared) 'desk.lock'
 if (-not (Test-Path $Dll)) { "NOT RUN: no DLL at $Dll"; exit 6 }
 $saveFrom = $null
+if ($EmptySave -and $Save -ne '') { "NOT RUN: give -Save or -EmptySave, not both"; exit 9 }
+$useSlot = $Save -ne '' -or $EmptySave
 if ($Save -ne '') {
     $saveDir = Get-BwvrTestSave $Save
     if (-not $saveDir) { "NOT RUN: there is no test save named '$Save' in $(Get-BwvrTestSaves). Make it first: make_test_save.ps1 -Name $Save"; exit 9 }
@@ -210,7 +218,7 @@ public static class IdleR {
     $keepSlots = @()
     $profiles = Get-BwvrSaveProfiles $playerFolders
     "the profile folders: the game reads slot 20 in '$($profiles.Read)', it writes the exit path in '$($profiles.Later)', and each of these gets a test save: $($profiles.All -join ', ')"
-    if ($Save -ne '') {
+    if ($useSlot) {
         if (-not $guardOk -or -not $profiles.Read -or -not $profiles.Later) {
             "NOT RUN: a run with a test save needs the folder of the profile that the game reads, in the game folder or its VirtualStore, the folder of the profile that gets the writes of the game, and the copy of the profile guard. The folders of the profile: '$($profiles.Read)', '$($profiles.Later)'"
             exit 9
@@ -232,12 +240,22 @@ public static class IdleR {
     $testOut = @()
     try {
         $saveIn = $true
-        if ($Save -ne '') {
+        if ($useSlot) {
             # Out of each slot goes each file that is there (the guard has
-            # it). In go the files of the test save, and nothing else.
+            # it). In go the files of the test save, and nothing else. With
+            # -EmptySave nothing goes in.
             foreach ($slot in $slots) {
                 New-Item -ItemType Directory -Force -Path $slot | Out-Null
                 foreach ($f in (Get-ChildItem -LiteralPath $slot -Recurse -File -Force)) { [System.IO.File]::Delete($f.FullName) }
+                if ($EmptySave) {
+                    if (@(Get-ChildItem -LiteralPath $slot -Recurse -File -Force).Count -eq 0) {
+                        "slot 20 of the profile is empty for the run: $slot"
+                    } else {
+                        $saveIn = $false
+                        "NOT RUN: slot 20 of the profile ($slot) is not empty, so the start is not the start with no save"
+                    }
+                    continue
+                }
                 foreach ($f in (Get-ChildItem -LiteralPath $saveFrom -Recurse -File -Force)) {
                     $to = $slot + $f.FullName.Substring($saveFrom.Length)
                     New-Item -ItemType Directory -Force -Path (Split-Path -Parent $to) | Out-Null
@@ -252,7 +270,8 @@ public static class IdleR {
             }
             $Extra = $Extra.Clone()
             $Extra['registry_test_guard'] = 1
-            $Args = ''
+            if (-not $Extra.ContainsKey('start_new_game')) { $Extra['start_new_game'] = 0 }
+            if ($Args -ne '-CONTINUE') { $Args = '' }
         }
         # THE GUARD OF THE FALL BACK OF VULKAN. With backend=vulkan the mod
         # writes bwvr-vulkan-pending.txt in the game folder, and the first

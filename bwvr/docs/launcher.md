@@ -13,12 +13,24 @@ file. The game keeps it in the registry, under
 as `ScreenW` and `ScreenH`. If a person edits one and forgets the other, the
 result looks like a bug in the mod.
 
-The window has these buttons: "Play in VR", "Play, new game" (starts the game
-with `-NEWGAME`, on the first island, with no menu), "Play, no VR" (see "The
-game without VR"), "Save Config" (writes the settings and does not start the
-game) and "Support". The buttons are a block below the table. "Play in VR"
-and "Play, new game" are in the first row, "Save Config" and "Play, no VR" in
-the second row, and "Support" has the third row to itself.
+The window has these buttons: "Play in VR", a second play button, "Play,
+no VR" (see "The game without VR"), "Save Config" (writes the settings and
+does not start the game) and "Support". The buttons are a block below the
+table. "Play in VR" and the second play button are in the first row, "Save
+Config" and "Play, no VR" in the second row, and "Support" has the third row
+to itself.
+
+"Play in VR" starts the game with no word on the command line. The second
+play button follows `start_new_game` (`backend.md`, "The start of the
+game"):
+
+| `start_new_game` | "Play in VR" | The second play button |
+| --- | --- | --- |
+| 1 (the default) | A new game. The start dialog of the fan patch is the first menu | "Play, continue": the word `-CONTINUE`. The game loads the save of the exit and opens its Main Menu |
+| 0 | The game loads the save of the exit and opens its Main Menu | "Play, new game": the word `-NEWGAME`. A new game with the start dialog |
+
+With no save of the exit, each of the two starts a new game. The launcher
+reads the key when it opens. It has no row for the key.
 
 The launcher asks Windows for version 6 of the common controls (a manifest
 line at the top of `launcher.cpp`). The controls then have the visual styles
@@ -98,8 +110,8 @@ Every save also writes these:
 If Windows refuses the write (an unelevated write to `bwvr.ini` in Program
 Files fails), the status line says so and not "Saved.".
 
-Each start of the game ("Play in VR", "Play, new game", "Play, no VR") first
-sets the flag `LARGE_ADDRESS_AWARE` in `runblack.exe` as the row "Use 4 GB of
+Each start of the game ("Play in VR", the second play button, "Play, no
+VR") first sets the flag `LARGE_ADDRESS_AWARE` in `runblack.exe` as the row "Use 4 GB of
 memory" asks (`large_address`, 1 is the default). With the flag, the game
 has 4 GB of address space and not 2 GB. With 0 the launcher clears the flag,
 and the file is the original again. If Windows refuses the change, the game

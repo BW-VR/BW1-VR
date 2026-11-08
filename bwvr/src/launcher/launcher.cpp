@@ -1791,9 +1791,18 @@ bool StartGame(const char* parameters, HANDLE* process) {
   return true;
 }
 
-void Play(bool new_game) {
+// The second way to play. With start_new_game=1 (the default) the mod
+// starts a new game with the start dialog of the fan patch, so the second
+// button continues the save of the exit with the word -CONTINUE of the mod.
+// With start_new_game=0 the game continues that save, so the second button
+// starts a new game with -NEWGAME.
+bool StartNewGameKey() { return ReadIni("start_new_game", 1) != 0; }
+
+void Play(bool second_way) {
   SaveAll();
-  if (StartGame(new_game ? "-NEWGAME" : nullptr, nullptr)) {
+  const char* word = nullptr;
+  if (second_way) word = StartNewGameKey() ? "-CONTINUE" : "-NEWGAME";
+  if (StartGame(word, nullptr)) {
     PostMessageA(g_window, WM_CLOSE, 0, 0);
   } else {
     SayStatus("Could not start runblack.exe.");
@@ -2220,8 +2229,9 @@ void BuildControls() {
       0, "BUTTON", "Play in VR", WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON, 0,
       0, 0, 0, g_window, reinterpret_cast<HMENU>(1), nullptr, nullptr);
   g_buttons[kButtonFresh] = CreateWindowExA(
-      0, "BUTTON", "Play, new game", WS_CHILD | WS_VISIBLE, 0, 0, 0, 0,
-      g_window, reinterpret_cast<HMENU>(2), nullptr, nullptr);
+      0, "BUTTON", StartNewGameKey() ? "Play, continue" : "Play, new game",
+      WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, g_window,
+      reinterpret_cast<HMENU>(2), nullptr, nullptr);
   g_buttons[kButtonSave] = CreateWindowExA(
       0, "BUTTON", "Save Config", WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, g_window,
       reinterpret_cast<HMENU>(3), nullptr, nullptr);
@@ -2251,8 +2261,21 @@ void BuildControls() {
   }
   SendMessageA(g_status, WM_SETFONT, reinterpret_cast<WPARAM>(g_font), TRUE);
   AddTip(g_status, g_status_tip);
+  AddTip(g_buttons[kButtonPlay],
+         StartNewGameKey()
+             ? "Start the game in the headset. A new game starts, and the "
+               "start dialog of the game opens first: skip the tutorial, or "
+               "keep your old Creature."
+             : "Start the game in the headset. The game loads the save that "
+               "it made when you quit, and opens its Main Menu.");
   AddTip(g_buttons[kButtonFresh],
-         "Start a new game on the first island, skipping the menu.");
+         StartNewGameKey()
+             ? "Continue the game that you played last. The game loads the "
+               "save that it made when you quit, and opens its Main Menu. "
+               "\"Play in VR\" starts a new game with the start dialog: skip "
+               "the tutorial, or keep your old Creature."
+             : "Start a new game. The start dialog of the game opens first: "
+               "skip the tutorial, or keep your old Creature.");
   AddTip(g_buttons[kButtonSave],
          "Write the settings without starting the game.");
   AddTip(g_buttons[kButtonPlain],

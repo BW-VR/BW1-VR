@@ -1,5 +1,6 @@
-// The start of the game, for the log of a desktop run (docs/backend.md, "A
-// test save").
+// The start of the game: the choice between a new game and the save of the
+// exit (start_new_game), and the line of the log that says how the game
+// started (docs/backend.md, "The start of the game" and "A test save").
 //
 // One line at the first frame of the scene says how the game started and how
 // long the start took: a new game, or a saved game that the game loaded. The
@@ -18,6 +19,31 @@
 //   2  A saved game of the Temple or the quick save. The game is in this
 //      mode only after a game of the same process ended (GGame::Close).
 // So the mode at the first frame says whether the load of slot 20 was good.
+//
+// THE START DIALOG OF A NEW GAME (start_new_game). GGame::OnNewGame
+// (0x005538E0) calls GGame::DoYesNoSkipTutorialRequestersIfNecessary
+// (0x0054CBD0). The fan patch v1.42 put NOPs over the test of that function,
+// so it shows the start dialog (SkipBox, FrontEnd 0x00CD0634) at each new
+// game: start the game normally, skip straight to the Creature select, skip
+// all of the Creature tutorial, or keep your old Creature. Esc does not
+// close it (SkipBox::CanESCOut gives 0). The dialog shows only in a new
+// game, so it is the first menu only when the start is a new game. A game in
+// Program Files with no administrator rights never has a save in slot 20,
+// because Windows refuses the rename of 20.sav.tmp (docs/backend.md, "A save
+// in the VirtualStore"). So the plain game there starts a new game each
+// time, and the start dialog is its first menu. With save_virtual_store=1
+// the save of the exit works, and the game then loads it and opens its Main
+// Menu. No button of the first tab of the Main Menu starts a new game. That
+// button is in the tab of the profiles.
+//
+// With start_new_game=1 the mod gives the game the word -NEWGAME: it sets
+// the byte of that word (0x00D46AB9) from DllMain, before WinMain. Only
+// ScanParameters (0x00641AA0) writes the byte, and it writes only a 1. Only
+// pc_main (0x00641C60) reads it, one time, to set the mode 1 of the first
+// start. ScanParameters does not take -MULTIPLAYER after -NEWGAME, so the mod
+// does not set the byte when the command line has -MULTIPLAYER or -SKIRMISH.
+// The word -CONTINUE (the launcher button "Play, continue") is a word of the
+// mod: the game does not know it, and with it the mod does not set the byte.
 //
 // THE MAIN MENU OF THE START (the test key menu_skip_test_frame). With the
 // mode 0 the game waits in its Main Menu, which it opened over the loaded
@@ -52,6 +78,9 @@ const uintptr_t kGame = 0x00D0195C;  // GGame::g_game
 const int kGameMode = 0x25017C;
 const int kLandNumber = 0x205A08;
 
+// The byte of the word -NEWGAME of the command line (ScanParameters).
+const uintptr_t kNewGameWord = 0x00D46AB9;
+
 const uintptr_t kStartupMenuActive = 0x00CD0B03;  // FrontEnd::StartupMenuActive
 const uintptr_t kPauseGame = 0x0054AE20;          // PauseGame(int)
 const uintptr_t kDialogHide = 0x00513640;         // DialogBoxBase::Hide()
@@ -62,6 +91,7 @@ typedef void(__cdecl* NoArgFn)();
 bool g_said = false;
 int g_menu_skip_frame = -1;  // menu_skip_test_frame, -1 until it is read
 bool g_menu_skip_done = false;
+bool g_gave_new_game = false;  // start_new_game set the byte of -NEWGAME
 
 int IniInt(const char* key, int fallback) {
   char path[MAX_PATH];
@@ -72,6 +102,19 @@ int IniInt(const char* key, int fallback) {
   slash[1] = 0;
   strcat_s(path, MAX_PATH, "bwvr.ini");
   return static_cast<int>(GetPrivateProfileIntA("bwvr", key, fallback, path));
+}
+
+// True when the command line has the word, after a '-' or a '/', as
+// ScanParameters reads it: the start of the text after the sign, with no
+// case.
+bool HasWord(const char* line, const char* word) {
+  const size_t length = strlen(word);
+  for (const char* p = line; *p != 0; ++p) {
+    if ((*p == '-' || *p == '/') && _strnicmp(p + 1, word, length) == 0) {
+      return true;
+    }
+  }
+  return false;
 }
 
 // The test key menu_skip_test_frame: one time, at its frame.
@@ -106,6 +149,36 @@ void SkipMainMenu() {
 }
 
 }  // namespace
+
+// From DllMain, before WinMain: start_new_game.
+void GameStartChoose() {
+  const int key = IniInt("start_new_game", 1);
+  if (key == 0) {
+    ModLog("game start   : start_new_game=0. With no word on the command "
+           "line the game loads the save of the exit (slot 20) and opens its "
+           "Main Menu over it. With no save there it starts a new game, and "
+           "the start dialog of the fan patch is its first menu");
+    return;
+  }
+  const char* line = GetCommandLineA();
+  if (line == nullptr) line = "";
+  const char* words[] = {"CONTINUE", "MULTIPLAYER", "SKIRMISH", "NEWGAME"};
+  for (const char* word : words) {
+    if (HasWord(line, word)) {
+      ModLog("game start   : start_new_game=1, and the command line has the "
+             "word -%s, so the mod does not change the start", word);
+      return;
+    }
+  }
+  *reinterpret_cast<volatile uint8_t*>(kNewGameWord) = 1;
+  g_gave_new_game = true;
+  ModLog("game start   : start_new_game=1. The mod gives the game the word "
+         "-NEWGAME, so the game starts a new game and the first menu is the "
+         "start dialog of the fan patch: start normally, skip straight to the "
+         "Creature select, skip all of the Creature tutorial, or keep your "
+         "old Creature. The save of the exit stays in slot 20, and the word "
+         "-CONTINUE (the launcher button \"Play, continue\") loads it");
+}
 
 // The seconds from the start of the game process to now.
 double SecondsSinceProcessStart() {
@@ -156,7 +229,10 @@ void GameStartFrame() {
            mode, land, seconds, registry);
   } else {
     ModLog("game start   : a new game starts, frame %llu (game mode %d, land "
-           "%d), %.1f s after the start of the game process%s",
-           frame, mode, land, seconds, registry);
+           "%d), %.1f s after the start of the game process%s%s",
+           frame, mode, land, seconds, registry,
+           g_gave_new_game ? ". The word -NEWGAME came from the mod "
+                             "(start_new_game=1)"
+                           : "");
   }
 }

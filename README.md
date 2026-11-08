@@ -90,14 +90,16 @@ entry. Virtual Desktop and SteamVR have one.
 1. Start your VR software and connect the headset.
 2. Open the shortcut "Black & White VR Mod". The launcher names the runtime
    that it found.
-3. Select "Play in VR". "Play, new game" starts a new game.
+3. Select "Play in VR". The game starts a new game, and the start dialog
+   of the game opens first. "Play, continue" loads the game that you played
+   last.
 4. In the headset, press a trigger or A to skip the logos. Press F11 on the
    keyboard if the view is not in front of you.
 
 **Skip the tutorial.** You can play the tutorial of the game in VR, but it
 is made for the mouse and the keyboard of the original game. We recommend
-that you skip it. When you start a new game, select "Skip straight to the
-Creature select" in the start dialog.
+that you skip it. In the start dialog, select "Skip straight to the
+Creature select". To keep your Creature, select "Keep your old Creature".
 
 ### The right controller
 

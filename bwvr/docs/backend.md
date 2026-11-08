@@ -49,7 +49,7 @@ Other docs: `software-tnl.md` (the CPU transform and the camera matrix),
 | `src/mod/pointer_map.cpp` | The pointer in render pixels, the head lock of the cursor |
 | `src/mod/cursor_trace.cpp` | A test aid: the log names each caller that touches the cursor of Windows or takes the front |
 | `src/mod/exit_test.cpp` | A test aid: the game ends by itself at one frame, and its writes to the registry are dropped. The same guard from the start of the mod, for a run that loads a test save |
-| `src/mod/game_start.cpp` | A test aid: one line of the log says how the game started (a new game or a saved game) and how long the start took |
+| `src/mod/game_start.cpp` | The start of the game: a new game with the start dialog of the fan patch, or the save of the exit (`start_new_game`). One line of the log says how the game started and how long the start took |
 | `src/mod/comfort_camera.cpp` | Snap turns, jumps, zoom steps |
 | `src/mod/script_camera.cpp` | The camera of the story |
 | `src/mod/draw_hooks.cpp` | Hints, tooltips, subtitles, interface depth and size |
@@ -1022,6 +1022,52 @@ clean end with 1.
 The checks in a headset are in `headset-checks.md`, and the checks that a
 desktop run can prove are in `roadmap.md`, R12.
 
+### The start of the game
+
+**The start dialog of a new game [V].** `GGame::OnNewGame` (`0x005538E0`) calls
+`GGame::DoYesNoSkipTutorialRequestersIfNecessary` (`0x0054CBD0`). The fan
+patch v1.42 put NOPs over the test in that function, so the start dialog
+(`SkipBox`, at `0x00CD0634`) shows at each new game. It has four choices:
+"Start the game normally", "Skip straight to the Creature select", "Skip
+all of the Creature tutorial" and "Keep your old Creature". Esc does not
+close it (`SkipBox::CanESCOut` gives 0). The box shows only in a new game.
+
+**The plain game.** With no word on the command line, the game loads the
+save of the exit (slot 20, "Auto Save On Exit") and opens its Main Menu over
+it ("A test save"). No button of the first tab of the Main Menu starts a
+new game. A new game comes from button 4 of the tab of the profiles
+(`ProfileEditor`, at `0x0053EFAB`), after a box that asks for a yes. With
+no save in slot 20, the start is a new game, and the start dialog is
+the first menu. A game in Program Files with no administrator rights never
+has that save, because Windows refuses the rename of `20.sav.tmp` ("A save
+in the VirtualStore"). So the plain game there shows the start dialog at each
+start. With `save_virtual_store=1` the save of the exit works.
+
+**What the mod does.** With `start_new_game=1` (the default) the start is a
+new game, so the start dialog is the first menu, as in the plain game in
+Program Files. In `DllMain`, before `WinMain`, `game_start.cpp` sets the byte
+of the word `-NEWGAME` (`0x00D46AB9`). `ScanParameters` writes only a 1 to
+that byte, and only `pc_main` reads it, one time, for the mode of the first
+start. `ScanParameters` does not take `-MULTIPLAYER` after `-NEWGAME`. So
+the mod does not set the byte when the command line has `-MULTIPLAYER`,
+`-SKIRMISH`, `-NEWGAME` or `-CONTINUE`. The game does not know the word
+`-CONTINUE`. It is the word of the launcher button "Play, continue": the
+game then loads the save of the exit and opens its Main Menu. The save of
+the exit stays in slot 20 until the game writes the next one at its exit.
+With `start_new_game=0` the mod does not change the start.
+
+The start dialog goes to the menu panel in the room, as each menu over the
+scene does (`ui-layer.md`, section 20). With "Play, no VR" (`vr=0`) the mod
+does not change the start.
+
+The log, one line from `DllMain` and the line of the first frame:
+
+```
+game start   : start_new_game=1. The mod gives the game the word -NEWGAME, so the game starts a new game and the first menu is the start dialog of the fan patch: ...
+game start   : start_new_game=1, and the command line has the word -CONTINUE, so the mod does not change the start
+game start   : a new game starts, frame N (game mode 1, land 1), T s after the start of the game process. The word -NEWGAME came from the mod (start_new_game=1)
+```
+
 ### A test save
 
 A desktop run can start in a saved game that a test run made
@@ -1035,8 +1081,8 @@ reads it in a switch at `0x0054F6EF`:
 
 | Mode | When | What `GGame::Init` does |
 | --- | --- | --- |
-| 0 | No word on the command line | `GameOSFile::AutoLoad` (`0x00563FF0`) loads `Saved Games\20\20.sav` of the profile. When the load fails, the mode becomes 1 |
-| 1 | `-NEWGAME`, or no saved game in slot 20 | A new game: `GSetup::LoadMapScript` and `GGame::OnNewGame` (`0x005538E0`) |
+| 0 | No word on the command line, and `start_new_game=0` or the word `-CONTINUE` ("The start of the game") | `GameOSFile::AutoLoad` (`0x00563FF0`) loads `Saved Games\20\20.sav` of the profile. When the load fails, the mode becomes 1 |
+| 1 | `-NEWGAME`, `start_new_game=1`, or no saved game in slot 20 | A new game: `GSetup::LoadMapScript` and `GGame::OnNewGame` (`0x005538E0`) |
 | 2 | After a load in play (the Temple, or the quick load, which calls `fn_00793380(19)`) | `GameOSFile::LoadAllGame` (`0x005587B0`) with the file name at `0x00D01838` |
 
 Slot 20 is the saved game that the game writes each time its loop ends
@@ -1090,7 +1136,8 @@ the mod. The mod drops each write to a key under `Lionhead Studios Ltd`, and
 the log names each one with its key (lines `registry test`). A write to a
 different key passes, as in each other run. The log names the first 6 and
 counts each one. The log also names each file that the process opens for a
-write. `desk_run.ps1 -Save` gives a run this key.
+write. `desk_run.ps1 -Save` gives a run this key, and `start_new_game=0`
+when the run does not give that key, so the game loads the test save.
 
 **The line of the start.** `game_start.cpp` writes one line at the first
 frame of the scene:
@@ -5868,6 +5915,7 @@ keys that the launcher sets.
 | `exit_shutdown` | 1 | 1: the mod shuts down on the exit path of the game. 0: in `DllMain`. See "The end of the mod" |
 | `exit_test_frame` | 0 | A test key of the desktop runs: the frame at which the game ends by itself. See "The test of the end" |
 | `registry_test_guard` | 0 | A test key of the desktop runs. 1: from the start of the mod, the mod drops each write of the game to its keys of the registry, and the log names each one. See "A test save" |
+| `start_new_game` | 1 | 1: with no word on the command line, the start is a new game, and the start dialog of the fan patch is the first menu. The word `-CONTINUE` loads the save of the exit. 0: the game loads the save of the exit and opens its Main Menu. See "The start of the game" |
 | `menu_skip_test_frame` | 0 | A test key of the desktop runs: the frame at which the mod closes the Main Menu that the game opens over a saved game that it loads at its start, as the button "Continue Game" does. 0 is off. The launcher removes the key from `bwvr.ini` on each save. See "A test save" |
 | `window_width`, `window_height` | 0 | A forced window size |
 | `snap_turn`, `blink`, `instant_jumps`, `camera_glide` | 2, 0, 1, 0 | See "Moving around" |

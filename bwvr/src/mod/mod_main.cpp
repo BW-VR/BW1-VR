@@ -292,6 +292,8 @@ void DxCheckInstall(bool own_answer);
 void FileReadAheadInstall(bool on, bool test_keys);
 // save_store.cpp: the calls of a save in the VirtualStore of the user.
 void SaveStoreInstall(bool on);
+// game_start.cpp: a new game or the save of the exit at the start.
+void GameStartChoose();
 // near_plane.cpp: the near plane of the game camera.
 void NearPlaneSetOptions(int cm_24, int cm_16);
 void NearPlaneInstall();
@@ -3007,6 +3009,8 @@ void Startup() {
     return;
   }
   if (!VerifyTarget()) return;
+  // Before WinMain, because pc_main reads the word -NEWGAME one time.
+  GameStartChoose();
 
   const MH_STATUS started = MH_Initialize();
   if (started != MH_OK && started != MH_ERROR_ALREADY_INITIALIZED) {

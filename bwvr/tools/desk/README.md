@@ -122,7 +122,7 @@ calls it. It keeps these rules, and a new script must keep them too:
 
 | Script | What it is |
 | --- | --- |
-| `desk_run.ps1`, `desk_test.ps1` | One run of a DLL with extra ini keys. The base of each other script. `-Save <name>` starts the run in a test save. Each run starts with no `bwvr-vulkan-pending.txt` in the game folder, and the file of the player comes back after the run. `-VulkanPending <text>` starts the run with that file (`backend.md`, "The fall back of the renderer Vulkan") |
+| `desk_run.ps1`, `desk_test.ps1` | One run of a DLL with extra ini keys. The base of each other script. `-Save <name>` starts the run in a test save, with `start_new_game=0` when the run does not give that key. `-EmptySave` starts the run with slot 20 empty: the start of a profile with no save of the exit. With either one, `-Args '-CONTINUE'` gives the run the word of the launcher button "Play, continue". Each run starts with no `bwvr-vulkan-pending.txt` in the game folder, and the file of the player comes back after the run. `-VulkanPending <text>` starts the run with that file (`backend.md`, "The fall back of the renderer Vulkan") |
 | `make_test_save.ps1` | Makes a test save: a saved game that the game writes at the end of a test run. See "A fast start" |
 | `idle_seconds.ps1` | The time since the last input. A large number while the owner's "test now" flag holds |
 | `desk_state.ps1` | Reads the place of the real cursor, the window in front and the idle time |

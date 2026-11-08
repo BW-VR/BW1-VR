@@ -295,7 +295,9 @@ click, so a test run needs no window focus and no mouse.
 
 No switch loads a saved game. With no switch, the game loads the saved game
 of slot 20 of the profile and opens its Main Menu over it (`backend.md`, "A
-test save").
+test save"). With `start_new_game=1` the mod sets the byte of `-NEWGAME`
+itself, so the start is a new game (`backend.md`, "The start of the
+game").
 
 ## Tools and method
 

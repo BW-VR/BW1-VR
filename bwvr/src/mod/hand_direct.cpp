@@ -9611,6 +9611,18 @@ bool HandDirectTakeRuns() {
   return g_face != nullptr && TakeObject(g_face) != nullptr;
 }
 
+// For take_stream.cpp: the source of the game's bulk take now
+// (GInterfaceStatus+0x3C, TakeObject) and its class for the log. False with
+// no take.
+bool HandDirectTakeSource(void** object, const char** name) {
+  if (g_face == nullptr) return false;
+  void* take = TakeObject(g_face);
+  if (take == nullptr) return false;
+  *object = take;
+  *name = ClassName(take);
+  return true;
+}
+
 // For miracle.cpp (docs/miracles.md, "A miracle in the Hand in the plain
 // game"): world units in a meter of the room now, the point of the real hand of
 // this frame, and the object of the next pick record. The record gets the

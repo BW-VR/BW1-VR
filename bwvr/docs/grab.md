@@ -1769,9 +1769,19 @@ not over the source. So the mod puts the pieces on a curve from the top of
 the source to the Hand (`take_stream=1`). A piece goes straight up out of the
 source, then over to the Hand, and it comes down into the Hand at the end of
 its life. The game makes and deletes the pieces as before: 8 pieces a second,
-and each one lives 1 s. A take with the Hand at the source has the line of
-the game. With `take_stream=0` each take has the line of the game, from the
-land under the Hand.
+and each one lives 1 s. With `take_stream=0` each take has the line of the
+game, from the land under the Hand.
+
+**A take with the Hand at the source.** The direct grab starts a take with
+the real hand at the pile. Then the hand moves away from the pile, or the
+player moves the view, and the game does not hold the Hand over the pile as
+it does with the mouse. On the line of the game each new piece then starts at
+the land under the real hand. With `take_stream_hand=1` (the default) such a
+take has the curve too, from the top of the source of the game's take
+(`GInterfaceStatus+0x3C`, `HandDirectTakeSource`). So the pieces come out of
+the pile wherever the hand goes. With the hand at the pile the way is short:
+the pieces go up out of the pile into the Hand. With `take_stream_hand=0` a
+take with the Hand at the source has the line of the game.
 
 **The hook** (`take_stream.cpp`) is on the rule
 `ER_MultiPickup::ModifyAtomCollection`. After the rule of the game it writes
@@ -1779,7 +1789,9 @@ the place (`AtomCore+0x80`) and the velocity (`+0x34`) of each piece again,
 from the age of the piece (`AtomCore::GetAtomAge`) over `RaiseTime`.
 `FarGrabTakeSource` says that the far grab has the source of a take: from the
 press on a bulk target to the end of the take. The game starts the stream in
-the game turn of the press, before the far grab reads the take.
+the game turn of the press, before the far grab reads the take. With no take
+of the far grab, the source is the one of the game's take
+(`take_stream_hand=1`).
 
 **The curve** (`take_stream_math.h`) is a cubic Bezier curve in world units:
 
@@ -1834,13 +1846,17 @@ about 8 pieces are on the way at one time, and they go faster on a long way:
 a way of 0.6 m of the room has a mean speed of 0.6 m/s, and a way of 2.5 m
 has 2.5 m/s. The mod does not change the two values.
 
-**The log.** Tag `take stream`: one line when the stream of a take at a
-distance starts, with the source, its point and its top, the Hand, the length
-of the way in units and in meters of the room, and the life of a piece. One
-line at its end, with the count of the pieces that the mod placed, the calls
-of the rule, how many of them were a second call in a frame, and the top of
-the source at the start and at the end. With `take_stream=0` the two lines
-say that the pieces are on the line of the game.
+**The log.** Tag `take stream`: one line when the stream of a take starts
+("a take at a distance" or "a take with the Hand at the source"), with the
+source, its point and its top, the Hand, the length of the way in units and
+in meters of the room, and the life of a piece. One line at its end, with the
+count of the pieces that the mod placed, the calls of the rule, how many of
+them were a second call in a frame, and the top of the source at the start
+and at the end. With `take_stream=0`, or `take_stream_hand=0` for a take with
+the Hand at the source, the two lines say that the pieces are on the line of
+the game. The test key `take_stream_test_trace=1` gives one line for each
+frame of a stream (400 at the most): the top of the source, the Hand, and
+the place of the newest piece.
 
 ### A forest gives a tree
 
@@ -2340,6 +2356,8 @@ not jump.
 | `grip_skips_tied` | 1 | The object that holds a tied leash is no target of the grip, at the Hand and from a distance. 0: it is a target as each other object (see [creature.md](creature.md), section 5.2) |
 | `far_take_carry` | 1 | 1: when the source of a take at a distance goes away while the grip is closed, the grip machine keeps the grip and the grip carries the bundle. 0: the far grab holds the grip back until it opens, and the machine lets the bundle go at once (see "A bulk source at a distance"). Test key: Shift and Backspace |
 | `take_stream` | 1 | 1: the pieces of the stream of a take at a distance go on a curve from the top of the source to the Hand. 0: the line of the game, from the land under the Hand (see "The stream of a take at a distance"). Test key: Ctrl, Shift and the minus key |
+| `take_stream_hand` | 1 | 1: a take with the Hand at the source (the direct grab) has the curve too, from the top of the source of the game's take, so the pieces come out of the pile when the hand or the view moves. 0: the line of the game (see "The stream of a take at a distance") |
+| `take_stream_test_trace` | 0 | A test key: one line for each frame of a stream, with the top of the source, the Hand and the newest piece |
 | `creature_hold_stay`, `creature_hold_stay_ms`, `creature_stay_look` | 1, 350, 1 | A grip that stays closed on the far Creature makes it stay (see [creature.md](creature.md), section 5.3). Test key: Shift and End |
 | `far_roots_at_tree` | 1 | 1 puts the roots pile of a tree that comes from a distance at the roots, on the land where the tree stood. 0 leaves it where the game puts it, on the way of the glide. Test key: Ctrl, Shift and Page Down |
 | `tree_plant_hint` | 1 | 1 makes the card say what the opening of the grip does with a tree in the Hand. 0 shows the text of the game ("Plant") each time. Test key: Ctrl and Page Down |

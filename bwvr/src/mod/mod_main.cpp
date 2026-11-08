@@ -588,6 +588,9 @@ FarGrabSettings g_far_grab;
 // take_stream: the stream of a take at a distance goes on a curve from the
 // source to the Hand (take_stream.cpp).
 int g_take_stream = 1;
+// take_stream_hand: a take with the Hand at the source has the curve too.
+int g_take_stream_hand = 1;
+int g_take_stream_trace = 0;
 // The law of a throw and its log (throw_physics.cpp).
 int g_throw_law = 2;
 int g_throw_slow_x10 = 20;
@@ -1613,6 +1616,12 @@ void ReadSettings() {
     // the game, from the land under the Hand (docs/grab.md, "The stream of a
     // take at a distance").
     g_take_stream = number("take_stream", 1);
+    // take_stream_hand: 1 a take with the Hand at the source (the direct
+    // grab) has that curve too, from the source of the game's take, so the
+    // pieces stay at the pile when the hand or the view moves. 0 the line of
+    // the game. take_stream_test_trace=1: a line for each frame of a stream.
+    g_take_stream_hand = number("take_stream_hand", 1);
+    g_take_stream_trace = number("take_stream_test_trace", 0);
 
     // Moving around by grabbing the world. See docs/god-view.md, "Moving
     // around: the grab and the mouse".
@@ -2068,6 +2077,7 @@ void StartVrStep() {
         ThrowPhysicsInstallEarly();
         FarGrabInstall();
         TakeStreamSetOptions(g_take_stream, g_test_keys);
+        TakeStreamSetHand(g_take_stream_hand, g_take_stream_trace);
         TakeStreamInstall();
         ThrowPhysicsInstall();
         HandGlowSetEnabled(g_hand_glow);

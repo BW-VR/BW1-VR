@@ -2649,6 +2649,8 @@ settings     : the welcome page closes: the player pressed VR Settings. welcome_
 settings     : the window opens, 0.56 by 0.56 m, its middle at 0.00 -0.21 -0.98 m, the group Moving with 7 switches, frame 531
 settings     : snap_turn goes from 2 to 3 (90 degrees), written to bwvr.ini. It acts at once, frame 650
 comfort      : the VR Settings window: turn in steps of 90 degrees now
+settings     : grab_hand goes from 1 to 2 (Either grip), written to bwvr.ini. It acts at the next start of the game, frame 700
+settings     : the bottom row of the window asks for a restart of the game: a setting that acts at the next start has a new value, frame 700
 ```
 
 ### 24.5 Tests and limits

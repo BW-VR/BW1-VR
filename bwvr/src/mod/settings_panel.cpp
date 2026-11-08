@@ -286,9 +286,21 @@ void LastLine(int i, wchar_t* out, int size) {
   if (size > 0) out[0] = 0;
 }
 
+bool g_said_restart = false;
+
 const wchar_t* IdleNow() {
   ReadSettings();
-  return RestartNeeded(g_start, g_value) ? kRestartLine : nullptr;
+  const bool restart = RestartNeeded(g_start, g_value);
+  if (restart != g_said_restart) {
+    g_said_restart = restart;
+    ModLog("settings     : %s, frame %llu",
+           restart ? "the bottom row of the window asks for a restart of the "
+                     "game: a setting that acts at the next start has a new "
+                     "value"
+                   : "the bottom row no longer asks for a restart",
+           ControllersFrameCount());
+  }
+  return restart ? kRestartLine : nullptr;
 }
 
 const WindowPage* PageOf(int group) {

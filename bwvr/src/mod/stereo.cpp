@@ -194,6 +194,7 @@ void HandDirectPassBegin(int eye);
 void HandDirectPassDone(int eye);
 void HandDirectReport();
 void FightMarksReport();
+void JobIconReport();
 // hand_glow.cpp: the glow at the Hand's point.
 void HandGlowReport();
 // target_glow.cpp: the glow on the mesh of a target of the Hand.
@@ -2238,6 +2239,7 @@ void __fastcall Process3dEngineBody(void* self, void* unused) {
     ControllersReport();
     HandDirectReport();
     FightMarksReport();
+    JobIconReport();
     HandGlowReport();
     TargetGlowReport();
     OverlayReport();

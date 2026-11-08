@@ -3595,6 +3595,7 @@ void CreatureChecks() {
 #include "gesture_panel_checks.h"
 #include "sky_checks.h"
 #include "sprite_checks.h"
+#include "job_icon_checks.h"
 #include "feel_checks.h"
 #include "pinch_checks.h"
 #include "hand_land_checks.h"
@@ -4041,6 +4042,7 @@ int main() {
   gesture_panel_checks::GesturePanelChecks();
   sky_checks::SkyChecks();
   sprite_checks::SpriteChecks();
+  job_icon_checks::JobIconChecks();
   forest_checks::ForestChecks();
   forest_checks::ForestGripChecks();
   feel_checks::FeelChecks();

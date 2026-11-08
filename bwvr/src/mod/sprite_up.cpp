@@ -252,6 +252,10 @@ bool Hook(uintptr_t address, void* replacement, void** original,
 
 }  // namespace
 
+// The turn in radians that the hook of the draw adds to a sprite now: 0 with
+// sprite_world_up=0. job_icon.cpp reads it to find the up of the job icon.
+float SpriteUpTurnNow() { return g_on ? TurnNow() : 0.0f; }
+
 // sprite_world_up, sprite_test_frame and sprite_test_trace.
 void SpriteUpSet(bool on, int test_frame, bool trace) {
   g_on = on;

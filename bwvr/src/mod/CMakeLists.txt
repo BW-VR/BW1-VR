@@ -67,6 +67,7 @@ add_library(bwvr_mod SHARED
     sprite_up.cpp
     spirit_anchor.cpp
     fight_marks.cpp
+    job_icon.cpp
     controllers.cpp
     controller_hints.cpp
     hint_card.cpp

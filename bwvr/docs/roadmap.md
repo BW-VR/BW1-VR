@@ -310,6 +310,12 @@ keeps the mod as it is.
 
 **The village, the Creature and the help**
 
+- **F27. A bookmark on an object.** The aim of a new bookmark
+  (`bookmark_aim=1`, `controllers.md` 10.11) finds a living thing under
+  the ray, but in the desk run it goes back to the land 12 frames later,
+  so the grip sets the bookmark on the land. The hold of the aim on an
+  object does not keep it yet. Open: the cause, and a run that sets a
+  bookmark on a villager (`ring_run.ps1 -Kind places`).
 - **F22. Words that the card never shows.** The card shows the game's
   "Drop" and "Throw" with the word of the grip (`controller-hints.md`,
   9.9). The second VR mod leaves those two words out

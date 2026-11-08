@@ -1985,6 +1985,7 @@ first time.
 | `ring_icons` | 1 | 1 each item is a round seal with its icon and its word under it (10.4). 0 each item is a seal with its word |
 | `places_sheet` | 1 | 1 the item `places` goes to the sheet of the places (10.11). 0 it opens the panel of places (`ui-layer.md`, section 22) |
 | `bookmark_aim` | 1 | 1 the seal with the plus of the sheet of the places waits for the grip at the aim of the pointing hand (10.11). 0 it sets the bookmark at the Hand, as Ctrl and the number do |
+| `leash_pictures` | 1 | 1 the tiles of the sheet of the leashes show the picture of the leash that turns, from the files of the game (10.12). 0 the icon of each kind |
 | `bookmark_test_aim` | | A test key: the word `aimmark` of the scripted controller aims at the nearest living thing of the cone with `living` |
 | `places_panel` | 1 | 0 the word `places` is an empty slot. With `ring_pages=0`, page 2 as made then has `mark_set`, `mark_go` and `mark_back` |
 | `snapshot_item` | 1 | 1 the item `snapshot` saves a snapshot for a report (10.9). 0 the word `snapshot` is an empty slot |
@@ -2040,6 +2041,8 @@ bookmark aim : the aim is on the land at 1830.2 2411.7, frame 902
 bookmark aim : the grip sets bookmark 2 on the land at 1830.2 2411.7 (Bookmark::SetBookMark), 1.4 m of the room along the ray, frame 960
 bookmark aim : the grip sets bookmark 4 on the Villager 0x1C2D9F40 at 1822.0 2400.5 (fn_00439F70), 1.2 m of the room along the ray, frame 1210
 bookmark aim : the aim of bookmark 5 stops: the player pressed B, frame 1300
+leash        : leash_pictures=1: the pictures of the leashes come from Data\Misc\leash.l3d (68 points, 64 triangles) and Data\Textures\leash.raw with leasha.raw
+ring         : the sheet of the leashes drew 812 pictures of a leash. The longest took 0.93 ms
 ```
 
 Each of the first 40 new pictures of the ring has one line:
@@ -2354,12 +2357,12 @@ icons, and the card in the middle.
 
 | Row | Tiles | What a choice does |
 | --- | --- | --- |
-| Places | Creature, Town, Temple, Inside, Land, Back | The items `creature`, `town`, `temple`, `enter`, `land` and `mark_back` of the ring (10.2). Back goes to the place before the last move to a bookmark |
+| Places | Back, apart at the left, then Creature, Town, Temple, Inside, Land | The items `mark_back`, `creature`, `town`, `temple`, `enter` and `land` of the ring (10.2). Back goes to the place before the last move to a bookmark |
 | Bookmarks | A seal with the number of each bookmark that is set, then a seal with a plus | A number goes to its bookmark: the key of the number (`fn_0043A070`). The plus adds a bookmark (below). It is dim when all 7 are set |
 | Bins | A small seal with a bin under each bookmark | It removes that bookmark: Ctrl, Shift and the number (`fn_00439D40`) |
 
-The rows have the headers "Places" and "Bookmarks". The places are 7 to 12
-cm above the middle, and the bookmarks with their bins 5 to 12 cm below it,
+The rows have the headers "Places" and "Bookmarks". The places are 5 to 11
+cm above the middle, and the bookmarks with their bins 4 to 10 cm below it,
 so the hand starts on no tile. A seal is dim for the reason of its item on
 the ring,
 and each tile of a bookmark is dim while the game takes no bookmark key: in
@@ -2410,8 +2413,25 @@ under them.
 
 ![The sheet of the leashes](images/ring-sheet-leash.png)
 
-**The picture of a leash.** A tile shows the icon of its kind (a heart, a
-book, the marks of a claw) until the mod has the picture of the leash.
+**The picture of a leash** (`leash_model.cpp`, `leash_pictures=1`). The
+mod reads the mesh and the texture of the leash from the files of the game
+on the player's PC, one time, at the first open of the sheet: the leash
+posts of the Temple load `Data\Misc\leash.l3d` (a band of 68 points and 64
+triangles round its axis) and `Data\Textures\leash.raw` with its alpha in
+`leasha.raw`. The three kinds use one mesh, with a different strip of the
+texture: a V offset of 0.375 for Aggression, 0.125 for Learning and 0.25
+for Compassion (`TempleLeash` `0x00464650`, `fn_007F9B70`). The band stands
+on its axis and turns once in 9 s, as on a turntable, seen from 36 degrees
+above, over a soft shadow on the paper. `panel_raster.h` draws it in a box
+of 176 px, one sample to a pixel, from the far triangle to the near one, so
+the soft edges of the alpha show the far side of the band. A new picture of
+the turn comes at most 30 times a second, and only while the sheet shows:
+it copies the box of each leash from a kept picture of the sheet and draws
+the three leashes again (about 0.6 ms each in the offline harness). No mesh
+and no picture of the game is in the mod or in the repo: the picture in
+this section has the icons. When a file is not there, or with
+`leash_pictures=0`, each tile shows the icon of its kind (a heart, a book,
+the marks of a claw).
 
 ## 11. The Temple
 

@@ -203,9 +203,12 @@ inline void RingSheetChecks() {
     Check(SheetPick(sheets[kSheetPlaces], x, below, -1, 0.01f) == -1 &&
               SheetPick(sheets[kSheetPlaces], x, below, 0, 0.01f) == 0,
           "a tile stays for a hand that shakes just out of its box", 0, 0);
-    Check(sheets[kSheetPlaces].box[0][1] > 0.06f,
-          "the boxes of the places start more than 6 cm above the middle",
-          sheets[kSheetPlaces].box[0][1], 0.06);
+    Check(sheets[kSheetPlaces].box[0][1] > 0.05f,
+          "the boxes of the places start more than 5 cm above the middle",
+          sheets[kSheetPlaces].box[0][1], 0.05);
+    Check(places.tile[0].box[0] - places.tile[5].box[2] >= 40,
+          "Back is apart from the places, with a gap of 40 px or more",
+          places.tile[0].box[0] - places.tile[5].box[2], 40);
   }
 
   // THE RING TO A SHEET, WITH THE BUTTON AND THE HAND.

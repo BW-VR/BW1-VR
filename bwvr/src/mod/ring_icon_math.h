@@ -175,10 +175,15 @@ const float kR = 4.5f;
 #define RING_ICON_SHAPES(name) const Shape name[] =
 
 RING_ICON_SHAPES(kShapesLeash){
-    // A leash: the loop for the hand, the line, and the ring of the collar.
-    {kRing, kAdd, {66, 28, 19, 10}},
-    {kSegment, kAdd, {52, 42, 31, 66, 5}},
-    {kRing, kAdd, {24, 76, 14, 9}},
+    // A leash: the long loop of the grip, the rope in a bend, and the collar
+    // with its tag.
+    {kBox, kAdd, {62, 4, 88, 42, 13}},
+    {kBox, kCut, {70, 12, 80, 34, 5}},
+    {kSegment, kAdd, {75, 42, 70, 52, 4.5f}},
+    {kSegment, kAdd, {70, 52, 58, 56, 4.5f}},
+    {kSegment, kAdd, {58, 56, 47, 59, 4.5f}},
+    {kRing, kAdd, {32, 66, 17, 10}},
+    {kDisc, kAdd, {32, 91, 6}},
 };
 RING_ICON_SHAPES(kShapesPlaces){
     // A map pin.
@@ -227,9 +232,11 @@ RING_ICON_SHAPES(kShapesRecenter){
     {kDisc, kAdd, {50, 50, 8}},
 };
 RING_ICON_SHAPES(kShapesNames){
-    // A villager with a label of words over the head.
-    {kBox, kAdd, {10, 2, 90, 34, 8}},
-    {kBox, kCut, {24, 14, 76, 22, 2}},
+    // A villager with a name tag over the head: the tag has a hole and a
+    // line of words.
+    {kBox, kAdd, {6, 2, 94, 36, 9}},
+    {kDisc, kCut, {20, 19, 5.5f}},
+    {kBox, kCut, {34, 15, 82, 23, 3}},
     {kDisc, kAdd, {50, 54, 12}},
     {kBox, kAdd, {26, 70, 74, 100, 16}},
     {kBox, kCut, {0, 96, 100, 120, 0}},

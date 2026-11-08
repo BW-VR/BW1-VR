@@ -15,7 +15,8 @@ bool LeashPicturesOn();
 // Draws the leash of `kind` (1 Aggression, 2 Learning, 3 Compassion), turned
 // by `turn_deg` about the up axis, into a box of size by size pixels at x0,
 // y0 of a BGRA picture with the color times the alpha (pitch in pixels). It
-// draws over the pixels that are there. False when there is no picture: the
-// caller then draws the icon of the kind.
+// draws over the pixels that are there, at `alpha` (1 for all of it). size
+// is at most 192. False when there is no picture: the caller then draws the
+// icon of the kind.
 bool LeashModelDraw(uint8_t* bgra, int pitch, int kind, float turn_deg, int x0,
-                    int y0, int size);
+                    int y0, int size, float alpha);

@@ -122,21 +122,21 @@ switch ($Kind) {
     }
     'places' {
         # 1. The plus, then a grip on the land in front.
-        $end = Sheet 900 1 @(0, 0, 0, -6.6) 40
+        $end = Sheet 900 1 @(0, 0, 0, -5.6) 40
         $script:steps += "shot@$($end - 10)+1 shot@$($end + 40)+1 grip@$($end + 70)+10"
-        # 2. Bookmark 1 is set: the plus is at 1.9 -6.6. aimmark turns the
+        # 2. Bookmark 1 is set: the plus is at 1.9 -5.6. aimmark turns the
         #    ray to a living thing, and the grip sets bookmark 2 on it.
-        $end = Sheet 1200 1 @(1.9, -6.6) 40
+        $end = Sheet 1200 1 @(1.9, -5.6) 40
         $script:steps += "aimmark@$($end + 30)+1 shot@$($end + 50)+1 grip@$($end + 70)+10"
         # 3. Land: the view goes to the middle of the land.
-        $end = Sheet 1500 1 @(7.4, 9.4) 40
-        # 4. The seal of bookmark 1 (bookmarks 1 and 2 set: -3.9 -6.6).
-        $end = Sheet 1750 1 @(-3.9, -6.6) 40
+        $end = Sheet 1500 1 @(11.5, 8.0) 40
+        # 4. The seal of bookmark 1 (bookmarks 1 and 2 set: -3.9 -5.6).
+        $end = Sheet 1750 1 @(-3.9, -5.6) 40
         $script:steps += "shot@$($end + 60)+1"
-        # 5. The bin of bookmark 2 (0.0 -10.4).
-        $end = Sheet 2000 1 @(0.0, -10.4) 40
-        # 6. The plus, then B stops the aim.
-        $end = Sheet 2250 1 @(0.0, -6.6) 40
+        # 5. The bin of bookmark 2 (0.0 -9.2).
+        $end = Sheet 2000 1 @(0.0, -9.2) 40
+        # 6. The plus (bookmark 1 is set: 1.9 -5.6), then B stops the aim.
+        $end = Sheet 2250 1 @(1.9, -5.6) 40
         $script:steps += "b@$($end + 40)+6"
         $set = "$base;bookmark_test_aim=living"
         $seconds = 60

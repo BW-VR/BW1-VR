@@ -10,7 +10,8 @@
 //
 // THE PLACES (from the top):
 //
-//   the places     a row of seals: Creature, Town, Temple, Inside, Land, Back
+//   the places     a row of seals: Back at the left, apart, then Creature,
+//                  Town, Temple, Inside, Land
 //   the card       in the middle
 //   the bookmarks  a seal with the number of each bookmark that is set, then
 //                  a seal with a plus that adds one
@@ -58,16 +59,20 @@ const int kPlaceItems[kPlaces] = {
     radial_math::kItemCreature, radial_math::kItemTown,
     radial_math::kItemTemple,   radial_math::kItemEnter,
     radial_math::kItemLand,     radial_math::kItemMarkBack};
-const int kPlaceY = 196;
+const int kPlaceY = 240;
 const int kPlaceSize = 100;
-const int kPlacePitch = 158;
+const int kPlacePitch = 150;
+// The places go round this middle, and Back is at kBackX, with a gap of
+// kBackGap px between its box and the box of the first place.
+const int kPlacesX = 580;
+const int kBackX = 90;
 const int kPlaceBoxUp = 66;     // the box goes this far up from the middle
 const int kPlaceBoxDown = 96;   // and this far down: the word under the seal
-const int kMarkY = 724;
+const int kMarkY = 690;
 const int kMarkSize = 92;
 const int kMarkPitch = 124;
 const int kMarkBoxHalf = 56;
-const int kBinY = 842;
+const int kBinY = 806;
 const int kBinSize = 68;
 const int kBinBoxHalf = 40;
 
@@ -92,9 +97,13 @@ inline void PlacesLayout(const bool set[radial_math::kMarks], Layout* out) {
   out->sheet = radial_math::kSheetPlaces;
   out->count = 0;
   out->card_y = static_cast<int>(kMiddle);
+  // The 5 places, then Back apart at the left: it goes back, it is no place.
   for (int i = 0; i < kPlaces; ++i) {
     const int cx =
-        static_cast<int>(kMiddle + (i - 0.5f * (kPlaces - 1)) * kPlacePitch);
+        i == kPlaces - 1
+            ? kBackX
+            : static_cast<int>(kPlacesX + (i - 0.5f * (kPlaces - 2)) *
+                                              kPlacePitch);
     AddTile(out, kTilePlace, kPlaceItems[i], cx, kPlaceY, kPlaceSize,
             kPlacePitch / 2, kPlaceBoxUp, kPlaceBoxDown);
   }
@@ -124,7 +133,8 @@ const int kLeashY = 262;
 const int kLeashWidth = 276;
 const int kLeashHeight = 300;
 const int kLeashPitch = 300;
-const int kLeashPicture = 210;  // the picture of the leash in a tile
+const int kLeashPicture = 176;  // the picture of the leash in a tile
+const int kLeashPictureTop = 26;  // from the top of a tile to its picture
 
 inline void LeashLayout(Layout* out) {
   out->sheet = radial_math::kSheetLeash;

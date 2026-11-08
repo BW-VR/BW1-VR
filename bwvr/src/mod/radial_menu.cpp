@@ -699,6 +699,9 @@ uint64_t g_blocked = 0, g_no_choice = 0;
 uint64_t g_rasters = 0;
 double g_raster_ms = 0.0;
 double g_stage_ms = 0.0;
+// The pictures of the leashes that the sheet drew, and the longest one.
+uint64_t g_leash_pictures = 0;
+double g_leash_ms = 0.0;
 
 double NowSeconds() {
   static LARGE_INTEGER frequency = {};
@@ -1648,11 +1651,12 @@ const int kLabelGap = 4;
 const int kLabelHalo = 3;         // the dark edge round its letters
 const int kDigitsCap = 40;        // the number on the seal of a bookmark
 const int kTileNameCap = 23;      // the name on a tile of a leash
-const int kHeaderY = 642;         // the header "Bookmarks" of the places
-const int kPlacesHeaderY = 108;   // and the header "Places"
+const int kHeaderY = 610;         // the header "Bookmarks" of the places
+const int kPlacesHeaderY = 156;   // and the header "Places", over the places
 // The turn of the pictures of the leashes: kTurnSteps steps in one turn,
-// one turn in kTurnSeconds.
-const int kTurnSteps = 90;
+// one turn in kTurnSeconds. So a new picture of the turn comes at most 30
+// times a second, and only while the sheet of the leashes shows.
+const int kTurnSteps = 270;
 const double kTurnSeconds = 9.0;
 // GDI draws the letters of one part into the work picture, and the part is
 // drawn in a picture with the same pitch.
@@ -2366,17 +2370,13 @@ int LeashItem(int kind) {
                      : kItemLeashCompassion;
 }
 
-// THE PICTURE OF A LEASH on its tile: the turn of the picture is `turn`
-// steps. True when the picture is drawn. With no picture the tile shows the
-// icon of the kind.
-bool LeashPicture(const card_scroll::Picture& picture, int kind, int turn,
-                  int x0, int y0, int size);
-
-// A TILE OF A LEASH: a page of the parchment with the picture of the leash
-// and its name. The chosen tile has the gold rim and glow. The leash of now
-// has a small red seal with a tick at its top right.
+// A TILE OF A LEASH: a page of the parchment with the name of the leash.
+// The chosen tile has the gold rim and glow. The leash of now has a small
+// red seal with a tick at its top right. The picture of the leash turns, so
+// RasterSheet draws it over the tile at each new picture (leash_model.cpp).
+// With no picture the tile has the icon of the kind.
 void DrawLeashTile(Part* part, const ring_sheet_math::Tile& tile, bool lit,
-                   bool dim, bool now, int turn) {
+                   bool dim, bool now) {
   part->ok = true;
   part->w = part->h = 0;
   const int w = ring_sheet_math::kLeashWidth;
@@ -2391,9 +2391,23 @@ void DrawLeashTile(Part* part, const ring_sheet_math::Tile& tile, bool lit,
   const int x0 = kSealEdge, y0 = kSealEdge, x1 = x0 + w, y1 = y0 + h;
   card_scroll::Page(picture, x0, y0, x1, y1, 41 + tile.arg * 7);
   const int size = ring_sheet_math::kLeashPicture;
-  const int px = x0 + (w - size) / 2, py = y0 + 18;
+  const int px = x0 + (w - size) / 2;
+  const int py = y0 + ring_sheet_math::kLeashPictureTop;
   const int kind = tile.arg;
-  if (!LeashPicture(picture, kind, turn, px, py, size)) {
+  if (LeashPicturesOn()) {
+    // The soft shadow of the leash on the paper, under the turning picture.
+    const float sx = px + 0.5f * size, sy = py + 0.80f * size;
+    const float rx = 0.40f * size, ry = 0.075f * size;
+    for (int y = static_cast<int>(sy - ry) - 2; y < sy + ry + 2; ++y) {
+      for (int x = static_cast<int>(sx - rx) - 2; x < sx + rx + 2; ++x) {
+        const float dx = (x + 0.5f - sx) / rx, dy = (y + 0.5f - sy) / ry;
+        const float d = dx * dx + dy * dy;
+        if (d >= 1.0f) continue;
+        OverPixel(g_work + (static_cast<size_t>(y) * kWorkWidth + x) * 4,
+                  kEdgeDark, 0.28f * (1.0f - d) * (1.0f - d));
+      }
+    }
+  } else {
     const float is = 0.55f * size;
     IconLetters(ItemIcon(LeashItem(kind)), px + 0.5f * (size - is),
                 py + 0.5f * (size - is), is);
@@ -2416,12 +2430,6 @@ void DrawLeashTile(Part* part, const ring_sheet_math::Tile& tile, bool lit,
   if (lit) RimBox(picture, x0, y0, x1, y1, 6.0f, dim ? 0.5f : 1.0f);
   if (dim) FadeWork(pw, ph, lit ? 218 : 154);
   KeepPart(part, tile.cx - pw / 2, tile.cy - ph / 2, pw, ph);
-}
-
-bool LeashPicture(const card_scroll::Picture& picture, int kind, int turn,
-                  int x0, int y0, int size) {
-  return LeashModelDraw(picture.bgra, picture.pitch, kind,
-                        turn * (360.0f / kTurnSteps), x0, y0, size);
 }
 
 // The thin ring of ink with a gold line in it, on the circle of the items,
@@ -2556,8 +2564,7 @@ void DrawTile(Part* part, const Look& look, int i, bool lit) {
                 nullptr, lit, dim, seed);
       break;
     case ring_sheet_math::kTileLeash:
-      DrawLeashTile(part, t, lit, dim, look.leash_now == look.tile_arg[i],
-                    look.turn);
+      DrawLeashTile(part, t, lit, dim, look.leash_now == look.tile_arg[i]);
       break;
     default:
       part->ok = true;
@@ -2568,15 +2575,17 @@ void DrawTile(Part* part, const Look& look, int i, bool lit) {
   part->item = look.tile_kind[i];
   part->arg = look.tile_arg[i];
   part->dim = dim;
-  part->value = look.tile_kind[i] == ring_sheet_math::kTileLeash
-                    ? look.turn * 8 + (look.leash_now == look.tile_arg[i])
+  part->value = look.tile_kind[i] == ring_sheet_math::kTileLeash &&
+                        look.leash_now == look.tile_arg[i]
+                    ? 1
                     : 0;
 }
 
 bool TilePartOk(const Part& part, const Look& look, int i) {
   const ring_sheet_math::Tile& t = g_layout[look.sheet].tile[i];
-  const int value = look.tile_kind[i] == ring_sheet_math::kTileLeash
-                        ? look.turn * 8 + (look.leash_now == look.tile_arg[i])
+  const int value = look.tile_kind[i] == ring_sheet_math::kTileLeash &&
+                            look.leash_now == look.tile_arg[i]
+                        ? 1
                         : 0;
   return part.ok && part.style == 2 && part.item == look.tile_kind[i] &&
          part.arg == look.tile_arg[i] && part.dim == look.tile_dim[i] &&
@@ -2605,7 +2614,7 @@ void RasterSheet(const Look& look) {
     }
     if (g_mark_header.w > 0) PutPart(g_mark_header);
     if (!g_places_header.ok) {
-      DrawHeader(&g_places_header, static_cast<int>(kMiddle), kPlacesHeaderY,
+      DrawHeader(&g_places_header, ring_sheet_math::kPlacesX, kPlacesHeaderY,
                  L"Places");
       ++g_scroll_new;
     }
@@ -2623,11 +2632,50 @@ void RasterSheet(const Look& look) {
   }
 }
 
+// THE PICTURES OF THE LEASHES turn. So the picture of the sheet with no
+// leash is kept (g_sheet_base), and a picture that changes only the turn
+// copies the box of each leash from it and draws the leashes again.
+uint8_t g_sheet_base[kSize * kSize * 4];
+
+void LeashBox(const Look& look, int i, int* x0, int* y0, int* size) {
+  const ring_sheet_math::Tile& t = g_layout[look.sheet].tile[i];
+  *size = ring_sheet_math::kLeashPicture;
+  *x0 = t.cx - *size / 2;
+  *y0 = t.cy - ring_sheet_math::kLeashHeight / 2 +
+        ring_sheet_math::kLeashPictureTop;
+}
+
+void DrawLeashes(const Look& look, bool from_kept) {
+  for (int i = 0; i < look.tiles; ++i) {
+    if (look.tile_kind[i] != ring_sheet_math::kTileLeash) continue;
+    int x0 = 0, y0 = 0, size = 0;
+    LeashBox(look, i, &x0, &y0, &size);
+    if (x0 < 0 || y0 < 0 || x0 + size > kSize || y0 + size > kSize) continue;
+    if (from_kept) {
+      for (int y = y0; y < y0 + size; ++y) {
+        const size_t at = (static_cast<size_t>(y) * kSize + x0) * 4;
+        memcpy(g_base + at, g_sheet_base + at, static_cast<size_t>(size) * 4);
+      }
+    }
+    const double start = NowSeconds();
+    LeashModelDraw(g_base, kSize, look.tile_arg[i],
+                   look.turn * (360.0f / kTurnSteps), x0, y0, size,
+                   look.tile_dim[i] ? 0.6f : 1.0f);
+    const double ms = (NowSeconds() - start) * 1000.0;
+    if (ms > g_leash_ms) g_leash_ms = ms;
+    ++g_leash_pictures;
+  }
+}
+
 // The scroll look: the parts from the cache, and each part that changed.
 void RasterScroll(const Look& look) {
   memset(g_base, 0, sizeof(g_base));
   if (look.sheet != kSheetNone) {
     RasterSheet(look);
+    if (look.sheet == kSheetLeash && LeashPicturesOn()) {
+      memcpy(g_sheet_base, g_base, sizeof(g_base));
+      DrawLeashes(look, false);
+    }
     return;
   }
   for (int i = 0; i < kSlots; ++i) {
@@ -2714,7 +2762,14 @@ bool Raster(const Look& look) {
   const double start = NowSeconds();
   g_scroll_new = 0;
   const bool scroll = look.scroll != 0 && ScrollStart();
-  if (scroll) {
+  // Only the turn of the leashes changed: their boxes, and no other part.
+  Look same_turn = look;
+  same_turn.turn = g_drawn.turn;
+  if (scroll && g_have_drawn && look.sheet == kSheetLeash &&
+      g_drawn.scroll != 0 && LeashPicturesOn() &&
+      SameLook(same_turn, g_drawn)) {
+    DrawLeashes(look, true);
+  } else if (scroll) {
     RasterScroll(look);
   } else {
     RasterPlain(look);
@@ -3349,6 +3404,12 @@ void RadialMenuReport() {
     ModLog("ring         : the picture of the ring was drawn %llu times. The "
            "longest draw took %.2f ms, and the longest step of the fade %.2f "
            "ms", g_rasters, g_raster_ms, g_stage_ms);
+  }
+  if (g_leash_pictures > 0) {
+    ModLog("ring         : the sheet of the leashes drew %llu pictures of a "
+           "leash. The longest took %.2f ms", g_leash_pictures, g_leash_ms);
+    g_leash_pictures = 0;
+    g_leash_ms = 0.0;
   }
   if (g_baked > 0) {
     ModLog("ring         : the scroll look put %llu parts into the cache "

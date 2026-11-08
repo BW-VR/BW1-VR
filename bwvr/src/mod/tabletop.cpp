@@ -83,6 +83,7 @@
 #include "hint_learn_math.h"
 #include "table_math.h"
 #include "tabletop.h"
+#include "solid_math.h"
 #include "walk_math.h"
 #include "zoom_math.h"
 
@@ -139,6 +140,10 @@ bool ControllersGrabHeld();
 bool HeadBlinderOn();
 float HeadBlinderLevel();
 float HeadBlinderClearance(const char** what);
+// hand_direct.cpp: the solids near the hands and the head that the first eye
+// pass of the frame before kept, and the class of one for the log.
+int HandDirectSolids(void* objects[], solid_math::Solid out[], int max);
+const char* HandDirectSolidClass(void* object);
 // vignette.cpp: a move of the view that the player makes with a control, with
 // the share of its full speed, and a step of the view in one frame.
 void VignetteMove(float share, const char* by);
@@ -473,6 +478,8 @@ uint64_t g_display_frames = 0;
 uint64_t g_holds = 0;
 double g_hold_seconds = 0.0;
 void StopZoomHold(const char* cause, bool view_stays);
+// A solid stopped the smooth zoom in this hold, and the log said so.
+bool g_hold_solid_said = false;
 float g_god_last_scale = 0.0f;
 // A story holds the camera, and the God view stands aside.
 bool g_god_story = false;
@@ -1606,6 +1613,90 @@ float ZoomClearHead(TablePose* pose, const float room[3],
   return down;
 }
 
+// THE SOLIDS IN THE WAY OF A ZOOM (god_zoom_solid_stop). With
+// god_zoom_about 1 and 2 a zoom step moves the head over the land, and with
+// each value a step in brings the head nearer to the land and to what stands
+// on it. Near the lowest scale a step can then put the head into a house. So
+// a step stops where the head is kSolidClearM out of the nearest solid, which
+// is where the overlay of the head blinder starts, or it is refused when it
+// cannot go at all. The solids are the ones near the hands and the head that
+// the first eye pass of the frame before kept (hand_direct.cpp,
+// LatchSolids). Near the lowest scale the head wants them from
+// kZoomSolidReachM of the room (TabletopZoomSolidReachM), so a house that a
+// step brings to the head is in that list.
+const float kSolidClearM = 0.05f;
+const float kZoomSolidReachM = 1.5f;
+
+struct SolidStop {
+  bool short_step;   // the step stops short or is refused
+  float full_cm;     // the clearance of the whole step, in cm of the room
+  void* object;      // the solid of the whole step
+};
+
+// The clearance of the head from the nearest solid, in meters of the room, at
+// a pose. which gets the index of that solid.
+float HeadSolidClearance(const TablePose& pose, const float room[3],
+                         const float head[3], const solid_math::Solid* solids,
+                         int count, int* which) {
+  float at[3];
+  PoseWorld(pose, room, head, at);
+  const float least = solid_math::Least(solids, count, at, which);
+  return pose.scale > 0.0f ? least / pose.scale : 1e30f;
+}
+
+// The ratio of a zoom about pivot that keeps the head out of the solids: the
+// ratio itself, a ratio nearer to 1, or exactly 1 for a step that cannot go.
+float ZoomSolidRatio(const TablePose& pose, const float room[3],
+                     const float head[3], const float pivot[3], float ratio,
+                     SolidStop* stop) {
+  stop->short_step = false;
+  stop->full_cm = 0.0f;
+  stop->object = nullptr;
+  if (g_settings.god_zoom_solid_stop == 0 || ratio == 1.0f) return ratio;
+  static void* objects[solid_math::kMostSolids];
+  static solid_math::Solid solids[solid_math::kMostSolids];
+  const int count =
+      HandDirectSolids(objects, solids, solid_math::kMostSolids);
+  if (count == 0) return ratio;
+  const float low = GodLowest(), high = GodHighest();
+  const auto clear = [&](float t) {
+    TablePose next;
+    GodZoomAbout(pose, pivot, powf(ratio, t), low, high, &next);
+    int which = -1;
+    return HeadSolidClearance(next, room, head, solids, count, &which);
+  };
+  const float share = zoom_math::StepShare(clear, kSolidClearM);
+  if (share >= 1.0f) return ratio;
+  TablePose full;
+  GodZoomAbout(pose, pivot, ratio, low, high, &full);
+  int which = -1;
+  stop->full_cm =
+      HeadSolidClearance(full, room, head, solids, count, &which) * 100.0f;
+  stop->object = which >= 0 ? objects[which] : nullptr;
+  stop->short_step = true;
+  const float used = powf(ratio, share);
+  return fabsf(used - 1.0f) < 1e-4f ? 1.0f : used;
+}
+
+void SayZoomSolid(const SolidStop& stop, bool refused, float from, float to,
+                  const char* by) {
+  if (!ZoomLog()) return;
+  const char* name =
+      stop.object != nullptr ? HandDirectSolidClass(stop.object) : "solid";
+  if (refused) {
+    ModLog("god view     : %s is refused at %.2f units per meter: it puts your "
+           "head %.1f cm %s the %s %p (god_zoom_solid_stop=1)", by, from,
+           fabsf(stop.full_cm), stop.full_cm < 0.0f ? "into" : "out of", name,
+           stop.object);
+  } else {
+    ModLog("god view     : %s stops short at %.2f units per meter, not %.2f: "
+           "the whole step puts your head %.1f cm %s the %s %p, so your head "
+           "stays %.0f cm out of it (god_zoom_solid_stop=1)", by, to, from,
+           fabsf(stop.full_cm), stop.full_cm < 0.0f ? "into" : "out of", name,
+           stop.object, kSolidClearM * 100.0f);
+  }
+}
+
 // THE LOWEST SCALE. One log line each time a zoom in comes to the lowest
 // scale (god_near_units_per_meter_x10): the size of a villager in the room,
 // and the land under the head. Below the life size scale the land stays at
@@ -1676,10 +1767,22 @@ void ApplyGodSteps() {
     PoseWorld(pose, room, head, at);
     GodZoomPoint(pose, room, head, &point);
     const float step = 1.0f + g_settings.god_zoom_pct * 0.01f;
-    const float ratio = zoom > 0 ? 1.0f / step : step;
+    const float wanted = zoom > 0 ? 1.0f / step : step;
     const float before = pose.scale;
-    const float used = GodZoomAbout(pose, point.pivot, ratio, GodLowest(),
-                                    GodHighest(), &next);
+    SolidStop stop;
+    const float ratio =
+        ZoomSolidRatio(pose, room, head, point.pivot, wanted, &stop);
+    const float used = ratio == 1.0f
+                           ? 1.0f
+                           : GodZoomAbout(pose, point.pivot, ratio,
+                                          GodLowest(), GodHighest(), &next);
+    if (stop.short_step) {
+      float full = before * wanted;
+      if (full < GodLowest()) full = GodLowest();
+      if (full > GodHighest()) full = GodHighest();
+      SayZoomSolid(stop, used == 1.0f, used == 1.0f ? before : full,
+                   next.scale, "the zoom step");
+    }
     if (used != 1.0f) {
       // The head moves over the land, and a hill there stays below it.
       const float sunk =
@@ -1729,7 +1832,7 @@ void ApplyGodSteps() {
       Help(kHelpZoom, kInputWheel);
     } else {
       ++g_god_refused;
-      if (ZoomLog()) {
+      if (!stop.short_step && ZoomLog()) {
         ModLog("god view     : the zoom is at its limit, %.1f units per meter",
                pose.scale);
       }
@@ -1996,6 +2099,7 @@ double Seconds() {
 // and the pair of TabletopGodCameraWritten gets the scale of the end. It is
 // false when the view is built again.
 void StopZoomHold(const char* cause, bool view_stays) {
+  g_hold_solid_said = false;
   g_hold.fresh = false;
   g_hold.push = 0.0f;
   if (!g_hold.active) return;
@@ -2171,13 +2275,24 @@ void ApplyGodZoomHold(double frame_seconds) {
     }
   }
   const float seconds = zoom_math::FrameSeconds(frame_seconds, kHoldFrameCap);
-  const float ratio = zoom_math::FrameRatio(
+  const float wanted = zoom_math::FrameRatio(
       push, step, g_settings.god_zoom_smooth_ms * 0.001f, seconds);
   ++g_hold.frames;
   g_hold.seconds += seconds;
-  TablePose next;
-  const float used = GodZoomAbout(pose, point.pivot, ratio, GodLowest(),
-                                  GodHighest(), &next);
+  TablePose next = pose;
+  SolidStop stop;
+  const float ratio =
+      ZoomSolidRatio(pose, room, head, point.pivot, wanted, &stop);
+  const float used = ratio == 1.0f
+                         ? 1.0f
+                         : GodZoomAbout(pose, point.pivot, ratio, GodLowest(),
+                                        GodHighest(), &next);
+  // One line for a hold that a solid stops.
+  if (stop.short_step && !g_hold_solid_said) {
+    g_hold_solid_said = true;
+    SayZoomSolid(stop, used == 1.0f, pose.scale, next.scale,
+                 "the smooth zoom");
+  }
   // At a limit of the scale, or in a frame with no time, nothing moves.
   if (used == 1.0f) return;
   // The head moves over the land, and a hill there stays below it.
@@ -3223,6 +3338,18 @@ bool TabletopOwnsView() {
 }
 
 float TabletopViewScale() { return TabletopOwnsView() ? g_scale : 0.0f; }
+
+// For head_blinder.cpp: how far from the head, in meters of the room, the
+// zoom wants the solids. Below twice the life size scale a zoom step can
+// bring a house to the head, and kZoomSolidReachM holds the houses that the
+// next step can bring. 0 when the zoom does not look at the solids.
+float TabletopZoomSolidReachM() {
+  if (!g_settings.god || g_settings.god_zoom_solid_stop == 0 ||
+      !TabletopOwnsView()) {
+    return 0.0f;
+  }
+  return g_scale < 2.0f * HeadPoseScale() ? kZoomSolidReachM : 0.0f;
+}
 
 // THE ROOM OF THE TABLE, for the hands and the spirits. The same numbers the
 // main camera call of this frame used, so the Hand and the picture agree.

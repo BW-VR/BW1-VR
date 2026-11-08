@@ -427,6 +427,31 @@ inline void LowestChecks() {
         sqrtf(off) * 100.0f, 0);
 }
 
+// A ZOOM THAT STOPS SHORT OF A SOLID (StepShare): a clearance that goes down
+// along the step, a step with no solid in the way, and a head that is
+// already nearer than the limit.
+inline void StepShareChecks() {
+  using namespace zoom_math;
+  printf("\nA zoom step that stops short of a solid\n");
+  // The clearance goes from 30 cm to -20 cm along the step.
+  const auto falls = [](float t) { return 0.30f - 0.50f * t; };
+  Near("the step stops where the head is 5 cm out", StepShare(falls, 0.05f),
+       0.5, 1e-5);
+  const auto open = [](float t) { return 0.30f + 0.10f * t; };
+  Check(StepShare(open, 0.05f) == 1.0f, "a step with no solid in the way goes "
+        "all the way", StepShare(open, 0.05f), 1);
+  const auto at = [](float t) { return 0.05f - 0.20f * t; };
+  Check(StepShare(at, 0.05f) < 1e-5f, "a head at the limit with the solid "
+        "coming nearer does not move", StepShare(at, 0.05f), 0);
+  // A head 2 cm out already may go on while it does not come nearer.
+  const auto away = [](float t) { return 0.02f + 0.10f * t; };
+  Check(StepShare(away, 0.05f) == 1.0f, "a head nearer than the limit may go "
+        "away from the solid", StepShare(away, 0.05f), 1);
+  const auto worse = [](float t) { return 0.02f - 0.10f * t; };
+  Check(StepShare(worse, 0.05f) < 1e-5f, "a head nearer than the limit does "
+        "not go nearer", StepShare(worse, 0.05f), 0);
+}
+
 inline void ZoomChecks() {
   using namespace table_math;
   using namespace zoom_math;
@@ -633,6 +658,7 @@ inline void ZoomChecks() {
   }
   ZoomPointChecks();
   LowestChecks();
+  StepShareChecks();
 }
 
 }  // namespace zoom_checks

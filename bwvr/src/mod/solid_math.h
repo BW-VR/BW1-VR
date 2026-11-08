@@ -281,4 +281,36 @@ inline float Distance(const Solid& s, const float p[3]) {
   return sqrtf(out) + (in < 0.0f ? in : 0.0f);
 }
 
+// THE WALLS OF A HOUSE BELOW THE LIFE SIZE SCALE (solid_house_inset_pct).
+// The box of the mesh of a house holds the eaves of its roof, which go past
+// its walls. At a small scale the player walks beside the walls, under the
+// eaves, so the box of a house gets smaller by share of each half size that
+// is level: an axis that points up less than kLevelAxis keeps its height.
+// share is from 0 (the whole box) to 0.5.
+const float kLevelAxis = 0.7f;
+
+inline void InsetLevel(Solid* s, float share) {
+  if (s->kind != kBox || !(share > 0.0f)) return;
+  if (share > 0.5f) share = 0.5f;
+  for (int j = 0; j < 3; ++j) {
+    if (fabsf(s->axis[j * 3 + 1]) < kLevelAxis) s->half[j] *= 1.0f - share;
+  }
+}
+
+// The solid nearest to a point: the least distance, in world units, and its
+// index in which (-1 with no solid, and then the distance is 1e30).
+inline float Least(const Solid* solids, int count, const float p[3],
+                   int* which) {
+  float least = 1e30f;
+  *which = -1;
+  for (int i = 0; i < count; ++i) {
+    const float d = Distance(solids[i], p);
+    if (d < least) {
+      least = d;
+      *which = i;
+    }
+  }
+  return least;
+}
+
 }  // namespace solid_math

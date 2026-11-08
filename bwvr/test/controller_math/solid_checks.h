@@ -299,6 +299,40 @@ inline void SolidChecks() {
     Near("a head over the trunk is out by the height", sm::Distance(trunk, over),
          2.0, 1e-4);
   }
+
+  // THE WALLS OF A HOUSE BELOW THE LIFE SIZE SCALE (InsetLevel): the level
+  // half sizes get smaller, the height stays, and a trunk does not change.
+  {
+    sm::Solid walls = House();
+    sm::InsetLevel(&walls, 0.2f);
+    Near("an inset of 20% makes the half width 8 units", walls.half[0], 8.0,
+         1e-5);
+    Near("the inset keeps the height", walls.half[1], 5.0, 1e-5);
+    Near("the inset makes the half depth 8 units", walls.half[2], 8.0, 1e-5);
+    const float eave[3] = {9.0f, 5.0f, 0.0f};
+    const float deep[3] = {4.0f, 5.0f, 0.0f};
+    Check(sm::Distance(house, eave) < 0.0f && sm::Distance(walls, eave) > 0.0f,
+          "a head under the eave is in the whole box and out of the walls",
+          sm::Distance(walls, eave), 1.0);
+    Near("a head deep in the house is still in the walls",
+         sm::Distance(walls, deep), -4.0, 1e-4);
+    sm::Solid trunk = Trunk();
+    sm::InsetLevel(&trunk, 0.2f);
+    Near("the inset does not change a trunk", trunk.radius, 2.0, 1e-6);
+    sm::Solid most = House();
+    sm::InsetLevel(&most, 0.9f);
+    Near("the inset is at most half of the box", most.half[0], 5.0, 1e-5);
+    // The nearest solid.
+    const sm::Solid two[2] = {House(), Trunk()};
+    const float p[3] = {0.0f, 12.0f, 0.0f};
+    int which = -2;
+    const float least = sm::Least(two, 2, p, &which);
+    Check(which == 0 && least > 1.99f && least < 2.01f,
+          "the nearest of a house and a trunk is the roof 2 units under the "
+          "head", least, 2.0);
+    sm::Least(two, 0, p, &which);
+    Check(which == -1, "no solid gives no index", which, -1);
+  }
 }
 
 }  // namespace solid_checks

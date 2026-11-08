@@ -731,14 +731,19 @@ if ($Kind -eq 'totem') {
     # villager is 1.6 m high, and the last one is at the limit. Then the grip
     # of the left hand lowers the land 80 cm, to 1.4 m below the head, so the
     # eyes are at the height of the eyes of a villager. Then the Hand 15 cm
-    # and 8 cm in front of the eyes (the near plane of 5 cm of the room), and
-    # five steps out to 7.6 units for each meter, past the life size scale.
-    # An eye picture at each place. The head looks straight ahead. Compare
-    # with -Set "god_near_units_per_meter_x10=75": the zoom stops at 7.5.
+    # and 8 cm in front of the eyes (the near plane of 5 cm of the room). A
+    # step that would put the head into a house stops 5 cm out of it, or is
+    # refused (god_zoom_solid_stop). Then the word "lean" puts the head 60 cm
+    # forward for 60 frames, toward the house that stopped the zoom, so the
+    # head blinder must cover the view there. Then five steps out, past the
+    # life size scale. An eye picture at each place. The head looks straight
+    # ahead. Compare with -Set "god_near_units_per_meter_x10=75" (the zoom
+    # stops at 7.5) and "god_zoom_solid_stop=0;solid_house_inset_pct=0" (the
+    # zoom goes into the house, and the blinder covers the view).
     # Give it -Set "backend=dxwrapper\ddraw.dll;test_frame_rate=60" for the
     # eye pictures.
     # The run takes 100 s by default, also in a test save: the steps go to
-    # frame 1990, and a run with test_frame_rate=60 must not end before them.
+    # frame 2060, and a run with test_frame_rate=60 must not end before them.
     if ($Plan -eq '') { $Plan = 'gostore,villager' }
     if ($Census -eq '') { $Census = '890' }
     if ($Seconds -eq 0) { $Seconds = 100; $given = $true }
@@ -748,11 +753,12 @@ if ($Kind -eq 'totem') {
         for ($f = 1060; $f -le 1360; $f += 30) { $Steps += " stick_up@$($f)+10" }
         $Steps += ' shot@1400+1 shot@1460+1 ' +
                   'lpoint@1480+1 lgrip@1500+130 lpoint@1530+1 lpoint@1560+1 lpoint@1590+1 shot@1660+1 ' +
-                  'point@1700+1 shot@1730+1 point@1760+1 shot@1790+1'
-        for ($f = 1830; $f -le 1950; $f += 30) { $Steps += " stick_down@$($f)+10" }
-        $Steps += ' shot@1990+1'
+                  'point@1700+1 shot@1730+1 point@1760+1 shot@1790+1 ' +
+                  'lean@1810+60 shot@1840+1 shot@1860+1'
+        for ($f = 1900; $f -le 2020; $f += 30) { $Steps += " stick_down@$($f)+10" }
+        $Steps += ' shot@2060+1'
     }
-    $keys = "$keys;god_zoom_about=2;fake_controller_left_points=-16,-30,50 -16,-60,50 -16,-90,50 -16,-110,50"
+    $keys = "$keys;god_zoom_about=2;fake_head_forward_cm=60;fake_controller_left_points=-16,-30,50 -16,-60,50 -16,-90,50 -16,-110,50"
 } elseif ($Kind -eq 'tglow') {
     # The glow on the mesh of a target (bwvr/docs/hand-model.md, "The glow on
     # the mesh of a target") in the light of the day of the test save. The
@@ -868,7 +874,7 @@ if ($Kind -eq 'tooltip') {
     $pattern = '^hand pick    : seek plan|^ui hint      : .*(tooltip|at the Hand)|^ui depth     : \d+ tooltips'
 }
 if ($Kind -eq 'small') {
-    $pattern = '^hand pick    : seek plan|^god view     : (on\.|zoomed|the zoom is|zoom check, the scene|the Hand is)|^near plane   :|^grab         :|^head blinder :|^tabletop     : the Z buffer'
+    $pattern = '^hand pick    : seek plan|^god view     : (on\.|zoomed|the zoom is|the zoom step|zoom check, the scene|the Hand is)|^hand land    : solid_house_inset_pct|^near plane   :|^grab         :|^head blinder :|^tabletop     : the Z buffer'
 }
 if ($Kind -eq 'tglow') {
     $pattern = '^hand pick    : seek plan|^target glow  : (the mesh|test: a batch|\S+ \S+ has no mesh)'

@@ -79,6 +79,9 @@ bool VignetteDrawBlinder(const blinder_math::BlinderPoint* points, int count);
 // kept, and the class of one for the log.
 int HandDirectSolids(void* objects[], solid_math::Solid out[], int max);
 const char* HandDirectSolidClass(void* object);
+// tabletop.cpp: how far from the head, in meters of the room, the zoom of
+// the God view wants the solids (god_zoom_solid_stop), 0 when it does not.
+float TabletopZoomSolidReachM();
 
 namespace {
 
@@ -270,7 +273,12 @@ bool HeadBlinderSolidPoint(float point[3], float* bound) {
     return false;
   }
   for (int k = 0; k < 3; ++k) point[k] = g_head[k];
-  *bound = kSolidNearM * g_head_scale;
+  // A zoom step near the lowest scale moves the head far over the land, so
+  // it needs the solids farther from the head. The overlay itself counts only
+  // the solids within kSolidNearM (KeepSolids).
+  float meters = TabletopZoomSolidReachM();
+  if (meters < kSolidNearM) meters = kSolidNearM;
+  *bound = meters * g_head_scale;
   return true;
 }
 

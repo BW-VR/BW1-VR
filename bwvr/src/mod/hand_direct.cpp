@@ -10053,6 +10053,26 @@ float g_solid_bound[3];
 int g_solid_wants = 0;
 uint64_t g_solid_points_frame = ~0ull;
 
+// THE WALLS OF A HOUSE BELOW THE LIFE SIZE SCALE (solid_house_inset_pct, 20).
+// The box of the mesh of a house holds the eaves of its roof. Below the life
+// size scale the player walks beside the walls, so the box of a house gets
+// smaller by this percent of each level half size (solid_math::InsetLevel).
+// A rock and a trunk keep their shape, and at the life size scale and above
+// a house keeps its whole box. 0 keeps the whole box at each scale.
+float HouseInset() {
+  static int pct = -1;
+  if (pct < 0) {
+    pct = IniKey("solid_house_inset_pct", 20);
+    if (pct < 0) pct = 0;
+    if (pct > 50) pct = 50;
+    ModLog("hand land    : solid_house_inset_pct=%d. %s", pct,
+           pct > 0 ? "Below the life size scale the box of a house is that "
+                     "much smaller across, so it is nearer to its walls"
+                   : "A house is the whole box of its mesh at each scale");
+  }
+  return pct * 0.01f;
+}
+
 int SolidPoints(float points[3][3], float bound[3]) {
   if (g_solid_points_frame != g_frame) {
     g_solid_points_frame = g_frame;
@@ -10117,6 +10137,11 @@ void LatchSolids() {
         s.half[k] = half[k];
       }
       for (int k = 0; k < 9; ++k) s.axis[k] = axis[k];
+      const float life = HeadPoseScale();
+      if (life > 0.0f && units < life * 0.9999f &&
+          strcmp(ClassName(candidate), "Rock") != 0) {
+        solid_math::InsetLevel(&s, HouseInset());
+      }
     }
     if (!solid_math::Counts(s, units)) continue;
     bool near_one = false;

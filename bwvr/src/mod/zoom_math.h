@@ -200,6 +200,30 @@ inline float LowestScale(int tenths, float life) {
   return static_cast<float>(tenths) * 0.1f;
 }
 
+// A ZOOM THAT STOPS SHORT OF A SOLID (god_zoom_solid_stop). clear(t) is the
+// clearance of the head from the solids, in meters of the room, after the
+// share t of a step: 0 is no step and 1 is the whole step. The step goes as
+// far as the clearance stays at need or more. A head that is already nearer
+// than need may go on while it does not come nearer. Gives the share of the
+// step, from 0 to 1. Twenty halvings find the limit within a millionth of
+// the step.
+template <typename Clear>
+inline float StepShare(Clear clear, float need) {
+  const float now = clear(0.0f);
+  const float floor = now < need ? now : need;
+  if (clear(1.0f) >= floor) return 1.0f;
+  float lo = 0.0f, hi = 1.0f;
+  for (int i = 0; i < 20; ++i) {
+    const float mid = 0.5f * (lo + hi);
+    if (clear(mid) >= floor) {
+      lo = mid;
+    } else {
+      hi = mid;
+    }
+  }
+  return lo;
+}
+
 // How many zoom steps a change of the scale is, for the log: 1 for a change
 // by the ratio of one step, in or out.
 inline float Steps(float from, float to, float step) {

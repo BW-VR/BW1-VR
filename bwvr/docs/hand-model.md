@@ -1512,6 +1512,7 @@ numbers, so the game's point and the drawn hand agree.
 | --- | --- | --- |
 | `hand_land_stop` | 1 | 1: a hand in the land is drawn on the land, and the Hand's point goes with it. 0: the drawn hands are the real hands also in the land, the land hides them, and only the Hand's point stops 5 mm over the land |
 | `hand_object_stop` | 1 | 1: a hand in a house, a rock or a tree trunk is drawn on its surface. 0: the drawn hands go into them |
+| `solid_house_inset_pct` | 20 | Below the life size scale the box of a house is this percent smaller across, so it is nearer to the walls under the eaves (`god-view.md`, section 2, "Houses at a small scale"). 0: the whole box at each scale |
 
 The debug page has the switches "Land stop" and "Object stop" in the group
 of the Hand.

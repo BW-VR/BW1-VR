@@ -998,6 +998,9 @@ void ReadSettings() {
     // The nearest zoom, in tenths: 10 is 1 unit for each meter, where a
     // villager is as high as the player. 75 is the life size scale.
     t.god_least_tenths = number("god_near_units_per_meter_x10", 10);
+    // 1: a zoom step stops 5 cm before the head goes into a house, a rock or
+    // a tree trunk. 0: the zoom does not look at the solids.
+    t.god_zoom_solid_stop = number("god_zoom_solid_stop", 1);
     // Where the player goes when the game puts its own camera at a place:
     // 1 follows the game, with the land point that the camera looks at
     // god_spawn_ahead_cm in front of the head. 0 builds the view only at the

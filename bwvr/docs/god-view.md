@@ -228,15 +228,52 @@ change of the land is a large change in the room: 0.5 units are 50 cm at 1
 unit per meter. So after a zoom in about a point that is not under the head,
 the land under the head can be 10 cm below it (`ZoomClearHead`) or far
 below it. With the land 1.4 to 1.6 m below the head,
-the player sees the village from the eyes of a villager. The head stops at
-houses as at each scale (section 5.9), so a house that the player walks into
-covers the view. The land of the game has cells of 10 units, which are 10 m at
+the player sees the village from the eyes of a villager.
+
+**Houses at a small scale.** The player walks among the houses there, so two
+rules keep a house from covering the view of a head that is not in it:
+
+- **The walls** (`solid_house_inset_pct`, 20). The box of the mesh of a house
+  holds the eaves of its roof, which go past its walls. Below the life size
+  scale the box of a house is 20 percent smaller across, in each level
+  direction, and it keeps its height (`solid_math.h`, `InsetLevel`). A house
+  of Land 1 has a half width of about 3.4 units, so the box comes about
+  0.7 units (70 cm at 1 unit per meter) nearer to the middle on each side. A
+  head under the eaves is then out of the house, and a head that is deep in
+  the house is still in it: the head blinder covers the view there, and the
+  drawn hand stops at the smaller box. A rock and a tree trunk keep their
+  shape. At the life size scale and above a house keeps its whole box,
+  because the Hand there touches its roof from above. 0 keeps the whole box
+  at each scale.
+- **The zoom stops at a house** (`god_zoom_solid_stop`, 1). A zoom step
+  brings the head nearer to the land, and with `god_zoom_about` 1 and 2 it
+  also moves the head over the land. So near the lowest scale a step can put
+  the head into a house. A step, and each frame of the smooth zoom, stops
+  where the head is 5 cm out of the nearest house, rock or trunk, which is
+  where the overlay of the head blinder starts (`StepShare` in
+  `zoom_math.h`). A step that cannot go at all is refused. A head that is
+  already nearer than 5 cm may zoom away from the solid, but not nearer. The
+  solids are the ones near the hands and the head of the frame before.
+  Below twice the life size scale (15 units per meter) the head wants them
+  from 1.5 m of the room, so a house that the next step brings to the head
+  is in the list. 0 lets a zoom step put the head into a house.
+
+The head blinder still covers the view when the player walks or leans into
+the walls of a house (section 5.9). The land of the game has cells of 10 units, which are 10 m at
 1 unit per meter, so the land looks flat and its texture is soft there.
 
 Below twice the life size scale (15 units per meter) the zoom check of each
 step has one more line: the height of the eye over the land, the near plane,
 the fog of the game and the overlay of the head blinder after the step. A
-zoom in that comes to the lowest scale logs one line, and it comes again
+zoom step that a solid stops logs one line, and a hold of the smooth zoom
+logs one line for each hold:
+
+```
+god view     : the zoom step stops short at 1.93 units per meter, not 1.73: the whole step puts your head 38.8 cm into the Abode 13AF65F0, so your head stays 5 cm out of it (god_zoom_solid_stop=1)
+god view     : the zoom step is refused at 1.93 units per meter: it puts your head 21.0 cm into the Abode 13AF65F0 (god_zoom_solid_stop=1)
+```
+
+A zoom in that comes to the lowest scale logs one line, and it comes again
 only after the scale went above it:
 
 ```
@@ -1086,6 +1123,7 @@ under the land. As in Half-Life: Alyx, an opaque overlay then fills the view
 | --- | --- | --- |
 | `head_blinder` | 1 | 1: an opaque overlay when the head goes into the land, and the floor of the head is at the height of the head at the recenter pose. 0: the eyes see under the land, and the floor of the head follows the head. The launcher row "Head in the land". The switch "Head blinder" of the debug page |
 | `head_blinder_objects` | 1 | 1: a house, a rock and a tree trunk cover the view as the land does. 0: only the land counts, and the eyes see into a house. The switch "Blinder solids" of the debug page |
+| `solid_house_inset_pct` | 20 | Below the life size scale the box of a house is this percent smaller across, nearer to its walls (section 2, "Houses at a small scale"). It is the same box for the drawn hand (`hand-model.md`). 0 to 50. 0: the whole box at each scale |
 
 The log has one line when the overlay starts, with the clearance of the
 head, what it is near (the land, or the class and the address of a solid)
@@ -1623,6 +1661,7 @@ section 5.8.
 | `god_zoom_about_test` | 0 | A test with no key press: at this frame of the controllers the test key of `god_zoom_about` acts. 0 is never |
 | `god_ground_step_cm` | 5 | One ground step, 1 to 50 |
 | `god_far_units_per_meter` | 4000 | The farthest zoom, 10 to 8000 |
+| `god_zoom_solid_stop` | 1 | 1: a zoom step stops 5 cm before the head goes into a house, a rock or a tree trunk, or it is refused (section 2, "Houses at a small scale"). 0: a zoom step can put the head into a house |
 | `god_near_units_per_meter_x10` | 10 | The nearest zoom, in tenths of a unit per meter (section 2, "The limits"). 10: 1 unit per meter, where a villager is as high as the player. 75: the life size scale. 0: the life size scale of `head_units_per_meter_x10` |
 | `god_spawn` | 1 | 1: the player goes where the game puts its own camera (section 15). 0: the view is built at the start, a load and the end of a story only, with the focus under the recenter pose |
 | `god_spawn_ahead_cm` | 50 | How far the land point that the game camera looks at is in front of the head, 0 to 150 |
@@ -1727,6 +1766,14 @@ checks the pure functions at 7.5, 100 and 2000 units per meter:
   under the head moves a half and a third of the distance to the point, and
   the step back puts it under the head again. The point of a hold keeps its
   room point while the head turns 9 degrees.
+- The step that stops short of a solid (`zoom_checks.h`, `StepShareChecks`):
+  a clearance that goes from 30 cm to -20 cm stops the step at its half, a
+  step with no solid in the way goes all the way, and a head nearer than
+  5 cm may go away from the solid but not nearer. The walls of a house
+  (`solid_checks.h`): an inset of 20 percent makes the half width of a box of
+  10 units 8 units and keeps its height, a head under the eave is out of the
+  walls, a head deep in the house is still in them, a trunk does not change,
+  and the inset is at most a half.
 - The lowest scale (`zoom_checks.h`, `LowestChecks`): the default key gives
   1 unit per meter, 75 and 0 give 7.5, and a villager of 1.6 units is 1.6 m
   high there. 12 steps in from 100 stop at 1, 5 steps out from 1 give 7.59,

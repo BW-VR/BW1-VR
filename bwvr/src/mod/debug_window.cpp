@@ -287,7 +287,11 @@ int Groups() {
 unsigned char KindIn(const WindowRows* src, int i, int value) {
   int count = src->value_count(i);
   if (count < 0 && src->picture == nullptr) count = 0;
-  return static_cast<unsigned char>(KindOfRow(count, value == kDebugCannot));
+  int kind = KindOfRow(count, value == kDebugCannot);
+  if (kind == kRowToggle && src->arrows != nullptr && src->arrows(i)) {
+    kind = kRowArrows;
+  }
+  return static_cast<unsigned char>(kind);
 }
 
 unsigned char KindOf(int i, int value) { return KindIn(g_src, i, value); }
@@ -475,6 +479,8 @@ struct Look {
   int list_part;
   uint8_t item[kListMost];
   uint8_t button;
+  // The bottom row is a notice (WindowRows::idle_now): it has an icon.
+  bool notice;
 };
 const uint8_t kNoButton = 255;
 Look g_drawn;
@@ -742,6 +748,57 @@ void DrawList(const Look& look) {
   }
 }
 
+// THE ICON OF A NOTICE: a round arrow of red ink (the wax of the seals),
+// as the sign of a restart, at cx, cy, with 4 by 4 samples a pixel.
+void NoticeIcon(const card_scroll::Picture& to, float cx, float cy) {
+  const float radius = 12.0f, half = 2.1f;
+  const float red[3] = {150.0f, 38.0f, 26.0f};
+  // The arc goes from 50 to 320 degrees (y goes down), and the head of the
+  // arrow is at its end.
+  const float end = 320.0f * 3.14159265f / 180.0f;
+  const float hx = cx + radius * cosf(end), hy = cy + radius * sinf(end);
+  // The head points along the arc: the tangent at its end.
+  const float tx = -sinf(end), ty = cosf(end);
+  const float nx = cosf(end), ny = sinf(end);
+  const float tip[2] = {hx + tx * 8.0f, hy + ty * 8.0f};
+  const float b1[2] = {hx + nx * 6.5f, hy + ny * 6.5f};
+  const float b2[2] = {hx - nx * 6.5f, hy - ny * 6.5f};
+  const auto inside = [](const float p[2], const float a[2], const float b[2],
+                         const float c[2]) {
+    const auto side = [](const float* u, const float* v, const float* w) {
+      return (v[0] - u[0]) * (w[1] - u[1]) - (v[1] - u[1]) * (w[0] - u[0]);
+    };
+    const float d1 = side(a, b, p), d2 = side(b, c, p), d3 = side(c, a, p);
+    return (d1 >= 0 && d2 >= 0 && d3 >= 0) || (d1 <= 0 && d2 <= 0 && d3 <= 0);
+  };
+  for (int y = static_cast<int>(cy - 17); y <= static_cast<int>(cy + 17); ++y) {
+    for (int x = static_cast<int>(cx - 17); x <= static_cast<int>(cx + 17);
+         ++x) {
+      if (x < 0 || y < 0 || x >= to.width || y >= to.height) continue;
+      int in = 0;
+      for (int sy = 0; sy < 4; ++sy) {
+        for (int sx = 0; sx < 4; ++sx) {
+          const float p[2] = {x + (sx + 0.5f) / 4.0f, y + (sy + 0.5f) / 4.0f};
+          const float dx = p[0] - cx, dy = p[1] - cy;
+          float angle = atan2f(dy, dx);
+          if (angle < 0.0f) angle += 6.2831853f;
+          const float r = sqrtf(dx * dx + dy * dy);
+          const bool arc = fabsf(r - radius) <= half &&
+                           angle >= 50.0f * 3.14159265f / 180.0f &&
+                           angle <= end;
+          if (arc || inside(p, tip, b1, b2)) ++in;
+        }
+      }
+      if (in == 0) continue;
+      const float a = in / 16.0f;
+      uint8_t* d = to.bgra + (static_cast<size_t>(y) * to.pitch + x) * 4;
+      d[0] = static_cast<uint8_t>(red[2] * a + d[0] * (1.0f - a) + 0.5f);
+      d[1] = static_cast<uint8_t>(red[1] * a + d[1] * (1.0f - a) + 0.5f);
+      d[2] = static_cast<uint8_t>(red[0] * a + d[2] * (1.0f - a) + 0.5f);
+    }
+  }
+}
+
 // The words of the bottom row in the box: one line in the middle of the
 // box, or two lines of a smaller font when they do not fit in one.
 void StatusWords(const card_scroll::Picture& to, const wchar_t* words,
@@ -794,7 +851,7 @@ void Compose(const Look& look, uint64_t frame) {
     }
   }
   if (first || wcscmp(look.status, g_drawn.status) != 0 ||
-      look.button != g_drawn.button) {
+      look.button != g_drawn.button || look.notice != g_drawn.notice) {
     int n[4];
     NoteBox(n);
     kit::PageToCard(c, n);
@@ -804,6 +861,11 @@ void Compose(const Look& look, uint64_t frame) {
       kit::Button(c, r, look.button, g_page->button, g_label_font, 41);
     }
     NoteBoxBeside(look.button != kNoButton, n);
+    if (look.notice) {
+      NoticeIcon(kit::CardPicture(c), n[0] + 15.0f,
+                 (n[1] + n[3]) * 0.5f);
+      n[0] += 40;
+    }
     StatusWords(kit::CardPicture(c), look.status, n);
     ++drawn;
   }
@@ -1149,6 +1211,7 @@ void BuildLook(Look* look) {
     wcscpy_s(look->status, L"Each button has its default job now.");
   } else if (idle_now != nullptr) {
     wcsncpy_s(look->status, idle_now, _TRUNCATE);
+    look->notice = true;
   } else if (g_page != nullptr) {
     g_page->status(-1, look->status, 128);
   } else if (hover_row >= 0 && hover_row < g_rows &&
@@ -1166,6 +1229,7 @@ void BuildLook(Look* look) {
 
 bool SameLook(const Look& a, const Look& b) {
   if (a.page != b.page || a.page_value != b.page_value ||
+      a.notice != b.notice ||
       a.list_part != b.list_part || a.button != b.button ||
       memcmp(a.item, b.item, sizeof(a.item)) != 0) {
     return false;

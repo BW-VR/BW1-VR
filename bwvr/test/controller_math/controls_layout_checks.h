@@ -102,6 +102,61 @@ inline void ControlsLayoutChecks() {
         "two lines that cross, lines with a shared end, and lines apart", 0,
         0);
 
+  // THE ROUTE: the controls take the rows in their order from the top, a
+  // control takes one row, and no two parts of the leaders cross when Route
+  // says so. Most sets of 6 or 7 controls on 7 rows have a route.
+  {
+    int routed = 0, wrong = 0;
+    for (int trial = 0; trial < 300; ++trial) {
+      const bool left = trial % 2 == 0;
+      const int n = 6 + trial % 2;
+      const int rows = 7;
+      float anchors[lay::kMostBoxes][2], slot_y[lay::kMostBoxes];
+      int col[2], boxes[2];
+      lay::ModelColumn(left, &col[0], &col[1]);
+      lay::BoxColumn(left, &boxes[0], &boxes[1]);
+      for (int i = 0; i < n; ++i) {
+        anchors[i][0] = random(col[0] + 20.0f, col[1] - 20.0f);
+        anchors[i][1] = random(200.0f, 650.0f);
+      }
+      for (int r = 0; r < rows; ++r) slot_y[r] = lay::SlotMiddle(r, rows, 420.0f);
+      const float start_x = static_cast<float>(left ? boxes[0] : boxes[1]);
+      const float knee_x = start_x;
+      int row_of[lay::kMostBoxes];
+      float st[lay::kMostBoxes][2], kn[lay::kMostBoxes][2],
+          en[lay::kMostBoxes][2];
+      if (!lay::Route(anchors, n, knee_x, start_x, slot_y, rows, row_of, st,
+                      kn, en)) {
+        continue;
+      }
+      ++routed;
+      for (int u = 0; u < n; ++u) {
+        for (int w = 0; w < n; ++w) {
+          if (u == w) continue;
+          if (row_of[u] == row_of[w]) ++wrong;
+          if (anchors[u][1] < anchors[w][1] && row_of[u] > row_of[w]) ++wrong;
+          if (lay::Cross(st[u], kn[u], st[w], kn[w]) ||
+              lay::Cross(kn[u], en[u], kn[w], en[w]) ||
+              lay::Cross(st[u], kn[u], kn[w], en[w])) {
+            ++wrong;
+          }
+        }
+      }
+    }
+    Check(wrong == 0 && routed > 100,
+          "in 300 sets of 6 or 7 controls, each routed set has one row for "
+          "each control, in the order of the controls from the top, and no "
+          "two parts of its leaders cross", routed, 300);
+    int rows_l[4], rows_r[4];
+    lay::BoxRect(true, 0, 7, 420.0f, rows_l);
+    lay::BoxRect(false, 0, 7, 420.0f, rows_r);
+    Check(rows_l[1] == rows_r[1] &&
+              fabsf(lay::SlotMiddle(0, 7, 420.0f) -
+                    (rows_l[1] + rows_l[3]) * 0.5f) < 0.01f,
+          "the rows of the two sides are at the same heights", rows_l[1],
+          rows_r[1]);
+  }
+
   // THE PARTS of the page: a box of each side.
   bool left = false;
   int box = -1;
@@ -111,15 +166,15 @@ inline void ControlsLayoutChecks() {
             2 * lay::kMostBoxes <= debugwin_math::kPageParts,
         "the parts of the boxes of the two sides", lay::PartOf(false, 2), 10);
 
-  // THE VIEW: the eye is above the controller and at its inner side, and
-  // the two sides are mirrors.
+  // THE VIEW: the eye is in front of the controller, above it and at its
+  // inner side, and the two sides are mirrors.
   float r[3], l[3];
   lay::EyeDirection(false, r);
   lay::EyeDirection(true, l);
-  Check(r[0] < 0.0f && r[1] > 0.0f && r[2] == 0.0f && l[0] == -r[0] &&
+  Check(r[0] < 0.0f && r[1] > 0.0f && r[2] < 0.0f && l[0] == -r[0] &&
             fabsf(r[0] * r[0] + r[1] * r[1] + r[2] * r[2] - 1.0f) < 1e-5f,
-        "the eye sees the right controller from above and its inner side, "
-        "and the left one as its mirror", r[0], -0.65);
+        "the eye sees the right controller from the front, above and its "
+        "inner side, and the left one as its mirror", r[0], -0.73);
 
   // THE FIT of a picture into the box of a model: it fills the box on one
   // side, with its margin, in the middle.

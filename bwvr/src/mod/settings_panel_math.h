@@ -221,6 +221,13 @@ inline int ValueCount(const wchar_t* values) {
   return n;
 }
 
+// A TOGGLE is a row whose two values are "Off" and "On" (a slot with a knob
+// of wax). A row of two other values (In steps, Smooth) is a choice of two
+// ways, so it has the arrows of each other choice.
+inline bool IsToggle(const wchar_t* values) {
+  return ValueCount(values) == 2 && wcsncmp(values, L"Off=", 4) == 0;
+}
+
 // Value `index` of the list: its word into `word` and its number into
 // `value`. False when the list has no such value.
 inline bool ValueAt(const wchar_t* values, int index, wchar_t* word,

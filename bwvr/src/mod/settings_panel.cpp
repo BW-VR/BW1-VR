@@ -303,6 +303,11 @@ const wchar_t* IdleNow() {
   return restart ? kRestartLine : nullptr;
 }
 
+// Two values that are not off and on: the arrows of a choice.
+bool Arrows(int i) {
+  return !IsControls(i) && !IsToggle(kTable[i].values);
+}
+
 const WindowPage* PageOf(int group) {
   return group == ControlsTab() ? ControlsPage() : nullptr;
 }
@@ -404,6 +409,7 @@ const WindowRows kSettingsRows = {
     FixedWord,
     IdleNow,
     PageOf,
+    Arrows,
 };
 
 // --- the welcome page ------------------------------------------------------------

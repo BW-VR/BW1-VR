@@ -2555,9 +2555,11 @@ program.
 | Hands | Gesture trail | `gesture_trail` | Off, On |
 | Controls | The page of 24.6 | `button_map_hand`, `button_map_other` | A job for each button |
 
-A row with two values is a toggle, with the "off" value first, so the knob
-is at the left for it. A row with more values has two arrows, and a step
-goes round the list. A value in `bwvr.ini` that the list does not have shows
+A row of Off and On is a toggle, with Off first, so the knob is at the left
+for it. Each other row has two arrows, and a step goes round the list. So
+Smooth zoom (In steps, Smooth) has arrows: it is a choice of two ways, not
+a thing that is on or off, and a knob of wax would read as on and off
+(`settings_math::IsToggle`, `WindowRows::arrows`). A value in `bwvr.ini` that the list does not have shows
 as its number, and the right arrow goes to the first value of the list.
 
 **The settings with no row.** These keys still act, and the window does not
@@ -2581,8 +2583,9 @@ its label.
 **The restart.** A row that acts at the next start (`grab_hand`) has no
 words of its own. While its value is not the value of the start of the
 game, the bottom row of the window says "Restart the game to use the
-changes." at its left, in place of "Point at a setting to read what it
-does." The words of a change show there first for 2.5 s.
+changes." at its left, after a round arrow of red ink, in place of "Point at
+a setting to read what it does." The icon tells a notice from a help line.
+The words of a change show there first for 2.5 s.
 
 ### 24.2 A change
 
@@ -2689,36 +2692,46 @@ Each controller has a half of the page:
 | left model | left boxes | right boxes | right model |
 ```
 
-- **The headers.** "Left" and "Right" over the two columns of boxes, and
-  under them "Hand" or "Other hand".
+- **The headers.** "Left hand" and "Right hand" over the two halves, and
+  the small word "Main" under the hand of the Hand.
 - **The models** are the models of the controllers of the hints
   (`hint_model.cpp`, the WebXR Input Profiles), drawn on the CPU: a faint
   wash of ink for the body, a darker wash for the controls, the light from
   above, and an outline of ink at the edges, in the look of the parchment.
-  The eye is above each controller and at its inner side, so the face
-  buttons show, and the trigger and the grip face the boxes. Each model fits
-  a box of 190 by 644 pixels at the outer side of its half. A controller
+  The eye is in front of each controller, above it and at its inner side,
+  as a player knows the controller, so the face buttons and the stick face
+  the eye and the trigger shows at the side toward the boxes. A soft light
+  comes from the upper left, and a face that turns away from the eye is
+  darker. Each button is a part of its own in a darker ink. Each model fits
+  a box of 196 by 644 pixels at the outer side of its half. A controller
   with no model has the drawing of `controller_art_math.h` in its place.
 - **The boxes**, one for each control of the kind: the trigger, the grip,
   the stick, the stick click, the face buttons and the menu button. A box
   has the name of the control in small capitals ("Y button", "Stick
-  click") over its job ("Ring"). The box of a button that can take a
-  different job is a key with a mark that points down. The box of a control
-  that keeps its job (the trigger, the grip, the stick, the pad click of a
-  Vive wand) has no key, and its words are lighter.
-- **The leaders.** A line of ink goes from each box to its control on the
-  model, with a dot of ink on the control. The dot is at the middle of the
-  pixels of that control in the picture, so it is on a part of the control
-  that the eye sees. The stick and the stick click share the stick: the
-  dot of the click is nearer to the top of the stick. A control that the
-  model does not have (the menu button of a Touch Plus model) has a box
-  with no leader. The boxes have fixed places in their column, round the
-  middle of the model, and the controls go to the boxes so that the sum of
-  the lengths of the leaders is the least (`LeaderOrder`). Two straight
-  lines of such an order never cross.
-- **Under the ray** a box is gold, and its leader and its control on the
-  model are gold too. The bottom row says the control and its job, and
-  "Pull the trigger to change it." or "This control always has this job."
+  click") over its job ("Ring", or "Not used" for a control with no job).
+  The box of a button that can take a different job is a key with a mark
+  that points down. The box of a control that keeps its job (the trigger,
+  the grip, the stick, the pad click of a Vive wand) has a plain frame of
+  thin ink with no mark, and its words are a little lighter, so it reads as
+  a fact and not as a control that does not work.
+- **The rows.** The boxes of both sides are on one grid: as many rows as
+  the side with the most controls, at the same heights.
+- **The leaders.** A straight line of ink goes from the side of each box
+  that faces the model to its control, and ends in a small ring on the
+  control. The ring is at the middle of the pixels of that control in the
+  picture, so it is on a part of the control that the eye sees. The stick
+  and the stick click share the stick: the ring of the click is nearer to
+  the top of the stick. A control that the model does not have (the menu
+  button of a Touch Plus model) has a box with no leader. The controls take
+  the rows in their order from the top of the model, each as near to its
+  own height as the rows let it (`Route`), so the lines are short and run
+  side by side, and a line crosses the body only to reach a button on the
+  face. When two lines would cross, the side uses the order of the least
+  length (`LeaderOrder`): two straight lines of such an order never cross.
+- **Under the ray** a box is gold, and its leader, its ring and its
+  control on the model are gold too. The bottom row says the control and
+  its job ("Left Y: Ring"), with "(always)" for a control that keeps its
+  job.
 
 **A change.** A pull of the trigger on the box of a button opens a list
 under the box (above it at the foot of the page): a small scroll of paper
@@ -2744,7 +2757,7 @@ controllers are known and both models are loaded
 (`ControlsPageWarmFrame`), so the first show of the page copies them. The
 page waits for the end of the thread before it uses them. A new picture of
 the page (a new box under the ray, a list, a change) lays the pictures, the
-leaders and the boxes again: about 4 ms.
+leaders and the boxes again: about 5 ms.
 
 | Key | Default | Meaning |
 | --- | --- | --- |
@@ -2761,17 +2774,18 @@ The log has the tag `controls`, and the map has lines of the tag
 ```
 controllers  : the right controller is a Quest Touch controller (profile "/interaction_profiles/oculus/touch_controller"). Its buttons for the jobs: A, B, Stick click, frame 2
 controls     : panel_warm=1: the models of the controllers are loaded (meta-quest-touch-plus and meta-quest-touch-plus), so a thread of the mod draws their pictures for the page Controls, frame N
-controls     : the page with the models (meta-quest-touch-plus and meta-quest-touch-plus, parchment): part 0 left Stick click: Recenter (a list), part 1 left Y button: Ring (a list), part 2 left Trigger: No job, ...
+controls     : the page with the models (meta-quest-touch-plus and meta-quest-touch-plus, parchment): part 0 left Stick click: Recenter (a list), part 1 left Stick: Walk, part 2 left Y button: Ring (a list), part 3 left Trigger: Not used, ...
 controls     : a picture of the page took 3.65 ms, frame 731
-settings     : the trigger presses the part 1 of the page: its list of 4 items opens, frame 740
+settings     : the trigger presses the part 2 of the page: its list of 4 items opens, frame 740
 controls     : the list of Left Y: it goes from Ring to Recenter, and Left stick click takes Ring. button_map_other=1324 is in bwvr.ini. It acts when each button is up, frame 760
 controllers  : the new map of the buttons acts now: button_map_hand=1234, button_map_other=1324, frame 761
 controls     : Reset Defaults: each button has its job as made. button_map_hand=1234 and button_map_other=1234 are in bwvr.ini, frame 902
 ```
 
 The math checks are in `test/controller_math/controls_layout_checks.h` (the
-columns, the boxes, 300 sets of leaders with no two that cross, the parts,
-the view and the fit of a model), `panel_raster_checks.h` (the drawing on the
+columns, the boxes, the grid, 300 sets of leaders with no two that cross
+for each of `LeaderOrder` and `Route`, the parts, the view and the fit of a
+model), `panel_raster_checks.h` (the drawing on the
 CPU), `debug_window_checks.h` (the parts of a page, the list and the button)
 and `button_map_checks.h` (the kinds, the maps and the jobs). The desktop run
 is `village_run.ps1 -Kind controls` (`tools/desk/README.md`). A desktop run

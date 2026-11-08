@@ -242,6 +242,16 @@ inline void SettingsPanelChecks() {
           "also has Cards", TabCount(true), 2);
   }
 
+  // THE TOGGLES: only the rows of Off and On. Smooth zoom (In steps,
+  // Smooth) is a choice of two ways, with arrows.
+  Check(IsToggle(kTable[kGestureTrail].values) &&
+            IsToggle(kTable[kTeleport].values) &&
+            !IsToggle(kTable[kZoomSmooth].values) &&
+            !IsToggle(kTable[kSnapTurn].values) &&
+            !IsToggle(kTable[kCardStyle].values),
+        "a toggle is a row of Off and On, and the other rows have arrows", 0,
+        0);
+
   // THE RESTART. A change of a row that acts at the next start asks for a
   // restart until it is back at the value of the start.
   {

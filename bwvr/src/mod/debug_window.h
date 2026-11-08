@@ -104,6 +104,9 @@ struct WindowRows {
   // Null, or the page of a group that is one picture, else null for a
   // group of rows.
   const WindowPage* (*page)(int group);
+  // Null, or true for a row with two values that has the two arrows of a
+  // choice in place of a toggle: two values that are not off and on.
+  bool (*arrows)(int i);
 };
 const int kWindowSlots = 2;
 

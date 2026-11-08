@@ -13,14 +13,23 @@
 //
 //   | left model | left boxes | right boxes | right model |
 //
-// The model is seen from above and from its inner side, so the face buttons
-// show, and the trigger and the grip (at the inner side) face the boxes.
+// The model is seen as a player knows it: from the front, from above and
+// from its inner side, with the face buttons and the stick toward the eye,
+// and the trigger and the grip (at the inner side) toward the boxes.
 //
-// THE LEADERS. Each box has a line of ink to its control on the model. The
-// boxes have fixed places in their column, and the controls go to the boxes
-// so that the sum of the lengths of the lines is the least (LeaderOrder). Two
-// straight lines of such an order never cross: when two lines cross, a swap
-// of their two boxes makes both lines shorter.
+// THE GRID. The boxes of both sides are on the same rows (SlotTop): as many
+// rows as the side with the most controls has.
+//
+// THE LEADERS (Route). Each box has a straight line of ink from the side of
+// the box that faces the model to its control. The controls take the rows
+// in their order from the top of the model, each as near to its own height
+// as the rows let it, so the lines are short and run side by side. The boxes
+// are next to the side of the model that faces them, where the trigger and
+// the grip are, so a line crosses the body only to reach a button on the
+// face. When two lines still cross (two controls at one height), the caller
+// uses the order of the least length (LeaderOrder): two straight lines of
+// such an order never cross, because a swap of the boxes of two lines that
+// cross makes both lines shorter.
 
 #pragma once
 
@@ -39,10 +48,10 @@ const int kHeadBottom = 82;
 
 // The column of boxes and the box of the model of each side. x0 and x1 in
 // pixels of the page.
-const int kModelWidth = 190;
-const int kBoxWidth = 164;
-const int kSideGap = 6;     // from the model to its boxes
-const int kMiddleGap = 12;  // between the two columns of boxes
+const int kModelWidth = 196;
+const int kBoxWidth = 160;
+const int kSideGap = 5;     // from the model to its boxes
+const int kMiddleGap = 10;  // between the two columns of boxes
 const int kModelTop = 100;
 const int kModelBottom = 744;
 inline void ModelColumn(bool left, int* x0, int* x1) {
@@ -80,6 +89,12 @@ inline void BoxRect(bool left, int i, int count, float middle, int out[4]) {
   out[1] = BoxTop(i, count, middle);
   out[3] = out[1] + kBoxHeight;
 }
+// THE ROWS of the grid: `rows` rows round `middle`, the same for both sides.
+// The answer is the middle of row i.
+inline float SlotMiddle(int i, int rows, float middle) {
+  return BoxTop(i, rows, middle) + kBoxHeight * 0.5f;
+}
+
 // The point of a box where its leader starts: the middle of its side that
 // faces the model.
 inline void LeaderStart(bool left, const int box[4], float* x, float* y) {
@@ -149,6 +164,88 @@ inline bool Cross(const float a[2], const float b[2], const float c[2],
          ((d3 > 0.0f && d4 < 0.0f) || (d3 < 0.0f && d4 > 0.0f));
 }
 
+// THE ROUTE of the leaders of one side. anchors[k] is the point of control
+// k on the model, start_x the x of the side of the boxes that faces the
+// model, and slot_y the middles of the `rows` rows. row_of[k] gets the row
+// of control k, and the points of its line go into start and end. knee_x
+// gives a knee: a line from the box goes level to knee_x at the height of
+// its row, and then to its control. With knee_x equal to start_x the line is
+// straight. The heights that the rows follow keep kKneeGap apart. False when
+// two lines cross, or when the side has more controls than rows.
+const float kKneeGap = 10.0f;
+inline bool Route(const float anchors[][2], int count, float knee_x,
+                  float start_x, const float slot_y[], int rows, int row_of[],
+                  float start[][2], float knee[][2], float end[][2]) {
+  if (count <= 0) return true;
+  if (count > rows || count > kMostBoxes || rows > kMostBoxes) return false;
+  // The controls from the top of the model.
+  int order[kMostBoxes];
+  for (int k = 0; k < count; ++k) order[k] = k;
+  for (int i = 1; i < count; ++i) {
+    for (int j = i; j > 0 && anchors[order[j]][1] < anchors[order[j - 1]][1];
+         --j) {
+      const int t = order[j];
+      order[j] = order[j - 1];
+      order[j - 1] = t;
+    }
+  }
+  float ky[kMostBoxes];
+  for (int j = 0; j < count; ++j) {
+    ky[j] = anchors[order[j]][1];
+    if (j > 0 && ky[j] < ky[j - 1] + kKneeGap) ky[j] = ky[j - 1] + kKneeGap;
+  }
+  // The rows in the same order, with the least sum of the heights from a
+  // row to its knee: a table of the first j controls in the first r rows.
+  float best[kMostBoxes + 1][kMostBoxes + 1];
+  bool take[kMostBoxes + 1][kMostBoxes + 1];
+  for (int j = 0; j <= count; ++j) {
+    for (int r = 0; r <= rows; ++r) {
+      best[j][r] = 1e30f;
+      take[j][r] = false;
+    }
+  }
+  for (int r = 0; r <= rows; ++r) best[0][r] = 0.0f;
+  for (int j = 1; j <= count; ++j) {
+    for (int r = j; r <= rows; ++r) {
+      const float skip = best[j][r - 1];
+      const float use = best[j - 1][r - 1] + fabsf(slot_y[r - 1] - ky[j - 1]);
+      if (use <= skip) {
+        best[j][r] = use;
+        take[j][r] = true;
+      } else {
+        best[j][r] = skip;
+      }
+    }
+  }
+  for (int j = count, r = rows; j > 0; --r) {
+    if (take[j][r]) {
+      row_of[order[j - 1]] = r - 1;
+      --j;
+    }
+  }
+  for (int j = 0; j < count; ++j) {
+    const int k = order[j];
+    start[k][0] = start_x;
+    start[k][1] = slot_y[row_of[k]];
+    knee[k][0] = knee_x;
+    knee[k][1] = slot_y[row_of[k]];
+    end[k][0] = anchors[k][0];
+    end[k][1] = anchors[k][1];
+  }
+  for (int a = 0; a < count; ++a) {
+    for (int b = a + 1; b < count; ++b) {
+      const float* pa[2][2] = {{start[a], knee[a]}, {knee[a], end[a]}};
+      const float* pb[2][2] = {{start[b], knee[b]}, {knee[b], end[b]}};
+      for (int i = 0; i < 2; ++i) {
+        for (int j = 0; j < 2; ++j) {
+          if (Cross(pa[i][0], pa[i][1], pb[j][0], pb[j][1])) return false;
+        }
+      }
+    }
+  }
+  return true;
+}
+
 // --- the parts of the page -------------------------------------------------------
 
 // The parts of the page for the hit test of the window: box i of the left
@@ -166,13 +263,13 @@ inline bool SideOfPart(int part, bool* left, int* box) {
 // --- the view of a model ---------------------------------------------------------
 
 // THE VIEW of the right controller in its grip space (meters, y up, -z ahead
-// along the handle, +x to the right): the eye is above it and at its inner
-// side (-x), and -z of the grip is up in the picture. So the inner side of the right controller is at the left of its
-// picture, toward its boxes. The left controller has the mirror view (+x).
-// The answer is the direction from the middle of the model to the eye, of
-// length 1.
+// along the handle, +x to the right): the eye is in front of it (-z), above
+// it and at its inner side (-x), and -z of the grip is up in the picture. So
+// the inner side of the right controller is at the left of its picture,
+// toward its boxes. The left controller has the mirror view (+x). The answer
+// is the direction from the middle of the model to the eye, of length 1.
 inline void EyeDirection(bool left, float out[3]) {
-  const float x = left ? 0.85f : -0.85f, y = 1.0f, z = 0.0f;
+  const float x = left ? 1.25f : -1.25f, y = 1.0f, z = -0.5f;
   const float n = sqrtf(x * x + y * y + z * z);
   out[0] = x / n;
   out[1] = y / n;

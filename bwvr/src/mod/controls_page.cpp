@@ -947,6 +947,7 @@ struct SidePicture {
   bool has[art::kControls];
   float anchor[art::kControls][2];  // on the page
   float middle;                     // the y of the middle of the picture
+  float edge;  // the x of the side of the model that faces the boxes
   double ms;
 };
 
@@ -1024,6 +1025,9 @@ bool AllocPicture(SidePicture* p, int w, int h) {
   return true;
 }
 
+// The middle of the page: a picture at its left is of the left controller.
+const int kit_page_half = lay::kPageWidth / 2;
+
 // The anchor of each control: the middle of its pixels on the picture. The
 // stick click has the pixels of the stick, so its anchor is near the top of
 // the stick, and the anchor of the stick is a little lower.
@@ -1054,6 +1058,18 @@ void Anchors(SidePicture* p) {
       p->anchor[c][1] = static_cast<float>(p->box[1] + sy[c] / sw[c]);
     }
   }
+  // The side of the model that faces its boxes: the right of the left
+  // model, the left of the right model.
+  const bool left_side = p->box[0] < kit_page_half;
+  int most = -1, least = w;
+  for (int y = 0; y < h; ++y) {
+    for (int x = 0; x < w; ++x) {
+      if (p->bgra[(static_cast<size_t>(y) * w + x) * 4 + 3] < 96) continue;
+      if (x > most) most = x;
+      if (x < least) least = x;
+    }
+  }
+  p->edge = left_side ? p->box[0] + most + 1.0f : p->box[0] + least + 0.0f;
   if (p->has[art::kStick]) {
     p->has[art::kStickClick] = true;
     const float mx = p->anchor[art::kStick][0], my = p->anchor[art::kStick][1];
@@ -1066,10 +1082,10 @@ void Anchors(SidePicture* p) {
 }
 
 // The colors of the drawing of a model, in the ink of the cards.
-const float kBodyWash[3] = {0.62f, 0.49f, 0.34f};
-const float kControlWash[3] = {0.34f, 0.22f, 0.12f};
-const float kBodyAlpha = 0.42f;
-const float kControlAlpha = 0.80f;
+const float kBodyWash[3] = {0.90f, 0.76f, 0.55f};
+const float kControlWash[3] = {0.36f, 0.23f, 0.12f};
+const float kBodyAlpha = 0.94f;
+const float kControlAlpha = 1.0f;
 const float kOutlineInk[4] = {0.19f * 0.92f, 0.11f * 0.92f, 0.05f * 0.92f,
                               0.92f};
 
@@ -1129,8 +1145,15 @@ bool DrawModel(int side, const MeshCopy& m, SidePicture* out) {
     v.focal = fit[0] * ss;
     v.cx = (fit[1] - box[0]) * ss;
     v.cy = (fit[2] - box[1]) * ss;
-    // The light comes from above the eye.
-    float light[3] = {dir[0] * 0.6f, dir[1] * 0.6f + 0.8f, dir[2] * 0.6f};
+    // THE SHADE. A soft light from the upper left of the picture, a little
+    // from the eye, and a darker tone on a face that turns away from the
+    // eye, so the shape reads as a solid. A button is darker ink with its
+    // own light, so it reads as a part of its own.
+    float light[3], toward[3];
+    for (int a = 0; a < 3; ++a) {
+      light[a] = -0.55f * v.right[a] - 0.75f * v.down[a] - 0.45f * v.forward[a];
+      toward[a] = -v.forward[a];
+    }
     pr::Normalize(light);
     for (int tri = 0; tri < m.triangles; ++tri) {
       const int c = m.control[tri];
@@ -1149,8 +1172,14 @@ bool DrawModel(int side, const MeshCopy& m, SidePicture* out) {
         corner[k].x = q[0];
         corner[k].y = q[1];
         corner[k].depth = q[2];
-        const float lit = pr::Light(&m.normal[vi * 3], light, 0.3f);
-        const float level = 0.62f + 0.38f * lit;
+        const float* n = &m.normal[vi * 3];
+        const float lit = pr::Light(n, light, 0.0f);
+        float facing = pr::Dot(n, toward);
+        if (facing < 0.0f) facing = 0.0f;
+        const float level = c >= 0 ? (0.70f + 0.55f * lit) *
+                                         (0.80f + 0.20f * facing)
+                                   : (0.50f + 0.50f * lit) *
+                                         (0.72f + 0.28f * facing);
         for (int a = 0; a < 3; ++a) {
           corner[k].color[a] = wash[a] * level * alpha;
         }
@@ -1294,19 +1323,25 @@ struct PageBox {
   int control;
   bool can;  // a button with a list of jobs
   int rect[4];
+  // The leader: from the box to a knee and on to the control. With no
+  // route, the knee is the start (a straight line). leader false: no line.
+  bool leader;
+  float start[2], knee[2], end[2];
 };
 struct PageLayout {
   int count[2];
+  int rows;
+  bool routed[2];
   PageBox box[2][lay::kMostBoxes];
 };
 
 PageLayout Layout(const State& s) {
   PageLayout out;
   memset(&out, 0, sizeof(out));
+  int controls[2][lay::kMostBoxes];
   for (int side = 0; side < 2; ++side) {
     const bool left = side == 0;
     const int kind = s.kind[side];
-    int controls[lay::kMostBoxes];
     int n = 0;
     for (int k = 0; k < kBoxOrderCount && n < lay::kMostBoxes; ++k) {
       const int c = kBoxOrder[k];
@@ -1319,38 +1354,113 @@ PageLayout Layout(const State& s) {
                                              : map::kStick;
         shows = map::HasFixed(kind, fixed);
       }
-      if (shows) controls[n++] = c;
+      if (shows) controls[side][n++] = c;
     }
+    out.count[side] = n;
+    if (n > out.rows) out.rows = n;
+  }
+  // THE GRID: the rows of both sides round the middle of the two models.
+  float middle = 0.0f;
+  int models = 0;
+  for (int side = 0; side < 2; ++side) {
+    if (g_pic[side].ready) {
+      middle += g_pic[side].middle;
+      ++models;
+    }
+  }
+  middle = models > 0 ? middle / models
+                      : (lay::kModelTop + lay::kModelBottom) * 0.5f;
+  float slot_y[lay::kMostBoxes];
+  for (int r = 0; r < out.rows; ++r) {
+    slot_y[r] = lay::SlotMiddle(r, out.rows, middle);
+  }
+  for (int side = 0; side < 2; ++side) {
+    const bool left = side == 0;
+    const int n = out.count[side];
     const SidePicture& p = g_pic[side];
-    const float middle =
-        p.ready ? p.middle : (lay::kModelTop + lay::kModelBottom) * 0.5f;
-    float anchors[lay::kMostBoxes][2], starts[lay::kMostBoxes][2];
+    int column[2];
+    lay::BoxColumn(left, &column[0], &column[1]);
+    const float start_x = static_cast<float>(left ? column[0] : column[1]);
+    // The controls with a place on the picture get a leader. A control with
+    // no place keeps the order of kBoxOrder among the free rows.
+    float anchors[lay::kMostBoxes][2];
+    int with[lay::kMostBoxes], with_count = 0;
     for (int i = 0; i < n; ++i) {
-      int r[4];
-      lay::BoxRect(left, i, n, middle, r);
-      lay::LeaderStart(left, r, &starts[i][0], &starts[i][1]);
-      const int c = controls[i];
+      const int c = controls[side][i];
       if (p.ready && p.has[c]) {
-        anchors[i][0] = p.anchor[c][0];
-        anchors[i][1] = p.anchor[c][1];
-      } else {
-        // No place on the picture: the box keeps its place in kBoxOrder.
-        anchors[i][0] = starts[i][0];
-        anchors[i][1] = starts[i][1];
+        anchors[with_count][0] = p.anchor[c][0];
+        anchors[with_count][1] = p.anchor[c][1];
+        with[with_count++] = i;
       }
     }
+    int row_of[lay::kMostBoxes];
+    float st[lay::kMostBoxes][2], kn[lay::kMostBoxes][2],
+        en[lay::kMostBoxes][2];
+    const float knee_x = start_x;
+    out.routed[side] =
+        p.ready && lay::Route(anchors, with_count, knee_x, start_x, slot_y,
+                              out.rows, row_of, st, kn, en);
+    if (!out.routed[side]) {
+      // Straight lines in the order of the least length, on the first rows.
+      float starts[lay::kMostBoxes][2];
+      for (int r = 0; r < with_count; ++r) {
+        starts[r][0] = start_x;
+        starts[r][1] = slot_y[r];
+      }
+      lay::LeaderOrder(anchors, starts, with_count, row_of);
+      for (int k = 0; k < with_count; ++k) {
+        st[k][0] = kn[k][0] = start_x;
+        st[k][1] = kn[k][1] = slot_y[row_of[k]];
+        en[k][0] = anchors[k][0];
+        en[k][1] = anchors[k][1];
+      }
+    }
+    bool used[lay::kMostBoxes] = {};
+    int box_of[lay::kMostBoxes];
+    for (int i = 0; i < n; ++i) box_of[i] = -1;
+    for (int k = 0; k < with_count; ++k) {
+      box_of[with[k]] = row_of[k];
+      used[row_of[k]] = true;
+    }
+    for (int i = 0, r = 0; i < n; ++i) {
+      if (box_of[i] >= 0) continue;
+      while (r < out.rows && used[r]) ++r;
+      box_of[i] = r < out.rows ? r : 0;
+      if (r < out.rows) used[r] = true;
+    }
+    // The boxes in the order of their rows, so box i is the i-th row in use.
     int order[lay::kMostBoxes];
-    lay::LeaderOrder(anchors, starts, n, order);
-    out.count[side] = n;
-    for (int i = 0; i < n; ++i) {
-      PageBox& b = out.box[side][order[i]];
-      b.control = controls[i];
-      b.can = controls[i] < map::kButtons && CanStep(s, side, controls[i]);
-      lay::BoxRect(left, order[i], n, middle, b.rect);
+    for (int i = 0; i < n; ++i) order[i] = i;
+    for (int i = 1; i < n; ++i) {
+      for (int j = i; j > 0 && box_of[order[j]] < box_of[order[j - 1]]; --j) {
+        const int t = order[j];
+        order[j] = order[j - 1];
+        order[j - 1] = t;
+      }
+    }
+    for (int b = 0; b < n; ++b) {
+      const int i = order[b];
+      PageBox& box = out.box[side][b];
+      box.control = controls[side][i];
+      box.can = box.control < map::kButtons && CanStep(s, side, box.control);
+      lay::BoxRect(left, box_of[i], out.rows, middle, box.rect);
+      box.leader = false;
+      for (int k = 0; k < with_count; ++k) {
+        if (with[k] != i) continue;
+        box.leader = true;
+        for (int a = 0; a < 2; ++a) {
+          box.start[a] = st[k][a];
+          box.knee[a] = kn[k][a];
+          box.end[a] = en[k][a];
+        }
+      }
     }
   }
   return out;
 }
+
+// The page says "Not used" for a control with no job.
+const wchar_t* const kNotUsed = L"Not used";
 
 // The words of a box: the name of its control and its job.
 void BoxWords(const State& s, int side, int control, wchar_t* name,
@@ -1364,6 +1474,7 @@ void BoxWords(const State& s, int side, int control, wchar_t* name,
   }
   *job = JobOf(s, side, control);
   if (*job == nullptr) *job = L"";
+  if (wcscmp(*job, L"No job") == 0) *job = kNotUsed;
 }
 
 // --- the drawing of the page ----------------------------------------------------
@@ -1376,9 +1487,11 @@ const kit::Font& JobFont(kit::Canvas* c, const wchar_t* job, int width) {
   for (int f = 0; f < 2; ++f) {
     if (g_job_font[f].font == nullptr) continue;
     SelectObject(c->dc, g_job_font[f].font);
-    SIZE size = {};
-    GetTextExtentPoint32W(c->dc, job, static_cast<int>(wcslen(job)), &size);
-    if (size.cx <= width) return g_job_font[f];
+    RECT size = {0, 0, 4096, 256};
+    DrawTextW(c->dc, job, -1, &size,
+              DT_SINGLELINE | DT_NOPREFIX | DT_CALCRECT);
+    // The ink of a letter can go a little past its box.
+    if (size.right - size.left <= width - 4) return g_job_font[f];
   }
   return g_job_font[2];
 }
@@ -1415,6 +1528,8 @@ inline void OverPremul(uint8_t* d, const float rgb[3], float a) {
 const float kInkRgb[3] = {0.20f, 0.12f, 0.055f};
 const float kGoldRgb[3] = {0.84f, 0.58f, 0.13f};
 const float kLightInk[3] = {0.88f, 0.88f, 0.88f};
+// The face of the ring at the end of a leader: the light paper.
+const float kRingRgb[3] = {0.97f, 0.92f, 0.78f};
 
 // A line from a to b, or a dot with a == b, of `rgb` on a picture.
 void InkCapsule(const card_scroll::Picture& to, float ax, float ay, float bx,
@@ -1508,9 +1623,9 @@ void DrawPage(kit::Canvas* c, const int box[4], int style, int hover,
     g_head_font = kit::WordsFont(c, 23);
     g_sub_font = kit::SealFont(c, 14);
     g_name_font = kit::SealFont(c, 13);
-    g_job_font[0] = kit::WordsFont(c, 18);
-    g_job_font[1] = kit::WordsFont(c, 16);
-    g_job_font[2] = kit::WordsFont(c, 14);
+    g_job_font[0] = kit::WordsFont(c, 15);
+    g_job_font[1] = kit::WordsFont(c, 14);
+    g_job_font[2] = kit::WordsFont(c, 13);
   }
   if (!parchment && g_plain_job == nullptr) {
     const auto font = [](int em, int weight) {
@@ -1543,15 +1658,16 @@ void DrawPage(kit::Canvas* c, const int box[4], int style, int hover,
   }
   for (int side = 0; side < 2; ++side) {
     const bool left = side == 0;
-    // The header of the column of boxes.
-    int cx0 = 0, cx1 = 0;
-    lay::BoxColumn(left, &cx0, &cx1);
+    // The header of the half of the page of the controller.
+    const int cx0 = left ? 0 : lay::kPageWidth / 2;
+    const int cx1 = left ? lay::kPageWidth / 2 : lay::kPageWidth;
     const int head[4] = {ox + cx0, oy + lay::kHeadTop, ox + cx1,
                          oy + lay::kHeadTop + 34};
     const int sub[4] = {ox + cx0, oy + lay::kHeadTop + 36, ox + cx1,
                         oy + lay::kHeadBottom};
-    const wchar_t* head_word = left ? L"Left" : L"Right";
-    const wchar_t* sub_word = side == s.pointing ? L"Hand" : L"Other hand";
+    // "Main" marks the controller of the Hand.
+    const wchar_t* head_word = left ? L"Left hand" : L"Right hand";
+    const wchar_t* sub_word = side == s.pointing ? L"Main" : L"";
     if (parchment) {
       kit::InkWordsIn(c, card, g_head_font, head_word, head, 31 + side,
                       kit::kCenter);
@@ -1569,24 +1685,31 @@ void DrawPage(kit::Canvas* c, const int box[4], int style, int hover,
     const int lit_part =
         lit_control == art::kStickClick ? art::kStick : lit_control;
     if (p.ready) LayPicture(dst, ox, oy, p, lit_part);
-    // The leaders, then the boxes.
+    // The leaders, then the boxes. A leader goes from its box to its knee
+    // and on to its control, and ends in a ring on the control.
     for (int i = 0; i < l.count[side]; ++i) {
       const PageBox& b = l.box[side][i];
-      if (!p.ready || !p.has[b.control]) continue;
-      float sx, sy;
-      lay::LeaderStart(left, b.rect, &sx, &sy);
+      if (!p.ready || !b.leader) continue;
       const bool on = side == lit_side && i == lit_box;
-      const float ax = ox + p.anchor[b.control][0];
-      const float ay = oy + p.anchor[b.control][1];
-      if (on) {
-        InkCapsule(dst, ox + sx, oy + sy, ax, ay, 1.4f, kGoldRgb, 1.0f);
-        InkCapsule(dst, ox + sx, oy + sy, ax, ay, 0.5f, ink, 0.9f);
-        InkCapsule(dst, ax, ay, ax, ay, 4.5f, ink, 1.0f);
-        InkCapsule(dst, ax, ay, ax, ay, 3.0f, kGoldRgb, 1.0f);
-      } else {
-        InkCapsule(dst, ox + sx, oy + sy, ax, ay, 0.65f, ink, 0.8f);
-        InkCapsule(dst, ax, ay, ax, ay, 2.8f, ink, 1.0f);
+      const float pts[3][2] = {{ox + b.start[0], oy + b.start[1]},
+                               {ox + b.knee[0], oy + b.knee[1]},
+                               {ox + b.end[0], oy + b.end[1]}};
+      for (int k = 0; k < 2; ++k) {
+        if (on) {
+          InkCapsule(dst, pts[k][0], pts[k][1], pts[k + 1][0], pts[k + 1][1],
+                     1.5f, kGoldRgb, 1.0f);
+          InkCapsule(dst, pts[k][0], pts[k][1], pts[k + 1][0], pts[k + 1][1],
+                     0.55f, ink, 0.9f);
+        } else {
+          InkCapsule(dst, pts[k][0], pts[k][1], pts[k + 1][0], pts[k + 1][1],
+                     0.7f, ink, 0.85f);
+        }
       }
+      const float ax = pts[2][0], ay = pts[2][1];
+      InkCapsule(dst, ax, ay, ax, ay, on ? 6.5f : 5.5f, ink, 1.0f);
+      InkCapsule(dst, ax, ay, ax, ay, on ? 4.5f : 3.6f,
+                 on ? kGoldRgb : kRingRgb, 1.0f);
+      InkCapsule(dst, ax, ay, ax, ay, 1.4f, ink, 1.0f);
     }
     for (int i = 0; i < l.count[side]; ++i) {
       const PageBox& b = l.box[side][i];
@@ -1601,7 +1724,7 @@ void DrawPage(kit::Canvas* c, const int box[4], int style, int hover,
       // The name over the job, at the left of the box. A box with a list
       // has the mark at its right.
       const int name_box[4] = {r[0] + 14, r[1] + 7, r[2] - 10, r[1] + 27};
-      const int job_box[4] = {r[0] + 14, r[1] + 27, r[2] - (b.can ? 30 : 10),
+      const int job_box[4] = {r[0] + 14, r[1] + 27, r[2] - (b.can ? 24 : 8),
                               r[3] - 6};
       if (parchment) {
         if (b.can) {
@@ -1611,21 +1734,29 @@ void DrawPage(kit::Canvas* c, const int box[4], int style, int hover,
                            : look == kit::kPlain ? card_scroll::kKeyPlain
                                                  : card_scroll::kKeyFlash,
                            part * 3 + 5);
-          DownMark(card, r[2] - 18.0f, (r[1] + r[3]) * 0.5f + 1.0f, kInkRgb);
-        } else if (on) {
-          // A control that keeps its job has no key. Under the ray it has a
-          // rule of gold under its words.
-          InkCapsule(card, r[0] + 14.0f, r[3] - 4.0f, r[2] - 14.0f,
-                     r[3] - 4.0f, 1.2f, kGoldRgb, 1.0f);
+          DownMark(card, r[2] - 15.0f, (r[1] + r[3]) * 0.5f + 1.0f, kInkRgb);
+        } else {
+          // A control that keeps its job: a plain frame of thin ink, with no
+          // key and no mark, so it reads as a fact and not as a control.
+          // Under the ray the frame is gold.
+          const float* rim = on ? kGoldRgb : kInkRgb;
+          const float alpha = on ? 1.0f : 0.45f;
+          const float width = on ? 1.1f : 0.6f;
+          const float x0 = r[0] + 3.5f, y0 = r[1] + 3.5f;
+          const float x1 = r[2] - 3.5f, y1 = r[3] - 3.5f;
+          InkCapsule(card, x0, y0, x1, y0, width, rim, alpha);
+          InkCapsule(card, x0, y1, x1, y1, width, rim, alpha);
+          InkCapsule(card, x0, y0, x0, y1, width, rim, alpha);
+          InkCapsule(card, x1, y0, x1, y1, width, rim, alpha);
         }
         kit::InkWordsIn(c, card, g_name_font, name, name_box, part * 3 + 6,
                         kit::kLeftAlign);
         kit::InkWordsIn(c, card, JobFont(c, job, job_box[2] - job_box[0]),
                         job, job_box, part * 3 + 7, kit::kLeftAlign);
         if (!b.can && !on) {
-          // The words of a control that keeps its job are lighter.
-          const int words[4] = {r[0] + 10, r[1] + 4, r[2] - 8, r[3] - 7};
-          Lighter(card, kit::PagePicture(c), words, 0.42f);
+          // The words of a control that keeps its job are a little lighter.
+          const int words[4] = {r[0] + 10, r[1] + 6, r[2] - 8, r[3] - 6};
+          Lighter(card, kit::PagePicture(c), words, 0.28f);
         }
       } else {
         const int rect[4] = {r[0], r[1], r[2] - r[0], r[3] - r[1]};
@@ -1743,7 +1874,9 @@ bool PageListOf(int part, PageList* out) {
     // has no job, else the first of them.
     int twin = -1;
     for (int i = 0; i < out->count; ++i) {
-      if (wcscmp(out->word[i], map::kActionWord[action]) == 0) twin = i;
+      const wchar_t* word =
+          action == map::kNoJob ? kNotUsed : map::kActionWord[action];
+      if (wcscmp(out->word[i], word) == 0) twin = i;
     }
     if (twin >= 0) {
       if (choices[k] == s.map[side][button]) {
@@ -1752,7 +1885,9 @@ bool PageListOf(int part, PageList* out) {
       }
       continue;
     }
-    wcsncpy_s(out->word[out->count], map::kActionWord[action], _TRUNCATE);
+    wcsncpy_s(out->word[out->count],
+              action == map::kNoJob ? kNotUsed : map::kActionWord[action],
+              _TRUNCATE);
     g_list_slot[out->count] = choices[k];
     if (choices[k] == s.map[side][button]) out->now = out->count;
     ++out->count;
@@ -1789,8 +1924,9 @@ bool PageChoose(int part, int item, wchar_t* status, int size) {
   map::ButtonLabel(s.kind[side], left, which, label, 24);
   map::ButtonLabel(s.kind[side], left, other, moved, 24);
   const int after = ActionOf(s, side, which);
-  swprintf_s(status, size, L"%s: %s. %s: %s", label, map::kActionWord[after],
-             moved, map::kActionWord[before]);
+  swprintf_s(status, size, L"%s: %s. %s: %s", label,
+             after == map::kNoJob ? kNotUsed : map::kActionWord[after], moved,
+             before == map::kNoJob ? kNotUsed : map::kActionWord[before]);
   char l8[32], m8[32], from[24], to[24];
   Narrow(label, l8, sizeof(l8));
   Narrow(moved, m8, sizeof(m8));
@@ -1832,10 +1968,8 @@ void PageStatus(int part, wchar_t* out, int size) {
   wchar_t name[32];
   const wchar_t* job = nullptr;
   BoxWords(s, side, box.control, name, 32, &job);
-  swprintf_s(out, size,
-             box.can ? L"%s: %s. Pull the trigger to change it."
-                     : L"%s: %s. This control always has this job.",
-             label, job);
+  swprintf_s(out, size, box.can ? L"%s: %s" : L"%s: %s (always)", label,
+             job);
 }
 
 bool PageButtonCan() {

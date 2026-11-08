@@ -227,11 +227,11 @@ if ($Kind -eq 'totem') {
     # buttons"). The welcome page opens 3 s after the controllers can act
     # (welcome_done=0), and the trigger presses its button VR Settings. In
     # the window the trigger presses the tab Controls (tab2), then the box
-    # "Y button" of the left controller (page1 with the models of
+    # "Y button" of the left controller (page2 with the models of
     # bwvr/assets/controllers): its list opens. The trigger picks its item
     # Recenter (item2): Y takes the job of the left stick click (the
     # recenter hold), and the stick click takes the ring. The ray rests on
-    # the box "B button" of the right controller (page9), so the model
+    # the box "B button" of the right controller (page10), so the model
     # lights B. Close closes the window. Then a hold of the left stick click
     # opens the ring, and a hold of Y recenters the view. Each new picture of
     # the window is saved (debug_window_test_save).
@@ -243,7 +243,7 @@ if ($Kind -eq 'totem') {
     # (then -Parts "tab2 right5 row9 close").
     if ($Plan -eq '') { $Plan = 'gosite' }
     if ($Census -eq '') { $Census = '890' }
-    if ($Parts -eq '') { $Parts = 'tab2 page1 item2 page9 close' }
+    if ($Parts -eq '') { $Parts = 'tab2 page2 item2 page10 close' }
     if ($Steps -eq '') {
         # The first aimdebug aims at the button of the welcome page, then
         # one aimdebug for each word of -Parts. The shots are eye pictures

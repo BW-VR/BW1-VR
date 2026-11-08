@@ -33,3 +33,17 @@ So the head stays out of the house, but at the stop the eyes are against its wal
 - So zoomA9 repeats zoomA3, but the overlay starts one step earlier (at 2.6, as in zoomA2 and zoomA4), not after 1.7.
 
 The pictures stay on the laptop: C:\wt-zoom\bwvr\tools\desk\desk-zoomA7, zoomA8, zoomA9.
+
+## zoomA10 (job 69, agent/zoom 2347b4b)
+
+`.\dev.ps1 build -Clean`: 6127 checks, 0 failed. RUN DONE.
+
+- In to 2.6, then "the zoom step stops short at 2.17 units per meter, not 1.73: the whole step puts your head 13.2 cm out of the Abode 13AF25F0, so your head stays 30 cm out of it (god_zoom_solid_stop=1)", and three steps "is refused at 2.17 units per meter: it puts your head 3.3 cm into the Abode".
+- The zoom check at 2.17: the eye 0.29 units over the land, the near plane 0.109 units (5.0 cm), cover 0%, "your head is 12.5 cm from the land".
+- The lean: the overlay starts in the Abode at frame 1083 and is gone at frame 1157.
+- The zoom out: "the zoom step stops short at 2.17 units per meter, not 3.26: the whole step puts your head 23.4 cm out of the Abode 13AF25F0, so your head stays 30 cm out of it", then four steps out "is refused at 2.17 units per meter". The scale stays at 2.17 to the end of the run.
+- The pictures: 1400 and 1460, the wall and door of the Abode about 30 cm in front, the Hand whole. 1660, the roof slope with land and trees beside it. 1730 and 1790, the Hand whole at 15 and 8 cm. 1840 and 1860, the blinder. 2060, the same view as 1790, because the zoom out was refused.
+
+## game-sp1b and game-spvkb (job 63 again, more shots)
+
+The same save pictures, save card and guide (frames 3008 to 4217). The shots after the guide (4273, 4573) show the empty slot frames with the green pattern, not the land picture. No third save picture. spvkb: "4 copies from RGB into DXT1 blocks, and 0 copies of the blocks of a rect".

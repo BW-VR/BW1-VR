@@ -50,6 +50,7 @@ enum Id {
   kSnapTurn,
   kTurnSpeed,
   kTeleport,
+  kMoveType,
   kMoveStick,
   kMoveSpeed,
   kZoomSmooth,
@@ -81,11 +82,11 @@ struct Setting {
 
 const Setting kTable[kSettings] = {
     {kSnapTurn, kGroupMoving, "snap_turn", L"Turn", L"Turn",
-     L"Off=0|30 degrees=1|45 degrees=2|90 degrees=3|Smooth=4", 2, kNow,
+     L"Smooth=4|30 degrees=1|45 degrees=2|90 degrees=3", 2, kNow,
      L"Push the stick of your Hand left or right to turn. You stay where you "
-     L"are. 30, 45 or 90 degrees: one push turns you in one step. Smooth: "
-     L"you turn while you hold the stick, and a larger push turns faster. "
-     L"Off: the stick does not turn you.", true},
+     L"are. Smooth: you turn while you hold the stick, and a larger push "
+     L"turns faster. 30, 45 or 90 degrees: one push turns you in one step.",
+     true},
     {kTurnSpeed, kGroupMoving, "smooth_turn_speed", L"Turn speed",
      L"Speed of the smooth turn", L"Slow=45|Normal=90|Fast=135|Very fast=180",
      90, kNow,
@@ -95,11 +96,17 @@ const Setting kTable[kSettings] = {
      L"Off=0|On=1", 1, kNow,
      L"Hold A to aim an arc. Let go of A to go to the ring at its end. B "
      L"stops the aim. Off: A does a jump, as in the game.", false},
-    {kMoveStick, kGroupMoving, "move_stick", L"Stick walk",
-     L"Move with the other stick", L"Off=0|Head=1|Controller=2", 1, kNow,
-     L"Push the stick of your other hand to move over the land. Head: "
-     L"forward is where your head faces. Controller: forward is where that "
-     L"controller points. Off: the stick does not move you.", true},
+    {kMoveType, kGroupMoving, "move_type", L"Movement type",
+     L"Movement type", L"Walk=0|Fly=1", 0, kNow,
+     L"Push the stick of your other hand to move. Walk: you move over the "
+     L"land, and your view follows the hills. Fly: you move where your head "
+     L"faces or where the controller points, also up and down. Your view "
+     L"stops above the land.", true},
+    {kMoveStick, kGroupMoving, "move_stick", L"Movement direction",
+     L"Movement direction", L"Head=1|Controller=2", 1, kNow,
+     L"Which way is forward when you push the stick of your other hand. "
+     L"Head: forward is where your head faces. Controller: forward is where "
+     L"that controller points.", true},
     {kMoveSpeed, kGroupMoving, "move_stick_speed_cm", L"Walk speed",
      L"Speed of the stick walk",
      L"Slow=75|Normal=150|Fast=250|Very fast=400", 150, kNow,
@@ -155,6 +162,17 @@ const Setting kTable[kSettings] = {
      L"The subtitles and the help text of the game show on a card in front "
      L"of you. Off: they show in the picture of the game.", false},
 };
+
+// THE VALUES THAT THE WINDOW DOES NOT OFFER: snap_turn 0 (no turn) and
+// move_stick 0 (no walk). The mod still takes them from bwvr.ini, for a
+// desktop test. The window shows the default of the mod for them, as the
+// launcher does, and a step goes on from the default.
+inline int ShownValue(int id, int value) {
+  if ((id == kSnapTurn || id == kMoveStick) && value == 0) {
+    return kTable[id].fallback;
+  }
+  return value;
+}
 
 // --- the tabs --------------------------------------------------------------------
 

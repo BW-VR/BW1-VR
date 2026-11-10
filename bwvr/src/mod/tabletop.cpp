@@ -582,10 +582,17 @@ struct WalkHold {
   bool fresh = false;
   bool have_aim = false;
   float aim[2] = {0.0f, 1.0f};
+  bool have_aim3 = false;
+  float aim3[3] = {0.0f, 0.0f, 1.0f};  // the fly: the controller in 3D
   bool active = false;
   int rule = 0;
+  int type = 0;  // move_type at the start: the walk or the fly
   bool have_forward = false;
   float forward[2] = {0.0f, 1.0f};
+  // The fly: forward in 3D and its level right, of the last frame.
+  float forward3[3] = {0.0f, 0.0f, 1.0f};
+  float right[2] = {1.0f, 0.0f};
+  float climb = 0.0f;  // the fly: the sum of the steps up, meters of room
   float start_center[2] = {0.0f, 0.0f};  // the waist point, x and z
   float start_under[2] = {0.0f, 0.0f};
   float under[2] = {0.0f, 0.0f};
@@ -1938,8 +1945,10 @@ void ApplyGodSteps() {
 // THE COMFORT VIGNETTE (vignette.cpp): the share of the full speed of a
 // control that the view moved from one pose to the next in seconds: how far
 // the land under the head went across the room, the turn and the zoom
-// (comfort_math.h, MoveShare).
-float MotionShare(const TablePose& from, const TablePose& to, double seconds) {
+// (comfort_math.h, MoveShare). With `height` the move up and down counts
+// too, for the fly with the stick.
+float MotionShare(const TablePose& from, const TablePose& to, double seconds,
+                  bool height = false) {
   if (!(from.scale > 0.0f) || !(to.scale > 0.0f)) return 0.0f;
   float room[3], head[3], a[3], b[3];
   TableRoom(room);
@@ -1947,8 +1956,9 @@ float MotionShare(const TablePose& from, const TablePose& to, double seconds) {
   PoseWorld(from, room, head, a);
   PoseWorld(to, room, head, b);
   const float dx = b[0] - a[0], dz = b[2] - a[2];
+  const float dy = height ? b[1] - a[1] : 0.0f;
   const float meters =
-      sqrtf(dx * dx + dz * dz) * 2.0f / (from.scale + to.scale);
+      sqrtf(dx * dx + dy * dy + dz * dz) * 2.0f / (from.scale + to.scale);
   return comfort_math::MoveShare(meters,
                                  Wrap(to.heading - from.heading) * 57.29578f,
                                  to.scale / from.scale,
@@ -2336,7 +2346,17 @@ const char* WalkRuleText(int rule) {
              : "the direction of your head";
 }
 
+// The stick flies (move_type=1).
+bool Flies() { return g_settings.move_type == walk_math::kTypeFly; }
+
+// The word of the move for the log: "walk" or "fly".
+const char* MoveWord() { return Flies() ? "fly" : "walk"; }
+
 const char* FollowText() {
+  if (Flies()) {
+    return "The view does not follow the land, and the land under your head "
+           "stays 10 cm to 2.5 m below your head (move_type=1)";
+  }
   return g_settings.move_stick_follow_land != 0
              ? "The height of the view follows the land under your head "
                "(move_stick_follow_land=1)"
@@ -2354,13 +2374,15 @@ const char* FollowText() {
 void StopWalk(const char* cause, bool view_stays) {
   g_walk.fresh = false;
   g_walk.have_aim = false;
+  g_walk.have_aim3 = false;
   g_walk.push[0] = g_walk.push[1] = 0.0f;
   if (!g_walk.active) return;
   g_walk.active = false;
   ++g_walks;
   g_walk_seconds += g_walk.seconds;
   if (hint_learn_math::WalkMoved(sqrtf(g_walk.went[0] * g_walk.went[0] +
-                                       g_walk.went[1] * g_walk.went[1]))) {
+                                       g_walk.went[1] * g_walk.went[1] +
+                                       g_walk.climb * g_walk.climb))) {
     HintCardLearnDone(hint_learn_math::kSkillWalk,
                       "the stick moved the player");
   }
@@ -2390,7 +2412,14 @@ void StopWalk(const char* cause, bool view_stays) {
               "down for a direction.", g_walk.blind);
   }
   char land[256] = "";
-  if (g_walk.have_below) {
+  if (g_walk.have_below && g_walk.type == walk_math::kTypeFly) {
+    sprintf_s(land, " The land under your head was %.1f cm below your head "
+              "and is %.1f cm below it. The fly went %.1f cm %s in the room "
+              "(move_type=1).",
+              g_walk.start_below * 100.0f, g_walk.below * 100.0f,
+              fabsf(g_walk.climb) * 100.0f,
+              g_walk.climb < 0.0f ? "down" : "up");
+  } else if (g_walk.have_below) {
     sprintf_s(land, " The land under your head was %.1f cm below your head "
               "and is %.1f cm below it. The view went %.1f cm up and %.1f cm "
               "down with the land (move_stick_follow_land=%d).",
@@ -2412,14 +2441,15 @@ void StopWalk(const char* cause, bool view_stays) {
               g_walk.frame_most * 1000.0f, g_walk.step_least * 100.0f,
               g_walk.step_most * 100.0f);
   }
-  ModLog("god view     : the walk with the stick stopped (%s). You went %.2f "
+  ModLog("god view     : the %s with the stick stopped (%s). You went %.2f "
          "units over the land, which is %.2f cm of the room, %.1f degrees to "
          "the %s of straight ahead in the room. The land under your head was "
          "at %.1f %.1f and is at %.1f %.1f. The stick was pushed for %.3f s, "
          "which gives %.1f cm of the room each second, and the view moved on "
          "%llu of %llu frames (move_stick=%d, %.2f to %.2f units per "
          "meter), frame %llu.%s%s%s%s%s",
-         cause, sqrtf(dx * dx + dz * dz), room_m * 100.0f, fabsf(degrees),
+         g_walk.type == walk_math::kTypeFly ? "fly" : "walk", cause,
+         sqrtf(dx * dx + dz * dz), room_m * 100.0f, fabsf(degrees),
          degrees < -0.05f ? "left" : "right", g_walk.start_under[0],
          g_walk.start_under[1], g_walk.under[0], g_walk.under[1],
          g_walk.seconds,
@@ -2446,6 +2476,15 @@ void StopWalk(const char* cause, bool view_stays) {
 // the walk feels the same at each scale. The step of a frame is the speed
 // times the real time of the frame, with the cap of the smooth zoom.
 //
+// THE FLY (move_type=1). Forward is the forward direction of the head or of
+// the controller in 3D, so a push while the player looks or points down
+// goes down. The stick to the side moves level, at right angles to forward
+// (walk_math::FlyRight). The view does not follow the land. The height has
+// the ground limits of the grab (TabletopGodLimitHeight): the land under the
+// head stays 10 cm to 2.5 m below the head, and at a limit only the move up
+// or down stops. A hill at the new place of the head stays below the head,
+// as in the walk.
+//
 // The pump of the controllers asks again before each frame
 // (TabletopGodWalk). A frame with no request moves nothing, so the walk
 // stops in the frame in which the stick comes back, and nothing glides.
@@ -2464,8 +2503,11 @@ void ApplyGodWalk(double frame_seconds) {
                          fresh ? g_walk.push[1] : 0.0f};
   const bool have_aim = fresh && g_walk.have_aim;
   const float aim[2] = {g_walk.aim[0], g_walk.aim[1]};
+  const bool have_aim3 = fresh && g_walk.have_aim3;
+  const float aim3[3] = {g_walk.aim3[0], g_walk.aim3[1], g_walk.aim3[2]};
   g_walk.fresh = false;
   g_walk.have_aim = false;
+  g_walk.have_aim3 = false;
   g_walk.push[0] = g_walk.push[1] = 0.0f;
   if (g_walk_check.frames_left > 0 && --g_walk_check.frames_left == 0 &&
       WalkLog()) {
@@ -2506,6 +2548,11 @@ void ApplyGodWalk(double frame_seconds) {
   if (g_walk.active && rule != g_walk.rule) {
     StopWalk("the rule of the direction changed", true);
   }
+  const int type = walk_math::Type(g_settings.move_type);
+  const bool fly = type == walk_math::kTypeFly;
+  if (g_walk.active && type != g_walk.type) {
+    StopWalk("move_type changed", true);
+  }
   float room[3], head[3], under[3];
   TableRoom(room);
   HeadRoom(head);
@@ -2514,7 +2561,29 @@ void ApplyGodWalk(double frame_seconds) {
   // Forward on the land, in the room.
   float forward[2] = {0.0f, 1.0f};
   bool have_forward = false;
-  if (rule == walk_math::kRuleHead) {
+  // THE FLY: forward in 3D, and its level right. A forward that points
+  // almost straight up or down strafes along the level right of the head.
+  float forward3[3] = {0.0f, 0.0f, 1.0f};
+  float right[2] = {g_walk.right[0], g_walk.right[1]};
+  if (fly) {
+    float matrix[9], lean[3], flat[2];
+    const bool have_head = HeadPoseCurrent(matrix, lean);
+    float head_right[2] = {g_walk.right[0], g_walk.right[1]};
+    if (have_head && walk_math::HeadForward(matrix, flat)) {
+      head_right[0] = flat[1];
+      head_right[1] = -flat[0];
+    }
+    if (rule == walk_math::kRuleHead) {
+      have_forward = have_head && zoom_math::HeadForward(matrix, forward3);
+    } else if (have_aim3) {
+      have_forward = walk_math::Unit(aim3, forward3);
+    }
+    if (have_forward) {
+      walk_math::FlyRight(forward3, head_right, walk_math::kAimLeast, right);
+      forward[0] = forward3[0];
+      forward[1] = forward3[2];
+    }
+  } else if (rule == walk_math::kRuleHead) {
     float matrix[9], lean[3];
     have_forward = HeadPoseCurrent(matrix, lean) &&
                    walk_math::HeadForward(matrix, forward);
@@ -2526,6 +2595,8 @@ void ApplyGodWalk(double frame_seconds) {
   if (!g_walk.active) {
     g_walk.active = true;
     g_walk.rule = rule;
+    g_walk.type = type;
+    g_walk.climb = 0.0f;
     g_walk.have_forward = false;
     g_walk.start_center[0] = pose.center[0];
     g_walk.start_center[1] = pose.center[2];
@@ -2549,20 +2620,30 @@ void ApplyGodWalk(double frame_seconds) {
             : 0.0f;
     g_walk_check.frames_left = 0;
     if (WalkLog()) {
-      char where[96] = "has no direction on the land now";
-      if (have_forward) {
+      char where[128] = "has no direction on the land now";
+      if (have_forward && fly) {
+        const float degrees = walk_math::DegreesRight(forward);
+        const float down = walk_math::DegreesDown(forward3);
+        sprintf_s(where, "is %.1f degrees to the %s of straight ahead in the "
+                  "room and %.1f degrees %s level", fabsf(degrees),
+                  degrees < -0.05f ? "left" : "right", fabsf(down),
+                  down < 0.0f ? "above" : "below");
+      } else if (fly) {
+        sprintf_s(where, "has no direction now");
+      } else if (have_forward) {
         const float degrees = walk_math::DegreesRight(forward);
         sprintf_s(where, "is %.1f degrees to the %s of straight ahead in the "
                   "room", fabsf(degrees), degrees < -0.05f ? "left" : "right");
       }
-      ModLog("god view     : the walk with the stick starts at %.2f units per "
+      ModLog("god view     : the %s with the stick starts at %.2f units per "
              "meter, with the land under your head at %.1f %.1f, %.1f cm "
              "below your head. Forward is %s (move_stick=%d), and it %s. A "
              "full push moves you %d cm of the room each second "
              "(move_stick_speed_cm). %s, frame %llu.",
-             pose.scale, under[0], under[2], g_walk.start_below * 100.0f,
-             WalkRuleText(rule), rule, where, g_settings.move_stick_speed_cm,
-             FollowText(), ControllersFrameCount());
+             MoveWord(), pose.scale, under[0], under[2],
+             g_walk.start_below * 100.0f, WalkRuleText(rule), rule, where,
+             g_settings.move_stick_speed_cm, FollowText(),
+             ControllersFrameCount());
     }
   }
   const float seconds = zoom_math::FrameSeconds(frame_seconds, kHoldFrameCap);
@@ -2577,6 +2658,9 @@ void ApplyGodWalk(double frame_seconds) {
   if (have_forward) {
     g_walk.forward[0] = forward[0];
     g_walk.forward[1] = forward[1];
+    for (int i = 0; i < 3; ++i) g_walk.forward3[i] = forward3[i];
+    g_walk.right[0] = right[0];
+    g_walk.right[1] = right[1];
     g_walk.have_forward = true;
   } else {
     // The direction of the frame before, when the walk has one.
@@ -2584,26 +2668,50 @@ void ApplyGodWalk(double frame_seconds) {
     if (!g_walk.have_forward) return;
     forward[0] = g_walk.forward[0];
     forward[1] = g_walk.forward[1];
+    for (int i = 0; i < 3; ++i) forward3[i] = g_walk.forward3[i];
+    right[0] = g_walk.right[0];
+    right[1] = g_walk.right[1];
   }
-  float speed[2], step[2];
-  walk_math::Speed(forward, push, g_settings.move_stick_speed_cm * 0.01f,
-                   speed);
-  walk_math::Step(speed, seconds, step);
-  // In a frame with no time, nothing moves.
-  if (step[0] == 0.0f && step[1] == 0.0f) return;
+  const float top = g_settings.move_stick_speed_cm * 0.01f;
   TablePose next;
-  walk_math::Walk(pose, step, &next);
+  if (fly) {
+    float speed[3], step[3];
+    walk_math::FlySpeed(forward3, right, push, top, speed);
+    walk_math::FlyStep(speed, seconds, step);
+    // In a frame with no time, nothing moves.
+    if (step[0] == 0.0f && step[1] == 0.0f && step[2] == 0.0f) return;
+    walk_math::Fly(pose, step, &next);
+  } else {
+    float speed[2], step[2];
+    walk_math::Speed(forward, push, top, speed);
+    walk_math::Step(speed, seconds, step);
+    // In a frame with no time, nothing moves.
+    if (step[0] == 0.0f && step[1] == 0.0f) return;
+    walk_math::Walk(pose, step, &next);
+  }
   // The waist point stays on the map, as for a grab.
   next.center[0] = ClampCenter(next.center[0]);
   next.center[2] = ClampCenter(next.center[2]);
   // And at most god_zone_margin past the camera zone of the game.
   CameraZoneLimitMove(g_center, &next.center[0], &next.center[2],
-                      "the walk with the stick");
-  if (next.center[0] == g_center[0] && next.center[2] == g_center[2]) return;
+                      fly ? "the fly with the stick" : "the walk with the stick");
+  // THE HEIGHT OF A FLY: the ground limits of the grab. The land under the
+  // head stays 10 cm to 2.5 m below the head (kGroundNearest,
+  // kGroundFarthest, FloorHeadY). At a limit the height stops, and the move
+  // across goes on.
+  if (fly) TabletopGodLimitHeight(&next, nullptr);
+  if (next.center[0] == g_center[0] && next.center[2] == g_center[2] &&
+      next.center[1] == g_center[1]) {
+    return;
+  }
   float took[2];
   walk_math::InRoom(pose, next.center[0] - pose.center[0],
                     next.center[2] - pose.center[2], took);
-  const float way = sqrtf(took[0] * took[0] + took[1] * took[1]);
+  const float rose_m = fly && next.scale > 0.0f
+                           ? (next.center[1] - pose.center[1]) / next.scale
+                           : 0.0f;
+  const float way =
+      sqrtf(took[0] * took[0] + took[1] * took[1] + rose_m * rose_m);
   if (g_walk.step_most == 0.0f || way < g_walk.step_least) {
     g_walk.step_least = way;
   }
@@ -2613,7 +2721,8 @@ void ApplyGodWalk(double frame_seconds) {
   // walk_math.h, and the view goes up or down by the change of its output,
   // so the filtered land keeps its height in the room. The filter starts
   // again when something else moved the view since the last frame of a walk.
-  if (g_settings.move_stick_follow_land != 0 && next.scale > 0.0f) {
+  // The fly does not follow the land.
+  if (!fly && g_settings.move_stick_follow_land != 0 && next.scale > 0.0f) {
     if (!g_follow.have || g_follow.version != g_god_version) {
       walk_math::FollowStart(LandUnderHead(pose, room, head), &g_follow.land);
       g_follow.have = true;
@@ -2634,7 +2743,10 @@ void ApplyGodWalk(double frame_seconds) {
   Derive();
   ++g_serial;
   ++g_god_version;
-  g_follow.version = g_god_version;
+  // The filter of the land counts only the walk: a walk after a fly starts
+  // it again.
+  if (!fly) g_follow.version = g_god_version;
+  g_walk.climb += rose_m;
   // A walk is no snap turn: the game camera goes over the land under the
   // head, and does not turn about its focus (TabletopGodTurnedOnly).
   g_god_nonturn_version = g_god_version;
@@ -2666,9 +2778,19 @@ void ApplyGodWalk(double frame_seconds) {
   const float land = LandUnderHead(now, room, head);
   g_walk.below = head[1] - GroundInRoom(now, room, land);
   // The test move_stick_trace: one line for each of the first frames.
-  if (g_walk.moved <= static_cast<uint64_t>(g_settings.move_stick_trace) &&
-      g_walk_traces < kMaxWalkTraces) {
-    ++g_walk_traces;
+  const bool trace =
+      g_walk.moved <= static_cast<uint64_t>(g_settings.move_stick_trace) &&
+      g_walk_traces < kMaxWalkTraces;
+  if (trace) ++g_walk_traces;
+  if (trace && fly) {
+    ModLog("god view     : fly trace, frame %llu of the fly: %.2f ms, a step "
+           "of %.3f cm of the room (%.3f cm up), the waist point at %.3f %.3f "
+           "%.3f, the land under your head at %.3f and %.2f cm below your "
+           "head, frame %llu",
+           g_walk.frames, seconds * 1000.0f, way * 100.0f, rose_m * 100.0f,
+           now.center[0], now.center[1], now.center[2], land,
+           g_walk.below * 100.0f, ControllersFrameCount());
+  } else if (trace) {
     ModLog("god view     : walk trace, frame %llu of the walk: %.2f ms, a step "
            "of %.3f cm of the room, the waist point at %.3f %.3f %.3f, the "
            "land under your head at %.3f (filtered %.3f) and %.2f cm below "
@@ -2939,10 +3061,12 @@ void LogMoveStick(const char* tag) {
     return;
   }
   ModLog("%s: move_stick=%d. While the stick of the hand that does not point "
-         "is pushed, you move over the land. Forward is %s, and a full push "
-         "moves you %d cm of the room each second (move_stick_speed_cm). %s%s",
-         tag, rule, WalkRuleText(rule), g_settings.move_stick_speed_cm,
-         FollowText(), keys);
+         "is pushed, you %s. Forward is %s, and a full push moves you %d cm "
+         "of the room each second (move_stick_speed_cm). %s%s",
+         tag, rule,
+         Flies() ? "fly along that direction in 3D" : "move over the land",
+         WalkRuleText(rule), g_settings.move_stick_speed_cm, FollowText(),
+         keys);
 }
 
 }  // namespace
@@ -2997,6 +3121,7 @@ void TabletopSetOptions(const TabletopSettings& settings) {
   }
   g_settings.move_stick_follow_land =
       g_settings.move_stick_follow_land != 0 ? 1 : 0;
+  g_settings.move_type = walk_math::Type(g_settings.move_type);
   if (g_settings.move_stick_trace < 0) g_settings.move_stick_trace = 0;
   if (g_settings.move_stick_trace > 2000) g_settings.move_stick_trace = 2000;
 }
@@ -3310,8 +3435,10 @@ bool TabletopCamera(const float asked_position[3], const float asked_focus[3],
     ApplyGodWalk(frame_seconds);
     ApplyGodTurnHold(frame_seconds, cpu_seconds);
     if (g_hold.active || g_walk.active || g_turn_hold.active) {
-      VignetteMove(MotionShare(before_moves, Pose(), frame_seconds),
-                   g_walk.active   ? "the walk with the stick"
+      const bool flies = g_walk.active && g_walk.type == walk_math::kTypeFly;
+      VignetteMove(MotionShare(before_moves, Pose(), frame_seconds, flies),
+                   flies           ? "the fly with the stick"
+                   : g_walk.active ? "the walk with the stick"
                    : g_hold.active ? "the smooth zoom"
                                    : "the smooth turn");
     }
@@ -4048,7 +4175,7 @@ int TabletopGodMoveStick() {
 
 bool TabletopMoveAllowed() { return (CameraFeatures() & kFeatureDrag) != 0; }
 
-bool TabletopGodWalk(const float push[2], const float* aim) {
+bool TabletopGodWalk(const float push[2], const float* aim, const float* aim3) {
   if (TabletopGodMoveStick() == walk_math::kRuleOff || !TabletopGodOwnsView()) {
     return false;
   }
@@ -4070,6 +4197,10 @@ bool TabletopGodWalk(const float push[2], const float* aim) {
   if (aim != nullptr) {
     g_walk.aim[0] = aim[0];
     g_walk.aim[1] = aim[1];
+  }
+  g_walk.have_aim3 = aim3 != nullptr;
+  if (aim3 != nullptr) {
+    for (int i = 0; i < 3; ++i) g_walk.aim3[i] = aim3[i];
   }
   g_walk.fresh = true;
   return true;
@@ -4119,6 +4250,45 @@ void TabletopGodSetZoomSmooth(int smooth, const char* by) {
          g_settings.god_zoom_smooth != 0
              ? "The stick zooms while it is held"
              : "One push of the stick is one zoom step");
+}
+
+// THE KIND OF MOVE (debug page, switch "Move kind"): the walk that follows
+// the land, the walk that keeps its height, and the fly. The pointing
+// controller gives a short pulse for the walk, a medium pulse for the level
+// walk and a long pulse for the fly. A walk or a fly that runs stops, and a
+// stick that is still pushed starts a new one.
+void TabletopGodMoveKindCycle() {
+  if (!g_installed || !g_settings.god || !TestSwitchesOn()) return;
+  const int kind = walk_math::NextKind(walk_math::Kind(
+      g_settings.move_type, g_settings.move_stick_follow_land));
+  g_settings.move_type = kind == walk_math::kKindFly ? walk_math::kTypeFly
+                                                     : walk_math::kTypeWalk;
+  if (kind != walk_math::kKindFly) {
+    g_settings.move_stick_follow_land = kind == walk_math::kKindWalk ? 1 : 0;
+  }
+  StopWalk("the debug page changed the kind of move", true);
+  ControllersGesturePulse(0.5f, kind == walk_math::kKindFly         ? 0.40f
+                                : kind == walk_math::kKindWalkLevel ? 0.24f
+                                                                    : 0.08f);
+  LogMoveStick("debug page   ");
+}
+
+int TabletopGodMoveKindValue() {
+  if (!g_installed || !g_settings.god || !TestSwitchesOn()) {
+    return kDebugCannot;
+  }
+  return walk_math::Kind(g_settings.move_type,
+                         g_settings.move_stick_follow_land);
+}
+
+// The settings window (settings_panel.cpp): move_type.
+void TabletopGodSetMoveType(int type, const char* by) {
+  g_settings.move_type = walk_math::Type(type);
+  if (g_installed) StopWalk("the settings window changed move_type", true);
+  ModLog("tabletop     : %s: move_type=%d now: the stick %s", by,
+         g_settings.move_type,
+         Flies() ? "flies along the forward direction in 3D"
+                 : "walks over the land");
 }
 
 // The value of move_stick for the debug page: 0, 1 or 2.

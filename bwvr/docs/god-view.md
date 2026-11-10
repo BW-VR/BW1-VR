@@ -53,12 +53,14 @@ sets the flags of each mode.
 - **The grab of the world** moves the land one to one with one hand, across
   and up and down, and two hands turn and scale it. Nothing moves after the
   release.
-- **The walk with the stick.** The stick of the hand that does not point
-  moves the player over the land while it is pushed, along the direction of
-  the head or of the controller (`move_stick`). The height of the view
-  follows the land under the head through a smooth filter
-  (`move_stick_follow_land`). It stops when the stick comes back (section
-  5.7).
+- **The walk and the fly with the stick.** The stick of the hand that does
+  not point moves the player while it is pushed, along the direction of the
+  head or of the controller (`move_stick`). In the walk (`move_type=0`) the
+  player moves over the land, and the height of the view follows the land
+  under the head through a smooth filter (`move_stick_follow_land`). In the
+  fly (`move_type=1`) the player moves along that direction in 3D, also up
+  and down, and the view does not follow the land. It stops when the stick
+  comes back (section 5.7).
 - **The turn.** The stick of the Hand to the side turns the view about the
   head: in one step of 30, 45 or 90 degrees, or with `snap_turn=4` smoothly
   while it is held, faster with a larger push (section 4).
@@ -291,7 +293,8 @@ god view     : zoom check, the scene at 1.00 units per meter: the eye is 0.60 un
 ```
 
 **The inputs.** The right stick forward zooms out, and back zooms in
-(`god_zoom_forward_in=0`, "Stick forward" in the launcher). With 1 the stick
+(`god_zoom_forward_in=0`, the checkbox "Invert zoom direction" of the
+launcher is off). With 1 the stick
 forward zooms in. The desktop test scripts set 1, so the word `stick_up` of a
 recipe zooms in. With
 `god_zoom_smooth=0`, the default, one push past 70 percent is one step. The
@@ -438,8 +441,11 @@ goes under the new head position.
 
 ## 4. The turn
 
-The launcher row "Turn" (`snap_turn`) has five values: Off (0), 30, 45 and
-90 degrees (1 to 3), and Smooth (4). The default is 45 degrees.
+The launcher row "Turn" (`snap_turn`) has four values: Smooth (4), and 30,
+45 and 90 degrees (1 to 3). The default is 45 degrees. The mod also takes
+`snap_turn=0` (no turn) from bwvr.ini, for a desktop test. The launcher and
+the settings window do not offer it: for 0 they show the default, and a save
+of the launcher writes the default.
 
 **The snap turn** (1 to 3). The right stick left or right turns the view by
 the step. The turn keys and the middle mouse do the same. The request goes
@@ -811,7 +817,8 @@ the world (5.1): the waist point goes to the land that was one step from it
 in the room, and the heading and the scale stay. With
 `move_stick_follow_land=1` the height of the view follows the land under the
 head (see "The land under the head" below). With 0 the height of the ground
-stays too.
+stays too. With `move_type=1` the stick flies in place of the walk (see "The
+fly" below).
 
 ```
 G' = G + s * Lt * (step.x, 0, step.z)      step = speed * the time of the frame
@@ -829,7 +836,9 @@ event.
   which the controller of the stick points (its aim ray, `controllers.md`,
   section 8), flat on the land. The mod takes the direction again in each
   frame, so a turn of the head or of the hand turns the walk. With 0 the
-  stick does not move the player.
+  stick does not move the player. The launcher and the settings window do
+  not offer 0: for 0 they show the default (1), and a save of the launcher
+  writes 1. The mod takes 0 from bwvr.ini for a desktop test.
 - **A controller that points up or down.** A controller that points less than
   11.5 degrees from straight up or from straight down has no direction on
   the land. The walk then keeps the direction of the frame before, and a walk
@@ -889,7 +898,9 @@ event.
     after a teleport the land is at the height below the hands that the
     player has.
   - With `move_stick_follow_land=0` the view keeps its height in the world.
-    The launcher row "Walk follows the land" sets the key.
+    The launcher has no row for the key: "Walk" of the row "Movement type"
+    is 1, and a save of the launcher removes the key from bwvr.ini. The
+    switch "Move kind" of the debug page sets it while the game runs.
 - **A hill at the new place.** When the land at the new place of the head is
   nearer than 10 cm below the head, all of the land goes down to that limit
   (`ZoomClearHead`), as in a zoom that moves the head over the land. The
@@ -897,6 +908,35 @@ event.
   short sharp hill that the filter does not follow comes that near. With
   `move_stick_follow_land=0` the limit acts on each frame of a hill near the
   head, so the view then goes up with each bump at once.
+- **The fly** (`move_type=1`, the launcher row "Movement type", Fly). The
+  stick moves the view along the forward direction in 3D, so a push while
+  the player looks or points down goes down, and up goes up. Forward is the
+  forward axis of the head (`move_stick=1`), with its pitch, or the aim ray
+  of the controller of the stick (2). So with the controller the player
+  flies where the controller points. The stick to the side moves level, at
+  right angles to the flat part of forward (`FlyRight` in `walk_math.h`).
+  When forward points less than 11.5 degrees from straight up or down, the
+  side move goes along the level right of the head. The speed and the time
+  of a frame are the ones of the walk, and the speed is along the 3D
+  direction:
+
+  ```
+  G' = G + s * Lt * step                     step = speed * the time of the frame
+  ```
+
+  - The view does not follow the land.
+  - The height has the ground limits of the grab (`TabletopGodLimitHeight`,
+    "The ground height"): the land under the head stays 10 cm to 2.5 m
+    below the head (below the height of the head at the recenter pose with
+    `head_blinder=1`, section 5.9). At a limit the move up or down stops,
+    and the move across goes on. So a fly down stops 10 cm over the land,
+    and a fly up stops 2.5 m over it. A hill at the new place of the head
+    stays below the head, as in the walk.
+  - The fly stops in the frame in which the stick comes back, as the walk
+    does. There is no glide and no ease.
+  - The comfort vignette counts the move up and down too (section 5.8).
+  - A change of `move_type` stops a walk or a fly that runs. The filter of
+    the land starts again at the next walk.
 - **The map and the game camera.** The waist point stays on the map, as for a
   grab. The version of the view goes up on each frame that moves, so the game
   camera follows the player (section 7).
@@ -919,16 +959,23 @@ event.
 - **The other stick** keeps its jobs. The stick of the pointing hand turns
   and zooms, also during a walk.
 - **Comfort.** A walk with a stick makes some players ill. The grab and the
-  teleport move the player with no such motion. `move_stick=0`, and the
-  choice "Off" of the launcher, turn the walk off.
+  teleport move the player with no such motion. `move_stick=0` turns the
+  walk off (bwvr.ini only).
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `move_stick` | 1 | 0: the stick does not move the player. 1: forward is the direction of the head. 2: forward is the direction in which the controller of the stick points. The launcher row "Move with the other stick" |
+| `move_stick` | 1 | 0: the stick does not move the player (bwvr.ini only). 1: forward is the direction of the head. 2: forward is the direction in which the controller of the stick points. The launcher row "Movement direction" |
+| `move_type` | 0 | 0: the stick walks over the land. 1: the stick flies along the forward direction in 3D, and the view does not follow the land. The launcher row "Movement type" |
 | `move_stick_speed_cm` | 150 | The speed of a full push, in cm of the room for each second, 10 to 500 |
 | `god_display_time` | 1 | 1: the walk, the smooth zoom and the smoothing of the grips take the time of a frame from the display times of the headset. 0: from the time of the CPU |
-| `move_stick_follow_land` | 1 | 1: while the player walks, the height of the view follows the land under the head through the filter. 0: the view keeps its height. The launcher row "Walk follows the land" |
-| `move_stick_trace` | 0 | A test for a desktop run: the log has one line for each of the first N frames of each walk (at most 2000 lines in a game) |
+| `move_stick_follow_land` | 1 | 1: while the player walks, the height of the view follows the land under the head through the filter. 0: the view keeps its height. Not in the launcher: a save of the launcher removes it |
+| `move_stick_trace` | 0 | A test for a desktop run: the log has one line for each of the first N frames of each walk or fly (at most 2000 lines in a game) |
+
+The switch "Move kind" of the debug page goes from the walk that follows the
+land (`move_type=0`, `move_stick_follow_land=1`) to the walk that keeps its
+height (`move_stick_follow_land=0`), to the fly (`move_type=1`) and back. The
+pointing controller gives a short, a medium and a long pulse. A walk or a
+fly that runs stops.
 
 With `test_keys=1`, Shift and the Menu key of the keyboard change `move_stick`
 from 1 to 2, to 0 and back to 1 while the game runs. The Menu key is the key
@@ -966,6 +1013,15 @@ frames of each walk:
 god view     : walk trace, frame 61 of the walk: 18.05 ms, a step of 2.707 cm of the room, the waist point at 2023.553 42.130 2487.737, the land under your head at 49.517 (filtered 40.547) and 52.61 cm below your head, frame 961
 ```
 
+A fly has the same lines with the word "fly". The line of the start also
+gives the degrees of forward below or above level, and the line of the end
+gives how far the fly went up or down in the room (`move_type=1`). The
+trace has the step up in each frame:
+
+```
+god view     : fly trace, frame F of the fly: T ms, a step of S cm of the room (U cm up), the waist point at X Y Z, the land under your head at H and B cm below your head, frame N
+```
+
 **An even walk.** The step of each frame is the speed times the real time
 of that frame, so the walk is even in the time of the game: each frame
 moves the view at the speed of the push, and no limit, hill or switch of
@@ -991,10 +1047,9 @@ recenter from the controllers.
 the view go dark during a move that the player makes with a control and that
 the body does not feel. The middle of the view stays clear. These moves count:
 
-- the walk with the stick, the smooth zoom, the smooth turn and the grab of
-  the world with one hand or two hands. Each one reports how fast the view
-  moved in the
-  frame, as a share of the full speed of a control: 150 cm of the room each
+- the walk and the fly with the stick, the smooth zoom, the smooth turn and
+  the grab of the world with one hand or two hands. Each one reports how
+  fast the view moved in the frame (for the fly, also the move up and down), as a share of the full speed of a control: 150 cm of the room each
   second, a turn of 90 degrees each second, or a zoom of 1.5 times in 500 ms.
   The largest of the three counts (`comfort_math.h`, `MoveShare`). So a slow
   push of the stick gives a light vignette, and a grab that holds still gives
@@ -1603,7 +1658,7 @@ about 9 degrees (`tabletop.md`, "A spirit at a place of the world"). With
 | --- | --- |
 | Right stick forward or back | Zoom out or in one step (`god_zoom_forward_in=1` turns the direction), about the land that the head looks at (`god_zoom_about`). With `god_zoom_smooth=1`, zoom while the stick is held |
 | Right stick left or right | Turn one step about the head |
-| Left stick | Move over the land while it is pushed (`move_stick`, section 5.7) |
+| Left stick | Walk over the land, or fly with `move_type=1`, while it is pushed (`move_stick`, section 5.7) |
 | Left grip | Grab the land: pull to move it across, and up or down |
 | Y (left controller) | Hold it for the ring menu, and move the hand to an item (`controllers.md`, section 10) |
 | X (left controller) | No job |
@@ -1679,7 +1734,7 @@ section 5.8.
 | `god_zone` | 1 | 1: in a camera zone of a script the game camera stays in the zone, the player's place goes at most `god_zone_margin` past it, and the view does not shake (section 17). 0: the game pushes its camera back into the zone, with its sound and its shake. The debug page has the switch "Camera zone" |
 | `god_zone_margin` | 50 | How far the player's place goes past the camera zone, in world units, 0 to 2000 (section 17) |
 | `god_turn_keeps_focus` | 1 | 1: a snap turn alone turns the game camera about its own focus (section 7). 0: it puts the game camera over the land under the head |
-| `snap_turn` | 2 | The turn (section 4). 0: off. 1, 2, 3: a snap turn of 30, 45 or 90 degrees. 4: the smooth turn of the God view. The launcher row "Turn" |
+| `snap_turn` | 2 | The turn (section 4). 1, 2, 3: a snap turn of 30, 45 or 90 degrees. 4: the smooth turn of the God view. 0: off (bwvr.ini only, the launcher shows the default for it). The launcher row "Turn" |
 | `smooth_turn_speed` | 90 | The degrees a second of the smooth turn at a full push of the stick, 10 to 360 (section 4). The settings window has the row "Turn speed" (45, 90, 135 and 180), and the launcher has no row for it |
 | `tilt_help_degrees` | 3 | A look of the head up or down at 20 degrees a second or faster counts as the game's tilt: one tilt event of the help for each so many degrees, one in each game turn (section 7, "The tutorial"). 0: the head sends no tilt events |
 | `turn_help_degrees` | 5 | A snap turn counts as one turn event of the help for each so many degrees, one in each game turn, so the turn lesson of the tutorial ends with one full turn (section 7, "The turn lesson"). 0: one event for a snap turn |
@@ -1726,7 +1781,7 @@ The launcher removes these keys from `bwvr.ini` when it saves.
 | --- | --- |
 | `src/mod/table_math.h` | `GodRoom`, `PoseWorld`, `PoseRoom`, `GroundInRoom`, `ScaleAbout`, `GodZoomAbout`, `GodZoom`, `GodRaise`, `GodTurn`, `GameCameraOver`, `RayLevel`, `RayLand`, `GodSpawn`, `CameraLookPoint` and `HeadYaw`, as pure functions |
 | `src/mod/zoom_math.h` | The smooth zoom: the share of the top rate for a push (`StickShare`), the time of a frame (`FrameSeconds`) and the ratio of a frame (`FrameRatio`). The point of a zoom: its place across the room for each value of `god_zoom_about` (`PointAcross`), the level (`ZoomLevel`), the point in the world (`PivotAt`) and the rule for a hill at the new place of the head (`ClearHead`). All are pure functions |
-| `src/mod/walk_math.h` | The walk with the stick: the push (`Push`), the forward direction of the head and of the controller (`HeadForward`, `AimForward`), the speed in the room (`Speed`), the step of a frame (`Step`), the view after a step (`Walk`) and the filter of the land that the view follows (`FollowStart`, `FollowStep`). All are pure functions |
+| `src/mod/walk_math.h` | The walk with the stick: the push (`Push`), the forward direction of the head and of the controller (`HeadForward`, `AimForward`), the speed in the room (`Speed`), the step of a frame (`Step`), the view after a step (`Walk`), the filter of the land that the view follows (`FollowStart`, `FollowStep`), and the fly: the key (`Type`), the kinds of the debug switch (`Kind`, `NextKind`), the level right (`FlyRight`), the speed and the step in 3D (`FlySpeed`, `FlyStep`) and the view after a step (`Fly`). All are pure functions |
 | `src/mod/tabletop.cpp`, `tabletop.h` | The God view in the table state: the place at a game camera (`PlaceGod`, `ApplyGodSpawn`), the steps (`ApplyGodSteps`), the point of a zoom (`GodZoomPoint`, `ZoomClearHead`), the smooth zoom (`TabletopGodZoomHold`, `ApplyGodZoomHold`), the walk with the stick (`TabletopGodWalk`, `ApplyGodWalk`), the mouse pan (`MousePan`), the camera switches and events, the hook on `GGame::ClearMap`, the values that follow the scale, the Hand's size, the ears and the game camera it wants |
 | `src/mod/camera_zone.cpp`, `camera_zone.h`, `camera_zone_math.h` | The camera zone of a script (section 17): the read of the zone of the game, the limit of a move (`LimitMove`), the game camera in the zone (`KeepCamera`, `PointInside`), the bump for the sound (`BumpPoint`), and the hook on the shake of the push |
 | `src/mod/near_plane.cpp` | The near plane hook, for the God view, the table and the immersive view |
@@ -1835,6 +1890,17 @@ checks the pure functions at 7.5, 100 and 2000 units per meter:
   give the same. On a long hill the view rises with the land, 50 cm of the
   walk behind it. A bump of 10 cm moves the view by less than 15 percent of
   its height, and 80 cm later the view is back within 5 percent.
+- The fly with the stick (`walk_checks.h`, `FlyChecks`): `move_type` 1 is
+  the fly and each other value the walk, and the debug switch goes from the
+  walk to the level walk, to the fly and back. With a look 45 degrees down a
+  full push forward goes down and ahead at the top speed, a push to the side
+  is level, and a push back goes up. A look straight down strafes along the
+  right of the head and goes straight down. A controller 60 degrees up goes
+  up. A frame with no time and a stick at rest give no step. A step of 10 cm
+  down and 20 cm ahead at 100 units for each meter moves the waist point 10
+  units down and 20 units ahead, also with a heading of 90 degrees. With the
+  ground limits of the grab a fly down stops with the land 10 cm below the
+  head, and a fly up stops with it 2.5 m below.
 - The teleport (14.8), the place at a game camera (15.9) and the player that a
   script sees (16.9) have their own checks.
 

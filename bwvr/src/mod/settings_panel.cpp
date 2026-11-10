@@ -82,6 +82,7 @@ void ComfortCameraSetTurnSpeed(int degrees_per_second, const char* by);
 void ComfortCameraSetBlink(int ms, const char* by);
 bool TeleportSetOn(bool on, const char* by);
 void TabletopGodSetMoveStick(int rule, const char* by);
+void TabletopGodSetMoveType(int type, const char* by);
 void TabletopGodSetMoveSpeed(int cm, const char* by);
 void TabletopGodSetZoomSmooth(int smooth, const char* by);
 void VignetteSet(int mode, const char* by);
@@ -139,7 +140,7 @@ void ReadSettings() {
   g_on = key("settings_panel", 1) != 0;
   g_lean = key("settings_lean", 1) != 0;
   for (int i = 0; i < kSettings; ++i) {
-    g_value[i] = key(kTable[i].key, kTable[i].fallback);
+    g_value[i] = ShownValue(i, key(kTable[i].key, kTable[i].fallback));
     g_start[i] = g_value[i];
   }
   g_welcome_page = key("welcome_page", 1);
@@ -209,6 +210,7 @@ void ApplyLive(int id, int v) {
       break;
     case kTurnSpeed: ComfortCameraSetTurnSpeed(v, kBy); break;
     case kTeleport: TeleportSetOn(v != 0, kBy); break;
+    case kMoveType: TabletopGodSetMoveType(v, kBy); break;
     case kMoveStick: TabletopGodSetMoveStick(v, kBy); break;
     case kMoveSpeed: TabletopGodSetMoveSpeed(v, kBy); break;
     case kZoomSmooth: TabletopGodSetZoomSmooth(v, kBy); break;
@@ -660,7 +662,7 @@ int SettingsPanelWarmRows(int group, int* switches, int* values, int most) {
     const int v = static_cast<int>(GetPrivateProfileIntA(
         "bwvr", kTable[i].key, kTable[i].fallback, path));
     switches[n] = i;
-    values[n] = IndexOfValue(kTable[i].values, v);
+    values[n] = IndexOfValue(kTable[i].values, ShownValue(i, v));
     ++n;
   }
   return n;

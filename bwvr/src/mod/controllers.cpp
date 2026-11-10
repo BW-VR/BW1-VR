@@ -203,7 +203,7 @@ bool TabletopGodZoomForwardIn();
 // rule, its request for the next frame, and its test key. And the game's
 // switch for the drag of the land, which the walk keeps to.
 int TabletopGodMoveStick();
-bool TabletopGodWalk(const float push[2], const float* aim);
+bool TabletopGodWalk(const float push[2], const float* aim, const float* aim3);
 void TabletopGodMoveStickCycle();
 bool TabletopMoveAllowed();
 // teleport.cpp and hint_card.cpp: the test keys of teleport_switch and of
@@ -4001,15 +4001,17 @@ void PumpWalk() {
   const char* why = WalkRefusal();
   if (why == nullptr) {
     // The direction in which the controller of the stick points, flat on the
-    // land, in the room.
+    // land, in the room, and in 3D for the fly.
     float rotation[9], translation[3], direction[3], aim[2];
-    bool have_aim = false;
+    bool have_aim = false, have_direction = false;
     if (hand.aim_valid &&
         HeadPoseToRoom(g_aim_p[other], g_aim_q[other], rotation, translation)) {
       controller_math::AimDirection(rotation, direction);
+      have_direction = true;
       have_aim = walk_math::AimForward(direction, walk_math::kAimLeast, aim);
     }
-    if (!TabletopGodWalk(push, have_aim ? aim : nullptr)) {
+    if (!TabletopGodWalk(push, have_aim ? aim : nullptr,
+                         have_direction ? direction : nullptr)) {
       why = "the game does not allow a drag of the land now";
     }
   }

@@ -32,6 +32,34 @@ inline int NextRule(int value) {
   return value >= kRuleController ? kRuleOff : value + 1;
 }
 
+// move_type: how the stick moves the player.
+const int kTypeWalk = 0;  // over the land (Walk, Speed and Step)
+const int kTypeFly = 1;   // along the forward direction in 3D (Fly)
+
+// The value of the key from a number: 1 is the fly, each other value the
+// walk.
+inline int Type(int value) { return value == kTypeFly ? kTypeFly : kTypeWalk; }
+
+// THE KINDS OF MOVE for the test switch: the walk that follows the land
+// (move_type=0, move_stick_follow_land=1), the walk that keeps its height
+// (move_type=0, move_stick_follow_land=0), and the fly (move_type=1).
+const int kKindWalk = 0;
+const int kKindWalkLevel = 1;
+const int kKindFly = 2;
+
+inline int Kind(int type, int follow_land) {
+  if (Type(type) == kTypeFly) return kKindFly;
+  return follow_land != 0 ? kKindWalk : kKindWalkLevel;
+}
+
+// The next kind for the test switch: from the walk to the level walk, to the
+// fly and back to the walk.
+inline int NextKind(int kind) {
+  return kind == kKindWalk ? kKindWalkLevel
+         : kind == kKindWalkLevel ? kKindFly
+                                  : kKindWalk;
+}
+
 // THE PUSH. The stick as a vector, x to the right and y forward, with the
 // dead zone and the curve of the smooth zoom (zoom_math::StickShare) along
 // its length. So a push in each direction has the same dead zone, a small
@@ -168,6 +196,82 @@ inline float FollowStep(LandFollow* follow, float land, float way,
   follow->stage[0] = land + gap0 * e;
   follow->stage[1] = land + gap1 * e + gap0 * x * e;
   return follow->stage[1] - before;
+}
+
+// THE FLY (move_type=1). The stick moves the view along the forward
+// direction of the head or of the controller in 3D, so a push while the
+// player looks or points down goes down. The stick to the side moves level,
+// at right angles to that direction. The view does not follow the land. The
+// limits of the height are the ground limits of the grab (tabletop.cpp,
+// GodGroundHeight).
+
+// A unit vector from a direction. False for a direction with no length or
+// with a part that is not a number, and then out is not written.
+inline bool Unit(const float direction[3], float out[3]) {
+  const float length =
+      sqrtf(direction[0] * direction[0] + direction[1] * direction[1] +
+            direction[2] * direction[2]);
+  if (!(length > 1e-6f)) return false;
+  for (int i = 0; i < 3; ++i) out[i] = direction[i] / length;
+  return true;
+}
+
+// THE LEVEL RIGHT of a fly, as x and z of the room: 90 degrees to the right
+// of the flat part of forward. A forward that points almost straight up or
+// down has a flat part shorter than `least`, and then the right is
+// `fallback` (the level right of the head).
+inline void FlyRight(const float forward[3], const float fallback[2],
+                     float least, float out[2]) {
+  const float flat = sqrtf(forward[0] * forward[0] + forward[2] * forward[2]);
+  if (flat >= least && flat > 0.0f) {
+    out[0] = forward[2] / flat;
+    out[1] = -forward[0] / flat;
+    return;
+  }
+  out[0] = fallback[0];
+  out[1] = fallback[1];
+}
+
+// THE SPEED OF A FLY IN THE ROOM, in meters for each second, x, y and z.
+// forward is a unit direction in the room, right is its level right
+// (FlyRight), push is the stick (Push), and top is the speed of a full push.
+inline void FlySpeed(const float forward[3], const float right[2],
+                     const float push[2], float top, float out[3]) {
+  out[0] = top * (push[1] * forward[0] + push[0] * right[0]);
+  out[1] = top * push[1] * forward[1];
+  out[2] = top * (push[1] * forward[2] + push[0] * right[1]);
+}
+
+// THE STEP OF ONE FRAME OF A FLY, in meters of the room. A time that is not
+// above 0 gives no step.
+inline void FlyStep(const float speed[3], float seconds, float out[3]) {
+  out[0] = out[1] = out[2] = 0.0f;
+  if (!(seconds > 0.0f)) return;
+  for (int i = 0; i < 3; ++i) out[i] = speed[i] * seconds;
+}
+
+// THE VIEW AFTER A STEP OF A FLY. The player moves `step` in the room, so
+// the waist point G goes to the world point that was `step` from it:
+//
+//     G' = G + s * Lt * step
+//
+// The heading and the scale stay. A step up is a move of G up, so the land
+// goes down in the room.
+inline void Fly(const table_math::TablePose& pose, const float step[3],
+                table_math::TablePose* out) {
+  float basis[9];
+  table_math::Basis(pose.heading, basis);
+  const float across[3] = {step[0] * pose.scale, step[1] * pose.scale,
+                           step[2] * pose.scale};
+  *out = pose;
+  table_math::Along(pose.center, basis, across, out->center);
+}
+
+// The degrees of a direction below level, for the log: up is less than 0.
+inline float DegreesDown(const float direction[3]) {
+  const float flat =
+      sqrtf(direction[0] * direction[0] + direction[2] * direction[2]);
+  return atan2f(-direction[1], flat) * 57.29578f;
 }
 
 // A direction on the land in degrees, for the log: 0 is straight ahead in the

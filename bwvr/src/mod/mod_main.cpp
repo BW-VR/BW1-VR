@@ -1041,6 +1041,9 @@ void ReadSettings() {
     // a desktop run.
     t.move_stick_follow_land = number("move_stick_follow_land", 1);
     t.move_stick_trace = number("move_stick_trace", 0);
+    // How the stick moves the player: 0 walks over the land, and 1 flies
+    // along the forward direction of the head or of the controller in 3D.
+    t.move_type = number("move_type", 0);
     t.test_keys = number("test_keys", 0) != 0;
     // Tests with no key press, for a desktop run: the game's zoom to the
     // Temple at an update of the camera mode, and the test key of god_spawn.

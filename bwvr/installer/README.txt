@@ -212,9 +212,9 @@ hand_feel_bodies=0 for fingers that do not react to things, and
 hand_feel=0 for fingers that follow the trigger and the grip only.
 
   Stick up, down      Zoom out or in one step: up makes the world
-                      smaller, down makes it larger. "Stick forward"
-                      in the launcher turns the direction (key
-                      god_zoom_forward_in). Push again for the
+                      smaller, down makes it larger. "Invert zoom
+                      direction" in the launcher turns the direction
+                      (key god_zoom_forward_in). Push again for the
                       next step. The land that you look at stays where
                       it is, and its size changes. In the launcher,
                       "Center of the zoom" chooses a different point
@@ -229,12 +229,13 @@ hand_feel=0 for fingers that follow the trigger and the grip only.
                       to turn and zoom.
   Left stick          Push it to move over the land. You go where
                       your head faces, and you stop when you let the
-                      stick go. In the launcher, "Move with the left
-                      stick" makes forward the direction of the left
-                      controller, or turns the walk off (key
-                      move_stick). A walk with a stick makes some
-                      people ill. If it makes you ill, turn it off,
-                      and move with the left grip and with A.
+                      stick go. In the launcher, "Movement direction"
+                      makes forward the direction of the left
+                      controller (key move_stick), and "Movement
+                      type" chooses Walk or Fly (key move_type). A
+                      move with a stick makes some people ill. If it
+                      makes you ill, move with the left grip and
+                      with A.
   Left menu button    Open the game menu.
   Y (left hand)       Hold it for the ring: the Temple, your Creature,
                       the leashes and more. See MOTION CONTROLLERS.
@@ -440,20 +441,23 @@ launcher (key grab_hand). 1 uses the grip of your other hand. 2 also
 uses the grip of the pointing hand when the Hand is empty and not
 over an object. 0 turns the grab off.
 
-To change the walk with the left stick, set "Move with the other
-stick" in the launcher (key move_stick). 1 moves you where your head
-faces. 2 moves you where the left controller points. 0 turns the walk
-off. A full push moves you 150 cm of your room each second, at each
-zoom (key move_stick_speed_cm in bwvr.ini). The stick does not move
-you while a grip holds the land, in a menu, in a cut scene and in the
-Temple.
+To change the direction of the left stick, set "Movement direction"
+in the launcher (key move_stick). Head direction moves you where your
+head faces. Controller direction moves you where the left controller
+points. A full push moves you 150 cm of your room each second, at
+each zoom (key move_stick_speed_cm in bwvr.ini). The stick does not
+move you while a grip holds the land, in a menu, in a cut scene and
+in the Temple.
 
-While you move with the left stick, the height of your view follows
-the land under your head. A long hill moves the view up or down, and
-a small bump does not. The height that you set with the left grip
-stays your height above the land. To keep the view at one height, set
-"Walk follows the land" to Off in the launcher (key
-move_stick_follow_land=0).
+To walk or to fly, set "Movement type" in the launcher (key
+move_type). Walk (the default): while you move with the left stick,
+the height of your view follows the land under your head. A long hill
+moves the view up or down, and a small bump does not. The height that
+you set with the left grip stays your height above the land. Fly: you
+move where your head faces or where the controller points, also up
+and down. Look or point down and push the stick forward to go down.
+The view does not follow the land. It stops just above the land, and
+it goes up until the land is 2.5 m below you.
 
 Set button_layout=0 in bwvr.ini for a different layout of the left
 controller: Y opens the game menu, X opens the ring, and the left

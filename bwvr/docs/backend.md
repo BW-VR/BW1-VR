@@ -4944,7 +4944,8 @@ loads a saved game of the player.
 moves it.
 
 - **Snap turns in place** (`snap_turn`, default 2 for 45 degrees, steps 0, 30, 45
-  and 90). The game is told the middle mouse (action `0x10`) is up. The mod counts
+  and 90, and 4 for the smooth turn of the God view). The launcher and the
+  settings window do not offer 0. The game is told the middle mouse (action `0x10`) is up. The mod counts
   the mouse movement itself and turns once per 150 counts sideways. A turn key
   counts once per press, read from the key turn at `0x00C5B0C8` that
   `ProcessKeyMovement` fills after each camera update. A turn rotates the focus and
@@ -5945,6 +5946,7 @@ item.
 | Ctrl Shift Slash | `test_keys=1` | A tooltip or a hint of the game at the game's Hand, while the game places the Hand, has the depth of the Hand, or the same pixel in both eyes. A long pulse and a short pulse (`hint_hand_depth`, `ui-layer.md`, section 15.6). The slash key is the key of the main keyboard left of the right Shift key on a US keyboard | Interface, Hint depth |
 | Ctrl Menu key | `test_keys=1` | The layout of the buttons of the hand that does not point. The menu button of the left controller opens the game menu, Y opens the ring and the stick does not drive the ring, or Y opens the game menu and X and the stick open the ring. A long pulse and a short pulse on that hand (`button_layout`, `controllers.md`, 5.1). Shift must be up | View, Button layout |
 | Shift Menu key | `test_keys=1` | The walk with the stick of the hand that does not point steps from 1 to 2 to 0 and back: forward is the direction of the head, forward is the direction of that controller, or the stick does not move the player. A medium pulse, a long pulse and a short pulse (`move_stick`, `god-view.md`, section 5.7). Ctrl must be up | View, Stick walk |
+| None | `debug_menu=1` | The kind of move of the stick of the hand that does not point steps from the walk that follows the land, to the walk that keeps its height, to the fly, and back. A short, a medium and a long pulse (`move_type`, `move_stick_follow_land`, `god-view.md`, section 5.7). The debug page only | View, Move kind |
 
 The launcher has no row for `test_keys`. It is off by default, and a tester or a
 desktop run writes it in `bwvr.ini` (a save of the launcher keeps it). The row
@@ -6036,8 +6038,9 @@ keys that the launcher sets.
 | `snap_turn`, `blink`, `instant_jumps`, `camera_glide` | 2, 0, 1, 0 | See "Moving around" |
 | `turn_help_degrees`, `god_turn_keeps_focus`, `tilt_help_degrees` | 5, 1, 3 | See `god-view.md`, "The turn lesson" |
 | `zoom_step` | 2 | See "Zoom in steps" |
-| `move_stick`, `move_stick_speed_cm` | 1, 150 | The walk with the stick of the hand that does not point, in the God view. See `god-view.md`, section 5.7 |
-| `move_stick_follow_land` | 1 | 1: in the walk with the stick, the height of the view follows the land under the head. 0: the view keeps its height. See `god-view.md`, section 5.7 |
+| `move_stick`, `move_stick_speed_cm` | 1, 150 | The walk or the fly with the stick of the hand that does not point, in the God view. See `god-view.md`, section 5.7 |
+| `move_type` | 0 | 0: the stick walks over the land. 1: the stick flies along the forward direction in 3D. See `god-view.md`, section 5.7 |
+| `move_stick_follow_land` | 1 | 1: in the walk with the stick, the height of the view follows the land under the head. 0: the view keeps its height. A save of the launcher removes it. See `god-view.md`, section 5.7 |
 | `button_layout` | 1 | The layout of the buttons of the hand that does not point. See `controllers.md`, 5.1 |
 | `drag_smoothing_ms` | 35 | See "Smoother drags far out" |
 | `script_camera` and its keys | 2 | See "The story camera" |

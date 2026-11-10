@@ -80,6 +80,10 @@ struct TabletopSettings {
   // the head through a smooth filter (walk_math::FollowStep). 0: the view
   // keeps its height in the world.
   int move_stick_follow_land = 1;  // move_stick_follow_land: 1 follows, 0 not
+  // How the stick moves the player: 0 walks over the land (with
+  // move_stick_follow_land), 1 flies along the forward direction in 3D
+  // (walk_math.h, "The fly"). docs/god-view.md, "The walk with the stick".
+  int move_type = 0;               // move_type: 0 walk, 1 fly
   // A test for a desktop run: the log has a line for each of the first N
   // frames of each walk. 0 is off.
   int move_stick_trace = 0;        // move_stick_trace: frames to log
@@ -179,14 +183,16 @@ int TabletopGodZoomAboutValue();
 // TabletopGodWalk is the request of the stick for the next frame. push is the
 // stick, x to the right and y forward, and its length is the share of the top
 // speed (walk_math::Push). aim is the forward direction of the controller on
-// the land in the room (x and z), or null when that controller has none. The
+// the land in the room (x and z), or null when that controller has none.
+// aim3 is the unit direction in which that controller points in the room
+// (x, y and z), for the fly, or null when the controller has no pose. The
 // next main camera call uses the request once, for the time of that frame.
 // The stick asks again before each frame while it is pushed, and a frame with
 // no request moves nothing. False when the player does not move: the walk is
 // off, the God view does not own the view, or the game's switch for the drag
 // of the land is off. The push must then come back before it asks again.
 int TabletopGodMoveStick();
-bool TabletopGodWalk(const float push[2], const float* aim);
+bool TabletopGodWalk(const float push[2], const float* aim, const float* aim3);
 
 // THE SWITCH OF A MOVE OVER THE LAND. True while the game's switch for the
 // drag of the land is on (bit 8 of CameraHelp::EnabledFeatures). The grab,
@@ -198,6 +204,16 @@ bool TabletopMoveAllowed();
 // rule goes from 1 to 2 to 0 and back to 1.
 void TabletopGodMoveStickCycle();
 int TabletopGodMoveStickValue();
+
+// THE KIND OF MOVE (move_type and move_stick_follow_land). The switch
+// "Move kind" of the debug page goes from the walk that follows the land
+// (0) to the walk that keeps its height (1), to the fly (2) and back.
+// TabletopGodMoveKindValue gives that kind, or kDebugCannot.
+// TabletopGodSetMoveType is the change of the VR Settings window: 0 the
+// walk, 1 the fly. A walk or a fly that runs stops.
+void TabletopGodMoveKindCycle();
+int TabletopGodMoveKindValue();
+void TabletopGodSetMoveType(int type, const char* by);
 
 // True while the table or the God view is on, also while it stands aside.
 bool TabletopIsOn();

@@ -117,7 +117,7 @@ Creature select". To keep your Creature, select "Keep your old Creature".
 | Control | What it does |
 | --- | --- |
 | Grip | Grab the land and pull to move. With both grips: turn and zoom |
-| Stick | Move over the land, in the direction of your head |
+| Stick | Move over the land, in the direction of your head. "Movement type" in the launcher chooses Walk or Fly |
 | Y | Hold for a ring menu: leashes, places and bookmarks, recenter, quick save, VR Settings |
 | Menu button | The game menu. In a menu, point with the line and click with the trigger |
 
@@ -132,9 +132,8 @@ The full list is in "Black & White VR Mod readme.txt" in your game folder.
 - Save the game before you start a quest. Quick save is on the first page
   of the ring menu.
 - If the frame rate is low, lower "Resolution scale" in the launcher.
-- A walk with the left stick makes some people ill. If it makes you ill, turn
-  off "Move with the other stick" in the launcher. Then move with the left
-  grip and with A.
+- A walk or a fly with the left stick makes some people ill. If it makes you
+  ill, do not push the left stick. Move with the left grip and with A.
 - If you see no hints and no subtitles, open the options of the game, then
   "Help Options". Set "Intelligent ToolTips", "All Text" and "Medium Help" or
   more.

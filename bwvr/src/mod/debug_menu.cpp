@@ -78,6 +78,8 @@ int TabletopGodZoomAboutValue();
 void TabletopGodZoomAboutCycle();
 int TabletopGodMoveStickValue();
 void TabletopGodMoveStickCycle();
+int TabletopGodMoveKindValue();
+void TabletopGodMoveKindCycle();
 int WorldGrabTestValue();
 void WorldGrabCycleTest();
 // The teleport (teleport.cpp).
@@ -401,6 +403,10 @@ const Switch kSwitches[] = {
      TabletopGodMoveStickValue,
      [](const char*) { TabletopGodMoveStickCycle(); },
      L"off|head|controller"},
+    {kGroupView, L"Move kind", L"Walk, level walk or fly", "",
+     TabletopGodMoveKindValue,
+     [](const char*) { TabletopGodMoveKindCycle(); },
+     L"walk|walk level|fly"},
     {kGroupView, L"Vignette", L"Edges dark in a move", "comfort_vignette",
      VignetteValue, VignetteChange, L"off|gentle|strong"},
     {kGroupView, L"Head blinder", L"Cover the view in the land",
@@ -780,6 +786,10 @@ const wchar_t* const kTips[] = {
     // Stick walk
     L"The stick of the hand that does not point. Head: forward is where the "
     L"head looks. Controller: where the controller points. Off: no walk.",
+    // Move kind
+    L"Walk: the view follows the land under the head. Walk level: the view "
+    L"keeps its height. Fly: the stick moves the view along the forward "
+    L"direction in 3D, and the view does not follow the land.",
     // Vignette
     L"The edges of the view go dark while a control moves the view: a walk, "
     L"a zoom, a turn, a teleport or a grab of the world. Off, gentle or "

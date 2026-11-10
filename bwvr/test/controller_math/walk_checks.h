@@ -31,6 +31,137 @@ inline void Head(float yaw_right, float pitch_down, float roll_right,
   }
 }
 
+// THE FLY (move_type=1): the key, the kinds of the test switch, the level
+// right, the speed in 3D, the step of a frame, the view after a step, and
+// the ground limits of the grab on a fly down and up.
+inline void FlyChecks() {
+  using namespace table_math;
+  using namespace walk_math;
+  printf("\nThe fly with the stick\n");
+
+  Check(Type(0) == kTypeWalk && Type(1) == kTypeFly && Type(5) == kTypeWalk &&
+            Type(-1) == kTypeWalk,
+        "move_type 1 is the fly, and each other value is the walk", Type(5),
+        kTypeWalk);
+  Check(Kind(0, 1) == kKindWalk && Kind(0, 0) == kKindWalkLevel &&
+            Kind(1, 1) == kKindFly && Kind(1, 0) == kKindFly,
+        "the kinds: the walk, the level walk, and the fly with each "
+        "move_stick_follow_land", Kind(0, 0), kKindWalkLevel);
+  Check(NextKind(kKindWalk) == kKindWalkLevel &&
+            NextKind(kKindWalkLevel) == kKindFly &&
+            NextKind(kKindFly) == kKindWalk,
+        "the test switch goes from the walk to the level walk, to the fly and "
+        "back", NextKind(kKindFly), kKindWalk);
+
+  // A head that looks 45 degrees down: forward goes down and ahead.
+  const float top = 1.5f;
+  float head[9], forward[3], flat[2], right[2], speed[3];
+  walk_checks::Head(0.0f, 45.0f, 0.0f, head);
+  Check(zoom_math::HeadForward(head, forward) && HeadForward(head, flat),
+        "a head 45 degrees down has a direction in 3D and on the land", 1, 1);
+  Near("it points down 45 degrees", DegreesDown(forward), 45.0, 1e-3);
+  const float fallback[2] = {flat[1], -flat[0]};
+  FlyRight(forward, fallback, kAimLeast, right);
+  Near("its level right is the right of the room, x", right[0], 1.0, 1e-5);
+  Near("its level right is the right of the room, z", right[1], 0.0, 1e-5);
+  const float ahead[2] = {0.0f, 1.0f};
+  FlySpeed(forward, right, ahead, top, speed);
+  Near("a full push forward goes down", speed[1], -top * 0.70711, 1e-4);
+  Near("and ahead by the same speed", speed[2], top * 0.70711, 1e-4);
+  Near("and not to the side", speed[0], 0.0, 1e-5);
+  Near("the speed of a full push is the top speed",
+       sqrtf(speed[0] * speed[0] + speed[1] * speed[1] + speed[2] * speed[2]),
+       top, 1e-4);
+  const float side[2] = {1.0f, 0.0f};
+  FlySpeed(forward, right, side, top, speed);
+  Near("a full push to the right moves level", speed[1], 0.0, 1e-6);
+  Near("and to the right at the top speed", speed[0], top, 1e-5);
+  const float back[2] = {0.0f, -1.0f};
+  FlySpeed(forward, right, back, top, speed);
+  Near("a full push back goes up and back", speed[1], top * 0.70711, 1e-4);
+
+  // A head that looks straight down, turned 40 degrees to the right: the
+  // flat part of forward is too short, so the level right of the head counts.
+  walk_checks::Head(40.0f, 90.0f, 0.0f, head);
+  zoom_math::HeadForward(head, forward);
+  HeadForward(head, flat);
+  const float down_right[2] = {flat[1], -flat[0]};
+  FlyRight(forward, down_right, kAimLeast, right);
+  Near("a look straight down strafes along the right of the head, x",
+       right[0], cosf(40.0f * 3.14159265f / 180.0f), 1e-4);
+  Near("a look straight down strafes along the right of the head, z",
+       right[1], -sinf(40.0f * 3.14159265f / 180.0f), 1e-4);
+  FlySpeed(forward, right, ahead, top, speed);
+  Near("a full push forward with a look straight down goes straight down",
+       speed[1], -top, 1e-4);
+
+  // A controller that points 60 degrees up.
+  const float k = 3.14159265f / 180.0f;
+  const float up_aim[3] = {0.0f, sinf(60.0f * k) * 2.0f, cosf(60.0f * k) * 2.0f};
+  float aim[3];
+  Check(Unit(up_aim, aim), "a direction of length 2 gives a unit vector", 1,
+        1);
+  Near("the unit vector has length 1",
+       sqrtf(aim[0] * aim[0] + aim[1] * aim[1] + aim[2] * aim[2]), 1.0, 1e-5);
+  const float zero[3] = {0.0f, 0.0f, 0.0f};
+  Check(!Unit(zero, aim), "a direction with no length has no unit "
+        "vector", 0, 0);
+  Unit(up_aim, aim);
+  Near("a controller 60 degrees up points up", DegreesDown(aim), -60.0, 1e-3);
+  FlyRight(aim, fallback, kAimLeast, right);
+  FlySpeed(aim, right, ahead, top, speed);
+  Near("a full push forward goes up", speed[1], top * sinf(60.0f * k), 1e-4);
+
+  // THE STEP OF A FRAME.
+  float step[3];
+  const float fast[3] = {0.0f, -1.5f, 1.5f};
+  FlyStep(fast, 0.0f, step);
+  Near("a frame with no time gives no step",
+       fabsf(step[0]) + fabsf(step[1]) + fabsf(step[2]), 0.0, 1e-9);
+  FlyStep(fast, 0.01f, step);
+  Near("a frame of 10 ms goes 1.5 cm down", step[1], -0.015, 1e-6);
+  const float still[2] = {0.0f, 0.0f};
+  FlySpeed(forward, right, still, top, speed);
+  Near("a stick at rest gives no speed",
+       fabsf(speed[0]) + fabsf(speed[1]) + fabsf(speed[2]), 0.0, 1e-9);
+
+  // THE VIEW AFTER A STEP. At 100 units per meter, a step of 10 cm down and
+  // 20 cm ahead puts the waist point 10 units lower and 20 units ahead.
+  TablePose pose;
+  pose.center[0] = 100.0f;
+  pose.center[1] = 50.0f;
+  pose.center[2] = 200.0f;
+  pose.heading = 0.0f;
+  pose.scale = 100.0f;
+  const float move[3] = {0.0f, -0.1f, 0.2f};
+  TablePose next;
+  Fly(pose, move, &next);
+  Near("a step down lowers the waist point", next.center[1], 40.0, 1e-4);
+  Near("a step ahead moves it ahead", next.center[2], 220.0, 1e-4);
+  Near("and not to the side", next.center[0], 100.0, 1e-4);
+  Near("the scale stays", next.scale, 100.0, 1e-6);
+  // With the heading 90 degrees to the right, ahead in the room is +x.
+  pose.heading = 90.0f * k;
+  Fly(pose, move, &next);
+  Near("with a heading of 90 degrees a step ahead goes along x",
+       next.center[0], 120.0, 1e-3);
+  Near("and the height goes down the same", next.center[1], 40.0, 1e-4);
+
+  // THE GROUND LIMITS. The land is at 0, the room and the head at 0, and the
+  // scale 100. The view starts with the land 1 m below the head (C.y 100).
+  // Steps of 5 cm down stop with the land 10 cm below the head (C.y 10).
+  // Steps of 5 cm up stop with the land 2.5 m below it (C.y 250).
+  float y = 100.0f;
+  for (int i = 0; i < 40; ++i) {
+    y = GodGroundHeight(y - 5.0f, y, 0.0f, 0.0f, 100.0f, 0.0f, 0.10f, 2.50f);
+  }
+  Near("a fly down stops with the land 10 cm below the head", y, 10.0, 1e-3);
+  for (int i = 0; i < 80; ++i) {
+    y = GodGroundHeight(y + 5.0f, y, 0.0f, 0.0f, 100.0f, 0.0f, 0.10f, 2.50f);
+  }
+  Near("a fly up stops with the land 2.5 m below the head", y, 250.0, 1e-3);
+}
+
 inline void WalkChecks() {
   using namespace table_math;
   using namespace walk_math;
@@ -337,6 +468,7 @@ inline void WalkChecks() {
        0.0, 20.0 * 0.05);
   Near("a step with a height that is not a number moves nothing",
        FollowStep(&bump, sqrtf(-1.0f), 0.01f, length), 0.0, 1e-6);
+  FlyChecks();
 }
 
 }  // namespace walk_checks

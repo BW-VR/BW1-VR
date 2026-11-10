@@ -38,7 +38,9 @@ want.
    or a speed or a curve of the push that feels wrong. Then set the
    launcher row "Comfort vignette" to
    gentle and to strong for a short walk. Wrong: it does not help, or it is
-   in the way.
+   in the way. Then set "Movement type" to Fly and fly down to the land and
+   up, with the head and with the controller. Wrong: discomfort, or a fly
+   that does not go where you look or point.
 4. **The teleport.** Aim the arc at near and far land, and go to the village
    of Land 1. Wrong: an arc or a ring that is hard to see or to aim, or a way
    to the village that you cannot find.

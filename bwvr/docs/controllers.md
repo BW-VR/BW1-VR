@@ -1008,7 +1008,7 @@ The pointing hand is the right hand. When the left controller is the Hand
 | Grip | Grabs the land: pull to move it across, and up or down, one to one. Both grips turn and scale the land (`god-view.md`, section 5). `grab_hand=2` also lets the grip of the pointing hand grab the land when the Hand is empty and over nothing it can hold |
 | Y (B when the left hand points) | Hold: opens the ring, and the hand picks an item (section 10) |
 | X (A when the left hand points) | Opens and closes the spell book: the miracles that you can ask for now (`miracles.md`, "The spell book"). The grip of the pointing hand holds one, and a pull of 10 cm takes it out |
-| Stick | In the God view: push it to move over the land (`move_stick`, `god-view.md`, section 5.7). No job in the other views and in a room of the Temple |
+| Stick | In the God view: push it to walk over the land, or to fly with `move_type=1` (`move_stick`, `god-view.md`, section 5.7). No job in the other views and in a room of the Temple |
 | Stick click | Hold it for 1 s with the stick at rest: the view recenters, as F11 does (`recenter_hold`, `god-view.md`, section 5.8) |
 | Trigger | No job |
 | Menu button of the left controller | Esc: the game menu (3.6) |
@@ -1076,8 +1076,9 @@ default. Each control has one job, and one button opens the game menu.
 | `teleport` | 1 | 1: A makes the teleport. 0: A makes a jump |
 | `teleport_switch` | 1 | The switch of the game that the press of A keeps to. 1: the drag of the land, as the walk with the stick. 0: the double click jump (`god-view.md`, section 14.1). Not in the launcher |
 | `button_layout` | 1 | The layout of the buttons of the hand that does not point (5.1). 1: the menu button of the left controller opens the game menu, the second face button opens the ring, the first face button opens the spell book (`spell_book`), and the stick does not drive the ring. 0: the second face button opens the game menu, the first face button opens the ring, and the stick can drive the ring. The test key Ctrl and the Menu key goes between the two (`test_keys=1`). Not in the launcher |
-| `move_stick`, `move_stick_speed_cm` | 1, 150 | The walk with the stick of the hand that does not point, in the God view: 0 off, 1 along the direction of the head, 2 along the direction of the controller, and the speed of a full push in cm of the room for each second (`god-view.md`, section 5.7). The launcher row "Move with the other stick" |
-| `move_stick_follow_land` | 1 | In the walk with the stick, 1: the height of the view follows the land under the head through a smooth filter. 0: the view keeps its height (`god-view.md`, section 5.7). The launcher row "Walk follows the land" |
+| `move_stick`, `move_stick_speed_cm` | 1, 150 | The walk or the fly with the stick of the hand that does not point, in the God view: 1 along the direction of the head, 2 along the direction of the controller, 0 off (bwvr.ini only), and the speed of a full push in cm of the room for each second (`god-view.md`, section 5.7). The launcher row "Movement direction" |
+| `move_type` | 0 | 0: the stick walks over the land. 1: the stick flies along the forward direction of the head or of the controller in 3D, and the view does not follow the land (`god-view.md`, section 5.7). The launcher row "Movement type" |
+| `move_stick_follow_land` | 1 | In the walk with the stick, 1: the height of the view follows the land under the head through a smooth filter. 0: the view keeps its height (`god-view.md`, section 5.7). Not in the launcher: a save of the launcher removes it. The switch "Move kind" of the debug page |
 | `miracle_cancel_ms` | 400 | The longest press of the second face button that takes a miracle out of the Hand |
 | `spell_book` | 1 | 1: the first face button of the hand that does not point opens the spell book (`miracles.md`). 0: that button has no job. The switch "Spell book" of the debug page. Not in the launcher |
 | `debug_all_miracles` | 0 | 1: up to 6 miracles in the spell book (the slots of a Village Centre), with no cost in prayer power. For tests. The switch "All miracles" of the debug page. Not in the launcher |
@@ -1089,7 +1090,7 @@ default. Each control has one job, and one button opens the game menu.
 | `aim_pitch_deg`, `aim_yaw_deg` | 0, 0 | Section 8 |
 | `radial_menu` | 1 | Section 10. The other keys of the ring are in 10.5 |
 | `temple_pointer`, `temple_click`, `temple_camera_follow`, `temple_camera_drag`, `temple_camera_flight`, `temple_pointer_depth_cm`, `temple_turn`, `temple_taps` | see 11.6 | Section 11 |
-| `snap_turn` | 2 | 5.4. 4 is the smooth turn of the God view (`god-view.md`, section 4) |
+| `snap_turn` | 2 | 5.4. 4 is the smooth turn of the God view (`god-view.md`, section 4). 0 (no turn) is for a test only: the launcher and the settings window do not offer it |
 | `smooth_turn_speed` | 90 | The degrees a second of the smooth turn at a full push, 10 to 360 (`god-view.md`, section 4). The row "Turn speed" of the settings window. Not in the launcher |
 | `zoom_step` | 2 | 5.4 |
 | `menu_stops_turn` | 1 | 1: while a dialog box is up, the stick does not turn and does not zoom the God view. 0: it does (`god-view.md`, section 5.8). The switch "Menu turn" of the debug page. Not in the launcher |

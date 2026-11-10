@@ -257,48 +257,51 @@ const Setting kSettings[] = {
     //  "scenery does not poke through it."},
 
     {kGroup, nullptr, "Moving around", nullptr, 0, nullptr},
-    {kChoice, "snap_turn", "Turn",
-     "Off|30 degrees|45 degrees|90 degrees|Smooth", 2,
+    // snap_turn 0 (no turn) is not in the list. The mod still takes it from
+    // bwvr.ini for a test, and the launcher shows the default for it
+    // (kShownAsDefault).
+    {kValues, "snap_turn", "Turn",
+     "Smooth=4|30 degrees=1|45 degrees=2|90 degrees=3", 2,
      "Push the stick of your Hand left or right, drag sideways with the middle "
      "mouse button, or press a turn key, to turn. You stay where you are. "
-     "30, 45 or 90 degrees: you turn in one step. Smooth: in the God view you "
-     "turn while you hold the stick or the turn key, and a larger push turns "
-     "faster. The middle mouse button then turns in steps of 45 degrees. The "
-     "middle mouse button does not tilt the camera. Off: the stick does not "
-     "turn you, and the turn keys and the middle mouse button turn and tilt "
-     "the camera of the game."},
+     "Smooth: in the God view you turn while you hold the stick or the turn "
+     "key, and a larger push turns faster. The middle mouse button then "
+     "turns in steps of 45 degrees. 30, 45 or 90 degrees: you turn in one "
+     "step. The middle mouse button does not tilt the camera."},
     {kValues, "god_zoom_smooth", "Zoom with the stick", "In steps=0|Smooth=1",
      0,
      "In steps: one push of the stick of your Hand forward or back is one zoom "
      "step. Smooth: the zoom changes while you hold the stick. It stops when "
      "you let the stick go."},
-    {kValues, "god_zoom_forward_in", "Stick forward",
-     "Zooms out=0|Zooms in=1", 0,
-     "The direction of the zoom on the stick of your Hand. Zooms out: push the "
+    {kBool, "god_zoom_forward_in", "Invert zoom direction", nullptr, 0,
+     "The direction of the zoom on the stick of your Hand. Off: push the "
      "stick forward and the world gets smaller, pull it back and the world "
-     "gets larger. Zooms in is the other way."},
+     "gets larger. On: the other way."},
     {kValues, "god_zoom_about", "Center of the zoom",
      "The land you look at=1|The land under you=0|Your Hand=2", 1,
      "The point that stays where it is when you zoom with the stick. The "
      "land you look at: the thing in the middle of your view keeps its place "
      "and changes its size. The land under you: you keep your place on the "
      "land. Your Hand: the land at your Hand keeps its place."},
-    {kValues, "move_stick", "Move with the other stick",
-     "Head direction=1|Controller direction=2|Off=0", 1,
+    {kValues, "move_type", "Movement type", "Walk=0|Fly=1", 0,
      "Push the stick of your other hand (the left stick, or the right stick "
-     "with a left hand) to move over the "
-     "land in the God view. You stop when you let the stick go. Head "
+     "with a left hand) to move in the God view. You stop when you let the "
+     "stick go. Walk: you move over the land, and the height of your view "
+     "follows the hills, so the land stays at the same height below your "
+     "hands. Fly: you move in the direction of Movement direction, also up "
+     "and down. Look or point down and push the stick forward to go down. "
+     "The view does not follow the land, and the land stays between 10 cm "
+     "and 2.5 m below your head."},
+    // move_stick 0 (no walk) is not in the list. The mod still takes it
+    // from bwvr.ini for a test, and the launcher shows the default for it
+    // (kShownAsDefault).
+    {kValues, "move_stick", "Movement direction",
+     "Head direction=1|Controller direction=2", 1,
+     "Which way is forward when you push the stick of your other hand. Head "
      "direction: forward is where your head faces. Controller direction: "
-     "forward is where that controller points. Off: the stick does not move "
-     "you. Some people feel ill when a stick moves them: use Off then, and "
-     "move with the grip and with the teleport."},
-    {kValues, "move_stick_follow_land", "Walk follows the land", "On=1|Off=0",
-     1,
-     "When you move with the stick, the height of your view follows "
-     "the hills, so the land stays at the same height below your hands. The "
-     "view goes up and down smoothly, and it does not follow each small "
-     "bump. It moves only while you push the stick. Off: the view keeps its "
-     "height, and a hill comes nearer or goes farther away."},
+     "forward is where that controller points. With Fly, point the "
+     "controller where you want to go. Some people feel ill when a stick "
+     "moves them: then move with the grip and with the teleport."},
     // Not offered. These four keys act on the camera of the game. In the
     // God view the mod moves the view in cuts and in its own zoom steps,
     // and a story shows in a window in the room, so the defaults are the
@@ -1439,6 +1442,18 @@ void UpdateRendererRows(bool first) {
   if (!first) CheckEverything();
 }
 
+// Values that a kValues row does not offer. The mod still takes them from
+// bwvr.ini for a test. The row shows its default for them, so a save writes
+// the default.
+struct ShownAsDefault {
+  const char* key;
+  int value;
+};
+const ShownAsDefault kShownAsDefault[] = {
+    {"snap_turn", 0},   // no turn
+    {"move_stick", 0},  // no walk
+};
+
 void LoadAll() {
   for (int i = 0; i < kSettingCount; ++i) {
     const Setting& s = kSettings[i];
@@ -1507,10 +1522,25 @@ void LoadAll() {
         break;
     }
   }
+  for (const ShownAsDefault& hidden : kShownAsDefault) {
+    for (int i = 0; i < kSettingCount; ++i) {
+      const Setting& s = kSettings[i];
+      if (s.kind != kValues || g_control[i] == nullptr ||
+          strcmp(s.key, hidden.key) != 0 ||
+          ReadIni(s.key, s.fallback) != hidden.value) {
+        continue;
+      }
+      SendMessageA(g_control[i], CB_SETCURSEL,
+                   ChoiceIndex(s.choices, s.fallback), 0);
+    }
+  }
 }
 
 // Keys the launcher no longer offers. See SaveAll.
 const char* const kRetiredKeys[] = {
+    // The row "Movement type" replaced the row of this key: Walk always
+    // follows the land.
+    "move_stick_follow_land",
     "head_tracking",   "immersive",        "head_fov_deg",
     "eye_separation_milli", "hand_anchored", "head_roll",
     "ui_world_lock",   "pointer_clip",     "pointer_scale",

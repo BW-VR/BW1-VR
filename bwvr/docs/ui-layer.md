@@ -2549,9 +2549,10 @@ program.
 
 | Tab | Row | Key | Values |
 | --- | --- | --- | --- |
-| Moving | Turn | `snap_turn` | Off, 30, 45, 90 degrees, Smooth |
+| Moving | Turn | `snap_turn` | Smooth, 30, 45, 90 degrees. For 0 (no turn, a test value of bwvr.ini) the row shows the default |
 | Moving | Turn speed | `smooth_turn_speed` | Slow 45, Normal 90, Fast 135, Very fast 180 (degrees a second) |
-| Moving | Stick walk | `move_stick` | Off, Head, Controller |
+| Moving | Movement type | `move_type` | Walk, Fly |
+| Moving | Movement direction | `move_stick` | Head, Controller. For 0 (no walk, a test value of bwvr.ini) the row shows the default |
 | Moving | Walk speed | `move_stick_speed_cm` | Slow 75, Normal 150, Fast 250, Very fast 400 |
 | Moving | Smooth zoom | `god_zoom_smooth` | In steps, Smooth |
 | Moving | Comfort vignette | `comfort_vignette` | Off, Gentle, Strong |
@@ -2602,7 +2603,7 @@ which writes its own log line:
 | Key | The change function |
 | --- | --- |
 | `snap_turn`, `smooth_turn_speed`, `blink` | `ComfortCameraSetSnap`, `ComfortCameraSetTurnSpeed`, `ComfortCameraSetBlink` |
-| `move_stick`, `move_stick_speed_cm`, `god_zoom_smooth` | `TabletopGodSetMoveStick`, `TabletopGodSetMoveSpeed`, `TabletopGodSetZoomSmooth`. A walk or a hold of the zoom that runs stops |
+| `move_type`, `move_stick`, `move_stick_speed_cm`, `god_zoom_smooth` | `TabletopGodSetMoveType`, `TabletopGodSetMoveStick`, `TabletopGodSetMoveSpeed`, `TabletopGodSetZoomSmooth`. A walk, a fly or a hold of the zoom that runs stops |
 | `comfort_vignette` | `VignetteSet` |
 | With `settings_lean=0`: `teleport`, `recenter_hold`, `left_hand`, `gesture_trail`, `creature_stroke_open`, `hint_learn`, `hint_card_style` | `TeleportSetOn`, `ControllersSetRecenterHold`, `ControllersSetLeftHand`, `OverlaySetTrail`, `ControllersSetOpenStroke`, `HintCardSetLearn`, `HintCardSetStyle` |
 

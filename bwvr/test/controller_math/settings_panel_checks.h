@@ -73,9 +73,24 @@ inline void SettingsPanelChecks() {
   Check(IndexOfValue(kTable[kLeftHand].values, -1) == 0,
         "left_hand -1 (the option of the game) is the first value",
         IndexOfValue(kTable[kLeftHand].values, -1), 0);
-  Check(IndexOfValue(kTable[kMoveStick].values, 0) == 0,
-        "move_stick 0 (off) is the first value, the knob at the left",
-        IndexOfValue(kTable[kMoveStick].values, 0), 0);
+  Check(IndexOfValue(kTable[kMoveStick].values, 1) == 0 &&
+            IndexOfValue(kTable[kMoveStick].values, 0) == -1,
+        "move_stick 1 (head) is the first value, and the window has no off",
+        IndexOfValue(kTable[kMoveStick].values, 1), 0);
+  Check(IndexOfValue(kTable[kSnapTurn].values, 4) == 0 &&
+            IndexOfValue(kTable[kSnapTurn].values, 0) == -1,
+        "snap_turn 4 (smooth) is the first value, and the window has no off",
+        IndexOfValue(kTable[kSnapTurn].values, 4), 0);
+  Check(ShownValue(kSnapTurn, 0) == 2 && ShownValue(kMoveStick, 0) == 1 &&
+            ShownValue(kSnapTurn, 3) == 3 && ShownValue(kMoveSpeed, 0) == 0,
+        "snap_turn 0 shows as 45 degrees and move_stick 0 as the head, and "
+        "the other values show as they are", ShownValue(kSnapTurn, 0), 2);
+  Check(IndexOfValue(kTable[kMoveType].values, 0) == 0 &&
+            IndexOfValue(kTable[kMoveType].values, 1) == 1 &&
+            kTable[kMoveType].fallback == 0 &&
+            !IsToggle(kTable[kMoveType].values),
+        "move_type: Walk 0 is the default, Fly 1, with arrows",
+        kTable[kMoveType].fallback, 0);
   Check(IndexOfValue(kTable[kSnapTurn].values, 7) == -1,
         "a value that the list does not have has no place",
         IndexOfValue(kTable[kSnapTurn].values, 7), -1);
@@ -136,9 +151,9 @@ inline void SettingsPanelChecks() {
   {
     wchar_t word[40];
     int v = 0;
-    const bool ok = ValueAt(kTable[kSnapTurn].values, 4, word, 40, &v);
+    const bool ok = ValueAt(kTable[kSnapTurn].values, 0, word, 40, &v);
     Check(ok && wcscmp(word, L"Smooth") == 0 && v == 4,
-          "the fifth value of the turn is \"Smooth\", 4", v, 4);
+          "the first value of the turn is \"Smooth\", 4", v, 4);
     Check(IndexOfValue(kTable[kTurnSpeed].values, 90) == 1 &&
               kTable[kTurnSpeed].fallback == 90,
           "the turn speed is 90 degrees a second by default, the second value",
@@ -229,10 +244,10 @@ inline void SettingsPanelChecks() {
                       !InWindow(kHintLearn, true) &&
                       !InWindow(kCardStyle, true) &&
                       !InWindow(kSubtitleCard, true);
-    Check(lean_rows == 8 && gone && hidden_ok,
-          "the lean window has 8 rows, with no Teleport, Recenter hold, Hand, "
+    Check(lean_rows == 9 && gone && hidden_ok,
+          "the lean window has 9 rows, with no Teleport, Recenter hold, Hand, "
           "Open hand stroke, Gesture trail, Hints, Card look or Subtitle "
-          "card, and the old window has each row", lean_rows, 8);
+          "card, and the old window has each row", lean_rows, 9);
     Check(TabCount(true) == 2 && TabCount(false) == 3 &&
               GroupOfTab(0, true) == kGroupMoving &&
               GroupOfTab(1, true) == kGroupHands &&

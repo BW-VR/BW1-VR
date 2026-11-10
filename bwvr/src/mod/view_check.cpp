@@ -73,6 +73,7 @@ bool TabletopOwnsView();
 float TabletopViewScale();
 uint64_t TabletopGodViewVersion();
 bool TabletopGodWalkActive();
+float TabletopGodMoveScaleFactor();
 // controllers.cpp: a grip holds the world.
 bool ControllersGrabHeld();
 
@@ -103,6 +104,7 @@ struct ScaleFrame {
   float scale;              // units per meter of the God view
   uint64_t version;         // of the God view
   bool walk, grab;
+  float move_factor;        // the factor of the speed by the scale
   double seconds;           // the clock at the first pass of the frame
   bool have_cam[2];
   float cam[2][3];          // the cameras of the eye passes, world
@@ -155,6 +157,7 @@ struct ScaleTotals {
   uint64_t walk_frames;
   double walk_units, walk_seconds;
   double walk_across, walk_up;  // the parts across and up or down, units
+  double walk_factor_sum;       // the factor of the speed by the scale
   uint64_t grab_frames;
   double grab_units, grab_hand_m;
 };
@@ -228,15 +231,19 @@ void ScaleLine(const char* why) {
   if (t.eyes_n == 0 || g_scale_lines >= kScaleMostLines) return;
   ++g_scale_lines;
   const double eyes = Mean(t.eyes_sum, t.eyes_n);
-  char walk[320] = "";
+  char walk[400] = "";
   if (t.walk_frames > 0 && t.walk_seconds > 0.0 && eyes > 0.0) {
     const double to_cm = 100.0 / t.walk_seconds / eyes;
+    const double factor = Mean(t.walk_factor_sum, t.walk_frames);
     sprintf_s(walk, " In %llu frames of a walk the camera of the game went "
               "%.2f units in %.2f s: %.1f cm of the room each second at the "
               "units per meter of the eyes, %.1f across the land and %.1f up "
-              "and down.", t.walk_frames, t.walk_units, t.walk_seconds,
+              "and down. The scale makes the speed of the stick %.2f times "
+              "move_stick_speed_cm (move_stick_scale), and the speed across "
+              "over that factor is %.1f cm each second.", t.walk_frames, t.walk_units, t.walk_seconds,
               t.walk_units * to_cm, t.walk_across * to_cm,
-              t.walk_up * to_cm);
+              t.walk_up * to_cm, factor,
+              factor > 0.0 ? t.walk_across * to_cm / factor : 0.0);
   }
   char grab[200] = "";
   if (t.grab_frames > 0 && eyes > 0.0) {
@@ -344,6 +351,7 @@ void ScaleTake(const ScaleFrame& f) {
       const float dz = f.camera[2] - b.camera[2];
       t.walk_across += sqrtf(dx * dx + dz * dz);
       t.walk_up += fabsf(f.camera[1] - b.camera[1]);
+      t.walk_factor_sum += f.move_factor;
     }
     if (f.grab && b.grab) {
       ++t.grab_frames;
@@ -486,6 +494,7 @@ void ViewCheckEye(int eye, const float m[12], float near_plane, float half_x,
     f.version = TabletopGodViewVersion();
     f.walk = TabletopGodWalkActive();
     f.grab = ControllersGrabHeld();
+    f.move_factor = TabletopGodMoveScaleFactor();
     f.seconds = Clock();
     f.pointing = -1;
     f.have_hand = ReadGame3(kGameHandPosition, f.hand);

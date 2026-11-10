@@ -446,10 +446,12 @@ over an object. 0 turns the grab off.
 To change the direction of the left stick, set "Movement direction"
 in the launcher (key move_stick). Head direction moves you where your
 head faces. Controller direction moves you where the left controller
-points. A full push moves you 150 cm of your room each second, at
-each zoom (key move_stick_speed_cm in bwvr.ini). The stick does not
-move you while a grip holds the land, in a menu, in a cut scene and
-in the Temple.
+points. A full push moves you 150 cm of your room each second (key
+move_stick_speed_cm in bwvr.ini), times a factor of the zoom: up to 4
+times faster when you are as small as a villager, and 0.6 times as
+fast when the land is small. Set move_stick_scale=0 in bwvr.ini to
+keep one speed at each zoom. The stick does not move you while a grip
+holds the land, in a menu, in a cut scene and in the Temple.
 
 To walk or to fly, set "Movement type" in the launcher (key
 move_type). Walk (the default): while you move with the left stick,

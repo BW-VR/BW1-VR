@@ -98,6 +98,14 @@ struct TabletopSettings {
   // largest factor, 1 to 64.
   int move_stick_ramp = 1;         // move_stick_ramp: 1 on, 0 off
   int move_stick_ramp_most = 32;   // move_stick_ramp_most: the top factor
+  // The speed by the scale (walk_math::ScaleFactor): 1 multiplies the speed
+  // of the stick by (ref / scale) ^ power, kept between low and high. 0 the
+  // speed of move_stick_speed_cm at each scale.
+  int move_stick_scale = 1;              // move_stick_scale: 1 on, 0 off
+  int move_stick_scale_ref_x10 = 160;    // the scale of factor 1, in tenths
+  int move_stick_scale_power_pct = 50;   // the power, in percent
+  int move_stick_scale_low_pct = 60;     // the least factor, in percent
+  int move_stick_scale_high_pct = 400;   // the largest factor, in percent
   // A fly at a solid (god_zoom_solid_stop=1): 1 slides past it, and only a
   // push straight at it stops. 0 stops the step short of it.
   int fly_solid_slide = 1;         // fly_solid_slide: 1 slides, 0 stops
@@ -234,6 +242,11 @@ void TabletopGodSetMoveType(int type, const char* by);
 // The switch "Fly at solids" of the debug page (fly_solid_slide).
 void TabletopGodFlySlideToggle();
 int TabletopGodFlySlideValue();
+// The switch "Speed by scale" of the debug page (move_stick_scale), and the
+// factor of the speed of the stick at the scale now (1 when it is off).
+void TabletopGodMoveScaleToggle();
+int TabletopGodMoveScaleValue();
+float TabletopGodMoveScaleFactor();
 // The switch "Deep zoom" of the debug page (god_zoom_far_level).
 void TabletopGodZoomFarToggle();
 int TabletopGodZoomFarValue();

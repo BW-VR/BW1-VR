@@ -235,7 +235,8 @@ steps, and 5 steps out from 1 go past the life size scale, to 7.6.
 
 **Below the life size scale.** Each distance of the room stays the same as at
 the other scales: the Hand is 19 cm long (size 0.06), the near plane is 5 cm
-(0.05 units, section 8), the walk goes 150 cm a second (1.5 units), the reach
+(0.05 units, section 8), the walk goes 150 cm a second times the factor of
+the scale (6 m and 6 units at 1 unit per meter, section 5.7), the reach
 of the teleport arc is 10 units. The distance factor of the ears is 0.25,
 so a sound with the maximum 300 carries 75 m of the room (`audio.md`, 6.3). The values of section 8 that follow the scale stay the
 game's own below a gain of 1. The land under the head keeps the height that
@@ -866,11 +867,42 @@ event.
   move below 30 percent, the top speed from 95 percent, and a straight line
   between the two. A diagonal is not faster than a straight push.
 - **The speed** is a speed of the room: `move_stick_speed_cm` (150) cm of the
-  room for each second at a full push. So the walk feels the same at each
-  scale. At 100 units for each meter that is 150 units a second over the
-  land, and at the life size scale it is 11 units a second. The step of a
-  frame is the speed times the real time of the frame, and a frame counts at
-  most 50 ms.
+  room for each second at a full push, times the factor of the scale
+  (`move_stick_scale`, 1). The step of a frame is the speed times the real
+  time of the frame, and a frame counts at most 50 ms.
+- **The speed by the scale** (`ScaleFactor` in `walk_math.h`). A walk at one
+  speed of the room is slow at the villager scale: the land is as large as
+  for a villager, and a town is many seconds away. So the speed of the
+  stick is multiplied by a smooth function of the scale, with no steps:
+
+  ```
+  factor = (ref / scale) ^ power, kept between low and high
+  ```
+
+  With the defaults (ref 16 units per meter, power 0.5, low 0.6, high 4):
+
+  | Scale (units per meter) | 1 | 4 | 7.5 | 16 | 30 | 44.4 and up |
+  | --- | --- | --- | --- | --- | --- | --- |
+  | Factor | 4 | 2 | 1.46 | 1 | 0.73 | 0.6 |
+  | Room speed with 150 cm | 6.0 m/s | 3.0 | 2.2 | 1.5 | 1.1 | 0.9 |
+  | Room speed with 250 cm | 10.0 m/s | 5.0 | 3.7 | 2.5 | 1.8 | 1.5 |
+
+  At 1 unit per meter a villager is as high as the player, so 6 to 10 m/s
+  of the room is the run of a villager, and a town of 100 units takes 10 to
+  17 s before the speed ramp. From 21 to 43 units per meter the factor is
+  0.87 to 0.61, so a walk there is a little slower than the key. The power
+  of 0.5 is half way between one speed of the room (0) and one speed over
+  the land (1). The factor depends on the scale only: in a smooth zoom
+  during a walk it follows the scale of each frame, and with the stick at
+  rest nothing moves. The speed ramp multiplies the result and keeps its
+  cap, so the top speed at a large scale is 0.6 times the top speed of the
+  key, and at 1 unit per meter it is 4 times. The comfort vignette counts
+  the move in the room (section 5.8), so at a large factor it stays at its
+  full darkness. With `move_stick_scale=0` the speed is the speed of the key
+  at each scale. The grab of the world has no factor: the land stays at the
+  hand. The switch "Speed by scale" of the debug page changes the key while
+  the game runs, with a short pulse for 0 and a long pulse for 1. A walk or
+  a fly that runs stops.
 - **The speed ramp** (`move_stick_ramp`, 1). While the stick is pushed to 90
   percent of the top speed or more, the time of that push counts. After 1 s
   the speed doubles each 2 s, up to `move_stick_ramp_most` (32) times
@@ -883,10 +915,13 @@ event.
   A push under 90 percent sets the time to 0, so the speed goes back to the
   speed of the push in the same frame. A release stops the walk in the same
   frame, as before. The ramp acts in the walk and in the fly. At the scale
-  of a villager (1 unit for each meter) a full push is 1.5 units each
-  second, and 48 units each second after 11 s: 1000 units of the land take
-  about 29 s from rest. At 100 units for each meter the top is 4800 units
-  each second, so a player at that scale lets go before it. The comfort
+  of a villager (1 unit for each meter), with the speed by the scale and
+  `move_stick_speed_cm=150`, a full push is 6 units each second, and 192
+  units each second after 11 s: 1000 units of the land take about 13 s from
+  rest. With `move_stick_scale=0` it is 1.5 and 48 units each second, and
+  about 29 s. At 100 units for each meter the top is 2880 units each second
+  (4800 with `move_stick_scale=0`), so a player at that scale lets go
+  before it. The comfort
   vignette is at its full darkness from a move of 150 cm of the room each
   second (section 5.8), so a faster move keeps it full. With
   `move_stick_ramp=0` the speed is the speed of the push only.
@@ -1075,6 +1110,11 @@ event.
 | `move_stick_trace` | 0 | A test for a desktop run: the log has one line for each of the first N frames of each walk or fly (at most 2000 lines in a game) |
 | `move_stick_ramp` | 1 | 1: a push of 90 percent or more gets faster with its time, in the walk and in the fly. 0: the speed of the push only. The switch "Speed ramp" of the debug page. Not in the launcher |
 | `move_stick_ramp_most` | 32 | The largest factor of the speed ramp, 1 to 64 |
+| `move_stick_scale` | 1 | 1: the speed of the stick is times the factor of the scale (the speed by the scale). 0: the same speed of the room at each scale. The switch "Speed by scale" of the debug page. Not in the launcher |
+| `move_stick_scale_ref_x10` | 160 | The scale where the factor is 1, in tenths of a unit for each meter, 10 to 40000 |
+| `move_stick_scale_power_pct` | 50 | The power of the factor, in percent, 0 to 100 |
+| `move_stick_scale_low_pct` | 60 | The least factor, in percent, 10 to 100 |
+| `move_stick_scale_high_pct` | 400 | The largest factor, in percent, 100 to 1000 |
 | `fly_solid_slide` | 1 | With `god_zoom_solid_stop=1`, 1: a fly slides past a house, a rock or a tree trunk, and only a push straight at it stops. 0: a fly stops short of it. The switch "Fly at solids" of the debug page |
 
 The switch "Move kind" of the debug page goes from the walk that follows the
@@ -1099,6 +1139,15 @@ god view     : the walk with the stick starts at 100.00 units per meter, with th
 god view     : the walk with the stick stopped (the stick is back). You went 789.67 units over the land, which is 789.67 cm of the room, 0.0 degrees to the right of straight ahead in the room. The land under your head was at 1858.8 2528.7 and is at 2625.1 2338.0. The stick was pushed for 5.264 s, which gives 150.0 cm of the room each second, and the view moved on 300 of 300 frames (move_stick=1, 100.00 to 100.00 units per meter), frame 1201. The land under your head was 61.6 cm below your head and is 63.8 cm below it. The view went 118.7 cm up and 130.4 cm down with the land (move_stick_follow_land=1). A frame took 16.2 to 27.4 ms, and a step was 2.43 to 4.11 cm of the room.
 god view     : walk check, 30 frames after the stop the waist point is at 2625.12 2338.04, and it was at 2625.12 2338.04 at the stop: 0.000 units apart. In those frames the drawn head moved 0.00 cm of the room.
 controllers  : the stick of the other hand does not move you: a grip holds the world, frame 1081
+```
+
+The lines above are from a run with `move_stick_scale=0`. With 1 the line of
+the start also gives the factor of the scale and the speed with it, and the
+line of the end gives the least and the largest factor of the walk:
+
+```
+At 100.00 units per meter the speed of the stick is times 0.60 (move_stick_scale=1: (16.0 / scale) ^ 0.50, from 0.60 to 4.00): 90 cm of the room each second.
+The scale made the speed of the stick 0.60 to 0.60 times move_stick_speed_cm (move_stick_scale=1).
 ```
 
 The line of the end also says how far the land went down for a hill, and on
@@ -2239,7 +2288,7 @@ render size, because the recipes depend on it.
   brings it back to 20.83 m.
 - The scale check [R] (`controller-hints.md`, 9.16): `spawn_run.ps1 -Save
   temple` with `test_frame_rate=60`, `card_send_test_save=0`,
-  `fake_controller_play_frame=800`, `move_stick_ramp=0`,
+  `move_stick_scale=0`, `fake_controller_play_frame=800`, `move_stick_ramp=0`,
   `move_stick_speed_cm=150`, `god_zoom_about=0`, `god_zoom_smooth=0`,
   `fake_head_right_cm=10`, `fake_head_up_cm=-10`, six left points
   (`fake_controller_left_points=-16,-30,50 -16,-30,30 -16,-30,10 -16,-30,50
@@ -2252,7 +2301,9 @@ render size, because the recipes depend on it.
   each second, and the grab moves the land 40.0 cm for 40.0 cm of the grip.
   At 100 units per meter the walk goes over a slope: the follow of the land
   adds 29.3 cm up and 34.6 cm down, and the camera of the game goes 157.1
-  cm each second in all.
+  cm each second in all. The same run with `move_stick_scale=1` has no
+  result yet: the walk must give 150 cm times the factor across the land
+  (600 at 1, 219 at 7.5 and 90 at 100 units per meter).
 
 **The mouse pan and the tutorial events** need a run with the test mouse. Use
 `play_mode=0` (it must log the God view), `-NEWGAME` on Land 1,

@@ -645,6 +645,42 @@ inline void WalkChecks() {
   Near("a step with a height that is not a number moves nothing",
        FollowStep(&bump, sqrtf(-1.0f), 0.01f, length), 0.0, 1e-6);
 
+  // THE SPEED BY THE SCALE (ScaleFactor, move_stick_scale), with the
+  // defaults: ref 16 units per meter, power 0.5, low 0.6, high 4.
+  Near("at the villager scale (1) the stick is 4 times faster",
+       ScaleFactor(1.0f, 16.0f, 0.5f, 0.6f, 4.0f), 4.0, 1e-5);
+  Near("at the life size scale (7.5) 1.46 times",
+       ScaleFactor(7.5f, 16.0f, 0.5f, 0.6f, 4.0f), 1.46059, 1e-4);
+  Near("at 16 the speed of the key",
+       ScaleFactor(16.0f, 16.0f, 0.5f, 0.6f, 4.0f), 1.0, 1e-6);
+  Near("at 30 0.73 times", ScaleFactor(30.0f, 16.0f, 0.5f, 0.6f, 4.0f),
+       0.73030, 1e-4);
+  Near("at 100 the least factor, 0.6",
+       ScaleFactor(100.0f, 16.0f, 0.5f, 0.6f, 4.0f), 0.6, 1e-6);
+  Near("at 4000 the least factor too",
+       ScaleFactor(4000.0f, 16.0f, 0.5f, 0.6f, 4.0f), 0.6, 1e-6);
+  Near("a largest factor of 2 holds the villager scale at 2",
+       ScaleFactor(1.0f, 16.0f, 0.5f, 0.6f, 2.0f), 2.0, 1e-6);
+  Near("a scale of 0 gives 1", ScaleFactor(0.0f, 16.0f, 0.5f, 0.6f, 4.0f),
+       1.0, 1e-6);
+  Near("a power of 0 gives 1 at each scale",
+       ScaleFactor(3.0f, 16.0f, 0.0f, 0.6f, 4.0f), 1.0, 1e-6);
+  {
+    // Smooth and with no steps: the factor never grows with the scale, and
+    // a step of the scale of 1 percent changes it by at most 0.5 percent.
+    bool falls = true, smooth = true;
+    float before = ScaleFactor(1.0f, 16.0f, 0.5f, 0.6f, 4.0f);
+    for (float scale = 1.01f; scale < 4000.0f; scale *= 1.01f) {
+      const float now = ScaleFactor(scale, 16.0f, 0.5f, 0.6f, 4.0f);
+      if (now > before + 1e-6f) falls = false;
+      if (fabsf(now - before) > 0.0051f * before) smooth = false;
+      before = now;
+    }
+    Check(falls, "the factor goes down as the scale goes up, 1 to 4000",
+          falls, 1);
+    Check(smooth, "and it has no step", smooth, 1);
+  }
+
   // WHEN THE FILTER STARTS AGAIN (FollowRestart, move_stick_follow_place).
   // The arguments: the rule, have, the version changed, the view moved, a
   // place at a camera of the game, a recenter.

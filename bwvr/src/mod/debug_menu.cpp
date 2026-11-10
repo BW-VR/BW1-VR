@@ -78,6 +78,8 @@ int TabletopGodZoomAboutValue();
 void TabletopGodZoomAboutCycle();
 int TabletopGodZoomFarValue();
 void TabletopGodZoomFarToggle();
+int TabletopGodMoveScaleValue();
+void TabletopGodMoveScaleToggle();
 int TabletopGodMoveStickValue();
 void TabletopGodMoveStickCycle();
 int TabletopGodMoveKindValue();
@@ -476,6 +478,9 @@ const Switch kSwitches[] = {
      TabletopGodZoomFarValue,
      [](const char*) { TabletopGodZoomFarToggle(); },
      L"2.5 m level|land level"},
+    {kGroupView, L"Speed by scale", L"Stick faster when zoomed in",
+     "move_stick_scale", TabletopGodMoveScaleValue,
+     [](const char*) { TabletopGodMoveScaleToggle(); }, L"off|on"},
 
     // Picture
     {kGroupPicture, L"Scene window", L"Cut scene on a screen in the room",
@@ -894,6 +899,10 @@ const wchar_t* const kTips[] = {
     L"For a land more than 2.5 m below the head. Land level: a zoom in keeps "
     L"the land at its height in the room. 2.5 m level: a zoom in moves the "
     L"land farther down. A zoom out brings that land up in both.",
+    // Speed by scale
+    L"On: the walk and the fly with the stick are up to 4 times faster when "
+    L"zoomed in (1 unit per meter) and 0.6 times as fast when zoomed out. "
+    L"Off: the same speed in the room at each scale.",
     // Scene window
     L"On: a cut scene of the God view plays on a screen in the room. Off: it "
     L"plays in the full view, with held shots.",

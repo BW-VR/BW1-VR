@@ -1065,6 +1065,14 @@ void ReadSettings() {
     // move_stick_ramp_most times. 0 keeps the speed of the push.
     t.move_stick_ramp = number("move_stick_ramp", 1);
     t.move_stick_ramp_most = number("move_stick_ramp_most", 32);
+    // 1: the speed of the stick is times (ref / scale) ^ power, between low
+    // and high, so the walk and the fly are faster at a small scale and a
+    // little slower at a large one. 0: move_stick_speed_cm at each scale.
+    t.move_stick_scale = number("move_stick_scale", 1);
+    t.move_stick_scale_ref_x10 = number("move_stick_scale_ref_x10", 160);
+    t.move_stick_scale_power_pct = number("move_stick_scale_power_pct", 50);
+    t.move_stick_scale_low_pct = number("move_stick_scale_low_pct", 60);
+    t.move_stick_scale_high_pct = number("move_stick_scale_high_pct", 400);
     // A fly at a house, a rock or a tree trunk: 1 slides past it, 0 stops.
     t.fly_solid_slide = number("fly_solid_slide", 1);
     t.test_keys = number("test_keys", 0) != 0;

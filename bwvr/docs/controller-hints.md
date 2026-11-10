@@ -2039,11 +2039,14 @@ God view changes and the scale before had 30 frames or more (at most 400
 lines in a game):
 
 ```
-scale check  : a report window. The God view is at 1.000 units per meter. The eye cameras of the game give 1.000 units per meter (1.000 to 1.000, 450 frames), a move of the head 1.000 with the declared eye of the frame before (2 moves of 5 cm) and 0.500 with the declared eye of the same frame (2), a move of the drawn grip 1.000 (3), and a move of the Hand of the game 0.000 (0). In 119 frames of a walk the camera of the game went 2.98 units in 1.98 s: 150.0 cm of the room each second at the units per meter of the eyes, 150.0 across the land and 0.0 up and down.
+scale check  : a report window. The God view is at 1.000 units per meter. The eye cameras of the game give 1.000 units per meter (1.000 to 1.000, 450 frames), a move of the head 1.000 with the declared eye of the frame before (2 moves of 5 cm) and 0.500 with the declared eye of the same frame (2), a move of the drawn grip 1.000 (3), and a move of the Hand of the game 0.000 (0). In 119 frames of a walk the camera of the game went 2.98 units in 1.98 s: 150.0 cm of the room each second at the units per meter of the eyes, 150.0 across the land and 0.0 up and down. The scale makes the speed of the stick 1.00 times move_stick_speed_cm (move_stick_scale), and the speed across over that factor is 150.0 cm each second.
 scale check  : a move of the head of 14.14 cm from frame 160 to frame 171, with the declared eye of the frame before: the camera of the left eye pass went 0.1414 units, 1.000 units per meter
 ```
 
-The first line is from a desktop run. The line of a move comes for each of
+The first line is from a desktop run with `move_stick_scale=0`. With the
+speed by the scale (`god-view.md`, 5.7) the speed of the walk is the speed
+of the key times the factor, for example 600 cm each second at 1 unit per
+meter, and the speed across over the factor gives the key again. The line of a move comes for each of
 the first 40 moves of the head in a game.
 
 A walk at the same room speed looks slower when the land is farther below

@@ -610,6 +610,9 @@ struct WalkHold {
   // The speed ramp: the seconds of the full push, and the largest factor.
   float ramp_held = 0.0f;
   float ramp_top = 1.0f;
+  // The speed by the scale: the least and the largest factor of the walk.
+  float scale_least = 1.0f;
+  float scale_most = 1.0f;
   // The fly: how far its floor lifted the view, in meters of the room, on
   // how many frames, the least clearance of the head after a step, and the
   // steps that stopped short of a solid.
@@ -2520,6 +2523,33 @@ const char* RampText() {
   return text;
 }
 
+// THE SPEED BY THE SCALE (move_stick_scale, walk_math::ScaleFactor): the
+// factor of the speed of the stick at a scale, 1 when the key is 0.
+float MoveScaleFactor(float scale) {
+  if (g_settings.move_stick_scale == 0) return 1.0f;
+  return walk_math::ScaleFactor(
+      scale, g_settings.move_stick_scale_ref_x10 * 0.1f,
+      g_settings.move_stick_scale_power_pct * 0.01f,
+      g_settings.move_stick_scale_low_pct * 0.01f,
+      g_settings.move_stick_scale_high_pct * 0.01f);
+}
+
+// The speed by the scale, for the log.
+const char* MoveScaleText(float scale) {
+  static char text[224];
+  if (g_settings.move_stick_scale == 0) {
+    return "The speed is the same at each scale (move_stick_scale=0)";
+  }
+  sprintf_s(text, "At %.2f units per meter the speed of the stick is times "
+            "%.2f (move_stick_scale=1: (%.1f / scale) ^ %.2f, from %.2f to "
+            "%.2f)", scale, MoveScaleFactor(scale),
+            g_settings.move_stick_scale_ref_x10 * 0.1f,
+            g_settings.move_stick_scale_power_pct * 0.01f,
+            g_settings.move_stick_scale_low_pct * 0.01f,
+            g_settings.move_stick_scale_high_pct * 0.01f);
+  return text;
+}
+
 // The stick flies (move_type=1).
 bool Flies() { return g_settings.move_type == walk_math::kTypeFly; }
 
@@ -2624,6 +2654,12 @@ void StopWalk(const char* cause, bool view_stays) {
     sprintf_s(ramped, " The speed ramp went up to %.2f times the speed of "
               "the push (move_stick_ramp=1).", g_walk.ramp_top);
   }
+  char scaled[128] = "";
+  if (g_settings.move_stick_scale != 0) {
+    sprintf_s(scaled, " The scale made the speed of the stick %.2f to %.2f "
+              "times move_stick_speed_cm (move_stick_scale=1).",
+              g_walk.scale_least, g_walk.scale_most);
+  }
   char even[160] = "";
   if (g_walk.moved != 0) {
     sprintf_s(even, " A frame took %.1f to %.1f ms, and a step was %.2f to "
@@ -2637,7 +2673,7 @@ void StopWalk(const char* cause, bool view_stays) {
          "at %.1f %.1f and is at %.1f %.1f. The stick was pushed for %.3f s, "
          "which gives %.1f cm of the room each second, and the view moved on "
          "%llu of %llu frames (move_stick=%d, %.2f to %.2f units per "
-         "meter), frame %llu.%s%s%s%s%s%s%s",
+         "meter), frame %llu.%s%s%s%s%s%s%s%s",
          g_walk.type == walk_math::kTypeFly ? "fly" : "walk", cause,
          sqrtf(dx * dx + dz * dz), room_m * 100.0f, fabsf(degrees),
          degrees < -0.05f ? "left" : "right", g_walk.start_under[0],
@@ -2645,8 +2681,8 @@ void StopWalk(const char* cause, bool view_stays) {
          g_walk.seconds,
          g_walk.seconds > 0.0 ? g_walk.path * 100.0f / g_walk.seconds : 0.0,
          g_walk.moved, g_walk.frames, g_walk.rule, g_walk.start_scale, g_scale,
-         ControllersFrameCount(), hill, blind, land, floor, ramped, even,
-         late);
+         ControllersFrameCount(), hill, blind, land, floor, ramped, scaled,
+         even, late);
 }
 
 // THE WALK WITH THE STICK (move_stick, docs/god-view.md, "The walk with the
@@ -2663,9 +2699,13 @@ void StopWalk(const char* cause, bool view_stays) {
 // then keeps the direction of the frame before, and a walk with no such
 // frame does not move.
 //
-// THE SPEED is a speed of the room (move_stick_speed_cm at a full push), so
-// the walk feels the same at each scale. The step of a frame is the speed
-// times the real time of the frame, with the cap of the smooth zoom.
+// THE SPEED is a speed of the room: move_stick_speed_cm at a full push,
+// times the factor of the scale of this frame (move_stick_scale,
+// MoveScaleFactor). So the walk is faster at a small scale and a little
+// slower at a large one. The factor depends on the scale only, and in a
+// smooth zoom during a walk it follows the scale of each frame. The step of
+// a frame is the speed times the real time of the frame, with the cap of
+// the smooth zoom.
 //
 // THE FLY (move_type=1). Forward is the forward direction of the head or of
 // the controller in 3D, so a push while the player looks or points down
@@ -2800,6 +2840,7 @@ void ApplyGodWalk(double frame_seconds) {
     g_walk.climb = 0.0f;
     g_walk.ramp_held = 0.0f;
     g_walk.ramp_top = 1.0f;
+    g_walk.scale_least = g_walk.scale_most = MoveScaleFactor(pose.scale);
     g_walk.lifted = 0.0f;
     g_walk.lift_frames = 0;
     g_walk.least_clear = 1000.0f;
@@ -2850,11 +2891,13 @@ void ApplyGodWalk(double frame_seconds) {
              "meter, with the land under your head at %.1f %.1f, %.1f cm "
              "below your head. Forward is %s (move_stick=%d), and it %s. A "
              "full push moves you %d cm of the room each second "
-             "(move_stick_speed_cm). %s. %s, frame %llu.",
+             "(move_stick_speed_cm). %s: %.0f cm of the room each second. "
+             "%s. %s, frame %llu.",
              MoveWord(), pose.scale, under[0], under[2],
              g_walk.start_below * 100.0f, WalkRuleText(rule), rule, where,
-             g_settings.move_stick_speed_cm, FollowText(), RampText(),
-             ControllersFrameCount());
+             g_settings.move_stick_speed_cm, MoveScaleText(pose.scale),
+             g_settings.move_stick_speed_cm * MoveScaleFactor(pose.scale),
+             FollowText(), RampText(), ControllersFrameCount());
     }
   }
   const float seconds = zoom_math::FrameSeconds(frame_seconds, kHoldFrameCap);
@@ -2892,7 +2935,13 @@ void ApplyGodWalk(double frame_seconds) {
   const float ramp = walk_math::RampFactor(
       g_walk.ramp_held, static_cast<float>(g_settings.move_stick_ramp_most));
   if (ramp > g_walk.ramp_top) g_walk.ramp_top = ramp;
-  const float top = g_settings.move_stick_speed_cm * 0.01f * ramp;
+  // THE SPEED BY THE SCALE of this frame. A smooth zoom of the other stick
+  // changes the scale between two frames of the walk, and the factor follows.
+  const float scale_factor = MoveScaleFactor(pose.scale);
+  if (scale_factor < g_walk.scale_least) g_walk.scale_least = scale_factor;
+  if (scale_factor > g_walk.scale_most) g_walk.scale_most = scale_factor;
+  const float top =
+      g_settings.move_stick_speed_cm * 0.01f * scale_factor * ramp;
   TablePose next;
   if (fly) {
     float speed[3], step[3];
@@ -3400,6 +3449,21 @@ void TabletopSetOptions(const TabletopSettings& settings) {
   }
   if (g_settings.move_stick_trace < 0) g_settings.move_stick_trace = 0;
   if (g_settings.move_stick_trace > 2000) g_settings.move_stick_trace = 2000;
+  // The speed by the scale: ref 1 to 4000 units per meter, the power 0 to
+  // 1, the least factor 10 to 100 percent, the largest 100 to 1000.
+  g_settings.move_stick_scale = g_settings.move_stick_scale != 0 ? 1 : 0;
+  int& ref = g_settings.move_stick_scale_ref_x10;
+  if (ref < 10) ref = 10;
+  if (ref > 40000) ref = 40000;
+  int& power = g_settings.move_stick_scale_power_pct;
+  if (power < 0) power = 0;
+  if (power > 100) power = 100;
+  int& low = g_settings.move_stick_scale_low_pct;
+  if (low < 10) low = 10;
+  if (low > 100) low = 100;
+  int& high = g_settings.move_stick_scale_high_pct;
+  if (high < 100) high = 100;
+  if (high > 1000) high = 1000;
 }
 
 // Only when play_mode picks the table. With any other play mode, nothing in
@@ -4637,6 +4701,29 @@ int TabletopGodZoomFarValue() {
     return kDebugCannot;
   }
   return g_settings.god_zoom_far_level != 0 ? 1 : 0;
+}
+
+// THE SWITCH "Speed by scale" of the debug page: move_stick_scale off and
+// on. A walk or a fly that runs stops, and a stick that is still pushed
+// starts again with the new speed.
+void TabletopGodMoveScaleToggle() {
+  if (!g_installed || !g_settings.god || !TestSwitchesOn()) return;
+  g_settings.move_stick_scale = g_settings.move_stick_scale != 0 ? 0 : 1;
+  StopWalk("the debug page changed move_stick_scale", true);
+  ControllersGesturePulse(0.5f, g_settings.move_stick_scale != 0 ? 0.40f
+                                                                 : 0.08f);
+  ModLog("debug page   : %s", MoveScaleText(g_scale));
+}
+
+int TabletopGodMoveScaleValue() {
+  if (!g_installed || !g_settings.god || !TestSwitchesOn()) {
+    return kDebugCannot;
+  }
+  return g_settings.move_stick_scale != 0 ? 1 : 0;
+}
+
+float TabletopGodMoveScaleFactor() {
+  return g_installed && g_settings.god ? MoveScaleFactor(g_scale) : 1.0f;
 }
 
 uint64_t TabletopGodViewVersion() { return g_god_version; }

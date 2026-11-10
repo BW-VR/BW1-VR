@@ -257,6 +257,28 @@ inline float RampFactor(float held, float most) {
   return factor > most ? most : factor;
 }
 
+// THE SPEED BY THE SCALE (move_stick_scale=1). The speed of the stick in the
+// room is multiplied by a smooth function of the scale of the God view, so
+// a player at the villager scale crosses a town in some seconds, and a
+// player over a small land moves a little slower:
+//
+//     factor = (ref / scale) ^ power, kept between low and high
+//
+// With ref 16 units per meter, power 0.5, low 0.6 and high 4 the factor is
+// 4 at 1 unit per meter, 1.46 at the life size scale (7.5), 1 at 16, 0.73
+// at 30, and 0.6 from 44.4 units per meter up. The factor depends on the
+// scale only, so it never moves the view while the stick is at rest. The
+// speed ramp multiplies the result, with its own cap. 1 for a scale or a ref
+// that is not more than 0.
+inline float ScaleFactor(float scale, float ref, float power, float low,
+                         float high) {
+  if (!(scale > 0.0f) || !(ref > 0.0f)) return 1.0f;
+  float factor = powf(ref / scale, power);
+  if (factor < low) factor = low;
+  if (factor > high) factor = high;
+  return factor;
+}
+
 // THE FLY (move_type=1). The stick moves the view along the forward
 // direction of the head or of the controller in 3D, so a push while the
 // player looks or points down goes down. The stick to the side moves level,

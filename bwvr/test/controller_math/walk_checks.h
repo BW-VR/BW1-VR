@@ -5,6 +5,7 @@
 // main.cpp includes this file after Check and Near, just before main.
 #pragma once
 
+#include "../../src/mod/blinder_math.h"
 #include "../../src/mod/table_math.h"
 #include "../../src/mod/walk_math.h"
 #include "../../src/mod/zoom_math.h"
@@ -147,23 +148,17 @@ inline void FlyChecks() {
        next.center[0], 120.0, 1e-3);
   Near("and the height goes down the same", next.center[1], 40.0, 1e-4);
 
-  // THE HEIGHT. The land is at 0, the room and the head at 0, and the scale
-  // 100. The view starts with the land 1 m below the head (C.y 100). Steps
-  // of 5 cm down stop with the land 10 cm below the head (C.y 10). Steps up
-  // go past 2.5 m, the limit of the grab, and stop with the head 10000 units
-  // over the land (C.y 10000).
+  // THE CEILING. The land is at 0, the room and the head at 0. At 100 units
+  // for each meter steps up go past 2.5 m, the limit of the grab, and stop
+  // with the head 10000 units over the land (C.y 10000).
   const float ceiling = kFlyCeilingUnits;
-  float y = 100.0f;
-  for (int i = 0; i < 40; ++i) {
-    y = FlyHeight(y - 5.0f, y, 0.0f, 0.0f, 100.0f, 0.0f, 0.10f, ceiling);
-  }
-  Near("a fly down stops with the land 10 cm below the head", y, 10.0, 1e-3);
+  float y = 10.0f;
   for (int i = 0; i < 80; ++i) {
-    y = FlyHeight(y + 5.0f, y, 0.0f, 0.0f, 100.0f, 0.0f, 0.10f, ceiling);
+    y = FlyCeiling(y + 5.0f, y, 0.0f, 0.0f, 100.0f, 0.0f, ceiling);
   }
   Near("a fly up goes past 2.5 m below the head", y, 410.0, 1e-3);
   for (int i = 0; i < 400; ++i) {
-    y = FlyHeight(y + 50.0f, y, 0.0f, 0.0f, 100.0f, 0.0f, 0.10f, ceiling);
+    y = FlyCeiling(y + 50.0f, y, 0.0f, 0.0f, 100.0f, 0.0f, ceiling);
   }
   Near("and it stops with the head 10000 units over the land", y, 10000.0,
        1e-2);
@@ -171,23 +166,65 @@ inline void FlyChecks() {
   // height in units: 10000 m of the room.
   y = 2.0f;
   for (int i = 0; i < 300; ++i) {
-    y = FlyHeight(y + 50.0f, y, 0.0f, 0.0f, 1.0f, 0.0f, 0.10f, ceiling);
+    y = FlyCeiling(y + 50.0f, y, 0.0f, 0.0f, 1.0f, 0.0f, ceiling);
   }
   Near("at 1 unit for each meter a fly up also stops at 10000 units", y,
        10000.0, 1e-2);
   Near("a view over the ceiling does not go down by itself",
-       FlyHeight(12000.0f, 12000.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.10f, ceiling),
+       FlyCeiling(12000.0f, 12000.0f, 0.0f, 0.0f, 1.0f, 0.0f, ceiling),
        12000.0, 1e-3);
-  Near("and it cannot go up", FlyHeight(12100.0f, 12000.0f, 0.0f, 0.0f, 1.0f,
-                                        0.0f, 0.10f, ceiling),
+  Near("and it cannot go up",
+       FlyCeiling(12100.0f, 12000.0f, 0.0f, 0.0f, 1.0f, 0.0f, ceiling),
        12000.0, 1e-3);
-  Near("but it can go down", FlyHeight(11900.0f, 12000.0f, 0.0f, 0.0f, 1.0f,
-                                       0.0f, 0.10f, ceiling),
+  Near("but it can go down",
+       FlyCeiling(11900.0f, 12000.0f, 0.0f, 0.0f, 1.0f, 0.0f, ceiling),
        11900.0, 1e-3);
-  Near("a view under the floor cannot go down", FlyHeight(-5.0f, 0.0f, 0.0f,
-                                                          0.0f, 1.0f, 0.0f,
-                                                          0.10f, ceiling),
-       0.0, 1e-3);
+
+  // THE FLOOR, with the clearance of the head blinder.
+  const float least = kFlyClearMeters;
+  Check(least > blinder_math::kStartMeters,
+        "the floor of the fly is above the start of the head blinder", 1, 1);
+  Near("a step to 8 cm over the land goes up 2 cm",
+       FlyFloor(50.0f, 0.08f, 0.12f, least, 100.0f), 52.0, 1e-4);
+  Near("a step to 50 cm over the land stays",
+       FlyFloor(50.0f, 0.50f, 0.12f, least, 100.0f), 50.0, 1e-6);
+  Near("a head bent down to 4 cm is held at 4 cm on a step to 2 cm",
+       FlyFloor(50.0f, 0.02f, 0.04f, least, 100.0f), 52.0, 1e-4);
+  Near("and it is not lifted out on a step to 6 cm",
+       FlyFloor(50.0f, 0.06f, 0.04f, least, 100.0f), 50.0, 1e-6);
+  Near("a clearance that is no number changes nothing",
+       FlyFloor(50.0f, sqrtf(-1.0f), 0.04f, least, 100.0f), 50.0, 1e-6);
+  // A fly level across the land into a slope of 45 degrees, at 100 units
+  // for each meter, steps of 2.5 cm of the room, with the head 20 cm over
+  // the land at the start. The land rises from x = 100. The clearance is the
+  // one of the head blinder: the highest land at the head and 6 cm around
+  // it. The head never comes nearer than the floor, and it slides up along
+  // the slope.
+  {
+    const auto land = [](float x) { return x > 100.0f ? x - 100.0f : 0.0f; };
+    const auto clearance = [&](float x, float cy) {
+      float points[blinder_math::kPoints][2];
+      blinder_math::AroundPoints(x, 0.0f, 100.0f, points);
+      float ground[blinder_math::kPoints];
+      for (int i = 0; i < blinder_math::kPoints; ++i) {
+        ground[i] = land(points[i][0]);
+      }
+      return blinder_math::Clearance(cy, ground, blinder_math::kPoints,
+                                     100.0f);
+    };
+    float x = 0.0f, cy = 20.0f, worst = 1000.0f;
+    for (int i = 0; i < 200; ++i) {
+      const float before = clearance(x, cy);
+      x += 2.5f;
+      cy = FlyFloor(cy, clearance(x, cy), before, least, 100.0f);
+      const float now = clearance(x, cy);
+      if (now < worst) worst = now;
+    }
+    Near("a fly into a slope keeps the head at the floor or over it", worst,
+         least, 1e-4);
+    Near("and the view goes up along the slope", cy, land(x + 6.0f) + 10.0f,
+         1e-2);
+  }
 
   // THE SPEED RAMP.
   Near("a full push counts its time", RampSeconds(0.5f, 1.0f, 0.25f), 0.75,

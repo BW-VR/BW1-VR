@@ -944,17 +944,34 @@ event.
   ```
 
   - The view does not follow the land.
-  - The height (`FlyHeight` in `walk_math.h`). The floor is the floor of the
-    grab: the land under the head stays 10 cm or more below the head (below
-    the height of the head at the recenter pose with `head_blinder=1`,
-    section 5.9). The fly has no ceiling of 2.5 m, so a player at the scale
-    of a villager can fly over the island as a bird. The ceiling is 10000
-    world units over the land under the head, in world units so that a
-    small scale does not get a low ceiling. The far zoom already puts the
-    head that high (4000 units for each meter, the land 2.5 m below the
-    head). At a limit the move up or down stops, and the move across goes
-    on. A hill at the new place of the head stays below the head, as in the
-    walk.
+  - The floor (`FlyFloor` in `walk_math.h`, `FlyLandClearance`). The
+    clearance has the measure of the head blinder (section 5.9): the head
+    point over the highest land at it and at four points 6 cm of the room
+    around it. So a steep slope in front of the face counts, as for the
+    overlay. The floor is 10 cm (`kFlyClearMeters`), 5 cm over the start of
+    the overlay. The fly looks at the place of the head after the step.
+    When the step brings the head nearer than the floor, the view goes up
+    until the head is at the floor. So a fly down stops over the land, and
+    a fly across a rising slope slides up along it while the stick is
+    pushed. Nothing lifts the view when the stick is at rest. A head that
+    is already nearer (the player bent down into the land) is held at its
+    clearance, and the fly does not lift it out.
+  - The ceiling (`FlyCeiling`). The fly has no ceiling of 2.5 m, so a player
+    at the scale of a villager can fly over the island as a bird. The
+    ceiling is 10000 world units over the land under the head, in world
+    units so that a small scale does not get a low ceiling. The far zoom
+    already puts the head that high (4000 units for each meter, the land
+    2.5 m below the head). At the ceiling the move up stops, and the move
+    across goes on.
+  - The solids (`FlySolidStop`). With `god_zoom_solid_stop=1` a step stops
+    where the head is `god_zoom_solid_cm` (30) out of a house, a rock or a
+    tree trunk, as a zoom step does (section 2, "Houses at a small scale"),
+    with the solids that the first eye pass of the frame before kept within
+    1.5 m of the head (`TabletopZoomSolidReachM`). A head that is already
+    nearer may go on while it does not come nearer. The player steers away
+    from the solid to go on. The solids near the head need `head_blinder=1`
+    and `head_blinder_objects=1` (the defaults): with 0 the fly does not
+    stop at a house.
   - High over the land at a small scale, the game keeps its own fog (400 to
     900 units) and its own distance at which objects vanish (700 units),
     because the God view changes them only above 3 times the life size
@@ -1057,10 +1074,14 @@ gives how far the fly went up or down in the room (`move_type=1`). The line
 of the start names the speed ramp, and the line of the end gives the
 largest factor of the ramp when it went above 1 ("The speed ramp went up to
 R times the speed of the push"). Each trace line has the factor of its
-frame, and the trace of a fly has the step up in each frame:
+frame. The trace of a fly has the step up and the clearance of the head
+(the measure of the head blinder) in each frame. The line of the end of a
+fly also gives how far its floor lifted the view, the least clearance after
+a step, and the count of the steps that stopped short of a solid, and a
+step that stops short of a solid has one line in each fly:
 
 ```
-god view     : fly trace, frame F of the fly: T ms, a step of S cm of the room (U cm up, the speed times R), the waist point at X Y Z, the land under your head at H and B cm below your head, frame N
+god view     : fly trace, frame F of the fly: T ms, a step of S cm of the room (U cm up, the speed times R), the waist point at X Y Z, the land under your head at H and B cm below your head, a clearance of C cm, frame N
 ```
 
 **An even walk.** The step of each frame is the speed times the real time
@@ -1939,15 +1960,19 @@ checks the pure functions at 7.5, 100 and 2000 units per meter:
   right of the head and goes straight down. A controller 60 degrees up goes
   up. A frame with no time and a stick at rest give no step. A step of 10 cm
   down and 20 cm ahead at 100 units for each meter moves the waist point 10
-  units down and 20 units ahead, also with a heading of 90 degrees. A fly
-  down stops with the land 10 cm below the head. A fly up goes past 2.5 m
+  units down and 20 units ahead, also with a heading of 90 degrees. A fly up
+  goes past 2.5 m
   and stops with the head 10000 units over the land, at 100 and at 1 unit
-  for each meter. A view over the ceiling or under the floor stays, cannot
-  go farther out, and can come back. The speed ramp: a push of 90 percent
+  for each meter. A view over the ceiling stays, cannot go up, and can come
+  down. The speed ramp: a push of 90 percent
   or more counts its time and a push of 85 percent sets it to 0. The factor
   is 1 in the first second, 2 after 3 s, 4 after 5 s and 32 from 11 s, and
   a most of 1 is no ramp. At 1 unit for each meter and 60 frames a second,
-  1000 units take 29 s.
+  1000 units take 29 s. The floor of the fly: with the clearance of the
+  head blinder a step to 8 cm over the land goes up 2 cm, a step to 50 cm
+  stays, and a head bent down to 4 cm is held at 4 cm and not lifted out.
+  A fly level into a slope of 45 degrees keeps the head at 10 cm and slides
+  up along the slope.
 - The teleport (14.8), the place at a game camera (15.9) and the player that a
   script sees (16.9) have their own checks.
 
@@ -2015,7 +2040,7 @@ render size, because the recipes depend on it.
   rate of a small push has only the math test.
 
 - The walk with the stick [R]: `spawn_run.ps1 -Save temple` with
-  `fake_controller_play_frame=800`, `fake_controller_yaw=30`,
+  `move_stick_ramp=0`, `fake_controller_play_frame=800`, `fake_controller_yaw=30`,
   `fake_controller_sweep_yaw=30`, `fake_controller_sweep_pitch=-30`,
   `god_zoom_about=0` and the steps `look@830+1300 lstick_up@900+60
   lstick_right@1020+60 movekey@1130+1 lstick_up@1150+60 movekey@1260+1
@@ -2038,16 +2063,19 @@ render size, because the recipes depend on it.
   `layoutkey` the stick opens the ring and moves nothing. The scripted stick
   has full pushes only, so the speed of a small push has only the math test.
 - The follow of the land [R]: `spawn_run.ps1 -Save temple` with
-  `move_stick_trace=320` and the steps `lstick_up@900+300
-  lstick_right@1300+300 lstick_down@1700+200`, once with
+  `move_stick_trace=320`, `move_stick_ramp=0` and the steps
+  `lstick_up@900+300 lstick_right@1300+300 lstick_down@1700+200`, once with
   `move_stick_follow_land=1` and once with 0. The first walk goes 7.9 m of
   the room over the hills at the Temple, where the land under the head goes
   from 0 to 112 units (at 100 units for each meter), and the third walk is
   over the sea. In each walk of both runs each frame moves the view at
   149.93 to 150.07 cm of the room each second, with frames of 14.8 to 46.2
-  ms.
-  - With 1: the land under the head is 61.6 cm below the head at the start
-    of each walk, and 63.8, 61.6 and 61.6 cm at their ends. In the hills it
+  ms. With `test_frame_rate=60` each frame is 16.7 ms, so the walks go
+  7.5, 7.5 and 5.0 m.
+  - With 1 and `test_frame_rate=60`: the land under the head is 61.6, 62.9
+    and 61.6 cm below the head at the starts of the walks, and 62.9, 61.6
+    and 61.6 cm at their ends. Each walk starts where the walk before it
+    ended. Each trace line has "the speed times 1.00". In the hills it
     is 19 to 115 cm below the head (the filter is behind the land on the
     steep slopes), and the land never comes nearer than 10 cm. The height of
     the view changes by at most 2.5 cm in a frame, and its speed up or down
@@ -2060,6 +2088,40 @@ render size, because the recipes depend on it.
     in a frame, and its speed up or down changes by up to 181 cm each second
     from one frame to the next. After the hills the land is 108.2 cm below
     the head, and 122.3 cm after the second walk.
+- The speed ramp [R]: `spawn_run.ps1 -Save temple` with
+  `test_frame_rate=60`, `move_stick_trace=700`, `card_send_test_save=0`,
+  `fake_controller_play_frame=800` and the steps `lstick_up@900+300
+  lstick_half@1200+120 lstick_up@1320+180 lstick_up@1600+60`. For the first
+  60 frames of the full push a step is 2.45 to 2.51 cm, "times 1.00", and
+  1.01 at frame 61. Then the factor is 1.41 at frame 120, 2.00 at 180, 2.83
+  at 240 and 4.00 at 300, with a step of 10.02 cm at 300. At the half push,
+  in its first frame, the factor is 1.00 and the step 0.768 cm, with no stop
+  line between the pushes. The next full push starts at 1.00 for 60 frames.
+  The line of the end has "The speed ramp went up to 4.00 times the speed
+  of the push". The last push starts again at 1.00 and stays at 1.00 for its
+  60 frames.
+- The fly with the stick [R]: `spawn_run.ps1 -Save temple` with
+  `test_frame_rate=60`, `card_send_test_save=0`, `move_type=1`,
+  `move_stick=1`, `move_stick_trace=700`, `fake_controller_play_frame=800`,
+  `fake_head_pitch=-45`, `god_zoom_about=0`, `comfort_vignette=1` and the
+  steps `lstick_up@900+240 lstick_down@1200+400 lstick_right@1700+60`. The
+  line of the start has "45.0 degrees below level", and the vignette goes
+  dark for "the fly with the stick" in each fly. The first fly goes down at
+  45 degrees to the floor and on across. The second fly goes back and up:
+  the land under the head goes past 250 cm below the head near fly frame
+  130 and on to about 2000 cm, with the factor of the ramp from 1.00 to
+  7.15 and no line of a limit. At about 20 m the camera zone of the script
+  (`god_zone_margin=50`) holds the place across, and the fly goes on along
+  the edge of the zone. The strafe has "0.000 cm up" in each frame. 30
+  frames after each stop the waist point is 0.000 units from its place at
+  the stop.
+- The fly with the controller [R]: the same with `move_stick=2`,
+  `fake_controller_sweep_pitch=40` (the word of the script sets the
+  direction of the stick, not `fake_controller_pitch`), no
+  `fake_head_pitch`, and the step `lstick_up@900+400`. The line of the start
+  has "40.0 degrees above level". The land under the head goes from 62.9 to
+  1895.4 cm below the head with each step up more than 0, and the factor is
+  1.00 to fly frame 60, 2.83 at 240 and 7.13 at 400.
 
 **The mouse pan and the tutorial events** need a run with the test mouse. Use
 `play_mode=0` (it must log the God view), `-NEWGAME` on Land 1,

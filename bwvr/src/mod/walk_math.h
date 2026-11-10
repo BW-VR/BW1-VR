@@ -235,7 +235,7 @@ inline float RampFactor(float held, float most) {
 // direction of the head or of the controller in 3D, so a push while the
 // player looks or points down goes down. The stick to the side moves level,
 // at right angles to that direction. The view does not follow the land.
-// The height has a floor and a ceiling (FlyHeight).
+// The height has a floor (FlyFloor) and a ceiling (FlyCeiling).
 
 // A unit vector from a direction. False for a direction with no length or
 // with a part that is not a number, and then out is not written.
@@ -299,32 +299,48 @@ inline void Fly(const table_math::TablePose& pose, const float step[3],
   table_math::Along(pose.center, basis, across, out->center);
 }
 
-// THE HEIGHT OF A FLY. The floor is the floor of the grab: the land under
-// the head stays nearest_m or more below the head (head_y, in the room).
-// The ceiling is in world units, so that a small scale does not get a low
-// ceiling: the head stays at most ceiling_units over the land. The far zoom
-// (4000 units for each meter, the land 2.5 m below the head) puts the head
-// 10000 units over the land, so that height is one that the view already
-// draws. As in GodGroundHeight (table_math.h), the result never moves the
-// height farther out of the range than `current` already is, so at a limit
-// the height stops and never jumps.
+// THE CEILING OF A FLY, in world units, so that a small scale does not get
+// a low ceiling: the head (head_y, in the room) stays at most ceiling_units
+// over the land under it. The far zoom (4000 units for each meter, the land
+// 2.5 m below the head) puts the head 10000 units over the land, so that
+// height is one that the view already draws. As in GodGroundHeight
+// (table_math.h), the result never moves the height farther out than
+// `current` already is, so at the ceiling the height stops and never jumps.
 //
 //     under(C.y) = room_y + (land - C.y) / s
-//     floor:   C.y >= land - (head_y - nearest_m - room_y) * s
 //     ceiling: C.y <= land - (head_y - room_y) * s + ceiling_units
 const float kFlyCeilingUnits = 10000.0f;
 
-inline float FlyHeight(float wanted, float current, float land, float room_y,
-                       float scale, float head_y, float nearest_m,
-                       float ceiling_units) {
+inline float FlyCeiling(float wanted, float current, float land,
+                        float room_y, float scale, float head_y,
+                        float ceiling_units) {
   if (!(scale > 0.0f)) return current;
-  float low = land - (head_y - nearest_m - room_y) * scale;
   float high = land - (head_y - room_y) * scale + ceiling_units;
-  if (current < low) low = current;
   if (current > high) high = current;
-  if (wanted < low) return low;
-  if (wanted > high) return high;
-  return wanted;
+  return wanted > high ? high : wanted;
+}
+
+// THE FLOOR OF A FLY. The clearance is the measure of the head blinder
+// (blinder_math::Clearance): the head over the highest land at the head
+// point and at four points 6 cm around it, in meters of the room. The
+// overlay starts at 5 cm (blinder_math::kStartMeters), so the floor is
+// kFlyClearMeters, 5 cm over that. `after` is the clearance at the place of
+// the head after the step, and `before` at the place before it. When the
+// step brings the head nearer than the floor, the view goes up until the
+// head is at the floor: so a fly across a rising slope slides up along it.
+// A head that is already nearer than the floor (the player bent down into
+// the land) is held at its clearance of before, and is not lifted out.
+// Gives the height of the waist point to use.
+const float kFlyClearMeters = 0.10f;
+
+inline float FlyFloor(float center_y, float after, float before, float least,
+                      float scale) {
+  if (!(scale > 0.0f) || !(after == after) || !(before == before)) {
+    return center_y;
+  }
+  const float floor = before < least ? before : least;
+  if (after >= floor) return center_y;
+  return center_y + (floor - after) * scale;
 }
 
 // The degrees of a direction below level, for the log: up is less than 0.

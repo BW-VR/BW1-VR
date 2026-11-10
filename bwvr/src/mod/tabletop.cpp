@@ -76,6 +76,7 @@
 
 #include "MinHook.h"
 #include "../common/bw_addresses.h"
+#include "blinder_math.h"
 #include "camera_zone.h"
 #include "comfort_math.h"
 #include "debug_menu.h"
@@ -596,6 +597,13 @@ struct WalkHold {
   // The speed ramp: the seconds of the full push, and the largest factor.
   float ramp_held = 0.0f;
   float ramp_top = 1.0f;
+  // The fly: how far its floor lifted the view, in meters of the room, on
+  // how many frames, the least clearance of the head after a step, and the
+  // steps that stopped short of a solid.
+  float lifted = 0.0f;
+  uint64_t lift_frames = 0;
+  float least_clear = 1000.0f;
+  uint64_t solid_stops = 0;
   float start_center[2] = {0.0f, 0.0f};  // the waist point, x and z
   float start_under[2] = {0.0f, 0.0f};
   float under[2] = {0.0f, 0.0f};
@@ -1693,6 +1701,74 @@ float ZoomSolidRatio(const TablePose& pose, const float room[3],
   return fabsf(used - 1.0f) < 1e-4f ? 1.0f : used;
 }
 
+// THE CLEARANCE OF THE HEAD FOR THE FLOOR OF A FLY, in meters of the room,
+// at a pose: the measure of the head blinder (blinder_math::Clearance), the
+// head point over the highest land at it and at four points 6 cm of the
+// room around it. head is the head in the room now.
+float FlyLandClearance(const TablePose& pose, const float room[3],
+                       const float head[3]) {
+  if (!(pose.scale > 0.0f)) return 1000.0f;
+  float at[3];
+  PoseWorld(pose, room, head, at);
+  float points[blinder_math::kPoints][2];
+  blinder_math::AroundPoints(at[0], at[2], pose.scale, points);
+  float ground[blinder_math::kPoints];
+  for (int i = 0; i < blinder_math::kPoints; ++i) {
+    ground[i] = GroundAt(points[i][0], points[i][1]);
+  }
+  return blinder_math::Clearance(at[1], ground, blinder_math::kPoints,
+                                 pose.scale);
+}
+
+bool WalkLog();
+
+// One log line for the first step of each fly that stops short of a solid.
+void StopFlyLog(void* object, float full_cm) {
+  ++g_walk.solid_stops;
+  if (g_walk.solid_stops != 1 || !WalkLog()) return;
+  ModLog("god view     : the fly stops short: the whole step puts your head "
+         "%.1f cm %s the %s %p, so your head stays %.0f cm out of it "
+         "(god_zoom_solid_stop=1), frame %llu", fabsf(full_cm),
+         full_cm < 0.0f ? "into" : "out of",
+         object != nullptr ? HandDirectSolidClass(object) : "solid", object,
+         SolidClearM() * 100.0f, ControllersFrameCount());
+}
+
+// A FLY THAT STOPS SHORT OF A SOLID (god_zoom_solid_stop=1). The step from
+// `from` to `next` goes as far as the head stays god_zoom_solid_cm out of
+// the nearest solid (zoom_math::StepShare), with the solids of
+// HandDirectSolids, as for a zoom step. A head that is already nearer may
+// go on while it does not come nearer. The fly asks for the solids within
+// kZoomSolidReachM of the head (TabletopZoomSolidReachM).
+void FlySolidStop(const TablePose& from, const float room[3],
+                  const float head[3], TablePose* next) {
+  if (g_settings.god_zoom_solid_stop == 0) return;
+  static void* objects[solid_math::kMostSolids];
+  static solid_math::Solid solids[solid_math::kMostSolids];
+  const int count =
+      HandDirectSolids(objects, solids, solid_math::kMostSolids);
+  if (count == 0) return;
+  const TablePose to = *next;
+  const auto at = [&](float t) {
+    TablePose p = from;
+    for (int i = 0; i < 3; ++i) {
+      p.center[i] = from.center[i] + (to.center[i] - from.center[i]) * t;
+    }
+    return p;
+  };
+  const auto clear = [&](float t) {
+    int which = -1;
+    return HeadSolidClearance(at(t), room, head, solids, count, &which);
+  };
+  const float share = zoom_math::StepShare(clear, SolidClearM());
+  if (share >= 1.0f) return;
+  int which = -1;
+  const float full_cm =
+      HeadSolidClearance(to, room, head, solids, count, &which) * 100.0f;
+  *next = at(share);
+  StopFlyLog(which >= 0 ? objects[which] : nullptr, full_cm);
+}
+
 void SayZoomSolid(const SolidStop& stop, bool refused, float from, float to,
                   const char* by) {
   if (!ZoomLog()) return;
@@ -2451,6 +2527,14 @@ void StopWalk(const char* cause, bool view_stays) {
               "showed the frame before again for them.", g_walk.shown,
               g_walk.late, g_walk.period / 1e6);
   }
+  char floor[192] = "";
+  if (g_walk.type == walk_math::kTypeFly) {
+    sprintf_s(floor, " The floor of the fly lifted the view %.1f cm on %llu "
+              "frames, and the least clearance of your head after a step was "
+              "%.1f cm. %llu steps stopped short of a solid.",
+              g_walk.lifted * 100.0f, g_walk.lift_frames,
+              g_walk.least_clear * 100.0f, g_walk.solid_stops);
+  }
   char ramped[96] = "";
   if (g_walk.ramp_top > 1.0f) {
     sprintf_s(ramped, " The speed ramp went up to %.2f times the speed of "
@@ -2469,7 +2553,7 @@ void StopWalk(const char* cause, bool view_stays) {
          "at %.1f %.1f and is at %.1f %.1f. The stick was pushed for %.3f s, "
          "which gives %.1f cm of the room each second, and the view moved on "
          "%llu of %llu frames (move_stick=%d, %.2f to %.2f units per "
-         "meter), frame %llu.%s%s%s%s%s%s",
+         "meter), frame %llu.%s%s%s%s%s%s%s",
          g_walk.type == walk_math::kTypeFly ? "fly" : "walk", cause,
          sqrtf(dx * dx + dz * dz), room_m * 100.0f, fabsf(degrees),
          degrees < -0.05f ? "left" : "right", g_walk.start_under[0],
@@ -2477,7 +2561,8 @@ void StopWalk(const char* cause, bool view_stays) {
          g_walk.seconds,
          g_walk.seconds > 0.0 ? g_walk.path * 100.0f / g_walk.seconds : 0.0,
          g_walk.moved, g_walk.frames, g_walk.rule, g_walk.start_scale, g_scale,
-         ControllersFrameCount(), hill, blind, land, ramped, even, late);
+         ControllersFrameCount(), hill, blind, land, floor, ramped, even,
+         late);
 }
 
 // THE WALK WITH THE STICK (move_stick, docs/god-view.md, "The walk with the
@@ -2504,8 +2589,12 @@ void StopWalk(const char* cause, bool view_stays) {
 // (walk_math::FlyRight). The view does not follow the land. The height has
 // the floor of the grab (the land under the head stays 10 cm or more below
 // the head) and a ceiling of kFlyCeilingUnits world units over the land
-// (walk_math::FlyHeight). At a limit only the move up or down stops. A hill
-// at the new place of the head stays below the head, as in the walk.
+// (walk_math::FlyCeiling). At the ceiling only the move up stops. The floor
+// has the measure of the head blinder at the place of the head after the
+// step (FlyLandClearance, walk_math::FlyFloor), so a fly across a rising
+// slope slides up along it and the overlay does not start. With
+// god_zoom_solid_stop=1 a step stops god_zoom_solid_cm before a house, a
+// rock or a tree trunk, as a zoom step does (FlySolidStop).
 //
 // THE SPEED RAMP (move_stick_ramp=1, walk_math.h). While the stick is pushed
 // to 90 percent or more, the speed of the walk and of the fly grows with
@@ -2626,6 +2715,10 @@ void ApplyGodWalk(double frame_seconds) {
     g_walk.climb = 0.0f;
     g_walk.ramp_held = 0.0f;
     g_walk.ramp_top = 1.0f;
+    g_walk.lifted = 0.0f;
+    g_walk.lift_frames = 0;
+    g_walk.least_clear = 1000.0f;
+    g_walk.solid_stops = 0;
     g_walk.have_forward = false;
     g_walk.start_center[0] = pose.center[0];
     g_walk.start_center[1] = pose.center[2];
@@ -2738,10 +2831,20 @@ void ApplyGodWalk(double frame_seconds) {
   // world units over the land. At a limit the height stops, and the move
   // across goes on.
   if (fly && next.scale > 0.0f) {
-    next.center[1] = walk_math::FlyHeight(
+    next.center[1] = walk_math::FlyCeiling(
         next.center[1], g_center[1], LandUnderHead(next, room, head), room[1],
-        next.scale, FloorHeadY(head), kGroundNearest,
-        walk_math::kFlyCeilingUnits);
+        next.scale, head[1], walk_math::kFlyCeilingUnits);
+    FlySolidStop(pose, room, head, &next);
+    const float before = FlyLandClearance(pose, room, head);
+    const float after = FlyLandClearance(next, room, head);
+    const float y = walk_math::FlyFloor(next.center[1], after, before,
+                                        walk_math::kFlyClearMeters,
+                                        next.scale);
+    if (y > next.center[1]) {
+      g_walk.lifted += (y - next.center[1]) / next.scale;
+      ++g_walk.lift_frames;
+    }
+    next.center[1] = y;
   }
   if (next.center[0] == g_center[0] && next.center[2] == g_center[2] &&
       next.center[1] == g_center[1]) {
@@ -2781,7 +2884,8 @@ void ApplyGodWalk(double frame_seconds) {
     }
   }
   // The head moves over the land, and a hill there stays below it.
-  g_walk.sunk += ZoomClearHead(&next, room, head);
+  // The fly has its own floor above.
+  if (!fly) g_walk.sunk += ZoomClearHead(&next, room, head);
   for (int i = 0; i < 3; ++i) g_center[i] = next.center[i];
   Derive();
   ++g_serial;
@@ -2821,6 +2925,9 @@ void ApplyGodWalk(double frame_seconds) {
   const float land = LandUnderHead(now, room, head);
   g_walk.below = head[1] - GroundInRoom(now, room, land);
   // The test move_stick_trace: one line for each of the first frames.
+  // The fly: the clearance of the head by the measure of the head blinder.
+  const float clear_now = fly ? FlyLandClearance(now, room, head) : 1000.0f;
+  if (clear_now < g_walk.least_clear) g_walk.least_clear = clear_now;
   const bool trace =
       g_walk.moved <= static_cast<uint64_t>(g_settings.move_stick_trace) &&
       g_walk_traces < kMaxWalkTraces;
@@ -2829,10 +2936,10 @@ void ApplyGodWalk(double frame_seconds) {
     ModLog("god view     : fly trace, frame %llu of the fly: %.2f ms, a step "
            "of %.3f cm of the room (%.3f cm up, the speed times %.2f), the "
            "waist point at %.3f %.3f %.3f, the land under your head at %.3f "
-           "and %.2f cm below your head, frame %llu",
+           "and %.2f cm below your head, a clearance of %.2f cm, frame %llu",
            g_walk.frames, seconds * 1000.0f, way * 100.0f, rose_m * 100.0f,
            ramp, now.center[0], now.center[1], now.center[2], land,
-           g_walk.below * 100.0f, ControllersFrameCount());
+           g_walk.below * 100.0f, clear_now * 100.0f, ControllersFrameCount());
   } else if (trace) {
     ModLog("god view     : walk trace, frame %llu of the walk: %.2f ms, a step "
            "of %.3f cm of the room (the speed times %.2f), the waist point at "
@@ -3529,6 +3636,11 @@ float TabletopZoomSolidReachM() {
   if (!g_settings.god || g_settings.god_zoom_solid_stop == 0 ||
       !TabletopOwnsView()) {
     return 0.0f;
+  }
+  // A fly moves the head over the land at each scale, and a step of the
+  // speed ramp is up to 80 cm of the room.
+  if (g_walk.active && g_walk.type == walk_math::kTypeFly) {
+    return kZoomSolidReachM;
   }
   return g_scale < 2.0f * HeadPoseScale() ? kZoomSolidReachM : 0.0f;
 }

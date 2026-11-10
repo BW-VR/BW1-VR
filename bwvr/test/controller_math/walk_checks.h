@@ -644,6 +644,50 @@ inline void WalkChecks() {
        0.0, 20.0 * 0.05);
   Near("a step with a height that is not a number moves nothing",
        FollowStep(&bump, sqrtf(-1.0f), 0.01f, length), 0.0, 1e-6);
+
+  // WHEN THE FILTER STARTS AGAIN (FollowRestart, move_stick_follow_place).
+  // The arguments: the rule, have, the version changed, the view moved, a
+  // place at a camera of the game, a recenter.
+  const int each = kFollowPlaceEach, version = kFollowPlaceVersion;
+  Check(FollowRestart(each, false, false, false, false, false) &&
+            FollowRestart(version, false, false, false, false, false),
+        "the first walk starts the filter with each rule", 1, 1);
+  Check(FollowRestart(each, true, true, false, true, false),
+        "rule 1: a place at a camera of the game starts the filter again",
+        1, 1);
+  Check(!FollowRestart(version, true, false, false, true, false),
+        "rule 0: a place at a camera of the game does not", 1, 1);
+  Check(FollowRestart(each, true, false, false, false, true) &&
+            !FollowRestart(version, true, false, false, false, true),
+        "a recenter starts it again with rule 1 only", 1, 1);
+  Check(!FollowRestart(each, true, true, false, false, false),
+        "rule 1: a turn about the head keeps the filter", 1, 1);
+  Check(FollowRestart(version, true, true, false, false, false),
+        "rule 0: a turn starts it again", 1, 1);
+  Check(FollowRestart(each, true, true, true, false, false) &&
+            FollowRestart(version, true, true, true, false, false),
+        "a move of the view starts it again with each rule", 1, 1);
+  Check(!FollowRestart(each, true, false, false, false, false) &&
+            !FollowRestart(version, true, false, false, false, false),
+        "the next frame of a walk keeps it with each rule", 1, 1);
+  // His session: the last walk stopped on land at 18.0, and a camera of the
+  // game put the view over land at 31.2, at 4.41 units per meter. A filter
+  // that goes on lifts the view by the difference over the next walks. A
+  // filter that starts again lifts nothing over flat land.
+  LandFollow stale;
+  FollowStart(18.0f, &stale);
+  float lifted = 0.0f;
+  for (int i = 0; i < 400; ++i) lifted += FollowStep(&stale, 31.2f, 0.01f,
+                                                    length);
+  Near("a filter that goes on after a place lifts the view 2.99 m",
+       lifted / 4.41f, 2.993, 0.01);
+  LandFollow fresh;
+  FollowStart(31.2f, &fresh);
+  float none = 0.0f;
+  for (int i = 0; i < 400; ++i) none += FollowStep(&fresh, 31.2f, 0.01f,
+                                                  length);
+  Near("a filter that starts again at the place lifts nothing", none, 0.0,
+       1e-5);
   FlyChecks();
 }
 

@@ -104,6 +104,29 @@ inline void ZoomPointChecks() {
   Near("a deep valley gives a level 2.5 m below the head",
        ZoomLevel(-9.0f, -0.05f, 0.10f, 2.50f), -2.55, 1e-6);
 
+  // THE LEVEL OVER DEEP LAND (god_zoom_far_level). The head is at 0, and the
+  // land 4.01 m below it, as in a session at 4.41 units per meter.
+  Near("with the key a zoom in over deep land takes the land as its level",
+       ZoomLevelFor(-4.01f, 0.0f, 0.10f, 2.50f, 1, true), -4.01, 1e-6);
+  Near("with the key a zoom out over deep land keeps the level at 2.5 m",
+       ZoomLevelFor(-4.01f, 0.0f, 0.10f, 2.50f, -1, true), -2.50, 1e-6);
+  Near("without the key a zoom in keeps the level at 2.5 m",
+       ZoomLevelFor(-4.01f, 0.0f, 0.10f, 2.50f, 1, false), -2.50, 1e-6);
+  Near("with the key land in the range is its own level",
+       ZoomLevelFor(-0.60f, 0.0f, 0.10f, 2.50f, 1, true), -0.60, 1e-6);
+  Near("with the key a hill over the head still gives 10 cm",
+       ZoomLevelFor(1.20f, 0.0f, 0.10f, 2.50f, 1, true), -0.10, 1e-6);
+  // The zoom in from 4.41 to 1.00 units per meter. The old level puts that
+  // land 9.15 m below the head (his session), and the land level keeps it.
+  Near("a zoom in about a level 2.5 m down puts the land 9.15 m down",
+       DepthAfterZoom(2.50f, 4.01f, 4.41f, 1.00f), 9.159, 1e-3);
+  Near("a zoom in about the land keeps the land 4.01 m down",
+       DepthAfterZoom(4.01f, 4.01f, 4.41f, 1.00f), 4.01, 1e-5);
+  Near("a zoom out about a level 2.5 m down brings the land up",
+       DepthAfterZoom(2.50f, 4.01f, 4.41f, 17.64f), 2.8775, 1e-4);
+  Near("a zoom with no scale after it changes nothing",
+       DepthAfterZoom(2.50f, 4.01f, 4.41f, 0.0f), 4.01, 1e-6);
+
   // A HILL UNDER THE HEAD AFTER A ZOOM, at 100 units a meter. The waist point
   // has a height of 40 and is 60 cm under the recenter pose, and the head is
   // 5 cm under that pose. So land of a height of 40 is 55 cm below the head.

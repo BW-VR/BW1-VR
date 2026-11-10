@@ -1049,6 +1049,14 @@ void ReadSettings() {
     // a desktop run.
     t.move_stick_follow_land = number("move_stick_follow_land", 1);
     t.move_stick_trace = number("move_stick_trace", 0);
+    // 1: the filter of the land starts again after each move of the view, a
+    // place at a camera of the game and a recenter, and a turn keeps it. 0:
+    // it starts again after each change of the version of the view only.
+    t.move_stick_follow_place = number("move_stick_follow_place", 1);
+    // 1: a zoom in over a land more than 2.5 m below the head keeps the land
+    // at its height in the room. 0: it zooms about a level 2.5 m below the
+    // head, and the land goes farther down.
+    t.god_zoom_far_level = number("god_zoom_far_level", 1);
     // How the stick moves the player: 0 walks over the land, and 1 flies
     // along the forward direction of the head or of the controller in 3D.
     t.move_type = number("move_type", 0);

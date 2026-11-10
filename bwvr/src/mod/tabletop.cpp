@@ -101,6 +101,8 @@ bool HeadCameraEnabled();
 // sample: the head matrix and its lean from the recenter pose, in units at
 // the life size scale.
 float HeadPoseScale();
+// The count of the recenters of the room.
+uint64_t HeadPoseOriginSerial();
 bool HeadPoseCurrent(float matrix_out[9], float translation_out[3]);
 // stereo.cpp: the display time of the last frame of the headset and the
 // display period, in nanoseconds. False with no headset.
@@ -456,6 +458,10 @@ struct ZoomHold {
   float scale = 0.0f;
   float start_under[2] = {0.0f, 0.0f};
   float under[2] = {0.0f, 0.0f};
+  // The land under the head, in meters below the head, at the start of the
+  // hold and after its last frame that changed the scale.
+  float start_below = 0.0f;
+  float below = 0.0f;
   bool have_eye = false;
   float start_eye[3] = {0.0f, 0.0f, 0.0f};
   double seconds = 0.0;
@@ -640,15 +646,23 @@ struct WalkHold {
 } g_walk;
 // THE LAND THAT THE VIEW FOLLOWS (move_stick_follow_land=1, walk_math.h).
 // The filter keeps its state from one walk to the next, so a climb in short
-// pushes follows the land as a long push does. version is g_god_version
-// after the last frame of the walk that moved the view. When something else
-// moved the view since then (a teleport, a grab, a zoom, a ground step, a
-// new build), the filter starts again at the land under the head.
+// pushes follows the land as a long push does. version and nonturn are
+// g_god_version and g_god_nonturn_version after the last frame of the walk
+// that moved the view, and origin is the count of the recenters then. When
+// something else moved the view since then (a teleport, a grab, a zoom, a
+// ground step, a fly, a place at a camera of the game, a recenter), the
+// filter starts again at the land under the head (walk_math::FollowRestart,
+// move_stick_follow_place). placed is set by PlaceGod.
 struct WalkFollow {
   walk_math::LandFollow land;
   bool have = false;
   uint64_t version = 0;
+  uint64_t nonturn = 0;
+  uint64_t origin = 0;
+  bool placed = false;
 } g_follow;
+// The log lines of a start of the filter after a place or a recenter.
+int g_follow_logs = 0;
 // The test move_stick_trace: the lines of the trace in this game.
 uint64_t g_walk_traces = 0;
 const uint64_t kMaxWalkTraces = 2000;
@@ -1227,6 +1241,10 @@ bool PlaceGod(const char* cause, const float position[3],
   StopTurnHold("the view went to a camera of the game", false);
   g_tele.pending = false;
   g_pan = {};
+  // The view is at a new place, and the version of the view does not change
+  // here (g_pair and the game camera need it). So the filter of the land of
+  // the walk learns it from this flag (move_stick_follow_place).
+  g_follow.placed = true;
   Derive();
   g_have_table = true;
   ++g_serial;
@@ -1528,7 +1546,11 @@ bool ZoomPointAway(const ZoomPoint& point) {
 // head. So the land of that height keeps its height in the room, and the
 // ground stays where the player put it. The level goes into the range of a
 // step of the ground first, so a hill that stands over the head goes down as
-// the view zooms out.
+// the view zooms out. With god_zoom_far_level=1 a zoom in (direction 1) over
+// a land more than 2.5 m below the head takes the land itself as the level
+// (zoom_math::ZoomLevelFor), so the zoom in does not move that land farther
+// down. A zoom out keeps the level in the range, so a deep land comes up
+// toward it.
 //
 // ITS PLACE ACROSS is the choice of god_zoom_about (zoom_math.h,
 // PointAcross). 0: under the head, so the player keeps their place in the
@@ -1540,13 +1562,13 @@ bool ZoomPointAway(const ZoomPoint& point) {
 // in a zoom, and the game camera follows it (TabletopGodGameCamera). A hill
 // at the new place of the head stays below the head (ZoomClearHead).
 void GodZoomPoint(const TablePose& pose, const float room[3],
-                  const float head[3], ZoomPoint* out) {
+                  const float head[3], int direction, ZoomPoint* out) {
   float at[3];
   PoseWorld(pose, room, head, at);
   const float land = GroundAt(at[0], at[2]);
-  const float in_room =
-      zoom_math::ZoomLevel(GroundInRoom(pose, room, land), head[1],
-                           kGroundNearest, kGroundFarthest);
+  const float in_room = zoom_math::ZoomLevelFor(
+      GroundInRoom(pose, room, land), head[1], kGroundNearest,
+      kGroundFarthest, direction, g_settings.god_zoom_far_level != 0);
   out->pivot[0] = at[0];
   out->pivot[1] = pose.center[1] + (in_room - room[1]) * pose.scale;
   out->pivot[2] = at[2];
@@ -1906,7 +1928,7 @@ void ApplyGodSteps() {
     float at[3];
     ZoomPoint point;
     PoseWorld(pose, room, head, at);
-    GodZoomPoint(pose, room, head, &point);
+    GodZoomPoint(pose, room, head, zoom > 0 ? 1 : -1, &point);
     const float step = 1.0f + g_settings.god_zoom_pct * 0.01f;
     const float wanted = zoom > 0 ? 1.0f / step : step;
     const float before = pose.scale;
@@ -2308,6 +2330,10 @@ void StopZoomHold(const char* cause, bool view_stays) {
              ? sqrtf(ux * ux + uz * uz) / g_hold.scale * 100.0f
              : 0.0f,
          drawn);
+  ModLog("god view     : in the smooth zoom the land under your head went "
+         "from %.2f m to %.2f m below your head (god_zoom_far_level=%d)",
+         g_hold.start_below, g_hold.below,
+         g_settings.god_zoom_far_level != 0 ? 1 : 0);
 }
 
 // THE SMOOTH ZOOM (god_zoom_smooth=1, docs/god-view.md, "The zoom"), once a
@@ -2388,7 +2414,9 @@ void ApplyGodZoomHold(double frame_seconds) {
   const TablePose pose = Pose();
   PoseWorld(pose, room, head, under);
   ZoomPoint point = g_hold.point;
-  if (!g_hold.active || !g_hold.kept) GodZoomPoint(pose, room, head, &point);
+  if (!g_hold.active || !g_hold.kept) {
+    GodZoomPoint(pose, room, head, direction, &point);
+  }
   const float step = 1.0f + g_settings.god_zoom_pct * 0.01f;
   if (!g_hold.active) {
     g_hold.active = true;
@@ -2401,6 +2429,8 @@ void ApplyGodZoomHold(double frame_seconds) {
     g_hold.start_scale = g_hold.scale = pose.scale;
     g_hold.start_under[0] = g_hold.under[0] = under[0];
     g_hold.start_under[1] = g_hold.under[1] = under[2];
+    g_hold.start_below = g_hold.below =
+        head[1] - GroundInRoom(pose, room, LandUnderHead(pose, room, head));
     g_hold.have_eye = HeadCameraTableEye(g_hold.start_eye);
     g_hold.seconds = 0.0;
     g_hold.frames = g_hold.moved = 0;
@@ -2458,6 +2488,8 @@ void ApplyGodZoomHold(double frame_seconds) {
   PoseWorld(Pose(), room, head, under);
   g_hold.under[0] = under[0];
   g_hold.under[1] = under[2];
+  g_hold.below = head[1] - GroundInRoom(Pose(), room,
+                                        LandUnderHead(Pose(), room, head));
   PoseRoom(Pose(), room, g_hold.point.pivot, g_hold.point_now);
   SayLowest(Pose(), room, head);
   Help(kHelpZoom, kInputWheel);
@@ -2923,13 +2955,43 @@ void ApplyGodWalk(double frame_seconds) {
   // height under the head at the new place goes through the filter of
   // walk_math.h, and the view goes up or down by the change of its output,
   // so the filtered land keeps its height in the room. The filter starts
-  // again when something else moved the view since the last frame of a walk.
-  // The fly does not follow the land.
+  // again when something else moved the view since the last frame of a walk
+  // (walk_math::FollowRestart). The fly does not follow the land.
   if (!fly && g_settings.move_stick_follow_land != 0 && next.scale > 0.0f) {
-    if (!g_follow.have || g_follow.version != g_god_version) {
+    const uint64_t origin = HeadPoseOriginSerial();
+    const bool changed = g_follow.version != g_god_version;
+    const bool moved = g_follow.nonturn != g_god_nonturn_version;
+    const bool recentered = g_follow.origin != origin;
+    const bool placed = g_follow.placed;
+    const int follow_rule = g_settings.move_stick_follow_place != 0
+                                ? walk_math::kFollowPlaceEach
+                                : walk_math::kFollowPlaceVersion;
+    const bool again = walk_math::FollowRestart(
+        follow_rule, g_follow.have, changed, moved, placed, recentered);
+    // A log line when a place or a recenter is the only cause, so the log
+    // shows the case of both rules.
+    if (g_follow.have && (placed || recentered) && !moved && !changed &&
+        g_follow_logs < 20 && WalkLog()) {
+      ++g_follow_logs;
+      const float old_land = g_follow.land.stage[1];
+      const float land_now = LandUnderHead(pose, room, head);
+      ModLog("god view     : %s since the last walk. The filter of the land "
+             "holds %.2f, and the land under your head is at %.2f: %.1f cm "
+             "of the room apart. %s (move_stick_follow_place=%d)",
+             placed ? "the view went to a camera of the game"
+                    : "the room was recentered",
+             old_land, land_now,
+             (land_now - old_land) / pose.scale * 100.0f,
+             again ? "The filter starts again at the land under your head"
+                   : "The filter goes on from the land of the last walk",
+             g_settings.move_stick_follow_place != 0 ? 1 : 0);
+    }
+    if (again) {
       walk_math::FollowStart(LandUnderHead(pose, room, head), &g_follow.land);
       g_follow.have = true;
     }
+    g_follow.placed = false;
+    g_follow.origin = origin;
     const float rise =
         walk_math::FollowStep(&g_follow.land, LandUnderHead(next, room, head),
                               way, walk_math::kFollowLength);
@@ -2954,6 +3016,7 @@ void ApplyGodWalk(double frame_seconds) {
   // A walk is no snap turn: the game camera goes over the land under the
   // head, and does not turn about its focus (TabletopGodTurnedOnly).
   g_god_nonturn_version = g_god_version;
+  if (!fly) g_follow.nonturn = g_god_nonturn_version;
   ++g_walk.moved;
   ++g_walk_moves;
   // THE FRAMES OF THE HEADSET. The step of a frame is the speed times the
@@ -4549,6 +4612,36 @@ void TabletopGodFlySlideToggle() {
              ? "A fly slides past a house, a rock or a tree trunk"
              : "A fly stops short of a house, a rock or a tree trunk");
 }
+
+// THE SWITCH "Deep zoom" of the debug page: god_zoom_far_level, the level of
+// a zoom in over a land more than 2.5 m below the head. A hold of the smooth
+// zoom that runs stops, so the next hold takes its point by the new rule.
+void TabletopGodZoomFarToggle() {
+  if (!g_installed || !g_settings.god || !TestSwitchesOn()) return;
+  g_settings.god_zoom_far_level = g_settings.god_zoom_far_level != 0 ? 0 : 1;
+  StopZoomHold("the debug page changed god_zoom_far_level", true);
+  ControllersGesturePulse(0.5f, g_settings.god_zoom_far_level != 0 ? 0.40f
+                                                                   : 0.08f);
+  ModLog("debug page   : god_zoom_far_level=%d. %s",
+         g_settings.god_zoom_far_level,
+         g_settings.god_zoom_far_level != 0
+             ? "A zoom in over a land more than 2.5 m below your head keeps "
+               "the land at its height in the room"
+             : "A zoom in over a land more than 2.5 m below your head zooms "
+               "about a level 2.5 m below your head, and the land goes "
+               "farther down");
+}
+
+int TabletopGodZoomFarValue() {
+  if (!g_installed || !g_settings.god || !TestSwitchesOn()) {
+    return kDebugCannot;
+  }
+  return g_settings.god_zoom_far_level != 0 ? 1 : 0;
+}
+
+uint64_t TabletopGodViewVersion() { return g_god_version; }
+
+bool TabletopGodWalkActive() { return g_walk.active; }
 
 int TabletopGodFlySlideValue() {
   if (!g_installed || !g_settings.god || !TestSwitchesOn()) {

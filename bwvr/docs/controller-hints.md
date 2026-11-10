@@ -1701,7 +1701,7 @@ shows each card. The controller and the lines are in the eye pictures.
 | `hint_style` | from `hint_controller` | 2 the controller in the hand, with a card for each lit button. 1 the cards at the wrists (9.3). The default is 2 with `hint_controller=1` and 1 with `hint_controller=0`. Not in the launcher: a save of the launcher removes it, and a test can write it |
 | `hint_hand_opacity_pct` | 68 | The opacity of the hand while its controller shows, in percent. 35 is the fainter hand |
 | `hint_pulse` | 1 | 1 the lit buttons pulse, one beat a second from 35 percent of the light to full light. 0 a steady light |
-| `view_check` | 1 | 1 the check of the view (9.15) runs in the God view and writes its log lines. 0 no check |
+| `view_check` | 1 | 1 the check of the view (9.15) and the scale check (9.16) run in the God view and write their log lines. 0 no check |
 | `hint_body_fine` | 1 | 1 the simpler body of a heavy model has cells of 3.4 mm at most and a cell for each side of the normal, so the ink outline of a thin part (a ring, a strap) does not break. 0 the cells grow until the body has 2500 triangles, with one cell for all the normals |
 | `hint_model_test` | empty | Test key. The folder of a model for both hands, for example `valve-index`, in place of the model of the profile |
 | `hint_model_test_dir` | empty | Test key. The folder of the models. Empty is `bwvr-controllers` beside `runblack.exe`. `desk_test.ps1` sets `bwvr\assets\controllers` of its worktree |
@@ -1999,6 +1999,42 @@ Open: only a headset shows that the drawn controllers and hands are on the
 real ones with the fit (`headset-checks.md`). The table is made from the
 models of SteamVR and of the WebXR profiles, not from a measure of a real
 controller in Virtual Desktop.
+
+### 9.16 The scale that the eyes see
+
+The walk, the grab and the zoom use the scale of the God view (units per
+meter). The scale check measures the scale that the player sees from the
+matrices of the eye passes and the poses of the runtime, with no number of
+the God view in it, and puts the two side by side. It runs with
+`view_check=1`, in the same passes as the check of 9.15.
+
+| Measure | From | Gives |
+| --- | --- | --- |
+| The eyes | The camera of each eye pass, from the inverse of its matrix (`CameraPosition`), or with one walk the separation that the move of the right eye uses (`OneWalkSeparation`), over the declared eyes apart | The units per meter of the stereo picture |
+| The head | A move of 5 cm or more of the declared left eye while the version of the God view stays: the move of the camera of the left eye pass, over the move | The units per meter of a move of the head |
+| The drawn grip | The same for the grip point that draws the controller, over the grip of the runtime | The units per meter of a move of the hand |
+| The Hand of the game | The same for the Hand's world position in the game (`0x00C5E680`), over the grip of the pointing hand | The same for the Hand that the game draws. A turn of the controller and the stop at the land change it a little |
+| The walk | The camera that the game gets (`0x00EA1DB8`) in the frames of a walk, in units for each second, over the units per meter of the eyes | The speed in the room that the player sees |
+| The grab | The same camera in the frames of a grab of the world, over the units per meter of the eyes, beside the way of the grips | The move of the land in the room for the move of the hand |
+
+The math test runs the chain at 1, 7.5 and 100 units per meter: the cameras
+of the eye passes, the shift of one walk, a move of the head of 14 cm and a
+move of the grip of 14 cm each give the scale within 0.2 percent, and a
+render separation 6 percent too large shows as 6 percent more in the eyes.
+
+The log has one line in each report window, and one when the scale of the
+God view changes and the scale before had 30 frames or more (at most 400
+lines in a game):
+
+```
+scale check  : a report window. The God view is at 1.000 units per meter. The eye cameras of the game give 1.000 units per meter (0.999 to 1.001, 450 frames), a move of the head 1.000 (12 moves of 5 cm), a move of the drawn grip 1.000 (30), and a move of the Hand of the game 0.990 (14). In 300 frames of a walk the camera of the game went 7.50 units in 3.00 s: 250.0 cm of the room each second at the units per meter of the eyes.
+```
+
+A walk at the same room speed looks slower when the land is farther below
+the head: the land moves under the eyes at the speed over its distance. At
+2.3 m each second the land 1 m below moves at about 130 degrees each
+second, and the land 9 m below at about 15 (`god-view.md`, section 5.7, "The
+land under the head").
 
 ## 10. A text that waits for a click
 

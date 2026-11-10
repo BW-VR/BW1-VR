@@ -71,6 +71,34 @@ inline float ZoomLevel(float land_room_y, float head_y, float nearest_m,
   return land_room_y;
 }
 
+// THE LEVEL OF A ZOOM OVER DEEP LAND (god_zoom_far_level). A zoom keeps the
+// level at its height in the room and scales the heights about it. A land
+// that is d meters below the level goes to d times the ratio of the scales,
+// so a zoom in about a level over the land moves the land farther down:
+//
+//     depth' = level + (depth - level) * s / s'      s' < s for a zoom in
+//
+// With keep_far, a zoom in (direction 1) over a land more than farthest_m
+// below the head takes the land itself as the level, so the land keeps its
+// height in the room. A zoom out (direction -1) keeps the level of
+// ZoomLevel, so a deep land comes up toward the range. Without keep_far
+// both directions take ZoomLevel.
+inline float ZoomLevelFor(float land_room_y, float head_y, float nearest_m,
+                          float farthest_m, int direction, bool keep_far) {
+  if (keep_far && direction > 0 && land_room_y < head_y - farthest_m) {
+    return land_room_y;
+  }
+  return ZoomLevel(land_room_y, head_y, nearest_m, farthest_m);
+}
+
+// How far below the head a land is after a zoom from the scale `from` to the
+// scale `to` about a level: both depths in meters below the head.
+inline float DepthAfterZoom(float level_depth, float land_depth, float from,
+                            float to) {
+  if (!(to > 0.0f)) return land_depth;
+  return level_depth + (land_depth - level_depth) * from / to;
+}
+
 // WHERE THE POINT OF A ZOOM IS ACROSS THE ROOM. out is a room point, in
 // meters, and the zoom uses its x and its z. Returns the kind of the point.
 //

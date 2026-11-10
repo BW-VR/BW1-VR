@@ -80,6 +80,15 @@ struct TabletopSettings {
   // the head through a smooth filter (walk_math::FollowStep). 0: the view
   // keeps its height in the world.
   int move_stick_follow_land = 1;  // move_stick_follow_land: 1 follows, 0 not
+  // When the filter of the land starts again (walk_math::FollowRestart): 1
+  // after each move of the view, a place at a camera of the game and a
+  // recenter, but not after a turn. 0 after each change of the version of
+  // the view only.
+  int move_stick_follow_place = 1;  // move_stick_follow_place: 1 or 0
+  // A zoom in over a land more than 2.5 m below the head (zoom_math.h,
+  // ZoomLevelFor): 1 keeps the land at its height in the room, 0 zooms about
+  // a level 2.5 m below the head.
+  int god_zoom_far_level = 1;      // god_zoom_far_level: 1 or 0
   // How the stick moves the player: 0 walks over the land (with
   // move_stick_follow_land), 1 flies along the forward direction in 3D
   // (walk_math.h, "The fly"). docs/god-view.md, "The walk with the stick".
@@ -225,6 +234,13 @@ void TabletopGodSetMoveType(int type, const char* by);
 // The switch "Fly at solids" of the debug page (fly_solid_slide).
 void TabletopGodFlySlideToggle();
 int TabletopGodFlySlideValue();
+// The switch "Deep zoom" of the debug page (god_zoom_far_level).
+void TabletopGodZoomFarToggle();
+int TabletopGodZoomFarValue();
+// For view_check.cpp: the version of the God view (it changes with each move
+// and each turn of the view), and true while the stick walks or flies.
+uint64_t TabletopGodViewVersion();
+bool TabletopGodWalkActive();
 // The switch "Speed ramp" of the debug page (move_stick_ramp).
 void TabletopGodMoveRampToggle();
 int TabletopGodMoveRampValue();

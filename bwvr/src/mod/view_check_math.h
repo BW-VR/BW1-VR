@@ -116,6 +116,57 @@ inline bool GamePixel(const float m[12], float half_x, float half_y,
   return true;
 }
 
+// THE SCALE CHECK (docs/controller-hints.md, "The scale that the eyes see").
+//
+// The place of the camera of an eye pass in the world, from the matrix of
+// the pass (12 floats, row vector, the translation last). The camera is the
+// point that the matrix takes to the origin of the camera space:
+//
+//     c * A + t = 0      so      c = -t * inverse(A)
+//
+// A holds the turn and the scale of the field of view, so it is not a pure
+// turn, and the inverse is the full one. False when A has no inverse.
+inline bool CameraPosition(const float m[12], float out[3]) {
+  const float a = m[0], b = m[1], c = m[2];
+  const float d = m[3], e = m[4], f = m[5];
+  const float g = m[6], h = m[7], k = m[8];
+  const float det = a * (e * k - f * h) - b * (d * k - f * g) +
+                    c * (d * h - e * g);
+  if (!(fabsf(det) > 1e-20f)) return false;
+  // The inverse of A, by its cofactors.
+  const float inv[9] = {(e * k - f * h) / det, (c * h - b * k) / det,
+                        (b * f - c * e) / det, (f * g - d * k) / det,
+                        (a * k - c * g) / det, (c * d - a * f) / det,
+                        (d * h - e * g) / det, (b * g - a * h) / det,
+                        (a * e - b * d) / det};
+  const float t[3] = {-m[9], -m[10], -m[11]};
+  for (int j = 0; j < 3; ++j) {
+    out[j] = t[0] * inv[0 * 3 + j] + t[1] * inv[1 * 3 + j] +
+             t[2] * inv[2 * 3 + j];
+  }
+  return true;
+}
+
+// The eyes apart in world units with one walk (one_walk_math.h): the right
+// eye is the left eye with each vertex moved per_rhw * rhw pixels, and
+//
+//     per_rhw = -k * separation * half_x / near
+//
+// with k the scale of x in the matrix of the pass (the length of its first
+// column). So the separation that the right eye is drawn with is
+// |per_rhw| * near / (k * half_x). 0 when a number is not usable.
+inline float OneWalkSeparation(const float m[12], float per_rhw,
+                               float near_plane, float half_x) {
+  const float k = sqrtf(m[0] * m[0] + m[3] * m[3] + m[6] * m[6]);
+  if (!(k > 0.0f) || !(half_x > 0.0f) || !(near_plane > 0.0f)) return 0.0f;
+  return fabsf(per_rhw) * near_plane / (k * half_x);
+}
+
+inline float Distance3(const float a[3], const float b[3]) {
+  const float d[3] = {a[0] - b[0], a[1] - b[1], a[2] - b[2]};
+  return sqrtf(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+}
+
 // The point nearest to two rays (the middle of the shortest line between
 // them). False when the rays are parallel.
 inline bool Meet(const float o0[3], const float d0[3], const float o1[3],

@@ -202,6 +202,23 @@ high. A pan can bring one over the head. So the level is first kept between
 nearer to that height. After 14 steps out at the life size scale, a hill top
 12.73 m over the head is 5.6 cm under it.
 
+**A land far below the head.** A zoom scales the heights about the level, so
+a zoom in about a level over the land moves that land farther down. With
+`god_zoom_far_level=1` (the default) a zoom in over a land more than 2.5 m
+below the head takes that land as the level (`ZoomLevelFor` in
+`zoom_math.h`), and the land keeps its height in the room. A zoom out keeps
+the level at 2.5 m below the head, so a deep land comes up toward it: from
+4.01 m below the head at 4.41 units per meter, a zoom out to 17.64 puts it
+2.88 m below. With 0 a zoom in also takes the level at 2.5 m, and the same
+land goes to 9.15 m below the head at 1 unit per meter. The switch "Deep
+zoom" of the debug page changes the key while the game runs, with a short
+pulse for 0 and a long pulse for 1. The log has one line at the end of each
+smooth zoom:
+
+```
+god view     : in the smooth zoom the land under your head went from 4.01 m to 4.01 m below your head (god_zoom_far_level=1)
+```
+
 **The limits.** The lowest scale is 1 unit per meter
 (`god_near_units_per_meter_x10`, 10). A villager is about 1.6 units high: the
 body that the hand pick finds has a half height of 0.70 to 0.85 units, and
@@ -909,9 +926,24 @@ event.
     the height above the land. The filter keeps its state from one walk to
     the next, so a climb in short pushes follows the land as a long push
     does. When something else moved the view since the last frame of a walk
-    (a teleport, a grab, a zoom, a ground step, a new build), the filter
-    starts again at the land under the head, and the land keeps the height
-    below the head that it has then.
+    (a teleport, a jump to a place of the Places sheet, a grab, a zoom, a
+    ground step, a fly, a new build, a place at a camera of the game, a
+    recenter), the filter starts again at the land under the head, and the
+    land keeps the height below the head that it has then
+    (`move_stick_follow_place=1`, `FollowRestart` in `walk_math.h`). A place
+    at a camera of the game is a load, the end of a story or of a cut scene,
+    and each new place of the game camera (section 15). A snap turn and the
+    smooth turn turn about the head, so the head stays over the same land,
+    and the filter goes on. With `move_stick_follow_place=0` the filter
+    starts again only when the version of the view changed: after each move
+    and each turn, but not after a place at a camera of the game or a
+    recenter. Then the next walk moves the view up or down by the difference
+    of the land of the two places: 2.99 m for land of 18.0 and 31.2 units
+    at 4.41 units per meter. The log has one line when a place or a recenter
+    is the only cause (at most 20 in a game).
+  - A walk after a fly starts the filter at the land under the head with
+    each value of the key, so it keeps the height that the fly left, and it
+    does not chase the land of a place before the fly.
   - The teleport puts the land under the head at the same height in the room
     as before the teleport (section 14.4), with each value of the key. So
     after a teleport the land is at the height below the hands that the
@@ -995,8 +1027,13 @@ event.
     range of 10 cm to 2.5 m only for a move that goes farther out of it
     (`GodGroundHeight`): a grab or a step that lowers the view acts, a move
     up is stopped. A teleport and a move of the game camera to a new place
-    (a story, a load) put the land in the range again, as they do in each
-    view.
+    (a story, a load) keep the land under the head at its height in the
+    room, at most 2.5 m below the head.
+  - The way back to the land at the waist is a grab of one hand that pulls
+    the land up (1:1 with the hand, so 2.5 m takes about four pulls of 60
+    cm), or a ground step up of the keyboard. A zoom out also brings a deep land up toward
+    2.5 m below the head, and with `god_zoom_far_level=1` the next zoom in
+    keeps it there.
   - The fly stops in the frame in which the stick comes back, as the walk
     does. There is no glide and no ease.
   - The comfort vignette counts the move up and down too (section 5.8).
@@ -1034,6 +1071,7 @@ event.
 | `move_stick_speed_cm` | 150 | The speed of a full push, in cm of the room for each second, 10 to 500 |
 | `god_display_time` | 1 | 1: the walk, the smooth zoom and the smoothing of the grips take the time of a frame from the display times of the headset. 0: from the time of the CPU |
 | `move_stick_follow_land` | 1 | 1: while the player walks, the height of the view follows the land under the head through the filter. 0: the view keeps its height. Not in the launcher: a save of the launcher removes it |
+| `move_stick_follow_place` | 1 | 1: the filter of the land starts again after each move of the view, a place at a camera of the game and a recenter, and a turn keeps it. 0: it starts again after each change of the version of the view only, so a walk after a place at a camera of the game chases the land of the place before. Not in the launcher and not on the debug page |
 | `move_stick_trace` | 0 | A test for a desktop run: the log has one line for each of the first N frames of each walk or fly (at most 2000 lines in a game) |
 | `move_stick_ramp` | 1 | 1: a push of 90 percent or more gets faster with its time, in the walk and in the fly. 0: the speed of the push only. The switch "Speed ramp" of the debug page. Not in the launcher |
 | `move_stick_ramp_most` | 32 | The largest factor of the speed ramp, 1 to 64 |
@@ -1073,6 +1111,16 @@ frame before (see "An even walk" below):
 ```
 Of N frames of the headset, M came more than one refresh of 8.3 ms after the frame before, and the headset showed the frame before again for them.
 ```
+
+The first walk after a place at a camera of the game, or after a recenter,
+has one line for the filter of the land:
+
+```
+god view     : the view went to a camera of the game since the last walk. The filter of the land holds 18.00, and the land under your head is at 31.20: 299.3 cm of the room apart. The filter starts again at the land under your head (move_stick_follow_place=1)
+```
+
+With `move_stick_follow_place=0` the end of the line is "The filter goes on
+from the land of the last walk".
 
 With `move_stick_trace=N` the log also has one line for each of the first N
 frames of each walk:
@@ -1813,6 +1861,7 @@ section 5.8.
 | `god_zoom_about` | 1 | The point that a zoom keeps at its place in the room (section 2). 1: the land point that the head looks at. 0: the land point under the head. 2: the Hand's point. The launcher row "Center of the zoom". Ctrl, Shift and Delete change it with `test_keys=1` |
 | `god_zoom_about_far_cm` | 300 | With `god_zoom_about=1`, the point is at most this far from the head, 50 to 1000 |
 | `god_zoom_about_test` | 0 | A test with no key press: at this frame of the controllers the test key of `god_zoom_about` acts. 0 is never |
+| `god_zoom_far_level` | 1 | A zoom in over a land more than 2.5 m below the head (section 2, "A land far below the head"). 1: the land keeps its height in the room. 0: the zoom takes a level 2.5 m below the head, and the land goes farther down. The switch "Deep zoom" of the debug page. Not in the launcher |
 | `god_ground_step_cm` | 5 | One ground step, 1 to 50 |
 | `god_far_units_per_meter` | 4000 | The farthest zoom, 10 to 8000 |
 | `god_zoom_solid_stop` | 1 | 1: a zoom step stops `god_zoom_solid_cm` before the head goes into a house, a rock or a tree trunk, or it is refused (section 2, "Houses at a small scale"). 0: a zoom step can put the head into a house |
@@ -1870,7 +1919,7 @@ The launcher removes these keys from `bwvr.ini` when it saves.
 | File | What it holds |
 | --- | --- |
 | `src/mod/table_math.h` | `GodRoom`, `PoseWorld`, `PoseRoom`, `GroundInRoom`, `ScaleAbout`, `GodZoomAbout`, `GodZoom`, `GodRaise`, `GodTurn`, `GameCameraOver`, `RayLevel`, `RayLand`, `GodSpawn`, `CameraLookPoint` and `HeadYaw`, as pure functions |
-| `src/mod/zoom_math.h` | The smooth zoom: the share of the top rate for a push (`StickShare`), the time of a frame (`FrameSeconds`) and the ratio of a frame (`FrameRatio`). The point of a zoom: its place across the room for each value of `god_zoom_about` (`PointAcross`), the level (`ZoomLevel`), the point in the world (`PivotAt`) and the rule for a hill at the new place of the head (`ClearHead`). All are pure functions |
+| `src/mod/zoom_math.h` | The smooth zoom: the share of the top rate for a push (`StickShare`), the time of a frame (`FrameSeconds`) and the ratio of a frame (`FrameRatio`). The point of a zoom: its place across the room for each value of `god_zoom_about` (`PointAcross`), the level (`ZoomLevel`, and `ZoomLevelFor` over a deep land), the point in the world (`PivotAt`) and the rule for a hill at the new place of the head (`ClearHead`). All are pure functions |
 | `src/mod/walk_math.h` | The walk with the stick: the push (`Push`), the forward direction of the head and of the controller (`HeadForward`, `AimForward`), the speed in the room (`Speed`), the step of a frame (`Step`), the view after a step (`Walk`), the filter of the land that the view follows (`FollowStart`, `FollowStep`), and the fly: the key (`Type`), the kinds of the debug switch (`Kind`, `NextKind`), the level right (`FlyRight`), the speed and the step in 3D (`FlySpeed`, `FlyStep`) and the view after a step (`Fly`). All are pure functions |
 | `src/mod/tabletop.cpp`, `tabletop.h` | The God view in the table state: the place at a game camera (`PlaceGod`, `ApplyGodSpawn`), the steps (`ApplyGodSteps`), the point of a zoom (`GodZoomPoint`, `ZoomClearHead`), the smooth zoom (`TabletopGodZoomHold`, `ApplyGodZoomHold`), the walk with the stick (`TabletopGodWalk`, `ApplyGodWalk`), the mouse pan (`MousePan`), the camera switches and events, the hook on `GGame::ClearMap`, the values that follow the scale, the Hand's size, the ears and the game camera it wants |
 | `src/mod/camera_zone.cpp`, `camera_zone.h`, `camera_zone_math.h` | The camera zone of a script (section 17): the read of the zone of the game, the limit of a move (`LimitMove`), the game camera in the zone (`KeepCamera`, `PointInside`), the bump for the sound (`BumpPoint`), and the hook on the shake of the push |

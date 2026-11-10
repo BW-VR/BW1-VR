@@ -198,6 +198,32 @@ inline float FollowStep(LandFollow* follow, float land, float way,
   return follow->stage[1] - before;
 }
 
+// WHEN THE FILTER STARTS AGAIN (move_stick_follow_place). The filter holds
+// land heights of the place where the last walk stopped. When the view went
+// to a different place since then, those heights are not the land under the
+// head, and a filter that went on would move the view up or down by the
+// difference in the next walk. So the filter starts again at the land under
+// the head (FollowStart) when:
+//
+//   rule 1  the view moved since the last walk (moved), a camera of the game
+//           put the view at a place (placed), or the room was recentered
+//           (recentered). A turn about the head is not a move: the head
+//           stays over the same land, so the filter stays.
+//   rule 0  the version of the view changed (changed): each move and each
+//           turn. A place at a camera of the game and a recenter do not
+//           change the version.
+//
+// have is false before the first walk.
+const int kFollowPlaceVersion = 0;
+const int kFollowPlaceEach = 1;
+
+inline bool FollowRestart(int rule, bool have, bool changed, bool moved,
+                          bool placed, bool recentered) {
+  if (!have) return true;
+  if (rule == kFollowPlaceVersion) return changed;
+  return moved || placed || recentered;
+}
+
 // THE SPEED RAMP (move_stick_ramp=1). While the stick is pushed to
 // kRampShare of the top speed or more, the time of that push counts. For
 // the first kRampHoldSeconds nothing changes. Then the speed doubles each

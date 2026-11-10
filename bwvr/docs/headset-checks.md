@@ -306,6 +306,12 @@ agents: the log does not tell the item yet.
   two eyes see the drawn grip, in cm and in pixels. `grip fit     : the
   right hand, runtime ...` names the fit of each hand, and `the trim is`
   gives the trim.
+- **The scale that the eyes see** (`controller-hints.md`, 9.16). Log: `scale
+  check  :` gives the units per meter of the eyes, the head, the hand, and
+  the room speed of a walk and of a grab, beside the scale of the God view.
+- **The land under the head after a place or a zoom.** Log: `god view     :
+  the view went to a camera of the game since the last walk` with "The filter
+  starts again", and `in the smooth zoom the land under your head went from`.
 - **The hints follow the ToolTips option of the game.** Log: `hint card    :
   the ToolTips option of the game is N` after a change of the option in the
   game, with "each line always shows" for All ToolTips.

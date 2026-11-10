@@ -16,6 +16,29 @@
 // the runtime reports. An error that the check does not see is in the grip
 // pose itself, or in the model of the controller.
 //
+// THE SCALE CHECK (docs/controller-hints.md, "The scale that the eyes see").
+// The same passes give the units per meter that the player sees, from the
+// matrices of the game and the poses of the runtime, not from the numbers of
+// the God view:
+//
+//   the eyes   the cameras of the two eye passes (CameraPosition), or the
+//              shift of one walk (OneWalkSeparation), apart in world units,
+//              over the declared eyes apart in meters
+//   the head   a move of the declared left eye of 5 cm or more while the
+//              version of the God view stays: the move of the camera of the
+//              left eye pass in world units, over the move in meters
+//   the hand   the same for the drawn grip point of each hand over the grip
+//              of the runtime, and for the Hand of the game (0x00C5E680)
+//              over the grip of the pointing hand
+//   the walk   the camera that the game gets (0x00EA1DB8) in the frames of a
+//   the grab   walk or of a grab of the world, in world units for each
+//              second, over the units per meter of the eyes: the speed in
+//              the room that the player sees
+//
+// One line for each report window, and one when the scale of the God view
+// changes and the frames at the scale before were 30 or more. Each line
+// gives the units per meter of the God view beside the measured ones.
+//
 // THE KEY of bwvr.ini:
 //
 //   view_check=1   1 the check runs and writes its log lines. 0 no check
@@ -24,6 +47,7 @@
 #include <windows.h>
 #include <math.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "controllers.h"
@@ -42,8 +66,239 @@ bool OneWalkActive();
 float OneWalkShiftPerRhw();
 // tabletop.cpp
 bool TabletopOwnsView();
+float TabletopViewScale();
+uint64_t TabletopGodViewVersion();
+bool TabletopGodWalkActive();
+// controllers.cpp: a grip holds the world.
+bool ControllersGrabHeld();
 
 namespace {
+
+// The game's addresses that the scale check reads. The Hand's world
+// position is where sub_0046E160 copies it (0x005B725F). The camera that the
+// game gets is the camera that the camera hook hands back (pass_guard.cpp).
+const uintptr_t kGameHandPosition = 0x00C5E680;
+const uintptr_t kGameCamera = 0x00EA1DB8;
+// A move of the head or of a hand counts when it is this long, in meters.
+const float kScaleMoveM = 0.05f;
+// A line for a scale that changed needs this many frames at the scale
+// before.
+const uint64_t kScaleLeastFrames = 30;
+const int kScaleMostLines = 400;
+
+bool ReadGame3(uintptr_t address, float out[3]) {
+  const float* p = reinterpret_cast<const float*>(address);
+  if (IsBadReadPtr(p, sizeof(float) * 3)) return false;
+  for (int i = 0; i < 3; ++i) out[i] = p[i];
+  return out[0] == out[0] && out[1] == out[1] && out[2] == out[2];
+}
+
+// The numbers of one frame for the scale check.
+struct ScaleFrame {
+  uint64_t frame;
+  float scale;              // units per meter of the God view
+  uint64_t version;         // of the God view
+  bool walk, grab;
+  double seconds;           // the clock at the first pass of the frame
+  bool have_cam[2];
+  float cam[2][3];          // the cameras of the eye passes, world
+  float shift_separation;   // one walk: the eyes apart, world units
+  bool have_view[2];
+  float declared[2][3];     // the declared eyes, LOCAL meters
+  bool have_grip[2];
+  float grip[2][3];         // the grips of the runtime, LOCAL meters
+  float drawn[2][3];        // the drawn grip points, world
+  int pointing;
+  bool have_hand;
+  float hand[3];            // the Hand of the game, world
+  bool have_camera;
+  float camera[3];          // the camera that the game gets, world
+};
+ScaleFrame g_scale_frame = {};
+
+// A place to measure a move from: the eye or the grip in meters, and the
+// game point in world units, at one version of the view.
+struct Anchor {
+  bool have;
+  uint64_t version;
+  float room[3];
+  float world[3];
+};
+
+// The sums of one scale.
+struct ScaleTotals {
+  float scale;
+  uint64_t frames;
+  double eyes_sum;
+  float eyes_least, eyes_most;
+  uint64_t eyes_n;
+  double head_sum;
+  uint64_t head_n;
+  double drawn_sum;
+  uint64_t drawn_n;
+  double hand_sum;
+  uint64_t hand_n;
+  uint64_t walk_frames;
+  double walk_units, walk_seconds;
+  uint64_t grab_frames;
+  double grab_units, grab_hand_m;
+};
+ScaleTotals g_scale_totals = {};
+Anchor g_head_anchor = {};
+Anchor g_drawn_anchor[2] = {};
+Anchor g_hand_anchor = {};
+ScaleFrame g_scale_last = {};
+bool g_have_scale_last = false;
+int g_scale_lines = 0;
+
+double Clock() {
+  static LARGE_INTEGER frequency = {};
+  if (frequency.QuadPart == 0) QueryPerformanceFrequency(&frequency);
+  LARGE_INTEGER count;
+  QueryPerformanceCounter(&count);
+  return frequency.QuadPart > 0
+             ? static_cast<double>(count.QuadPart) / frequency.QuadPart
+             : 0.0;
+}
+
+// One move against its anchor: the ratio of the world move to the room move
+// when the room move is kScaleMoveM or more and the view did not move. A
+// change of the version sets a new anchor and gives no ratio.
+bool AnchorMove(Anchor* a, uint64_t version, const float room[3],
+                const float world[3], float* ratio) {
+  if (!a->have || a->version != version) {
+    a->have = true;
+    a->version = version;
+    for (int i = 0; i < 3; ++i) {
+      a->room[i] = room[i];
+      a->world[i] = world[i];
+    }
+    return false;
+  }
+  const float moved = view_check::Distance3(room, a->room);
+  if (moved < kScaleMoveM) return false;
+  *ratio = view_check::Distance3(world, a->world) / moved;
+  for (int i = 0; i < 3; ++i) {
+    a->room[i] = room[i];
+    a->world[i] = world[i];
+  }
+  return true;
+}
+
+double Mean(double sum, uint64_t n) { return n > 0 ? sum / n : 0.0; }
+
+// The line of a scale. why is the end of the sums: a report window or a new
+// scale.
+void ScaleLine(const char* why) {
+  ScaleTotals& t = g_scale_totals;
+  if (t.eyes_n == 0 || g_scale_lines >= kScaleMostLines) return;
+  ++g_scale_lines;
+  const double eyes = Mean(t.eyes_sum, t.eyes_n);
+  char walk[200] = "";
+  if (t.walk_frames > 0 && t.walk_seconds > 0.0 && eyes > 0.0) {
+    sprintf_s(walk, " In %llu frames of a walk the camera of the game went "
+              "%.2f units in %.2f s: %.1f cm of the room each second at the "
+              "units per meter of the eyes.", t.walk_frames, t.walk_units,
+              t.walk_seconds,
+              t.walk_units / t.walk_seconds / eyes * 100.0);
+  }
+  char grab[200] = "";
+  if (t.grab_frames > 0 && eyes > 0.0) {
+    sprintf_s(grab, " In %llu frames of a grab of the world the camera of "
+              "the game went %.2f units, %.1f cm of the room at the units "
+              "per meter of the eyes, and the grips went %.1f cm.",
+              t.grab_frames, t.grab_units, t.grab_units / eyes * 100.0,
+              t.grab_hand_m * 100.0);
+  }
+  ModLog("scale check  : %s. The God view is at %.3f units per meter. The "
+         "eye cameras of the game give %.3f units per meter (%.3f to %.3f, "
+         "%llu frames), a move of the head %.3f (%llu moves of 5 cm), a move "
+         "of the drawn grip %.3f (%llu), and a move of the Hand of the game "
+         "%.3f (%llu).%s%s", why, t.scale, eyes, t.eyes_least, t.eyes_most,
+         t.eyes_n, Mean(t.head_sum, t.head_n), t.head_n,
+         Mean(t.drawn_sum, t.drawn_n), t.drawn_n, Mean(t.hand_sum, t.hand_n),
+         t.hand_n, walk, grab);
+}
+
+// The numbers of the frame that ended go into the sums.
+void ScaleTake(const ScaleFrame& f) {
+  if (!(f.scale > 0.0f) || !f.have_cam[0] || !f.have_view[0] ||
+      !f.have_view[1]) {
+    return;
+  }
+  ScaleTotals& t = g_scale_totals;
+  if (t.frames > 0 && fabsf(f.scale - t.scale) > 0.005f * t.scale) {
+    if (t.frames >= kScaleLeastFrames) ScaleLine("the scale changed");
+    t = {};
+    g_head_anchor = {};
+    g_drawn_anchor[0] = g_drawn_anchor[1] = {};
+    g_hand_anchor = {};
+  }
+  if (t.frames == 0) t.scale = f.scale;
+  ++t.frames;
+  // The eyes.
+  const float ipd = view_check::Distance3(f.declared[0], f.declared[1]);
+  float apart = 0.0f;
+  if (f.have_cam[1]) {
+    apart = view_check::Distance3(f.cam[0], f.cam[1]);
+  } else {
+    apart = f.shift_separation;
+  }
+  if (ipd > 0.03f && apart > 0.0f) {
+    const float upm = apart / ipd;
+    if (t.eyes_n == 0 || upm < t.eyes_least) t.eyes_least = upm;
+    if (upm > t.eyes_most) t.eyes_most = upm;
+    t.eyes_sum += upm;
+    ++t.eyes_n;
+  }
+  // The head, the drawn grips and the Hand of the game.
+  float ratio = 0.0f;
+  if (AnchorMove(&g_head_anchor, f.version, f.declared[0], f.cam[0],
+                 &ratio)) {
+    t.head_sum += ratio;
+    ++t.head_n;
+  }
+  for (int hand = 0; hand < 2; ++hand) {
+    if (!f.have_grip[hand]) continue;
+    if (AnchorMove(&g_drawn_anchor[hand], f.version, f.grip[hand],
+                   f.drawn[hand], &ratio)) {
+      t.drawn_sum += ratio;
+      ++t.drawn_n;
+    }
+  }
+  if (f.have_hand && f.pointing >= 0 && f.pointing < 2 &&
+      f.have_grip[f.pointing] &&
+      AnchorMove(&g_hand_anchor, f.version, f.grip[f.pointing], f.hand,
+                 &ratio)) {
+    t.hand_sum += ratio;
+    ++t.hand_n;
+  }
+  // The walk and the grab, from the frame before.
+  const ScaleFrame& b = g_scale_last;
+  if (g_have_scale_last && b.frame + 1 == f.frame && f.have_camera &&
+      b.have_camera && fabsf(b.scale - f.scale) <= 0.005f * f.scale) {
+    const float units = view_check::Distance3(f.camera, b.camera);
+    if (f.walk && b.walk && f.seconds > b.seconds) {
+      ++t.walk_frames;
+      t.walk_units += units;
+      t.walk_seconds += f.seconds - b.seconds;
+    }
+    if (f.grab && b.grab) {
+      ++t.grab_frames;
+      t.grab_units += units;
+      float most = 0.0f;
+      for (int hand = 0; hand < 2; ++hand) {
+        if (!f.have_grip[hand] || !b.have_grip[hand]) continue;
+        const float m = view_check::Distance3(f.grip[hand], b.grip[hand]);
+        if (m > most) most = m;
+      }
+      t.grab_hand_m += most;
+    }
+  }
+  g_scale_last = f;
+  g_have_scale_last = true;
+}
+
 
 bool g_read = false;
 bool g_on = true;  // view_check
@@ -158,9 +413,31 @@ void ViewCheckEye(int eye, const float m[12], float near_plane, float half_x,
     memset(&s, 0, sizeof(s));
     s.frame = frame;
   }
+  // THE SCALE CHECK: the frame before goes into the sums, and this frame
+  // gets its numbers.
+  ScaleFrame& f = g_scale_frame;
+  if (f.frame != frame) {
+    if (f.frame != 0) ScaleTake(f);
+    memset(&f, 0, sizeof(f));
+    f.frame = frame;
+    f.scale = TabletopViewScale();
+    f.version = TabletopGodViewVersion();
+    f.walk = TabletopGodWalkActive();
+    f.grab = ControllersGrabHeld();
+    f.seconds = Clock();
+    f.pointing = -1;
+    f.have_hand = ReadGame3(kGameHandPosition, f.hand);
+    f.have_camera = ReadGame3(kGameCamera, f.camera);
+  }
+  f.have_cam[eye] = view_check::CameraPosition(m, f.cam[eye]);
   const bool walk_both = eye == 0 && OneWalkActive();
+  if (walk_both) {
+    f.shift_separation = view_check::OneWalkSeparation(
+        m, OneWalkShiftPerRhw(), near_plane, half_x);
+  }
   OverlayHands hands;
   if (!ControllersOverlayHands(&hands)) return;
+  f.pointing = hands.pointing;
   for (int e = 0; e < 2; ++e) {
     if (e != eye && !(walk_both && e == 1)) continue;
     float position[3], orientation[4], fov[4], size[2];
@@ -171,6 +448,15 @@ void ViewCheckEye(int eye, const float m[12], float near_plane, float half_x,
     view_check::MakeView(position, orientation, fov[0], fov[1], fov[2],
                          fov[3], size[0], size[1], &s.view[e]);
     s.have_view[e] = true;
+    f.have_view[e] = true;
+    for (int i = 0; i < 3; ++i) f.declared[e][i] = position[i];
+  }
+  if (eye == 0) {
+    for (int hand = 0; hand < 2; ++hand) {
+      const OverlayHand& o = hands.hand[hand];
+      f.have_grip[hand] = o.valid && ControllersGripLocal(hand, f.grip[hand]);
+      for (int i = 0; i < 3; ++i) f.drawn[hand][i] = o.position[i];
+    }
   }
   for (int hand = 0; hand < 2; ++hand) {
     const OverlayHand& o = hands.hand[hand];
@@ -194,6 +480,10 @@ void ViewCheckEye(int eye, const float m[12], float near_plane, float half_x,
 
 // Once a report window, when the check had points.
 void ViewCheckReport() {
+  // The scale check of the window. Its anchors stay, so a move that spans
+  // the end of a window counts.
+  ScaleLine("a report window");
+  g_scale_totals = {};
   Totals& t = g_totals;
   if (t.points == 0) {
     t = {};

@@ -2558,7 +2558,15 @@ program.
 | Moving | Comfort vignette | `comfort_vignette` | Off, Gentle, Strong |
 | Moving | Blink | `blink` | Off, Short, Long |
 | Hands | Grab the world | `grab_hand` | Off, Other grip, Either grip. At the next start |
+| Hands | Controller ahead | `grip_trim_ahead_mm` | -30 mm to 30 mm in steps of 5 mm, 0 mm by default |
+| Hands | Controller up | `grip_trim_up_mm` | The same |
+| Hands | Controller out | `grip_trim_out_mm` | The same |
 | Controls | The page of 24.6 | `button_map_hand`, `button_map_other` | A job for each button |
+
+The three rows of the controllers have no row in the launcher: a player
+sets them in the headset, where he sees the drawn controllers on his real
+ones. Ahead is where the controller points, up is to the top of the
+controller, and out is away from the other hand.
 
 A row of Off and On is a toggle, with Off first, so the knob is at the left
 for it. Each other row has two arrows, and a step goes round the list. So
@@ -2605,6 +2613,7 @@ which writes its own log line:
 | `snap_turn`, `smooth_turn_speed`, `blink` | `ComfortCameraSetSnap`, `ComfortCameraSetTurnSpeed`, `ComfortCameraSetBlink` |
 | `move_type`, `move_stick`, `move_stick_speed_cm`, `god_zoom_smooth` | `TabletopGodSetMoveType`, `TabletopGodSetMoveStick`, `TabletopGodSetMoveSpeed`, `TabletopGodSetZoomSmooth`. A walk, a fly or a hold of the zoom that runs stops |
 | `comfort_vignette` | `VignetteSet` |
+| `grip_trim_ahead_mm`, `grip_trim_up_mm`, `grip_trim_out_mm` | `GripFitSetTrim`. The controllers, the hands and the Hand move at the next frame (`controller-hints.md`, 9.15) |
 | With `settings_lean=0`: `teleport`, `recenter_hold`, `left_hand`, `gesture_trail`, `creature_stroke_open`, `hint_learn`, `hint_card_style` | `TeleportSetOn`, `ControllersSetRecenterHold`, `ControllersSetLeftHand`, `OverlaySetTrail`, `ControllersSetOpenStroke`, `HintCardSetLearn`, `HintCardSetStyle` |
 
 These functions do not need `test_keys=1`, and they give no pulse: the press

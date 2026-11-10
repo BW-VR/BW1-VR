@@ -61,6 +61,9 @@ enum Id {
   kGrabHand,
   kGestureTrail,
   kOpenStroke,
+  kGripAhead,
+  kGripUp,
+  kGripOut,
   kHintLearn,
   kCardStyle,
   kSubtitleCard,
@@ -79,6 +82,12 @@ struct Setting {
   const wchar_t* tip;
   bool lean;  // a row of the lean window
 };
+
+// The values of the trim of the controllers (grip_fit.cpp): -30 to 30 mm in
+// steps of 5 mm.
+constexpr const wchar_t* kTrimValues =
+    L"-30 mm=-30|-25 mm=-25|-20 mm=-20|-15 mm=-15|-10 mm=-10|-5 mm=-5|0 mm=0|"
+    L"5 mm=5|10 mm=10|15 mm=15|20 mm=20|25 mm=25|30 mm=30";
 
 const Setting kTable[kSettings] = {
     {kSnapTurn, kGroupMoving, "snap_turn", L"Turn", L"Turn",
@@ -147,6 +156,27 @@ const Setting kTable[kSettings] = {
      L"Stroke with the open hand", L"Off=0|On=1", 1, kNow,
      L"Put your open hand on your Creature for a moment, then move it slowly "
      L"to stroke the Creature. Off: only the grip strokes the Creature.", false},
+    {kGripAhead, kGroupHands, "grip_trim_ahead_mm", L"Controller ahead",
+     L"Move the controllers ahead or back",
+     kTrimValues, 0, kNow,
+     L"Moves the controllers that you see, your hands and the Hand ahead, "
+     L"where the controller points, in steps of 5 mm. A negative value moves "
+     L"them back. Use it when they are not where your real controllers are.",
+     true},
+    {kGripUp, kGroupHands, "grip_trim_up_mm", L"Controller up",
+     L"Move the controllers up or down",
+     kTrimValues, 0, kNow,
+     L"Moves the controllers that you see, your hands and the Hand up, to the "
+     L"top of the controller, in steps of 5 mm. A negative value moves them "
+     L"down.",
+     true},
+    {kGripOut, kGroupHands, "grip_trim_out_mm", L"Controller out",
+     L"Move the controllers out or in",
+     kTrimValues, 0, kNow,
+     L"Moves the controllers that you see, your hands and the Hand out, away "
+     L"from your other hand, in steps of 5 mm. A negative value moves them "
+     L"in, toward your other hand.",
+     true},
     {kHintLearn, kGroupCards, "hint_learn", L"Hints", L"Hints",
      L"Always=0|Until learned=1", 1, kNow,
      L"The cards beside your wrists show what each button does. Until "

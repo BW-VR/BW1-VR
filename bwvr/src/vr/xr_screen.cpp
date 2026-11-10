@@ -695,6 +695,8 @@ struct XrScreen::Impl {
   XrSystemId system = XR_NULL_SYSTEM_ID;
   // From StartSystem, for LogSystem.
   char system_name[XR_MAX_SYSTEM_NAME_SIZE] = {0};
+  // From xrGetInstanceProperties, for RuntimeName.
+  char runtime_name[XR_MAX_RUNTIME_NAME_SIZE] = {0};
   uint32_t max_w = 0;
   uint32_t max_h = 0;
   XrSession session = XR_NULL_HANDLE;
@@ -1535,6 +1537,11 @@ const char* XrScreen::SystemName() const {
   return impl_->system_name;
 }
 
+const char* XrScreen::RuntimeName() const {
+  if (remote_) return "";
+  return impl_->runtime_name;
+}
+
 bool XrScreen::InputFocused() const {
   if (remote_) return remote_->healthy() && remote_->packet->state.focus != 0;
   return impl_->input_ready && impl_->focused;
@@ -1710,6 +1717,7 @@ bool XrScreen::StartInstance(LogFn log) {
 
   XrInstanceProperties properties = {XR_TYPE_INSTANCE_PROPERTIES};
   if (XR_SUCCEEDED(xrGetInstanceProperties(s.instance, &properties))) {
+    strcpy_s(s.runtime_name, properties.runtimeName);
     s.log("  openxr: runtime \"%s\" version %u.%u.%u", properties.runtimeName,
           static_cast<unsigned>(XR_VERSION_MAJOR(properties.runtimeVersion)),
           static_cast<unsigned>(XR_VERSION_MINOR(properties.runtimeVersion)),

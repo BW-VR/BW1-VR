@@ -78,6 +78,7 @@
 #include "radial_menu.h"
 #include "spell_book.h"
 #include "gesture_panel.h"
+#include "grip_fit.h"
 #include "script_frame_math.h"
 #include "temple.h"
 #include "temple_math.h"
@@ -837,7 +838,13 @@ struct Pointing {
   bool on_window;       // the aim is the ray of the cut scene window
 };
 
+// The hands of this frame. The grip pose is the frame of the model of the
+// controller, with the trim of the player (GripFitFrame), and each user of a
+// grip pose reads it here.
 bwvr::HandInput g_hands[2];
+// The hands of this frame as the runtime gives them, for the log line of the
+// aim pose seen from the grip pose (LogGripToAim).
+bwvr::HandInput g_runtime_hands[2];
 // The aim orientation of each hand in this frame, with the turn of UpdateAim.
 // Every user of the aim reads this one and the point below: the pointer, the
 // menu ray, the teleport, the grab from a distance and the Creature commands.
@@ -4308,7 +4315,7 @@ void PollAimKeys() {
 // One line at the first tracked frame, and one when it changes by more than 1
 // degree or 5 mm. The next log of a headset then says what its runtime does.
 void LogGripToAim(int index) {
-  const bwvr::HandInput& hand = g_hands[index];
+  const bwvr::HandInput& hand = g_runtime_hands[index];
   if (!hand.active || !hand.aim_valid || !hand.grip_valid ||
       !hand.aim_tracked || !hand.grip_tracked) {
     return;
@@ -4857,6 +4864,9 @@ void ControllersFrame() {
   } else {
     return;
   }
+  g_runtime_hands[0] = g_hands[0];
+  g_runtime_hands[1] = g_hands[1];
+  GripFitFrame(g_hands, g_fake.mode != 0, g_frame);
   MapButtons();
   LatchFront();
   LogBothButtons();
@@ -5360,7 +5370,8 @@ bool ControllersOverlayHands(OverlayHands* out) {
 // The grip point of a hand in the LOCAL space of the runtime, from the same
 // sample as ControllersOverlayHands, with the same tests: the check of the
 // view (view_check.cpp) compares the place where the overlay draws the grip
-// with this point. False for a hand that the overlay does not draw.
+// with this point. It is the grip point of the frame of the model
+// (GripFitFrame), as the overlay draws it. False for a hand that the overlay does not draw.
 bool ControllersGripLocal(int index, float out[3]) {
   if (!g_on || g_frame == 0 || index < 0 || index > 1) return false;
   const bwvr::HandInput& hand = g_hands[index];
@@ -5959,6 +5970,12 @@ bool ControllersHeadTurn(float out[4]) {
 const char* ControllersSystemName() {
   if (g_fake.mode != 0 || g_screen == nullptr) return "";
   return g_screen->SystemName();
+}
+
+// For grip_fit.cpp: the name of the OpenXR runtime, or an empty string.
+const char* ControllersRuntimeName() {
+  if (g_fake.mode != 0 || g_screen == nullptr) return "";
+  return g_screen->RuntimeName();
 }
 
 void ControllersButtonMapOf(int c, int map[button_map::kButtons]) {

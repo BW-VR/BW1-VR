@@ -53,7 +53,9 @@ want.
 5. **The hands on the controllers.** Look at each hand, and close the
    trigger and the grip slowly. Wrong: a hand off its controller, turned or
    of a wrong size, a finger that jumps, or an object that looks wrong in the
-   palm (name the object). Reach slowly to the edge of your influence and
+   palm (name the object). Touch the tips of the two real controllers.
+   Wrong: drawn tips that do not touch (the fit of `controller-hints.md`,
+   9.15). Reach slowly to the edge of your influence and
    past it, with each hand. Wrong: a red glow at the edge that comes too
    late or too early, that is hard to see or too strong, or a fade of the
    hand that is too strong.
@@ -295,8 +297,10 @@ agents: the log does not tell the item yet.
 - **The lines that the player knows.** Log: `hint card    : hint_learn=1: on
   N frames a line that the`.
 - **The place of the controller in the hand** (`controller-hints.md`, 9.15).
-  Log: `view check   :` gives how far from the grip pose of the runtime the
-  two eyes see the drawn grip, in cm and in pixels.
+  Log: `view check   :` gives how far from the frame of the controller the
+  two eyes see the drawn grip, in cm and in pixels. `grip fit     : the
+  right hand, runtime ...` names the fit of each hand, and `the trim is`
+  gives the trim.
 - **The hints follow the ToolTips option of the game.** Log: `hint card    :
   the ToolTips option of the game is N` after a change of the option in the
   game, with "each line always shows" for All ToolTips.

@@ -251,6 +251,9 @@ int HandModelSwapValue();
 void HandModelSwapChange(const char* by);
 int HandModelLookValue();
 void HandModelLookChange(const char* by);
+// The frame of the controller on the grip pose (grip_fit.cpp).
+int GripFitValue();
+void GripFitChange(const char* by);
 int TargetGlowValue();
 void TargetGlowChange(const char* by);
 int TakeStreamValue();
@@ -678,6 +681,8 @@ const Switch kSwitches[] = {
      HandModelSwapValue, HandModelSwapChange, L"low poly|game|file"},
     {kGroupHand, L"Hand look", L"Look of the hands", "", HandModelLookValue,
      HandModelLookChange, L"player|evil|neutral|good"},
+    {kGroupHand, L"Controller fit", L"Controller on the grip pose", "grip_fit",
+     GripFitValue, GripFitChange, L"runtime|model"},
 
     // Throw
     {kGroupThrow, L"Fast release", L"Release at once", "release_at_once",
@@ -1129,6 +1134,11 @@ const wchar_t* const kTips[] = {
     // Hand look
     L"The look of the game hand mesh: the alignment of the player, evil, "
     L"neutral or good. The low poly hands do not change.",
+    // Controller fit
+    L"Model: on Virtual Desktop, the Oculus runtime and SteamVR, the drawn "
+    L"controller, the hands and the Hand go on the frame of the model of a "
+    L"Meta Touch controller, 2.7 cm from the grip pose. Runtime: on the grip "
+    L"pose of the runtime.",
     // Fast release
     L"On: a game turn runs on the frame after a release of the Hand, or after "
     L"the grip opens in a take. Off: the mod waits up to 100 ms for the game "

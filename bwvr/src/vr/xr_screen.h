@@ -659,6 +659,9 @@ class XrScreen {
   // The name of the headset that the runtime gives (XrSystemProperties), or
   // an empty string. The bridge does not send it.
   const char* SystemName() const;
+  // The name of the OpenXR runtime (XrInstanceProperties), for example
+  // "VirtualDesktopXR", or an empty string. The bridge does not send it.
+  const char* RuntimeName() const;
 
   // True while the session has input focus. The headset menu takes it away.
   bool InputFocused() const;

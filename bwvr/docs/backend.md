@@ -5554,7 +5554,9 @@ cull         : cull_distance=3, map objects stop at 3500 units. cull_fog=1: the 
 ```
 
 Test keys: `cull_test_frame=N` steps the cull distance as the debug page does,
-from frame N of the controllers on, each `cull_test_period` frames (700).
+from frame N of the controllers on, each `cull_test_period` frames (700). The
+frames count as the steps of the script count them, also with
+`fake_controller_play_frame`.
 
 Open: the frame cost of each value on the laptop, from a view high over the land
 at the villager scale.

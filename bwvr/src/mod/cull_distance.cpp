@@ -36,6 +36,7 @@
 
 extern void ModLog(const char* format, ...);
 uint64_t ControllersFrameCount();
+uint64_t ControllersTestFrame(uint64_t key_frame, uint64_t frame);
 void ControllersGesturePulse(float amplitude, float seconds);
 
 namespace {
@@ -58,6 +59,9 @@ int g_index = cull_math::kCullDefault;  // cull_distance
 int g_fog = 1;                          // cull_fog
 // A test for a desktop run: from this frame of the controllers on, each
 // g_test_period frames, the cull distance steps as the debug page steps it.
+// The frames count as the steps of the script count them
+// (ControllersTestFrame), so the steps and the recipe keep their distance in
+// a run in a test save.
 uint64_t g_test_frame = 0;   // cull_test_frame, 0 is never
 uint64_t g_test_period = 700;  // cull_test_period
 uint64_t g_test_next = 0;
@@ -169,8 +173,10 @@ void CullDistanceInstall() {
 // tabletop.cpp, TabletopApplyFrame: once a frame, before the eye passes.
 void CullDistanceFrame() {
   if (!g_installed) return;
-  if (g_test_frame != 0 && ControllersFrameCount() >= g_test_next) {
-    g_test_next = ControllersFrameCount() + g_test_period;
+  if (g_test_frame != 0 &&
+      ControllersTestFrame(g_test_next, ControllersFrameCount()) >=
+          g_test_next) {
+    g_test_next += g_test_period;
     Step("the test cull_test_frame");
   }
   g_frame_factor = cull_math::CullFactor(g_index);

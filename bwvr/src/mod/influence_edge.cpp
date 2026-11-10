@@ -33,17 +33,45 @@
 //                          the game yet. GVirtualInfluence keeps the land
 //                          point of the interface (GInterfaceStatus+0x14),
 //                          and the report logs it with its state
-//   influence_wall         a soft round glow lies on the edge at the point
-//                          nearest to each hand, at the height of the hand,
-//                          while the hand is less than 20 cm of the room
-//                          inside the edge, and fainter while the hand is
-//                          past it (influence_edge_math.h, GlowStrength). It
-//                          has the red of the game's own influence ring: the
-//                          color of the ring of the player in the table at
-//                          0x00EA9EFC, which fn_00826510 fills and
-//                          InfluenceCircle (fn_008265F0) reads by the player
-//                          index of GetRemapedPlayer 0x0064D790. overlay.cpp
-//                          draws it with the glow, as added light
+//   influence_wall         a glow on the edge near each hand. It has the red
+//                          of the game's own influence ring: the color of the
+//                          ring of the player in the table at 0x00EA9EFC,
+//                          which fn_00826510 fills and InfluenceCircle
+//                          (fn_008265F0) reads by the player index of
+//                          GetRemapedPlayer 0x0064D790. overlay.cpp draws it
+//                          with the glow, as added light, with the depth test.
+//                          influence_wall_look gives its look:
+//     1  the hologram: a part of the wall of the edge near the hand, with a
+//        grid that is fixed to the wall and rings that go out from the point
+//        of the wall nearest to the hand (influence_edge_math.h,
+//        BuildHologram). It starts 45 cm of the room inside the edge, gets
+//        brighter and larger as the hand comes nearer, and goes 40 cm past
+//        the edge. The wall is the real edge of the game: the influence of a
+//        player is the union of the disc of the Temple (Citadel+0x14, radius
+//        GGame+0x25007C times Citadel+0x6C) and the disc of each town
+//        (GPlayer+0xA50, next +0x75C, its place +0x14, its radius +0x5C8)
+//        [V, Influence::CalculatePlayerRawInfluence 0x005CD230,
+//        fn_004630F0, fn_007479E0]. So the point of the edge comes from the
+//        circles, with no search, and the wall of a circle does not turn
+//        when the hand turns. The test of the game checks the point 2 cm
+//        each side of it. When the test and the circles do not agree (an
+//        influence ring of a script, a friend's influence), the point comes
+//        from the search of the round patch and the hologram is level and
+//        faces the hand. influence_wall_ripple=1 lets the rings go out at
+//        5 cm of the room a second, 0 keeps them still
+//     0  the round patch: a soft round glow on the edge at the point nearest
+//        to the hand, found by 24 rays, in the plane that faces the hand,
+//        from 20 cm of the room inside the edge (GlowStrength)
+//
+// THE GAME'S OWN FIELD [V]. fn_00827820, from the draw of the land
+// (0x005E61B5), tests the place of the 3D object of the Hand
+// (CHand+0x482C, +0x38, copied to 0x00E9A100 by GLandscape::Draw) against
+// each disc of InfluenceCircle. When the Hand goes through the ring of a
+// player whose ring shows (0x00EB9A1C), it makes one burst at the point of
+// the ring between the two places (fn_00827250: 7 sprites of 0 to 12 units
+// that grow for 2 s, in the color of that ring), a sound and a pulse. So the
+// game shows a ring only at the moment of the crossing, at a fixed size in
+// world units, and not while the Hand comes near. The mod does not change it.
 //
 // The fade and the glow act only while the controller places the Hand. The
 // stream acts only for the land point of the Hand of the controller.
@@ -75,9 +103,11 @@
 #include <string.h>
 
 #include "MinHook.h"
+#include "debug_menu.h"
 #include "influence_edge_math.h"
 
 extern void ModLog(const char* format, ...);
+void ControllersGesturePulse(float amplitude, float seconds);
 // hand_direct.cpp
 bool HandDirectInsideInfluence(float x, float z, bool* inside);
 void* HandDirectPlayer();
@@ -168,6 +198,43 @@ int g_color_index = -1;
 int g_wall_logs = 0;
 const int kMaxWallLogs = 40;
 
+// THE HOLOGRAM (influence_wall_look=1), in meters of the room. It starts 45
+// cm inside the edge, so it shows before the hand is at the edge, and it goes
+// 40 cm past the edge, so it shows the way back. Its disc on the wall is 14
+// cm from the middle to the rim when it is faint and 30 cm at the touch. The
+// grid has a line each 7.5 cm, the rings are 8 cm apart, and a line is 8 mm
+// wide. The test of the game checks the edge point 2 cm each side of it.
+bool g_look = true;    // influence_wall_look
+bool g_ripple = true;  // influence_wall_ripple
+const float kHoloInsideM = 0.45f;
+const float kHoloOutsideM = 0.40f;
+const float kHoloSmallM = 0.14f;
+const float kHoloLargeM = 0.30f;
+const float kHoloLight = 0.8f;
+const float kHoloGridM = 0.075f;
+const float kHoloRingGapM = 0.08f;
+const float kHoloRingSpeedMps = 0.05f;
+const float kHoloLineHalfM = 0.004f;
+const float kHoloCheckM = 0.02f;
+const float kHoloMarginM = 0.002f;
+const int kMaxCircles = 48;
+// How each frame of the hologram found its wall, for the report.
+uint64_t g_holo_by_circles = 0;
+uint64_t g_holo_by_search = 0;
+uint64_t g_holo_disagree = 0;
+// The lines each 60 frames while the hologram shows.
+int g_holo_logs = 0;
+const int kMaxHoloLogs = 80;
+// THE CIRCLES of the influence of the player in the objects of the game.
+const uintptr_t kGamePointer = 0x00D0195C;  // GGame*
+const int kGameInfluenceScale = 0x25007C;   // float
+const int kPlayerCitadel = 0xA48;
+const int kPlayerTowns = 0xA50;
+const int kTownNext = 0x75C;
+const int kTownInfluence = 0x5C8;
+const int kThingCoords = 0x14;  // MapCoords of the Citadel and of a town
+const int kCitadelInfluence = 0x6C;
+
 // THE STREAM.
 uint64_t g_stream_calls = 0;
 uint64_t g_stream_lifted = 0;
@@ -209,6 +276,8 @@ void ReadKeys() {
   if (!(g_wall_light > 0.0f)) g_wall_light = 1.0f;
   if (g_wall_light > 3.0f) g_wall_light = 3.0f;
   g_wall = number("influence_wall", 1) != 0;
+  g_look = number("influence_wall_look", 1) != 0;
+  g_ripple = number("influence_wall_ripple", 1) != 0;
   g_stream_log = number("influence_stream_test_log", 0) != 0;
   g_test_cm = number("influence_test_circle_cm", 0);
   if (g_test_cm < 0) g_test_cm = 0;
@@ -241,6 +310,57 @@ float LandHeight(float x, float z) {
   float point[3] = {x, 0.0f, z};
   reinterpret_cast<GetLHPointFn>(kGetLHPoint)(&at, nullptr, point);
   return point[1];
+}
+
+// The land point of the MapCoords at `thing` + kThingCoords.
+void ThingPlace(const uint8_t* thing, float* x, float* z) {
+  const int32_t* at = reinterpret_cast<const int32_t*>(thing + kThingCoords);
+  *x = static_cast<float>(at[0]) / kMapScale;
+  *z = static_cast<float>(at[1]) / kMapScale;
+}
+
+// THE CIRCLES of the influence of the player, as the game sums them: the
+// disc of the Temple and the disc of each town. With the test circle, that
+// circle alone. Before the test circle starts, none. Returns the count.
+int GameCircles(influence_math::Circle* out, int room) {
+  if (g_have_circle) {
+    out[0].x = g_circle[0];
+    out[0].z = g_circle[1];
+    out[0].r = g_circle[2];
+    return 1;
+  }
+  if (g_test_cm > 0) return 0;
+  const uint8_t* player = static_cast<const uint8_t*>(HandDirectPlayer());
+  if (player == nullptr || IsBadReadPtr(player + kPlayerCitadel, 12)) {
+    return 0;
+  }
+  int n = 0;
+  const uint8_t* game = *reinterpret_cast<const uint8_t* const*>(kGamePointer);
+  const uint8_t* citadel =
+      *reinterpret_cast<const uint8_t* const*>(player + kPlayerCitadel);
+  if (citadel != nullptr && game != nullptr &&
+      !IsBadReadPtr(citadel, kCitadelInfluence + 4) &&
+      !IsBadReadPtr(game + kGameInfluenceScale, 4)) {
+    const float r =
+        *reinterpret_cast<const float*>(game + kGameInfluenceScale) *
+        *reinterpret_cast<const float*>(citadel + kCitadelInfluence);
+    if (r > 0.0f && n < room) {
+      ThingPlace(citadel, &out[n].x, &out[n].z);
+      out[n++].r = r;
+    }
+  }
+  const uint8_t* town =
+      *reinterpret_cast<const uint8_t* const*>(player + kPlayerTowns);
+  for (int guard = 0; town != nullptr && n < room && guard < 256; ++guard) {
+    if (IsBadReadPtr(town, kTownNext + 4)) break;
+    const float r = *reinterpret_cast<const float*>(town + kTownInfluence);
+    if (r > 0.0f) {
+      ThingPlace(town, &out[n].x, &out[n].z);
+      out[n++].r = r;
+    }
+    town = *reinterpret_cast<const uint8_t* const*>(town + kTownNext);
+  }
+  return n;
 }
 
 void __cdecl h_ManaPath(MapCoords* from, MapCoords* to, uint32_t color,
@@ -353,10 +473,15 @@ void InfluenceEdgeInstall() {
                          "point in the air"
                        : "The stream of the influence ends on the land under "
                          "the Hand, as the game draws it");
-  ModLog("influence    : influence_wall=%d. %s", g_wall ? 1 : 0,
-         g_wall ? "A soft red glow shows the edge of the influence at each "
-                  "hand, from 20 cm of the room before the edge"
-                : "No glow at the edge of the influence");
+  ModLog("influence    : influence_wall=%d, influence_wall_look=%d, "
+         "influence_wall_ripple=%d. %s", g_wall ? 1 : 0, g_look ? 1 : 0,
+         g_ripple ? 1 : 0,
+         !g_wall ? "No glow at the edge of the influence"
+         : g_look
+             ? "A red hologram shows the wall of the edge of the influence at "
+               "each hand, from 45 cm of the room before the edge"
+             : "A soft red patch shows the edge of the influence at each "
+               "hand, from 20 cm of the room before the edge");
   if (g_stream_hand) {
     Hook(kManaPathSprite, reinterpret_cast<void*>(&h_ManaPath),
          reinterpret_cast<void**>(&o_ManaPath),
@@ -450,14 +575,193 @@ void InfluenceEdgeColor(float rgb[3]) {
   for (int k = 0; k < 3; ++k) rgb[k] = g_color[k];
 }
 
+namespace {
+
+// The edge near the hand by the search of 24 rays (the round patch, and the
+// hologram where the circles do not agree with the test of the game). True
+// when a ray found it, with the point and its distance along the land.
+bool SearchEdge(const float point[3], float range, float at[2],
+                float* distance, int* rays) {
+  bool found[influence_math::kMaxDirections];
+  float edge[influence_math::kMaxDirections][2];
+  const auto inside = [](float x, float z) {
+    bool in = true;
+    if (!Inside(x, z, &in)) in = true;
+    return in;
+  };
+  *rays = influence_math::FindEdge(inside, point[0], point[2], range,
+                                   kWallRays, kWallSteps, kWallHalvings,
+                                   found, edge);
+  return *rays > 0 && influence_math::NearestEdge(point, found, edge,
+                                                  kWallRays, at, distance);
+}
+
+// THE HOLOGRAM (influence_wall_look=1) of one hand.
+int HologramWall(int hand, const float point[3], float units_per_meter,
+                 float seconds, influence_math::WallTriangle* out, int room) {
+  using namespace influence_math;
+  const float u = units_per_meter;
+  bool here = true;
+  if (!Inside(point[0], point[2], &here)) return 0;
+  Circle circles[kMaxCircles];
+  const int count = GameCircles(circles, kMaxCircles);
+  const float margin = kHoloMarginM * u;
+  const float range = (here ? kHoloInsideM : kHoloOutsideM) * u;
+  HoloWall wall = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
+  EdgePoint e = {-1, {0.0f, 0.0f}, 0.0f, true};
+  // 1 the circles of the game, 2 the search.
+  int how = 0;
+  float distance = 0.0f;
+  if (count > 0 &&
+      NearestUnionEdge(circles, count, point[0], point[2], margin, &e)) {
+    if (e.inside != here) {
+      ++g_holo_disagree;
+    } else if (e.distance > range) {
+      // Far from the edge of the circles: no hologram, and no more tests.
+      how = -1;
+    } else {
+      const Circle& c = circles[e.circle];
+      float nx = e.at[0] - c.x, nz = e.at[1] - c.z;
+      const float length = sqrtf(nx * nx + nz * nz);
+      if (length > 1e-4f) {
+        nx /= length;
+        nz /= length;
+        const float d = kHoloCheckM * u;
+        bool in_side = false, out_side = true;
+        Inside(e.at[0] - nx * d, e.at[1] - nz * d, &in_side);
+        Inside(e.at[0] + nx * d, e.at[1] + nz * d, &out_side);
+        if (in_side && !out_side) {
+          wall.cx = c.x;
+          wall.cz = c.z;
+          wall.r = c.r;
+          wall.qx = e.at[0];
+          wall.qz = e.at[1];
+          distance = e.distance;
+          how = 1;
+        } else {
+          ++g_holo_disagree;
+        }
+      }
+    }
+  }
+  int rays = 0;
+  if (how == 0) {
+    float at[2] = {0.0f, 0.0f};
+    if (SearchEdge(point, range, at, &distance, &rays)) {
+      float tx = -(at[1] - point[2]), tz = at[0] - point[0];
+      float length = sqrtf(tx * tx + tz * tz);
+      if (!(length > 1e-6f)) {
+        tx = 1.0f;
+        tz = 0.0f;
+        length = 1.0f;
+      }
+      wall.qx = at[0];
+      wall.qz = at[1];
+      wall.tx = tx / length;
+      wall.tz = tz / length;
+      how = 2;
+    }
+  }
+  const float strength =
+      how > 0 ? HologramStrength(here, distance, kHoloInsideM * u,
+                                 kHoloOutsideM * u)
+              : 0.0f;
+  int n = 0;
+  float y = point[1];
+  if (strength > 0.0f) {
+    // The middle is at the height of the hand, and never under the land at
+    // the edge.
+    const float land = LandHeight(wall.qx, wall.qz);
+    if (y < land) y = land;
+    HoloLook look;
+    look.y = y;
+    look.radius = (kHoloSmallM + (kHoloLargeM - kHoloSmallM) * strength) * u;
+    look.light = kHoloLight * g_wall_light * strength;
+    look.grid = kHoloGridM * u;
+    look.ring_gap = kHoloRingGapM * u;
+    float phase = 0.5f;
+    if (g_ripple && seconds >= 0.0f) {
+      const float turns = seconds * kHoloRingSpeedMps / kHoloRingGapM;
+      phase = turns - floorf(turns);
+    }
+    look.ring_phase = phase;
+    look.line_half = kHoloLineHalfM * u;
+    const int own = e.circle;
+    const auto show = [&](float x, float z) {
+      return how != 1 || !InOther(circles, count, own, x, z, margin);
+    };
+    n = BuildHologram(wall, look, show, out, room);
+    if (how == 1) {
+      ++g_holo_by_circles;
+    } else {
+      ++g_holo_by_search;
+    }
+  }
+  const bool shows = n > 0;
+  if (shows != g_wall_was[hand] && g_wall_logs < kMaxWallLogs) {
+    ++g_wall_logs;
+    ModLog("influence    : the hologram at the edge %s for the %s hand at "
+           "%.1f %.1f, %s the influence, %.1f cm of the room from the edge, "
+           "strength %.2f, %s, %d triangles, frame %llu",
+           shows ? "shows" : "goes", hand == 0 ? "left" : "right", point[0],
+           point[2], here ? "inside" : "outside", distance / u * 100.0f,
+           strength,
+           how == 1   ? "on the wall of a circle of the game"
+           : how == 2 ? "by the search of the rays"
+                      : "no edge near",
+           n, ControllersFrameCount());
+  }
+  // A line each 60 frames while it shows: the edge point, the wall and the
+  // strength, for the steps of a desktop run.
+  static uint64_t said_frame[2] = {0, 0};
+  if (shows && g_holo_logs < kMaxHoloLogs &&
+      ControllersFrameCount() >= said_frame[hand] + 60) {
+    said_frame[hand] = ControllersFrameCount();
+    ++g_holo_logs;
+    if (how == 1) {
+      const float angle =
+          atan2f(wall.qz - wall.cz, wall.qx - wall.cx) * 57.29578f;
+      ModLog("influence    : the hologram of the %s hand: %.1f cm of the "
+             "room %s the edge, strength %.2f, radius %.1f cm, edge point "
+             "%.2f %.1f %.2f on the circle at %.1f %.1f of radius %.1f, at "
+             "%.2f degrees on it, %d triangles, frame %llu",
+             hand == 0 ? "left" : "right", distance / u * 100.0f,
+             here ? "inside" : "past", strength,
+             (kHoloSmallM + (kHoloLargeM - kHoloSmallM) * strength) * 100.0f,
+             wall.qx, y, wall.qz, wall.cx, wall.cz, wall.r, angle, n,
+             ControllersFrameCount());
+    } else {
+      ModLog("influence    : the hologram of the %s hand: %.1f cm of the "
+             "room %s the edge, strength %.2f, edge point %.2f %.1f %.2f by "
+             "the search (%d rays), %d triangles, frame %llu",
+             hand == 0 ? "left" : "right", distance / u * 100.0f,
+             here ? "inside" : "past", strength, wall.qx, y, wall.qz, rays,
+             n, ControllersFrameCount());
+    }
+  }
+  g_wall_was[hand] = shows;
+  if (shows) {
+    ++g_wall_frames;
+    g_wall_triangles += static_cast<uint64_t>(n);
+  }
+  return n;
+}
+
+}  // namespace
+
 // overlay.cpp, once a frame for each hand (0 the left hand, 1 the right
-// hand): the glow at the edge near the point of that hand in the world.
-// Returns the count of triangles in `out`, at most `room`.
+// hand): the glow at the edge near the point of that hand in the world, at
+// `seconds` of the clock of the glow. Returns the count of triangles in
+// `out`, at most `room`.
 int InfluenceEdgeWall(int hand, const float point[3], float units_per_meter,
-                      influence_math::WallTriangle* out, int room) {
+                      float seconds, influence_math::WallTriangle* out,
+                      int room) {
   ReadKeys();
   if (hand < 0 || hand > 1) return 0;
   if (!g_wall || !(units_per_meter > 0.0f)) return 0;
+  if (g_look) {
+    return HologramWall(hand, point, units_per_meter, seconds, out, room);
+  }
   bool here = true;
   if (!Inside(point[0], point[2], &here)) return 0;
   const float range =
@@ -523,6 +827,26 @@ int InfluenceEdgeWall(int hand, const float point[3], float units_per_meter,
   return n;
 }
 
+// The debug page (debug_menu.cpp): the look of the glow at the edge.
+int InfluenceEdgeLookValue() {
+  ReadKeys();
+  if (!g_wall) return kDebugCannot;
+  return g_look ? 1 : 0;
+}
+
+void InfluenceEdgeLookChange(const char* by) {
+  ReadKeys();
+  if (!g_wall) return;
+  g_look = !g_look;
+  for (int h = 0; h < 2; ++h) g_wall_was[h] = false;
+  ControllersGesturePulse(0.5f, g_look ? 0.30f : 0.08f);
+  ModLog("influence    : %s: influence_wall_look is %d now: %s, frame %llu",
+         by, g_look ? 1 : 0,
+         g_look ? "the hologram on the wall of the edge"
+                : "the round patch at the edge",
+         ControllersFrameCount());
+}
+
 // CHand+0x4850 is the GInterfaceStatus of the Hand, and its +0x130 is the
 // GVirtualInfluence, which keeps the land point of the interface (+0x14 of
 // the status) while it is inside the influence.
@@ -583,6 +907,13 @@ void InfluenceEdgeReport() {
                                  static_cast<double>(g_wall_frames)
                            : 0.0,
          g_stream_calls, g_stream_lifted, g_last_lift, g_raw_tests);
+  if (g_holo_by_circles > 0 || g_holo_by_search > 0 || g_holo_disagree > 0) {
+    ModLog("influence    : the hologram: %llu frames on the wall of a circle "
+           "of the game, %llu frames by the search of the rays, %llu tests "
+           "where the circles and the test of the game did not agree",
+           g_holo_by_circles, g_holo_by_search, g_holo_disagree);
+  }
+  g_holo_by_circles = g_holo_by_search = g_holo_disagree = 0;
   g_fade_frames = g_wall_frames = g_wall_triangles = 0;
   g_stream_calls = g_stream_lifted = g_raw_tests = 0;
 }

@@ -140,6 +140,8 @@ int CullDistanceValue();
 void CullDistanceChange(const char* by);
 int CullFogValue();
 void CullFogChange(const char* by);
+int InfluenceEdgeLookValue();
+void InfluenceEdgeLookChange(const char* by);
 int VkSceneEyesValue();
 void VkSceneEyesToggle(const char* by);
 int VkSceneKeepPictureValue();
@@ -490,6 +492,9 @@ const Switch kSwitches[] = {
      L"game|2x|3x|5x|10x"},
     {kGroupPicture, L"Cull fog", L"Fog moves out with the models",
      "cull_fog", CullFogValue, CullFogChange, L"game|follows"},
+    {kGroupPicture, L"Edge look", L"Look of the influence edge",
+     "influence_wall_look", InfluenceEdgeLookValue, InfluenceEdgeLookChange,
+     L"patch|hologram"},
     {kGroupPicture, L"Advisor size", L"Advisor size at a world place",
      "spirit_world_size", SpiritAnchorWorldSizeValue,
      [](const char*) { SpiritAnchorWorldSizeToggle(); },
@@ -904,6 +909,9 @@ const wchar_t* const kTips[] = {
     // Cull fog
     L"Follows: the fog starts and ends further out, as far as the cull "
     L"distance moves the map objects out. Game: the fog of the game.",
+    // Edge look
+    L"The glow at the edge of the influence near a hand. Hologram: a red grid "
+    L"on the wall of the edge, with rings from the hand. Patch: a round glow.",
     // Advisor size
     L"An advisor at a place of the world. Near size: the size that it has for "
     L"the eye at its usual place. Game: the size of the game.",

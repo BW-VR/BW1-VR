@@ -56,9 +56,10 @@ want.
    palm (name the object). Touch the tips of the two real controllers.
    Wrong: drawn tips that do not touch (the fit of `controller-hints.md`,
    9.15). Reach slowly to the edge of your influence and
-   past it, with each hand. Wrong: a red glow at the edge that comes too
-   late or too early, that is hard to see or too strong, or a fade of the
-   hand that is too strong.
+   past it, with each hand. Wrong: a red hologram at the edge that comes too
+   late or too early, that is hard to see or too strong, that shakes or
+   turns with the hand, rings that are too fast, or a fade of the hand that
+   is too strong.
 6. **The grip.** Take things, set them down and let them go. Wrong: a take
    from a loose hand, a grip that lets go late or not at all, a drop by
    accident, or a job that needs the other button.

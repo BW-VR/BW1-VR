@@ -41,9 +41,10 @@ Related docs: `grab.md` (the grip), `throw.md` (the throw), `creature.md`
 - The Forest miracle has a camera path of the game that turns the camera
   around the new forest. With the head on the camera the mod starts no such
   path, so the camera of the player stays (`miracle_camera_still=1`).
-- Outside the influence of the player the hands fade, and a soft red glow
-  shows the edge where each hand comes near it (`influence_fade`,
-  `influence_wall`). With `influence_stream_hand=1` the stream of the game
+- Outside the influence of the player the hands fade. A red hologram shows
+  the wall of the edge where each hand comes near it, with a grid on the
+  wall and rings that go out from the hand (`influence_fade`,
+  `influence_wall`, `influence_wall_look`). With `influence_stream_hand=1` the stream of the game
   ends at the Hand's point in the air.
 
 ## Gestures in the plain game [V unless marked]
@@ -582,9 +583,9 @@ pour shows a column in the sky in the red of the influence ring (255 70 70),
 and not at the spire.
 
 The mod draws one thing in that red: the glow at the edge of the influence
-(`influence_wall`, "The glow at the edge"), a patch of 12 cm of the room at
-the edge nearest to each hand. Its lines `influence    : the glow at the
-edge` say when it shows and where. The game draws its influence ring in the
+(`influence_wall`, "The glow at the edge"), on the edge nearest to each hand.
+Its lines `influence    : the hologram at the edge` (or `the glow at the
+edge` for the round patch) say when it shows and where. The game draws its influence ring in the
 same red. A run with `influence_wall=0` tells the two apart.
 
 ### A teleport site in the pick (`miracle_site_pick=1`)
@@ -1132,31 +1133,72 @@ over the land, so three things change, each with a key:
   (`GInterfaceStatus + 0x14`), and `Draw` needs a last point inside (`+0x08`
   not 0). In the God view that land point can be away from the land under
   the Hand. The report of the log has the state of the stream.
-- **The glow at the edge** (`influence_wall=1`). For each hand, a soft round
-  patch of light lies on the edge at the point of the edge nearest to the
-  Hand's point of that hand, at the height of that point
-  (`influence_edge_math.h`). 24 rays go out from the land point of the hand,
-  and each finds the first point where the influence changes. The patch is
-  in the vertical plane through that point, facing the hand. It is 12 cm of
-  the room from its middle to its rim, about the size of a hand. Its light
-  is full in the middle, 0.55 of it at half the radius and 0 at the rim.
+- **The glow at the edge** (`influence_wall=1`). For each hand, a glow shows
+  the edge of the influence near the tip of the index finger of that hand
+  (`influence_edge_math.h`). `influence_wall_look` gives its look.
+  - **The hologram** (`influence_wall_look=1`). The influence of a player
+    is the union of discs on the land: the disc of the Temple and one disc
+    for each town [V, `Influence::CalculatePlayerRawInfluence` `0x005CD230`].
+    The disc of the Temple has its middle at `Citadel+0x14` and the radius
+    `GGame+0x25007C` times `Citadel+0x6C` (`Citadel::GetInfluence`). The
+    towns are the list at `GPlayer+0xA50` (next at `+0x75C`), each with its
+    middle at `+0x14` and its radius at `+0x5C8`. The game draws the same
+    discs as its influence ring (`InfluenceCircle`). So the wall of the edge
+    is a set of vertical cylinders. The mod reads the discs each frame and
+    finds the point of the edge nearest to the hand with no search
+    (`NearestUnionEdge`): a point straight out from the middle of a disc,
+    or a point where two rims cross. The test of the game checks that point
+    2 cm of the room each side of it. The hologram is a disc on the wall
+    around that point, at the height of the hand: a soft fill, a bright
+    spot at the point, a grid, and rings around the point. The grid has a
+    line each 7.5 cm of the room, at whole steps of the height of the world
+    and at whole steps along the wall. So the grid stays at its place on the
+    wall, and only the disc that shows it moves with the hand. The rings are
+    8 cm apart. With `influence_wall_ripple=1` they go out from the point at
+    5 cm of the room a second, and with 0 they are still. A line is 8 mm
+    wide, with its light in the middle. The hologram starts 45 cm of the
+    room inside the edge and goes 40 cm past it. Its strength rises as
+    `t * t * (3 - 2 t)` from 0 to 1 at the edge, and falls the same way past
+    the edge. Its disc grows with the strength, from 14 cm to 30 cm from the
+    middle to the rim. A part of the wall inside another disc of the union
+    is not an edge, and has no light. A hologram has at most 900 triangles.
+  - Where the discs and the test of the game do not agree (an influence ring
+    of a script, the influence of a friend), the point comes from the search
+    of 24 rays below, and the hologram is level and faces the hand.
+  - **The round patch** (`influence_wall_look=0`). A soft round patch of
+    light lies on the edge at the point of the edge nearest to the hand, at
+    the height of the hand. 24 rays go out from the land point of the hand,
+    and each finds the first point where the influence changes. The patch is
+    in the vertical plane through that point, facing the hand. It is 12 cm of
+    the room from its middle to its rim. Its light is full in the middle,
+    0.55 of it at half the radius and 0 at the rim. The point is on one of
+    the rays, so it jumps from ray to ray when the hand moves along the edge
+    (up to 2.7 units for a hand 10 units inside a circle of 100 units), and
+    the patch turns up to 7.5 degrees from the wall.
+  - **The game's own field** [V]. `fn_00827820`, from the draw of the land
+    (`0x005E61B5`), tests the place of the 3D object of the Hand
+    (`CHand+0x482C`, `+0x38`) against each disc of `InfluenceCircle`. When
+    the Hand goes through the ring of a player whose ring shows
+    (`0x00EB9A1C`), it makes one burst at the ring (`fn_00827250`: 7
+    sprites of 0 to 12 units that grow for 2 s, in the color of that ring),
+    a sound and a pulse. So the game shows the ring only at the moment of the
+    crossing, at a fixed size in world units. The mod does not change it.
   - **The color** is the red of the game's own influence ring: the color of
     the ring of the player in the table at `0x00EA9EFC`. `fn_00826510` fills
     it, and `InfluenceCircle` (`fn_008265F0`) gives the vertices of the ring
     the color of the player index of `GetRemapedPlayer` `0x0064D790` [V]. The
     mod takes the same entry for the player of the interface. Entry 0 is 255
     70 70.
-  - **The strength.** Inside the influence the glow starts 20 cm of the room
-    from the edge, about one hand length, so it shows only when the hand is
-    about to touch the edge and not while the hand works near it. It rises
-    as `t * t * (3 - 2 t)` with `t = 1 - distance / 20 cm`, so the start is
-    faint (0.16 at 15 cm) and the touch is full. Past the edge it falls to
-    35 percent in 3 cm and to 0 at 30 cm: a faint patch where the hand went
-    through, which shows the way back. The most light is 0.6 of full light.
-  - The overlay draws the patches with the glow, as added light, with the
-    depth test, so the land in front hides them. Most frames have no edge
-    near a hand, and then the search costs 48 tests of the influence for
-    each hand.
+  - **The strength of the round patch.** Inside the influence the patch
+    starts 20 cm of the room from the edge. It rises as `t * t * (3 - 2 t)`
+    with `t = 1 - distance / 20 cm`, so the start is faint (0.16 at 15 cm)
+    and the touch is full. Past the edge it falls to 35 percent in 3 cm and
+    to 0 at 30 cm. The most light is 0.6 of full light.
+  - The overlay draws the glow as added light, with the depth test, so the
+    land in front hides it. The triangles are in the world, so each eye sees
+    them at their depth. Each frame builds the glow one time for both eyes.
+    Most frames have no edge near a hand. Then the hologram costs one test
+    of the influence for each hand, and the round patch costs 48.
 
 The fade and the glow act only while the controller places the Hand, in the
 God view and on the table.
@@ -1320,7 +1362,9 @@ so the plain game has no flat band.
 | `miracle_camera_still` | 1 | 1: a miracle with a camera path of the game (the Forest) starts no path while the head carries the camera, and the camera of the player stays. 0: the path turns the camera as the game makes it |
 | `influence_fade` | 1 | 1: outside the influence of the player each hand fades to 45 percent. 0: the hands do not fade |
 | `influence_stream_hand` | 0 | 1: the stream of the influence of the game ends at the Hand's point in the air. 0: it ends on the land under the Hand, as the game draws it. 0 until a desktop run shows the stream |
-| `influence_wall` | 1 | 1: a soft red glow shows the edge of the influence at each hand, from 20 cm of the room before the edge (see "The glow at the edge"). 0: no glow |
+| `influence_wall` | 1 | 1: a red glow shows the edge of the influence at each hand (see "The glow at the edge"). 0: no glow |
+| `influence_wall_look` | 1 | 1: the glow is a hologram on the wall of the edge, from 45 cm of the room before the edge. 0: a round patch that faces the hand, from 20 cm before the edge |
+| `influence_wall_ripple` | 1 | 1: the rings of the hologram go out from the hand at 5 cm of the room a second. 0: the rings are still |
 | `miracle_hand` | 1 | 0: the game places the Hand with a miracle, and the mod gives no target, no cancel, no use of a seed and no lines |
 | `miracle_shake_mps` | 0.6 | The mean speed of each stroke of a shake, in m/s. 0 turns the shake off. 0.2 to 5 |
 | `miracle_cancel_button` | 1 | 0: the second face button does not cancel |
@@ -1357,7 +1401,8 @@ value in `bwvr.ini` (10 when that is 0), "Book bubble" changes
 point" changes `gesture_point` (grip or fingertip), and "Gesture trail"
 changes `gesture_trail`. The hand that does not point gives a long pulse for
 1 and a short pulse for 0. These switches have no key of the keyboard. Choose
-"Gesture point" between two draws.
+"Gesture point" between two draws. In the group Picture, "Edge look" changes
+`influence_wall_look` (patch or hologram).
 
 Test keys for the desktop runs only (the launcher removes them):
 
@@ -1394,11 +1439,17 @@ The tag `script camera` has one line at the start with
 `miracle_camera_still`, the address of the switch and its old value. A
 camera path that plays has the line "the camera belongs to CameraModePath".
 
-The tag `influence` has the three keys at the start, and these lines: a hand
+The tag `influence` has the keys at the start, and these lines: a hand
 that goes out of the influence or comes back into it, with its land point.
 The glow at the edge that shows or goes for a hand, with the distance of
-the hand from the edge, inside or past it, the strength and the rays that
-found the edge, and a line each 60 frames while it shows. The color of the
+the hand from the edge, inside or past it, and the strength. For the round
+patch the line has the rays that found the edge. For the hologram it says
+if the point is on the wall of a disc of the game or from the search, with
+the count of triangles. A line each 60 frames while it shows: for the
+hologram on a disc, the edge point, the disc and the angle of the point on
+it, so the steps of a run show the point move along the wall. Each report
+window has the frames of the hologram on a disc, by the search, and the
+tests where the discs and the test of the game did not agree. The color of the
 glow, with the player and the entry of the table of ring colors. The first stream that the game draws, with its two ends and the
 Hand's point. The first stream that ends at the Hand's point, with its
 height over the land. With the test circle or `influence_stream_hand=1` the

@@ -379,10 +379,13 @@ game as it is.
   hand"). The report of `scene_run.ps1 -Kind edge` has the state of the
   stream. Open: which state stops it, and then a run that shows the stream
   at the Hand.
-- **F5. The red glow at the edge.** The glow of the edge of the influence is
-  a soft red patch at each hand, with the color of the game's influence ring
-  (`influence_wall`, `miracles.md`, "The glow at the edge"). It waits for its
-  desktop run (`scene_run.ps1 -Kind edge`).
+- **F5. The hologram at the edge.** The glow of the edge of the influence is
+  a red hologram on the wall of the edge, near each hand, on the discs of
+  the game (`influence_wall_look=1`, `miracles.md`, "The glow at the edge").
+  It waits for its desktop runs (`scene_run.ps1 -Kind edge` and `-Kind
+  edgeside`). Open: the look in a headset (size, light, the speed of the
+  rings), and an edge of an influence ring of a script, where the hologram
+  comes from the search of the rays.
 - **N1. The frame time.** `bench_run.ps1` measures six fixed scenes on the
   desktop, and `profile=1` gives the same numbers for a session in a headset
   (`backend.md`, "Frame cost"). Still open:

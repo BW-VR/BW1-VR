@@ -310,12 +310,6 @@ keeps the mod as it is.
 
 **The village, the Creature and the help**
 
-- **F27. A bookmark on an object.** The aim of a new bookmark offers the
-  cone of its ray also with `far_grab=0`, and the hold reads the place of
-  the object (`bookmark_aim_hold=1`, `controllers.md` 10.11). Open: a run
-  that sets a bookmark on a living thing and shows "bookmark 2 holds the"
-  in the log (`ring_run.ps1 -Kind places`, with `-More "far_grab=0"` and
-  `-More "far_grab=1"`).
 - **F22. Words that the card never shows.** The card shows the game's
   "Drop" and "Throw" with the word of the grip (`controller-hints.md`,
   9.9). The second VR mod leaves those two words out

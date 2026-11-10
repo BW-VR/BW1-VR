@@ -127,8 +127,10 @@ THE SETTINGS
 These are some of the groups of the launcher.
 
   Picture         How big a picture each eye gets, a margin around
-                  the view, how sharp the textures are, and how far
-                  out models keep their full detail.
+                  the view, how sharp the textures are, how far out
+                  models keep their full detail, and how far out
+                  models are drawn at all. The fog moves out with the
+                  cull distance, so far models go into the fog.
 
   View            The cut scenes, and the Video Capture Mode. A cut
                   scene plays on a screen in front of you. "Around
@@ -1251,7 +1253,8 @@ the edge of a step can get a different shape in the two eyes, and
 the two pictures then do not join.
 
 The frame rate drops in busy scenes. If it gets too low, lower the
-resolution scale, or bring the model detail distance in.
+resolution scale, or bring the model detail distance or the model
+cull distance in.
 
 The mod uses the refresh rate that you set for the headset. To ask
 the headset for a different rate, set refresh_rate_hz in bwvr.ini to

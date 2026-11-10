@@ -1630,12 +1630,12 @@ at the table scale"), but they follow the scale. The gain is `s / 7.5`.
 
 | Value | Address | In the God view |
 | --- | --- | --- |
-| Map objects stop | `0x00C37200` | the game's 700 times the gain, at most 8000 |
+| Map objects stop | `0x00C37200` | the game's 700 times the gain, times the factor of `cull_distance`, at most 8000. The factor counts at each scale and in the frames that the view does not own |
 | Size cap of the model detail | `0x00C37EC8` | 5 times the gain, at most 30 |
 | Land detail lines | `0x00E9C4FC`, `0x00E9C4D4` | 1600 and 2500 times the gain |
 | Land texture line | `0x00E9C524` | the game's value times the gain, unless `table_textures=0` |
 | The Hand's reach | `CHand+0x4838` | 1800 times the gain, at most 5600 |
-| Fog | `0x00C37204` | the game's below a gain of 3, off above it |
+| Fog | `0x00C37204` | the game's below a gain of 3, off above it. Below a gain of 3, `cull_fog=1` moves the fog start and end out by the factor of `cull_distance` |
 | Reflection | `0x00E9CD8C` | the game's below a gain of 3, off above it |
 
 At the life size scale and below it every value is the game's own: a value
@@ -1643,6 +1643,12 @@ never goes below the game's. Above it a distance in the room stays the same
 at every zoom. The fog ends at 900 units, which is 40 m of the
 room at a gain of 3 (22.5 units per meter). Past that the fog would cover the
 island, so it goes off, as on the table.
+
+Below the life size scale each value is the game's own, so the map objects stop
+at 700 units and the fog ends at 900. At the nearest zoom (1 unit per meter) that is 700 m
+and 900 m of the room. `cull_distance` (default 5x, 3500 units) moves both out,
+so a view high over the land at a small scale shows the far land and its
+objects (`backend.md`, "Models are drawn further out").
 
 **The near plane.** `LandFeature::GetNearClipping` `0x005E2F30` gives 3.5
 units for a camera 20 units or more over the land. At the life size scale that

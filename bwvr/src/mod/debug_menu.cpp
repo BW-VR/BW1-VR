@@ -134,6 +134,10 @@ int LandLightEyesValue();
 void LandLightEyesChange(const char* by);
 int SeaDepthValue();
 void SeaDepthChange(const char* by);
+int CullDistanceValue();
+void CullDistanceChange(const char* by);
+int CullFogValue();
+void CullFogChange(const char* by);
 int VkSceneEyesValue();
 void VkSceneEyesToggle(const char* by);
 int VkSceneKeepPictureValue();
@@ -466,6 +470,11 @@ const Switch kSwitches[] = {
      L"left eye|both eyes"},
     {kGroupPicture, L"Sea depth", L"Land goes down under the water",
      "sea_depth", SeaDepthValue, SeaDepthChange, L"flat|depth"},
+    {kGroupPicture, L"Cull distance", L"How far out models are drawn",
+     "cull_distance", CullDistanceValue, CullDistanceChange,
+     L"game|2x|3x|5x|10x"},
+    {kGroupPicture, L"Cull fog", L"Fog moves out with the models",
+     "cull_fog", CullFogValue, CullFogChange, L"game|follows"},
     {kGroupPicture, L"Advisor size", L"Advisor size at a world place",
      "spirit_world_size", SpiritAnchorWorldSizeValue,
      [](const char*) { SpiritAnchorWorldSizeToggle(); },
@@ -863,6 +872,12 @@ const wchar_t* const kTips[] = {
     // Sea depth
     L"Depth: the land of the sea goes down under the water and fades into "
     L"the sea by its depth. Flat: the flat coast of the game.",
+    // Cull distance
+    L"How far out the map objects are drawn: trees, houses and villagers. "
+    L"Game: 700 units, as in the game. Each step multiplies it.",
+    // Cull fog
+    L"Follows: the fog starts and ends further out by the factor of the cull "
+    L"distance. Game: the fog of the game.",
     // Advisor size
     L"An advisor at a place of the world. Near size: the size that it has for "
     L"the eye at its usual place. Game: the size of the game.",

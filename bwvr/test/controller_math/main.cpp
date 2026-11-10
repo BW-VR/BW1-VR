@@ -3607,6 +3607,7 @@ void CreatureChecks() {
 #include "eye_luma_checks.h"
 #include "land_light_checks.h"
 #include "sea_depth_checks.h"
+#include "cull_checks.h"
 #include "tree_plant_checks.h"
 #include "tree_body_checks.h"
 #include "fish_checks.h"
@@ -4059,6 +4060,7 @@ int main() {
   eye_luma_checks::EyeLumaChecks();
   land_light_checks::LandLightChecks();
   sea_depth_checks::SeaDepthChecks();
+  cull_checks::CullChecks();
   tree_plant_checks::TreePlantChecks();
   tree_body_checks::TreeBodyChecks();
   fish_checks::FishChecks();

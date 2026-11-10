@@ -225,6 +225,9 @@ int TabletopGodMoveRampValue();
 
 // True while the table or the God view is on, also while it stands aside.
 bool TabletopIsOn();
+// True when the table or the God view is installed, also while Ctrl F11 has
+// it off. Then TabletopApplyFrame writes the values of the engine.
+bool TabletopInstalled();
 
 // Ctrl F11 and the debug page: the table or the God view goes off and on.
 // `by` names the cause, and must be a string that stays. TabletopValue is 1

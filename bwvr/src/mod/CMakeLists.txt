@@ -64,6 +64,7 @@ add_library(bwvr_mod SHARED
     script_camera.cpp
     cutscene_window.cpp
     sky_detail.cpp
+    cull_distance.cpp
     sprite_up.cpp
     spirit_anchor.cpp
     fight_marks.cpp

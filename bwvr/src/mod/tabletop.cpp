@@ -79,6 +79,7 @@
 #include "blinder_math.h"
 #include "camera_zone.h"
 #include "comfort_math.h"
+#include "cull_math.h"
 #include "debug_menu.h"
 #include "hint_card.h"
 #include "hint_learn_math.h"
@@ -159,6 +160,11 @@ uint64_t ControllersFrameCount();
 // hand_direct.cpp: the point of the real hand in the world, from the frame
 // before. False while no controller places the Hand.
 bool HandDirectRealPoint(float out[3]);
+// cull_distance.cpp: the latch of the cull distance for this frame, its
+// factor of the map object distance, and its report.
+void CullDistanceFrame();
+float CullDistanceFactor();
+void CullDistanceReport();
 
 namespace {
 
@@ -3851,23 +3857,33 @@ bool TabletopEars(const float head[3], float out[3]) {
 // So at the life size scale the game keeps its own values, and a distance in
 // the room stays the same at every zoom. The fog and the reflection stay the
 // game's below the gain kGodFarGain, and go off above it, as on the table.
+//
+// THE CULL DISTANCE (cull_distance.cpp) multiplies the map object distance
+// on top, in each frame, also in the frames that the view does not own. On
+// the table the distance is kObjectsFar while the table owns the frame.
 void TabletopApplyFrame() {
   if (!g_installed) return;
   ++g_frames;
   if (g_live) ++g_live_frames;
+  CullDistanceFrame();
+  const float cull = CullDistanceFactor();
   const float life = HeadPoseScale();
   const float gain = g_live && life > 0.0f ? g_scale / life : 1.0f;
   if (g_settings.god) {
     const bool zoomed_out = g_live && gain >= kGodFarGain;
     ApplyPatch(g_fog, zoomed_out);
     ApplyPatch(g_reflection, zoomed_out);
-    ApplyScaled(g_vanish, g_live, gain, kObjectsFar);
+    ApplyScaled(g_vanish, true, cull_math::VanishGain(g_live, gain, cull),
+                kObjectsFar);
     ApplyScaled(g_size_cap, g_live, gain, kSizeCapFar);
     ApplyScaled(g_detail_near, g_live, gain, kFar);
     ApplyScaled(g_detail_far, g_live, gain, kFar);
     ApplyScaled(g_texture_line, g_live, gain, kFar);
   } else {
-    for (Patch* p : g_patches) ApplyPatch(*p, g_live);
+    for (Patch* p : g_patches) {
+      if (p != &g_vanish) ApplyPatch(*p, g_live);
+    }
+    ApplyScaled(g_vanish, true, g_live ? kFar : cull, kObjectsFar);
   }
 
   // The Hand's reach is a field of the CHand, and a script can set it back.
@@ -3926,7 +3942,9 @@ bool TabletopHidesMist(const void* mist) {
 }
 
 // Once in each eye pass, before LH3DRender::FinishFrame. The two lists that
-// stop without a message are read here, with the table on and off.
+// stop without a message are read here, with the table on and off. The game
+// fills the list of map objects from the blocks near to far, and a full list
+// takes no more. So a full list loses the far objects, never the near ones.
 void TabletopCountLists() {
   if (!g_installed) return;
   const int32_t objects = *reinterpret_cast<const int32_t*>(kObjectCount);
@@ -3940,9 +3958,11 @@ void TabletopCountLists() {
   if ((objects_full || sorted_full) && g_full_logs < 8) {
     ++g_full_logs;
     ModLog("tabletop     : a list is full with the table %s: %d of %d map "
-           "objects, %d of %d sorted objects. The rest are not drawn.",
+           "objects, %d of %d sorted objects. The rest are not drawn. Map "
+           "objects stop at %.0f units (cull factor %.0f).",
            g_live ? "on" : "off", objects, kObjectLimit, sorted,
-           kSortedLimit);
+           kSortedLimit, *reinterpret_cast<const float*>(kVanish),
+           CullDistanceFactor());
   }
 }
 
@@ -4020,6 +4040,7 @@ void GodReport() {
 
 void TabletopReport() {
   if (!g_installed) return;
+  CullDistanceReport();
   if (g_settings.god) {
     GodReport();
     CameraZoneReport();
@@ -4071,6 +4092,8 @@ bool TabletopSweeping() { return g_installed && g_settings.sweep; }
 bool TabletopGodOwnsView() { return g_settings.god && TabletopOwnsView(); }
 
 bool TabletopIsOn() { return g_installed && g_on; }
+
+bool TabletopInstalled() { return g_installed; }
 
 // The teleports that the view made since the last call, for the report.
 uint64_t TabletopTakeTeleportMoves() {

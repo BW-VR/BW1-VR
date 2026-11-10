@@ -32,7 +32,9 @@ want.
    house, the gold and red cover comes too late or too soon, it flickers on
    a slope, or its color is hard on the eyes. At the nearest zoom, with the
    land pulled down to your feet, a villager must look as high as you.
-   Wrong: land or villagers that flicker or look wrong there.
+   Wrong: land or villagers that flicker or look wrong there. Look across
+   the island from a hill there. Wrong: far trees and houses that pop in or
+   out, or fog that hides the far land.
 3. **The turn and the comfort vignette.** Set the settings row "Turn" to
    Smooth, and turn with a small push and a full push. Wrong: discomfort,
    or a speed or a curve of the push that feels wrong. Then set the
@@ -214,6 +216,10 @@ agents: the log does not tell the item yet.
   miracle wrote on the Creature and its size. The start of a pour, for
   example the bolt of Lightning: `the spell ... gets its gesture place from
   the game`.
+- **Far trees, houses or villagers that are not drawn** with a long model
+  cull distance. Log: `tabletop     : a list is full` gives the counts of the
+  two lists, and `cull         :` gives the distance and the fog of each
+  window.
 - **A lightning in one eye only** (B18). Log: `land light   :`. A flash with
   no such line is not a light on the land.
 - **Black frames** in the guide of the first visit of the Temple (B13), and

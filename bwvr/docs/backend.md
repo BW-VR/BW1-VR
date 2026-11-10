@@ -58,6 +58,7 @@ Other docs: `software-tnl.md` (the CPU transform and the camera matrix),
 | `src/mod/bubble_card.cpp` | A speech bubble of the game as one card at the depth of its sign, and the name of a villager as one card at the depth of the villager |
 | `src/mod/note_depth.cpp` | A note of the game over a thing (the percent of a lesson over the Creature) at the depth of its place |
 | `src/mod/sky_detail.cpp`, `water_mode.cpp`, `sea_depth.cpp` | Clouds, the moon, sun glare, detail distance, the sea, the sea with depth |
+| `src/mod/cull_distance.cpp`, `cull_math.h` | The model cull distance and the fog that follows it |
 | `src/mod/sprite_up.cpp`, `sprite_math.h` | Smoke, fire and the other sprites with world up |
 | `src/mod/spirit_anchor.cpp` | The advisors |
 | `src/mod/near_plane.cpp` | The near plane |
@@ -5497,6 +5498,67 @@ Open: the depth is measured along the view axis, not as a distance. An object at
 edge of the view keeps more detail and can drop a level when the player turns to it.
 A hook on `0x00868C80` that uses the straight distance would fix it.
 
+### Models are drawn further out
+
+`GLandscape` fills its list of map objects (`fn_005E5CD0`) from a list of the land
+blocks in view, near to far. It stops at the first block that is not nearer than
+`[0x00C37200]`: 700 units (`0x005E5DE6`). So no tree, house or villager past 700
+units is drawn at all. The same distance ends the objects at `0x005E4A99` and the
+fade of the shadows (`fn_00874600`). Scripts change it through
+`SetVanishObjectDist`.
+
+The fog is computed on the CPU, linear in the depth from a start (`0x00C37220`) to
+an end (`0x00C37224`). The sky sets both once a frame through `fn_007FEAA0` (cdecl,
+the start and the end, plain `ret`). Its only caller is at `0x00869F59`. The
+function also keeps the end less the start at `0x00E9B6DC`, and the fog of the
+objects and of the land divides by that range. The sky asks for 400 to 900 units in
+clear weather, and down to 15 to 350 in rain. So in clear weather the far edge of
+the objects is 60 percent in the fog.
+
+`cull_distance` multiplies the 700. The key is 0 for the game's own, 1 for 2x, 2 for
+3x, 3 (default) for 5x and 4 for 10x. 10x is 7000 units, past the far corner of
+the map from its middle. `TabletopApplyFrame` writes the distance once a frame,
+also in the frames that the God view does not own. In the God view the gain of the
+view (`god-view.md`, section 8) comes on top, and on the table the distance is
+8000 while the table owns the frame. The value is at most 8000, and never less than
+the game's own value.
+
+`cull_fog=1` (default) multiplies the fog start and end of the sky by the same
+factor. A hook on `fn_007FEAA0` changes the two arguments, so the range at
+`0x00E9B6DC` stays correct. The far edge of the objects is then at the same share
+of the fog as in the game, in each weather, and the far land is not in fog. A
+model that is far out goes into the fog, and the fade of the model detail (see
+above) takes the small ones out before that. `cull_fog=0` keeps the fog of the
+game. Above a gain of 3 the God view has the fog off, so the key has no effect
+there.
+
+The model detail distance still ends each model: a large model fades out between
+86.7 and 173.3 times the size cap of 5, times `detail_distance`. At 5x that is 2170
+to 4330 units. With `detail_distance=0` and a long cull distance, the large models
+stop at 870 units.
+
+The list of map objects holds 2999. A full list takes no more objects, and the
+list is filled near to far, so a full list loses the far objects and never the
+near ones. The sorted list of transparent objects holds 2048. Each pass counts
+both lists, a full list gets a log line `tabletop : a list is full`, and the
+report of the God view has the largest counts.
+
+Only with `play_mode=3` and 4, where `tabletop.cpp` writes the distances. The
+values of a frame are latched before the eye passes (`CullDistanceFrame`). The
+debug page has the switches "Cull distance" and "Cull fog".
+
+Each report window has a line:
+
+```
+cull         : cull_distance=3, map objects stop at 3500 units. cull_fog=1: the sky asked for the fog from 400 to 900 units, the game got 2000 to 4500. 900 of 900 fog sets scaled
+```
+
+Test keys: `cull_test_frame=N` steps the cull distance as the debug page does,
+from frame N of the controllers on, each `cull_test_period` frames (700).
+
+Open: the frame cost of each value on the laptop, from a view high over the land
+at the villager scale.
+
 ## Time, bars and the second eye pass
 
 The game has two kinds of frame time, in milliseconds.
@@ -6055,6 +6117,9 @@ keys that the launcher sets.
 | `spirit_anchor` | 1 | See "The advisors" |
 | `spirit_world_size` | 1 | The size of an advisor at a place of the world. See "The advisors" and `tabletop.md` |
 | `cloud_pole_pct`, `sun_glare`, `detail_distance` | 25, 0, 3 | See "Sky, clouds and detail" |
+| `cull_distance` | 3 | How far out map objects are drawn: 0 the game's 700 units, 1 2x, 2 3x, 3 5x, 4 10x. See "Models are drawn further out" |
+| `cull_fog` | 1 | 1: the fog start and end move out by the factor of `cull_distance`. 0: the fog of the game |
+| `cull_test_frame`, `cull_test_period` | 0, 700 | Test keys: from frame N of the controllers on, the cull distance steps each period. The launcher removes them from `bwvr.ini` |
 | `cloud_fade_near_cm`, `cloud_fade_far_cm` | 15, 60 | In the table and the God view a sky cloud is clear when the eye is in it or within the near distance of its surface, and whole from the far distance on, in cm of the room (see "Clouds"). A far distance of 0: each sky cloud is whole |
 | `cloud_round_near` | 1000 | In the table and the God view a sky cloud nearer than this many units keeps its round shape, and the flatten of the engine comes back to its full value at 2 times the distance (see "Clouds"). 0: each sky cloud has the flatten of the engine |
 | `clouds_head_free` | 1 | 1: in the table and the God view the clouds face the table camera, so a move of the head does not turn them. 0: they face the render head. See "Clouds" |

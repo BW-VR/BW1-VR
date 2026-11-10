@@ -119,6 +119,11 @@ const Setting kSettings[] = {
      "How far out trees, villagers and buildings keep their full models "
      "before they change to simpler ones or disappear. Further costs more "
      "frame time in busy places."},
+    {kChoice, "cull_distance", "Model cull distance", "Game|2x|3x|5x|10x", 3,
+     "How far out trees, villagers and buildings are drawn at all. The game "
+     "draws them to 700 units. The fog moves out by the same factor, so a "
+     "far model goes into the fog and the far land stays clear. Further "
+     "costs more frame time where the land has many objects."},
 
     {kGroup, nullptr, "Performance", nullptr, 0, nullptr},
     {kRenderer, "backend", "Renderer", "Vulkan|Direct3D 9", 0,
@@ -1603,6 +1608,7 @@ const char* const kRetiredKeys[] = {
     "far_test_quest", "far_test_take_gone", "bubble_card_test",
     "bubble_card_test_frame", "one_walk_marks_test_frame",
     "eye_clean_test", "eye_clean_test_frame",
+    "cull_test_frame", "cull_test_period",
     "frame_time_test_frame", "frame_time_test_readers",
     "frame_time_test_readers_frames", "god_zoom_about_test",
     "god_zoom_test_toggle",

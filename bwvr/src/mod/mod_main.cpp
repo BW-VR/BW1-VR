@@ -249,6 +249,7 @@ void SpiritAnchorSetEnabled(bool on);
 void SpiritAnchorSetWorldSize(bool on, bool test_keys, int test_frame,
                               bool test_point);
 void DetailDistanceSet(float factor);
+void CullDistanceInstall();
 void ComfortCameraRelease();
 void PointerMapInstall();
 void HeadCameraSetHandAnchored(bool on);
@@ -2131,6 +2132,8 @@ void StartVrStep() {
     if (g_tabletop) {
       TabletopSetOptions(g_table);
       TabletopInstall();
+      // The model cull distance and the fog that follows it.
+      CullDistanceInstall();
       // The pick of the direct hand on the table (docs/tabletop.md, "The hand on the table").
       // The God view needs it too: zoomed out, a villager is a few pixels.
       if (g_controllers && g_direct_hand.mode == 1) HandDirectInstallTable();

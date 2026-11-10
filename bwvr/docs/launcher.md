@@ -208,6 +208,7 @@ does not delete them, so a value that a person writes in `bwvr.ini` is kept.
 | Anisotropic filtering | 16x | A list: off, 2x, 4x, 8x, 16x. Key `anisotropy` (1, 2, 4, 8, 16). With the renderer Direct3D 9 the launcher also writes the level to `AnisotropicFiltering` in `dxwrapper\dxwrapper.ini`, because dxwrapper applies its own level to the Direct3D 9 device. A fixed 16 there would make "off" do nothing. dxwrapper reads 0 as "leave it to the game". The renderer Vulkan takes the level that the game sets on its textures, so it needs no other file. |
 | Enable texture mipmaps | on | Uses smaller copies of each texture in the distance. Key `force_mips`. |
 | Model detail distance | 5x | How far out models keep their full detail. Key `detail_distance`, index 0 to 3: the game's own, 2x, 3x, 5x. |
+| Model cull distance | 5x | How far out trees, villagers and buildings are drawn at all. The game draws them to 700 units. The fog moves out by the same factor (`cull_fog`, not in the launcher). Key `cull_distance`, index 0 to 4: the game's own, 2x, 3x, 5x, 10x. See `backend.md`, "Models are drawn further out". |
 
 ### Performance
 

@@ -2011,11 +2011,23 @@ the God view in it, and puts the two side by side. It runs with
 | Measure | From | Gives |
 | --- | --- | --- |
 | The eyes | The camera of each eye pass, from the inverse of its matrix (`CameraPosition`), or with one walk the separation that the move of the right eye uses (`OneWalkSeparation`), over the declared eyes apart | The units per meter of the stereo picture |
-| The head | A move of 5 cm or more of the declared left eye while the version of the God view stays: the move of the camera of the left eye pass, over the move | The units per meter of a move of the head |
+| The head | A move of 5 cm or more of the declared left eye while the version of the God view stays: the move of the camera of the left eye pass, over the move. Once with the declared eye of the same frame, and once with the declared eye of the frame before | The units per meter of a move of the head |
 | The drawn grip | The same for the grip point that draws the controller, over the grip of the runtime | The units per meter of a move of the hand |
 | The Hand of the game | The same for the Hand's world position in the game (`0x00C5E680`), over the grip of the pointing hand | The same for the Hand that the game draws. A turn of the controller and the stop at the land change it a little |
-| The walk | The camera that the game gets (`0x00EA1DB8`) in the frames of a walk, in units for each second, over the units per meter of the eyes | The speed in the room that the player sees |
+| The walk | The camera that the game gets (`0x00EA1DB8`) in the frames of a walk, in units for each second, over the units per meter of the eyes | The speed in the room that the player sees, in all, across the land, and up and down. On a slope the follow of the land adds the move up and down, so the speed in all is more than the speed of the stick |
 | The grab | The same camera in the frames of a grab of the world, over the units per meter of the eyes, beside the way of the grips | The move of the land in the room for the move of the hand |
+
+**The frame of the head pose.** With the head on the camera of the game,
+the main camera call of the game builds the camera of a frame before the
+mod reads the head pose of that frame. So each eye picture is drawn from the
+head pose of the frame before. The projection layer declares that same pose,
+so the picture and the declared pose agree, and the runtime turns the
+picture to the head at the display. The head measure with the declared eye
+of the same frame is the one for a session. On the desktop the invented head
+declares the pose of its own frame, one frame ahead of the picture. Then a
+step of the head of 14 cm gives a move of 0 in its own frame and of 14 cm
+one frame later, and only the measure with the declared eye of the frame
+before gives the scale.
 
 The math test runs the chain at 1, 7.5 and 100 units per meter: the cameras
 of the eye passes, the shift of one walk, a move of the head of 14 cm and a
@@ -2027,8 +2039,12 @@ God view changes and the scale before had 30 frames or more (at most 400
 lines in a game):
 
 ```
-scale check  : a report window. The God view is at 1.000 units per meter. The eye cameras of the game give 1.000 units per meter (0.999 to 1.001, 450 frames), a move of the head 1.000 (12 moves of 5 cm), a move of the drawn grip 1.000 (30), and a move of the Hand of the game 0.990 (14). In 300 frames of a walk the camera of the game went 7.50 units in 3.00 s: 250.0 cm of the room each second at the units per meter of the eyes.
+scale check  : a report window. The God view is at 1.000 units per meter. The eye cameras of the game give 1.000 units per meter (1.000 to 1.000, 450 frames), a move of the head 1.000 with the declared eye of the frame before (2 moves of 5 cm) and 0.500 with the declared eye of the same frame (2), a move of the drawn grip 1.000 (3), and a move of the Hand of the game 0.000 (0). In 119 frames of a walk the camera of the game went 2.98 units in 1.98 s: 150.0 cm of the room each second at the units per meter of the eyes, 150.0 across the land and 0.0 up and down.
+scale check  : a move of the head of 14.14 cm from frame 160 to frame 171, with the declared eye of the frame before: the camera of the left eye pass went 0.1414 units, 1.000 units per meter
 ```
+
+The first line is from a desktop run. The line of a move comes for each of
+the first 40 moves of the head in a game.
 
 A walk at the same room speed looks slower when the land is farther below
 the head: the land moves under the eyes at the speed over its distance. At

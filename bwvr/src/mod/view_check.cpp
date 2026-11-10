@@ -26,14 +26,18 @@
 //              over the declared eyes apart in meters
 //   the head   a move of the declared left eye of 5 cm or more while the
 //              version of the God view stays: the move of the camera of the
-//              left eye pass in world units, over the move in meters
+//              left eye pass in world units, over the move in meters. Once
+//              with the declared eye of the same frame and once with the
+//              declared eye of the frame before (ScaleTake says why), and a
+//              line for each of the first 40 moves
 //   the hand   the same for the drawn grip point of each hand over the grip
 //              of the runtime, and for the Hand of the game (0x00C5E680)
 //              over the grip of the pointing hand
 //   the walk   the camera that the game gets (0x00EA1DB8) in the frames of a
 //   the grab   walk or of a grab of the world, in world units for each
 //              second, over the units per meter of the eyes: the speed in
-//              the room that the player sees
+//              the room that the player sees, in all, across the land, and
+//              up and down (the follow of the land)
 //
 // One line for each report window, and one when the scale of the God view
 // changes and the frames at the scale before were 30 or more. Each line
@@ -121,8 +125,16 @@ ScaleFrame g_scale_frame = {};
 struct Anchor {
   bool have;
   uint64_t version;
+  uint64_t frame;
   float room[3];
   float world[3];
+};
+
+// One move that AnchorMove measured.
+struct Move {
+  uint64_t from, to;  // the frames of the anchor and of the move
+  float room_m;       // the move of the pose of the runtime
+  float units;        // the move of the point of the game
 };
 
 // The sums of one scale.
@@ -134,17 +146,21 @@ struct ScaleTotals {
   uint64_t eyes_n;
   double head_sum;
   uint64_t head_n;
+  double head_late_sum;  // with the declared eye of the frame before
+  uint64_t head_late_n;
   double drawn_sum;
   uint64_t drawn_n;
   double hand_sum;
   uint64_t hand_n;
   uint64_t walk_frames;
   double walk_units, walk_seconds;
+  double walk_across, walk_up;  // the parts across and up or down, units
   uint64_t grab_frames;
   double grab_units, grab_hand_m;
 };
 ScaleTotals g_scale_totals = {};
 Anchor g_head_anchor = {};
+Anchor g_head_late_anchor = {};
 Anchor g_drawn_anchor[2] = {};
 Anchor g_hand_anchor = {};
 ScaleFrame g_scale_last = {};
@@ -164,11 +180,12 @@ double Clock() {
 // One move against its anchor: the ratio of the world move to the room move
 // when the room move is kScaleMoveM or more and the view did not move. A
 // change of the version sets a new anchor and gives no ratio.
-bool AnchorMove(Anchor* a, uint64_t version, const float room[3],
-                const float world[3], float* ratio) {
+bool AnchorMove(Anchor* a, uint64_t version, uint64_t frame,
+                const float room[3], const float world[3], Move* move) {
   if (!a->have || a->version != version) {
     a->have = true;
     a->version = version;
+    a->frame = frame;
     for (int i = 0; i < 3; ++i) {
       a->room[i] = room[i];
       a->world[i] = world[i];
@@ -177,12 +194,29 @@ bool AnchorMove(Anchor* a, uint64_t version, const float room[3],
   }
   const float moved = view_check::Distance3(room, a->room);
   if (moved < kScaleMoveM) return false;
-  *ratio = view_check::Distance3(world, a->world) / moved;
+  move->from = a->frame;
+  move->to = frame;
+  move->room_m = moved;
+  move->units = view_check::Distance3(world, a->world);
+  a->frame = frame;
   for (int i = 0; i < 3; ++i) {
     a->room[i] = room[i];
     a->world[i] = world[i];
   }
   return true;
+}
+
+// The log lines of single moves of the head, at most this many in a game.
+const int kHeadMoveLines = 40;
+int g_head_move_lines = 0;
+
+void HeadMoveLine(const Move& m, const char* pairing) {
+  if (g_head_move_lines >= kHeadMoveLines) return;
+  ++g_head_move_lines;
+  ModLog("scale check  : a move of the head of %.2f cm from frame %llu to "
+         "frame %llu, with %s: the camera of the left eye pass went %.4f "
+         "units, %.3f units per meter", m.room_m * 100.0f, m.from, m.to,
+         pairing, m.units, m.units / m.room_m);
 }
 
 double Mean(double sum, uint64_t n) { return n > 0 ? sum / n : 0.0; }
@@ -194,13 +228,15 @@ void ScaleLine(const char* why) {
   if (t.eyes_n == 0 || g_scale_lines >= kScaleMostLines) return;
   ++g_scale_lines;
   const double eyes = Mean(t.eyes_sum, t.eyes_n);
-  char walk[200] = "";
+  char walk[320] = "";
   if (t.walk_frames > 0 && t.walk_seconds > 0.0 && eyes > 0.0) {
+    const double to_cm = 100.0 / t.walk_seconds / eyes;
     sprintf_s(walk, " In %llu frames of a walk the camera of the game went "
               "%.2f units in %.2f s: %.1f cm of the room each second at the "
-              "units per meter of the eyes.", t.walk_frames, t.walk_units,
-              t.walk_seconds,
-              t.walk_units / t.walk_seconds / eyes * 100.0);
+              "units per meter of the eyes, %.1f across the land and %.1f up "
+              "and down.", t.walk_frames, t.walk_units, t.walk_seconds,
+              t.walk_units * to_cm, t.walk_across * to_cm,
+              t.walk_up * to_cm);
   }
   char grab[200] = "";
   if (t.grab_frames > 0 && eyes > 0.0) {
@@ -212,12 +248,14 @@ void ScaleLine(const char* why) {
   }
   ModLog("scale check  : %s. The God view is at %.3f units per meter. The "
          "eye cameras of the game give %.3f units per meter (%.3f to %.3f, "
-         "%llu frames), a move of the head %.3f (%llu moves of 5 cm), a move "
-         "of the drawn grip %.3f (%llu), and a move of the Hand of the game "
-         "%.3f (%llu).%s%s", why, t.scale, eyes, t.eyes_least, t.eyes_most,
-         t.eyes_n, Mean(t.head_sum, t.head_n), t.head_n,
-         Mean(t.drawn_sum, t.drawn_n), t.drawn_n, Mean(t.hand_sum, t.hand_n),
-         t.hand_n, walk, grab);
+         "%llu frames), a move of the head %.3f with the declared eye of the "
+         "frame before (%llu moves of 5 cm) and %.3f with the declared eye of "
+         "the same frame (%llu), a move of the drawn grip %.3f (%llu), and a "
+         "move of the Hand of the game %.3f (%llu).%s%s", why, t.scale, eyes,
+         t.eyes_least, t.eyes_most, t.eyes_n,
+         Mean(t.head_late_sum, t.head_late_n), t.head_late_n,
+         Mean(t.head_sum, t.head_n), t.head_n, Mean(t.drawn_sum, t.drawn_n),
+         t.drawn_n, Mean(t.hand_sum, t.hand_n), t.hand_n, walk, grab);
 }
 
 // The numbers of the frame that ended go into the sums.
@@ -231,6 +269,7 @@ void ScaleTake(const ScaleFrame& f) {
     if (t.frames >= kScaleLeastFrames) ScaleLine("the scale changed");
     t = {};
     g_head_anchor = {};
+    g_head_late_anchor = {};
     g_drawn_anchor[0] = g_drawn_anchor[1] = {};
     g_hand_anchor = {};
   }
@@ -251,37 +290,60 @@ void ScaleTake(const ScaleFrame& f) {
     t.eyes_sum += upm;
     ++t.eyes_n;
   }
-  // The head, the drawn grips and the Hand of the game.
-  float ratio = 0.0f;
-  if (AnchorMove(&g_head_anchor, f.version, f.declared[0], f.cam[0],
-                 &ratio)) {
-    t.head_sum += ratio;
+  // THE HEAD, with two pairings. With the head on the camera of the game
+  // (head_camera.cpp), the camera of an eye pass comes from the main camera
+  // call of the game. That call runs before the head pose of its frame is
+  // read, so it has the head pose of the frame before (stereo.cpp). In a
+  // session the projection layer declares that same pose
+  // (g_rendered_position), so the declared eye of the same frame pairs with
+  // the camera. On the desktop the declared view of the invented head is the
+  // pose of this frame, one frame ahead of the camera, so the declared eye
+  // of the frame before pairs with it. The line gives both.
+  Move move = {};
+  const ScaleFrame& b = g_scale_last;
+  const bool after = g_have_scale_last && b.frame + 1 == f.frame;
+  if (AnchorMove(&g_head_anchor, f.version, f.frame, f.declared[0], f.cam[0],
+                 &move)) {
+    t.head_sum += move.units / move.room_m;
     ++t.head_n;
+    HeadMoveLine(move, "the declared eye of the same frame");
   }
+  if (after && b.have_view[0] &&
+      AnchorMove(&g_head_late_anchor, f.version, f.frame, b.declared[0],
+                 f.cam[0], &move)) {
+    t.head_late_sum += move.units / move.room_m;
+    ++t.head_late_n;
+    HeadMoveLine(move, "the declared eye of the frame before");
+  }
+  // The drawn grips and the Hand of the game.
   for (int hand = 0; hand < 2; ++hand) {
     if (!f.have_grip[hand]) continue;
-    if (AnchorMove(&g_drawn_anchor[hand], f.version, f.grip[hand],
-                   f.drawn[hand], &ratio)) {
-      t.drawn_sum += ratio;
+    if (AnchorMove(&g_drawn_anchor[hand], f.version, f.frame, f.grip[hand],
+                   f.drawn[hand], &move)) {
+      t.drawn_sum += move.units / move.room_m;
       ++t.drawn_n;
     }
   }
   if (f.have_hand && f.pointing >= 0 && f.pointing < 2 &&
       f.have_grip[f.pointing] &&
-      AnchorMove(&g_hand_anchor, f.version, f.grip[f.pointing], f.hand,
-                 &ratio)) {
-    t.hand_sum += ratio;
+      AnchorMove(&g_hand_anchor, f.version, f.frame, f.grip[f.pointing],
+                 f.hand, &move)) {
+    t.hand_sum += move.units / move.room_m;
     ++t.hand_n;
   }
   // The walk and the grab, from the frame before.
-  const ScaleFrame& b = g_scale_last;
-  if (g_have_scale_last && b.frame + 1 == f.frame && f.have_camera &&
-      b.have_camera && fabsf(b.scale - f.scale) <= 0.005f * f.scale) {
+  if (after && f.have_camera && b.have_camera &&
+      fabsf(b.scale - f.scale) <= 0.005f * f.scale) {
     const float units = view_check::Distance3(f.camera, b.camera);
     if (f.walk && b.walk && f.seconds > b.seconds) {
       ++t.walk_frames;
       t.walk_units += units;
       t.walk_seconds += f.seconds - b.seconds;
+      // The world is y up: the part across the land and the part up or down.
+      const float dx = f.camera[0] - b.camera[0];
+      const float dz = f.camera[2] - b.camera[2];
+      t.walk_across += sqrtf(dx * dx + dz * dz);
+      t.walk_up += fabsf(f.camera[1] - b.camera[1]);
     }
     if (f.grab && b.grab) {
       ++t.grab_frames;

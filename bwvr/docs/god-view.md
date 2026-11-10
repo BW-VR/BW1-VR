@@ -2212,6 +2212,47 @@ render size, because the recipes depend on it.
   has "The floor of the fly lifted the view 37.3 cm on 18 frames, and the
   least clearance of your head after a step was 10.0 cm", and 150.0 cm of
   the room each second.
+- The filter of the land after a place [R]: `spawn_run.ps1 -Save temple`
+  with `test_frame_rate=60`, `card_send_test_save=0`,
+  `fake_controller_play_frame=800`, `move_stick_ramp=0`,
+  `move_stick_speed_cm=150`, `god_zoom_about=0`, `god_units_per_meter=10`,
+  `spawn_test_temple=1000`, `spawn_test_flag=0` and the steps
+  `lstick_up@900+300 lstick_right@1300+40 lstick_right@1400+40
+  lstick_right@1500+40 lstick_right@1800+40 lstick_right@1900+40
+  lstick_right@2000+40`, once with `move_stick_follow_place=1` and once with
+  0. The test calls the zoom of the game to the Temple between two walks, and
+  the view goes to the pen (the waist point from 1968.0 29.7 2470.6 to
+  2235.4 16.3 3156.7). The line of the filter gives 29.59 against the land
+  at 16.08, 135.1 cm of the room apart. With 1 the filter starts again, and
+  the next walk keeps the land 62.1 cm below the head with "0.0 cm up and
+  0.0 cm down". With 0 the filter goes on, and the walks after the place go
+  122.8, 12.2 and 14.1 cm down, to the floor of 10 cm in the first walk.
+- The zoom over deep land [R]: `spawn_run.ps1 -Save temple` with
+  `test_frame_rate=60`, `card_send_test_save=0`,
+  `fake_controller_play_frame=800`, `move_type=1`, `move_stick=1`,
+  `fake_head_pitch=-45`, `god_zoom_about=0`, `god_zoom_smooth=1` and the
+  steps `lstick_down@900+400 stick_up@1400+60 stick_down@1550+60`, once with
+  `god_zoom_far_level=1` and once with 0. The fly puts the land 21 m below
+  the head. With 1 the zoom in from 100 to 44.44 units per meter keeps it at
+  21.05 m, and the zoom out brings it to 10.75 m (2.5 + 18.55 / 2.25). With 0
+  the zoom in puts it at 43.74 m (2.5 + 18.33 * 2.25), and the zoom out
+  brings it back to 20.83 m.
+- The scale check [R] (`controller-hints.md`, 9.16): `spawn_run.ps1 -Save
+  temple` with `test_frame_rate=60`, `card_send_test_save=0`,
+  `fake_controller_play_frame=800`, `move_stick_ramp=0`,
+  `move_stick_speed_cm=150`, `god_zoom_about=0`, `god_zoom_smooth=0`,
+  `fake_head_right_cm=10`, `fake_head_up_cm=-10`, six left points
+  (`fake_controller_left_points=-16,-30,50 -16,-30,30 -16,-30,10 -16,-30,50
+  -16,-30,30 -16,-30,10`) and the steps `lean@900+100 lpoint@1050+1
+  lpoint@1100+1 lpoint@1150+1 lstick_up@1250+120 lpoint@1400+1
+  lgrip@1450+150 lpoint@1500+1 lpoint@1550+1`, at `god_units_per_meter=1`,
+  at 100, and at 15 with `god_zoom_step_pct=100` and a first step
+  `stick_up@850+10` (7.5). At each scale the eyes and the drawn grip give
+  the scale of the God view exactly, the walk gives 150.0 cm of the room
+  each second, and the grab moves the land 40.0 cm for 40.0 cm of the grip.
+  At 100 units per meter the walk goes over a slope: the follow of the land
+  adds 29.3 cm up and 34.6 cm down, and the camera of the game goes 157.1
+  cm each second in all.
 
 **The mouse pan and the tutorial events** need a run with the test mouse. Use
 `play_mode=0` (it must log the God view), `-NEWGAME` on Land 1,

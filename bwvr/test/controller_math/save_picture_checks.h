@@ -129,6 +129,69 @@ inline void SavePictureChecks() {
   DecodeDxt1Block(block, back);
   Check(back[0][0] < 64 && back[1][0] > 192,
         "and each pixel keeps its side", back[0][0], back[1][0]);
+
+  // The fit of least squares (vk_dxt_fit).
+  uint8_t fit[8];
+  FitDxt1Block(two, fit);
+  Near("the fit gives a block of black and white back exactly",
+       MaxError(two, fit), 0, 0);
+  FitDxt1Block(flat, fit);
+  Near("the fit of one color comes back within the step of 5 bits",
+       MaxError(flat, fit), 0, 4);
+  FitDxt1Block(ramp, fit);
+  EncodeDxt1Block(ramp, block);
+  Check(BlockError(ramp, fit) <= BlockError(ramp, block),
+        "the fit of a ramp is not worse than the box", BlockError(ramp, fit),
+        BlockError(ramp, block));
+  // Blocks of the kind of a picture: a gradient with noise, in many forms.
+  uint32_t seed = 12345u;
+  int worse = 0, fit_c0 = 0;
+  double sum_fit = 0.0, sum_box = 0.0;
+  for (int b = 0; b < 2000; ++b) {
+    uint8_t px[16][4];
+    seed = seed * 1664525u + 1013904223u;
+    const int base[3] = {static_cast<int>(seed >> 24),
+                         static_cast<int>((seed >> 16) & 0xFF),
+                         static_cast<int>((seed >> 8) & 0xFF)};
+    seed = seed * 1664525u + 1013904223u;
+    const int slope = static_cast<int>(seed >> 27) - 16;
+    for (int i = 0; i < 16; ++i) {
+      seed = seed * 1664525u + 1013904223u;
+      const int noise = static_cast<int>(seed >> 28) - 8;
+      for (int k = 0; k < 3; ++k) {
+        int v = base[k] + slope * ((i % 4) + (i / 4)) * (k + 1) / 2 + noise;
+        v = v < 0 ? 0 : v > 255 ? 255 : v;
+        px[i][k] = static_cast<uint8_t>(v);
+      }
+      px[i][3] = 255;
+    }
+    EncodeDxt1Block(px, block);
+    FitDxt1Block(px, fit);
+    const int e_box = BlockError(px, block), e_fit = BlockError(px, fit);
+    if (e_fit > e_box) ++worse;
+    const uint16_t f0 = static_cast<uint16_t>(fit[0] | fit[1] << 8);
+    const uint16_t f1 = static_cast<uint16_t>(fit[2] | fit[3] << 8);
+    if (f0 > f1) ++fit_c0;
+    sum_box += e_box;
+    sum_fit += e_fit;
+  }
+  Near("the fit is never worse than the box in 2000 blocks", worse, 0, 0);
+  Near("and each block of the fit has four colors (c0 > c1)", fit_c0, 2000, 0);
+  Check(sum_fit < 0.9 * sum_box,
+        "and the fit has at least 10 percent less squared error",
+        static_cast<int>(sum_fit), static_cast<int>(sum_box));
+
+  // The size of the read of the game (save_picture_fit).
+  int w = 0, h = 0;
+  ReadSize(false, true, &w, &h);
+  Near("a save reads 256 points across", w, 256, 0);
+  Near("and 128 down", h, 128, 0);
+  ReadSize(true, true, &w, &h);
+  Near("a full picture reads 400 points across", w, 400, 0);
+  Near("and 300 down", h, 300, 0);
+  ReadSize(false, false, &w, &h);
+  Near("without the fit the surface is 512 across", w, kWidth, 0);
+  Near("and 384 down", h, kHeight, 0);
 }
 
 }  // namespace save_picture_checks

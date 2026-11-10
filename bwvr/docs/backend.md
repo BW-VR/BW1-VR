@@ -1322,6 +1322,16 @@ and the Save Game Room loads its pictures again (`fn_007928D0`,
 `fn_00792850`). The full picture (`TakeFullScreen` `0x00821370`) reads 400
 by 300 points in the same way.
 
+Each point is one pixel of the screen, at
+`ftol(row * height / 128)` and `ftol(column * width / 256)`. Then the game
+mixes each pixel of the 256 by 128 with its neighbors at the right, below and
+below at the right, at half weight (`fn_00821D50`, three calls in
+`0x00821B7E` to `0x00821C4F`), and `SaveTextureCitadel` keeps the result as
+16 bit pixels and then as DXT1 blocks. So the picture of a slot that the
+Save Game Room shows is 256 by 128 pixels of DXT1 (4 bits a pixel) for a
+view of 4 by 3. That is the limit of the game: the mod cannot give the room
+a larger or a sharper picture without a change of the texture of the game.
+
 `Process` takes the base pointer, the pitch and the format from the locked
 surface, and the extent from `LHScreen::width` and `height`. It clamps
 nothing. In VR the primary surface is the window, which is not the size of
@@ -1333,10 +1343,15 @@ the picture that the player sees.
 
 `save_picture=1` (the default, `snapshot_guard.cpp`, `save_picture_math.h`).
 While VR runs, a hook on `Process` gives the game a primary surface of the
-mod for the call: 512 by 384 pixels of 32 bits, and `LHScreen::width` and
-`height` of that size. The pixels are the middle of the eye picture of the
-last frame: the middle 0.6 of its width, in the shape of 4 by 3, each pixel
-the mean of its box. The game then makes the picture, the texture and the
+mod for the call, with pixels of 32 bits, and `LHScreen::width` and `height`
+of its size. The pixels are the middle of the eye picture of the last frame:
+the middle 0.6 of its width, in the shape of 4 by 3, each pixel the mean of
+its box. With `save_picture_fit=1` (the default) the surface has the size of
+the read of the game: 256 by 128 for a save, 400 by 300 for the full
+picture. So each point that the game reads is the mean of all of its box of
+the eye picture, about 6.5 by 9.7 pixels of the eye of a Quest 3 at 2760 by
+2208, and no edge is cut into steps. With `save_picture_fit=0` the surface is
+512 by 384, and the game takes one pixel of each 2 by 3 of it. The game then makes the picture, the texture and the
 thumbnail with its own code, and the call puts the primary surface and the
 size back. The eye picture comes from:
 
@@ -1362,7 +1377,12 @@ the game needs: a `Blt` from RGB pixels into DXT1 blocks makes the blocks
 (`EncodeDxt1Block`: the ends of the box of the colors of a block, along the
 diagonal that follows the colors, and the nearest of the four colors for
 each pixel), and a `Blt` between two textures of one DXT format copies the
-blocks of its rects (`blt_copy::CopyBlocks`). `vk_blt_blocks=0` refuses the
+blocks of its rects (`blt_copy::CopyBlocks`). With `vk_dxt_fit=1` (the
+default) each block then gets up to two steps of least squares on its two
+colors (`FitDxt1Block`). A step stays only when it brings the colors nearer
+to the pixels, so the fit is never worse. On 2000 test blocks of gradients
+with noise the squared error is 30 percent less, and a block of black and
+white comes back exact (the box alone is 16 of 255 off). `vk_blt_blocks=0` refuses the
 first `Blt` and copies all the bytes of the source in the second, so a save
 with the picture of the mod writes over the pictures of the other slots of
 the texture. With dxwrapper the copies go as in "The copy to the monitor"
@@ -1372,8 +1392,9 @@ The log has one line for each of the first 12 pictures, and the report of
 `vk_ddraw` counts the copies of blocks:
 
 ```
-snapshot     : save_picture=1. The game makes each save picture from a surface of the mod with the middle of the left eye picture, 512 x 384, because its screen in VR is not the picture that the player sees
-snapshot     : the game made a save picture from the left eye of the Vulkan renderer (save_picture=1): the middle 60% of the width of 2064 x 2208, at 512 x 384. Its mean light is 0.38, and 0.2% of it is black. The eye picture took 14.2 ms and the call of the game 6.1 ms. The texture is .\Profiles\<profile>\Saved Games\Pictures\save_game_picture_temporary.raw
+snapshot     : save_picture=1. The game makes each save picture from a surface of the mod with the middle of the left eye picture, because its screen in VR is not the picture that the player sees. save_picture_fit=1: the surface has the size of the read of the game, 256 x 128 for a save and 400 x 300 for a full picture, so each pixel of the save is the mean of its box
+vk ddraw     : vk_dxt_fit=1. The DXT1 blocks of a save picture get the two colors of least squares when they are nearer to the pixels
+snapshot     : the game made a save picture from the left eye of the Vulkan renderer (save_picture=1): the middle 60% of the width of 2064 x 2208, at 256 x 128 (the size of the read of the game, save_picture_fit=1). Its mean light is 0.38, and 0.2% of it is black. The eye picture took 14.2 ms and the call of the game 6.1 ms. The texture is .\Profiles\<profile>\Saved Games\Pictures\save_game_picture_temporary.raw
 vk ddraw     : 2 copies from RGB into DXT1 blocks, and 2 copies of the blocks of a rect (vk_blt_blocks=1)
 ```
 
@@ -6237,6 +6258,8 @@ keys that the launcher sets.
 | `anisotropy`, `force_mips` | 16, 1 | Texture filter. `force_mips` forces the mip filter |
 | `skip_snapshot` | 1 | 1: while VR runs, the mod decides the save picture (`save_picture`). 0: the game makes each save picture from its own screen, which reads past the end of a square window. See "The save picture" |
 | `save_picture` | 1 | 1: in VR the game makes each save picture from a surface of the mod with the middle of the left eye picture. 0: no save picture in VR. See "The save picture" |
+| `save_picture_fit` | 1 | 1: the surface of the save picture has the size of the read of the game (256 by 128, or 400 by 300 for the full picture), so each pixel is the mean of its box. 0: a surface of 512 by 384, of which the game reads one pixel of each 2 by 3. See "The save picture" |
+| `vk_dxt_fit` | 1 | With `backend=vulkan`: 1 each DXT1 block of a save picture gets the two colors of least squares when they are nearer to its pixels. 0 the ends of the box of its colors. See "The save picture" |
 | `save_picture_test_dump` | 0 | A test key: each save picture of the mod goes to `bwvr-save-picture-N.bmp`, and the texture of the game to `bwvr-save-picture-N.raw`, beside `runblack.exe` |
 | `test_keys` | 0 | The test keys |
 | `file_read_ahead` | 1 | 1: a read of less than 64 KB from a file that LHFile opens to read comes from a copy of the next 256 KB of the file. 0: each read goes to `ReadFile`, as in the plain game. A test key: Shift Q. See "The read ahead of the files of the game" |

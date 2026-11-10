@@ -145,6 +145,10 @@ volatile LONG g_copy_blts = 0;
 // picture"). 0: the first is refused, and the second copies all the bytes of
 // the source.
 bool g_blt_blocks = true;
+// vk_dxt_fit of bwvr.ini: 1 (the default) each block of that Blt gets the fit
+// of least squares (FitDxt1Block), which is never worse than
+// EncodeDxt1Block. 0: EncodeDxt1Block alone.
+bool g_dxt_fit = true;
 volatile LONG g_encode_blts = 0;
 volatile LONG g_part_blts = 0;
 volatile LONG g_fills = 0;
@@ -1878,7 +1882,12 @@ HRESULT Surface::Blt(LPRECT to, LPDIRECTDRAWSURFACE7 from_s, LPRECT from_rect,
             o[3] = 255;
           }
         }
-        save_picture::EncodeDxt1Block(block, row + ((dr.left + bx) / 4) * 8);
+        uint8_t* out = row + ((dr.left + bx) / 4) * 8;
+        if (g_dxt_fit) {
+          save_picture::FitDxt1Block(block, out);
+        } else {
+          save_picture::EncodeDxt1Block(block, out);
+        }
       }
     }
     InterlockedIncrement(&g_encode_blts);
@@ -2221,6 +2230,15 @@ void VkDdrawSetBlocks(int on) {
              : "A Blt from RGB pixels into DXT1 blocks is refused, and a Blt "
                "between two surfaces of one DXT format copies all the bytes "
                "of the source");
+}
+
+void VkDdrawSetBlockFit(int on) {
+  g_dxt_fit = on != 0;
+  ModLog("vk ddraw     : vk_dxt_fit=%d. %s", g_dxt_fit ? 1 : 0,
+         g_dxt_fit ? "The DXT1 blocks of a save picture get the two colors of "
+                     "least squares when they are nearer to the pixels"
+                   : "The DXT1 blocks of a save picture have the ends of the "
+                     "box of their colors");
 }
 
 void VkDdrawInstall(int lines, int surface_heap) {

@@ -23,6 +23,33 @@ namespace save_picture {
 // picture 400 by 300.
 const int kWidth = 512;
 const int kHeight = 384;
+// THE SIZE OF THE READ (save_picture_fit=1). The game reads 256 by 128
+// points for the half picture of a save, and 400 by 300 for the full
+// picture, at a step of the width and of the height of the screen over these
+// counts, and it takes the one pixel at each point
+// (ScriptedScreenShot::Process). With a surface of exactly that size each
+// point is the mean of all of its box of the eye picture. A surface of
+// kWidth by kHeight gives the half picture one pixel of each 2 by 3.
+const int kHalfWidth = 256;
+const int kHalfHeight = 128;
+const int kFullWidth = 400;
+const int kFullHeight = 300;
+
+// The size of the surface for a picture: the size of the read with `fit`,
+// else kWidth by kHeight.
+inline void ReadSize(bool full, bool fit, int* width, int* height) {
+  if (!fit) {
+    *width = kWidth;
+    *height = kHeight;
+  } else if (full) {
+    *width = kFullWidth;
+    *height = kFullHeight;
+  } else {
+    *width = kHalfWidth;
+    *height = kHalfHeight;
+  }
+}
+
 // The share of the width of the eye picture that the save picture shows.
 // The view of an eye is about 100 degrees wide. The middle 0.6 of it is
 // about the view of the game camera on a monitor.
@@ -228,6 +255,109 @@ inline void EncodeDxt1Block(const uint8_t rgba[16][4], uint8_t out[8]) {
   out[2] = static_cast<uint8_t>(c1);
   out[3] = static_cast<uint8_t>(c1 >> 8);
   memcpy(out + 4, &bits, 4);
+}
+
+// The sum of the squared errors of the channels of a block with c0 > c1
+// against its 16 pixels.
+inline int BlockError(const uint8_t rgba[16][4], const uint8_t block[8]) {
+  const uint16_t c0 = static_cast<uint16_t>(block[0] | block[1] << 8);
+  const uint16_t c1 = static_cast<uint16_t>(block[2] | block[3] << 8);
+  uint8_t colors[4][3];
+  Palette(c0, c1, colors);
+  uint32_t bits = 0;
+  memcpy(&bits, block + 4, 4);
+  int sum = 0;
+  for (int i = 0; i < 16; ++i) {
+    const uint8_t* c = colors[(bits >> (2 * i)) & 3];
+    for (int k = 0; k < 3; ++k) {
+      const int e = rgba[i][k] - c[k];
+      sum += e * e;
+    }
+  }
+  return sum;
+}
+
+// A block with the two colors c0 > c1: each pixel gets the nearest of the
+// four colors.
+inline void IndexBlock(const uint8_t rgba[16][4], uint16_t c0, uint16_t c1,
+                       uint8_t out[8]) {
+  uint8_t colors[4][3];
+  Palette(c0, c1, colors);
+  uint32_t bits = 0;
+  for (int i = 0; i < 16; ++i) {
+    int best = 0;
+    int best_d = 1 << 30;
+    for (int j = 0; j < 4; ++j) {
+      int d = 0;
+      for (int k = 0; k < 3; ++k) {
+        const int e = rgba[i][k] - colors[j][k];
+        d += e * e;
+      }
+      if (d < best_d) {
+        best_d = d;
+        best = j;
+      }
+    }
+    bits |= static_cast<uint32_t>(best) << (2 * i);
+  }
+  out[0] = static_cast<uint8_t>(c0);
+  out[1] = static_cast<uint8_t>(c0 >> 8);
+  out[2] = static_cast<uint8_t>(c1);
+  out[3] = static_cast<uint8_t>(c1 >> 8);
+  memcpy(out + 4, &bits, 4);
+}
+
+// THE FIT (vk_dxt_fit=1). The block of EncodeDxt1Block, then up to two steps
+// of least squares: with the colors of the pixels fixed, the two colors that
+// give the smallest squared error. Index 0 is all of c0, index 1 all of c1,
+// index 2 two thirds of c0 and index 3 one third. A step stays only when its
+// error is smaller, so the fit is never worse than EncodeDxt1Block. The
+// block always has c0 > c1.
+inline void FitDxt1Block(const uint8_t rgba[16][4], uint8_t out[8]) {
+  EncodeDxt1Block(rgba, out);
+  int best = BlockError(rgba, out);
+  for (int step = 0; step < 2 && best > 0; ++step) {
+    uint32_t bits = 0;
+    memcpy(&bits, out + 4, 4);
+    static const float kShare0[4] = {1.0f, 0.0f, 2.0f / 3.0f, 1.0f / 3.0f};
+    float aa = 0.0f, ab = 0.0f, bb = 0.0f;
+    float ax[3] = {0.0f, 0.0f, 0.0f}, bx[3] = {0.0f, 0.0f, 0.0f};
+    for (int i = 0; i < 16; ++i) {
+      const float a = kShare0[(bits >> (2 * i)) & 3];
+      const float b = 1.0f - a;
+      aa += a * a;
+      ab += a * b;
+      bb += b * b;
+      for (int k = 0; k < 3; ++k) {
+        ax[k] += a * rgba[i][k];
+        bx[k] += b * rgba[i][k];
+      }
+    }
+    const float det = aa * bb - ab * ab;
+    if (!(det > 1e-3f)) return;  // all pixels on one color of the line
+    uint8_t hi[3], lo[3];
+    for (int k = 0; k < 3; ++k) {
+      float c0 = (bb * ax[k] - ab * bx[k]) / det;
+      float c1 = (aa * bx[k] - ab * ax[k]) / det;
+      c0 = c0 < 0.0f ? 0.0f : c0 > 255.0f ? 255.0f : c0;
+      c1 = c1 < 0.0f ? 0.0f : c1 > 255.0f ? 255.0f : c1;
+      hi[k] = static_cast<uint8_t>(c0 + 0.5f);
+      lo[k] = static_cast<uint8_t>(c1 + 0.5f);
+    }
+    uint16_t c0 = To565(hi), c1 = To565(lo);
+    if (c0 == c1) return;
+    if (c0 < c1) {
+      const uint16_t t = c0;
+      c0 = c1;
+      c1 = t;
+    }
+    uint8_t trial[8];
+    IndexBlock(rgba, c0, c1, trial);
+    const int error = BlockError(rgba, trial);
+    if (error >= best) return;
+    best = error;
+    memcpy(out, trial, 8);
+  }
 }
 
 // The 16 pixels of a DXT1 block with c0 > c1 (as EncodeDxt1Block makes

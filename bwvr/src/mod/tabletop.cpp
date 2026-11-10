@@ -611,6 +611,12 @@ struct WalkHold {
   uint64_t lift_frames = 0;
   float least_clear = 1000.0f;
   uint64_t solid_stops = 0;
+  uint64_t solid_slides = 0;
+  // The solids that the fly met: the last one and the way, for one log line
+  // for each solid, and their count.
+  void* solid_last = nullptr;
+  int solid_way = 0;
+  uint64_t solids_met = 0;
   float start_center[2] = {0.0f, 0.0f};  // the waist point, x and z
   float start_under[2] = {0.0f, 0.0f};
   float under[2] = {0.0f, 0.0f};
@@ -1733,51 +1739,84 @@ float FlyLandClearance(const TablePose& pose, const float room[3],
 
 bool WalkLog();
 
-// One log line for the first step of each fly that stops short of a solid.
-void StopFlyLog(void* object, float full_cm) {
-  ++g_walk.solid_stops;
-  if (g_walk.solid_stops != 1 || !WalkLog()) return;
-  ModLog("god view     : the fly stops short: the whole step puts your head "
-         "%.1f cm %s the %s %p, so your head stays %.0f cm out of it "
-         "(god_zoom_solid_stop=1), frame %llu", fabsf(full_cm),
-         full_cm < 0.0f ? "into" : "out of",
+// One log line for each solid that the fly slides past or stops at: when
+// the solid or the way changes.
+void SayFlySolid(void* object, int way, float full_cm, float clear_cm,
+                 const float middle[3], const float head[3],
+                 const TablePose& pose) {
+  if (way == walk_math::kSlideStop) {
+    ++g_walk.solid_stops;
+  } else {
+    ++g_walk.solid_slides;
+  }
+  if (object == g_walk.solid_last && way == g_walk.solid_way) return;
+  if (object != g_walk.solid_last) ++g_walk.solids_met;
+  g_walk.solid_last = object;
+  g_walk.solid_way = way;
+  if (!WalkLog()) return;
+  // The direction of the solid from the head, in the room, for a recipe
+  // that flies straight at it.
+  float room_dir[2];
+  walk_math::InRoom(pose, middle[0] - head[0], middle[2] - head[2], room_dir);
+  const float right = walk_math::DegreesRight(room_dir);
+  ModLog("god view     : the fly %s the %s %p at %.1f %.1f %.1f: the whole "
+         "step puts your head %.1f cm %s it, and your head stays %.1f cm out "
+         "of it (the shell is %.0f cm, fly_solid_slide=%d). Your head is at "
+         "%.1f %.1f %.1f, and the middle of the solid is %.1f degrees to the "
+         "%s of straight ahead in the room, frame %llu",
+         way == walk_math::kSlideStop ? "stops at" : "slides past",
          object != nullptr ? HandDirectSolidClass(object) : "solid", object,
-         SolidClearM() * 100.0f, ControllersFrameCount());
+         middle[0], middle[1], middle[2], fabsf(full_cm),
+         full_cm < 0.0f ? "into" : "out of", clear_cm, SolidClearM() * 100.0f,
+         g_settings.fly_solid_slide, head[0], head[1], head[2], fabsf(right),
+         right < -0.05f ? "left" : "right", ControllersFrameCount());
 }
 
-// A FLY THAT STOPS SHORT OF A SOLID (god_zoom_solid_stop=1). The step from
-// `from` to `next` goes as far as the head stays god_zoom_solid_cm out of
-// the nearest solid (zoom_math::StepShare), with the solids of
-// HandDirectSolids, as for a zoom step. A head that is already nearer may
-// go on while it does not come nearer. The fly asks for the solids within
-// kZoomSolidReachM of the head (TabletopZoomSolidReachM).
+// THE SOLIDS IN THE WAY OF A FLY (god_zoom_solid_stop=1), with the solids
+// of HandDirectSolids, as for a zoom step. The fly asks for the solids
+// within kZoomSolidReachM of the head (TabletopZoomSolidReachM). With
+// fly_solid_slide=1 the step slides past a solid: only the part that goes
+// into its shell of god_zoom_solid_cm comes off, and the part along it
+// stays (walk_math::FlySlide). So a push at a slant goes round a tree and a
+// push up at a wall goes over the house, and only a push straight at a
+// solid stops. With 0 the step stops short of the shell. The step of the
+// head in the world is the step of the waist point: the heading and the
+// scale stay.
 void FlySolidStop(const TablePose& from, const float room[3],
                   const float head[3], TablePose* next) {
-  if (g_settings.god_zoom_solid_stop == 0) return;
+  if (g_settings.god_zoom_solid_stop == 0 || !(from.scale > 0.0f)) return;
   static void* objects[solid_math::kMostSolids];
   static solid_math::Solid solids[solid_math::kMostSolids];
   const int count =
       HandDirectSolids(objects, solids, solid_math::kMostSolids);
   if (count == 0) return;
-  const TablePose to = *next;
-  const auto at = [&](float t) {
-    TablePose p = from;
-    for (int i = 0; i < 3; ++i) {
-      p.center[i] = from.center[i] + (to.center[i] - from.center[i]) * t;
-    }
-    return p;
-  };
-  const auto clear = [&](float t) {
+  float p[3];
+  PoseWorld(from, room, head, p);
+  const float step[3] = {next->center[0] - from.center[0],
+                         next->center[1] - from.center[1],
+                         next->center[2] - from.center[2]};
+  const auto dist = [&](const float q[3]) {
     int which = -1;
-    return HeadSolidClearance(at(t), room, head, solids, count, &which);
+    return solid_math::Least(solids, count, q, &which);
   };
-  const float share = zoom_math::StepShare(clear, SolidClearM());
-  if (share >= 1.0f) return;
+  float out[3];
+  const int way = walk_math::FlySlide(
+      dist, p, step, SolidClearM() * from.scale, 0.001f * from.scale,
+      g_settings.fly_solid_slide != 0, out);
+  if (way == walk_math::kSlideFree) return;
+  const float q[3] = {p[0] + step[0], p[1] + step[1], p[2] + step[2]};
   int which = -1;
   const float full_cm =
-      HeadSolidClearance(to, room, head, solids, count, &which) * 100.0f;
-  *next = at(share);
-  StopFlyLog(which >= 0 ? objects[which] : nullptr, full_cm);
+      solid_math::Least(solids, count, q, &which) / from.scale * 100.0f;
+  void* object = which >= 0 ? objects[which] : nullptr;
+  const float none[3] = {0.0f, 0.0f, 0.0f};
+  const float* middle = which >= 0 ? solids[which].middle : none;
+  for (int i = 0; i < 3; ++i) next->center[i] = from.center[i] + out[i];
+  const float r[3] = {p[0] + out[0], p[1] + out[1], p[2] + out[2]};
+  int near_one = -1;
+  const float clear_cm =
+      solid_math::Least(solids, count, r, &near_one) / from.scale * 100.0f;
+  SayFlySolid(object, way, full_cm, clear_cm, middle, p, from);
 }
 
 void SayZoomSolid(const SolidStop& stop, bool refused, float from, float to,
@@ -2538,13 +2577,15 @@ void StopWalk(const char* cause, bool view_stays) {
               "showed the frame before again for them.", g_walk.shown,
               g_walk.late, g_walk.period / 1e6);
   }
-  char floor[192] = "";
+  char floor[288] = "";
   if (g_walk.type == walk_math::kTypeFly) {
     sprintf_s(floor, " The floor of the fly lifted the view %.1f cm on %llu "
               "frames, and the least clearance of your head after a step was "
-              "%.1f cm. %llu steps stopped short of a solid.",
+              "%.1f cm. The fly met %llu solids: %llu steps slid past one, "
+              "and %llu steps stopped at one.",
               g_walk.lifted * 100.0f, g_walk.lift_frames,
-              g_walk.least_clear * 100.0f, g_walk.solid_stops);
+              g_walk.least_clear * 100.0f, g_walk.solids_met,
+              g_walk.solid_slides, g_walk.solid_stops);
   }
   char ramped[96] = "";
   if (g_walk.ramp_top > 1.0f) {
@@ -2604,8 +2645,9 @@ void StopWalk(const char* cause, bool view_stays) {
 // has the measure of the head blinder at the place of the head after the
 // step (FlyLandClearance, walk_math::FlyFloor), so a fly across a rising
 // slope slides up along it and the overlay does not start. With
-// god_zoom_solid_stop=1 a step stops god_zoom_solid_cm before a house, a
-// rock or a tree trunk, as a zoom step does (FlySolidStop).
+// god_zoom_solid_stop=1 the head stays god_zoom_solid_cm out of a house, a
+// rock or a tree trunk: the step slides past it, and only a push straight
+// at it stops (FlySolidStop, fly_solid_slide).
 //
 // THE SPEED RAMP (move_stick_ramp=1, walk_math.h). While the stick is pushed
 // to 90 percent or more, the speed of the walk and of the fly grows with
@@ -2730,6 +2772,10 @@ void ApplyGodWalk(double frame_seconds) {
     g_walk.lift_frames = 0;
     g_walk.least_clear = 1000.0f;
     g_walk.solid_stops = 0;
+    g_walk.solid_slides = 0;
+    g_walk.solid_last = nullptr;
+    g_walk.solid_way = 0;
+    g_walk.solids_met = 0;
     g_walk.have_forward = false;
     g_walk.start_center[0] = pose.center[0];
     g_walk.start_center[1] = pose.center[2];
@@ -3284,6 +3330,7 @@ void TabletopSetOptions(const TabletopSettings& settings) {
       g_settings.move_stick_follow_land != 0 ? 1 : 0;
   g_settings.move_type = walk_math::Type(g_settings.move_type);
   g_settings.move_stick_ramp = g_settings.move_stick_ramp != 0 ? 1 : 0;
+  g_settings.fly_solid_slide = g_settings.fly_solid_slide != 0 ? 1 : 0;
   if (g_settings.move_stick_ramp_most < 1) g_settings.move_stick_ramp_most = 1;
   if (g_settings.move_stick_ramp_most > 64) {
     g_settings.move_stick_ramp_most = 64;
@@ -4488,6 +4535,26 @@ void TabletopGodMoveRampToggle() {
   ControllersGesturePulse(0.5f, g_settings.move_stick_ramp != 0 ? 0.40f
                                                                 : 0.08f);
   ModLog("debug page   : %s", RampText());
+}
+
+// THE SWITCH "Fly at solids" of the debug page: fly_solid_slide, the slide
+// past a solid (1) or the stop short of it (0).
+void TabletopGodFlySlideToggle() {
+  if (!g_installed || !g_settings.god || !TestSwitchesOn()) return;
+  g_settings.fly_solid_slide = g_settings.fly_solid_slide != 0 ? 0 : 1;
+  ControllersGesturePulse(0.5f, g_settings.fly_solid_slide != 0 ? 0.40f
+                                                                : 0.08f);
+  ModLog("debug page   : fly_solid_slide=%d. %s", g_settings.fly_solid_slide,
+         g_settings.fly_solid_slide != 0
+             ? "A fly slides past a house, a rock or a tree trunk"
+             : "A fly stops short of a house, a rock or a tree trunk");
+}
+
+int TabletopGodFlySlideValue() {
+  if (!g_installed || !g_settings.god || !TestSwitchesOn()) {
+    return kDebugCannot;
+  }
+  return g_settings.fly_solid_slide != 0 ? 1 : 0;
 }
 
 int TabletopGodMoveRampValue() {

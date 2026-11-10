@@ -226,6 +226,87 @@ inline void FlyChecks() {
          1e-2);
   }
 
+  // THE SLIDE PAST A SOLID. A trunk of radius 1 on the axis x 0, z 0, and a
+  // box of half size 1 at the middle (0, 0, 5). The shell is 0.3.
+  {
+    const auto trunk = [](const float q[3]) {
+      return sqrtf(q[0] * q[0] + q[2] * q[2]) - 1.0f;
+    };
+    const auto box = [](const float q[3]) {
+      const float c[3] = {q[0], q[1], q[2] - 5.0f};
+      float out = 0.0f, in = -1e30f;
+      for (int i = 0; i < 3; ++i) {
+        const float d = fabsf(c[i]) - 1.0f;
+        if (d > 0.0f) out += d * d;
+        if (d > in) in = d;
+      }
+      return sqrtf(out) + (in < 0.0f ? in : 0.0f);
+    };
+    const float need = 0.3f, h = 0.001f;
+    float out[3];
+    const float p0[3] = {0.0f, 0.0f, -2.0f};
+    const float far_step[3] = {0.0f, 0.0f, 0.1f};
+    Check(FlySlide(trunk, p0, far_step, need, h, true, out) == kSlideFree &&
+              out[2] == 0.1f,
+          "a step that stays out of the shell goes as it is", 1, 1);
+    const float rest[3] = {0.0f, 0.0f, 0.0f};
+    const float at_shell[3] = {0.0f, 0.0f, -1.3f};
+    FlySlide(trunk, at_shell, rest, need, h, true, out);
+    Near("a step of 0 stays 0",
+         fabsf(out[0]) + fabsf(out[1]) + fabsf(out[2]), 0.0, 1e-9);
+    const float straight[3] = {0.0f, 0.0f, 0.05f};
+    Check(FlySlide(trunk, at_shell, straight, need, h, true, out) ==
+              kSlideStop,
+          "a push straight at the middle of a trunk stops", 1, 1);
+    Near("and it does not go into the shell", trunk(at_shell) - 0.3f +
+         out[2], 0.0, 1e-3);
+    const float slant[3] = {0.07f, 0.0f, 0.07f};
+    Check(FlySlide(trunk, at_shell, slant, need, h, true, out) == kSlideAlong,
+          "a push at a slant slides", 1, 1);
+    Near("it keeps the part along the trunk", out[0], 0.07, 1e-3);
+    Near("and loses the part into it, with no part away from it", out[2],
+         0.0, 1e-3);
+    // Many steps at 45 degrees past the trunk: the head goes round it and on,
+    // and it never comes into the shell.
+    float q[3] = {-1.0f, 0.0f, -2.0f};
+    float worst = 1000.0f;
+    int stops = 0;
+    for (int i = 0; i < 200; ++i) {
+      const float s45[3] = {0.02f, 0.0f, 0.02f};
+      if (FlySlide(trunk, q, s45, need, h, true, out) == kSlideStop) ++stops;
+      for (int j = 0; j < 3; ++j) q[j] += out[j];
+      const float d = trunk(q);
+      if (d < worst) worst = d;
+    }
+    Check(q[2] > 1.0f && stops == 0,
+          "a fly at a slant goes round the trunk and past it", q[2], 1.0f);
+    Near("and the head stays out of the shell", worst < 0.3f ? worst : 0.3f,
+         0.3, 1e-3);
+    // A fly forward and up at a wall of the box goes up the wall and over it.
+    float w[3] = {0.0f, 0.0f, 3.5f};
+    worst = 1000.0f;
+    for (int i = 0; i < 120; ++i) {
+      const float up[3] = {0.0f, 0.05f, 0.05f};
+      FlySlide(box, w, up, need, h, true, out);
+      for (int j = 0; j < 3; ++j) w[j] += out[j];
+      const float d = box(w);
+      if (d < worst) worst = d;
+    }
+    Check(w[2] > 6.3f && w[1] > 1.3f,
+          "a fly forward and up at a wall goes up and over the house", w[2],
+          6.3f);
+    Near("and the head stays out of the shell of the house",
+         worst < 0.3f ? worst : 0.3f, 0.3, 1e-3);
+    const float wall[3] = {0.0f, 0.0f, 3.7f};
+    Check(FlySlide(box, wall, straight, need, h, true, out) == kSlideStop,
+          "a push straight at a wall stops", 1, 1);
+    // fly_solid_slide=0: the step stops short along its own direction.
+    Check(FlySlide(trunk, at_shell, slant, need, h, false, out) ==
+              kSlideStop &&
+              fabsf(out[0] - out[2]) < 1e-6f && out[0] < 0.07f,
+          "with the slide off a push at a slant stops short", out[0], 0.07f);
+  }
+
   // THE SPEED RAMP.
   Near("a full push counts its time", RampSeconds(0.5f, 1.0f, 0.25f), 0.75,
        1e-6);

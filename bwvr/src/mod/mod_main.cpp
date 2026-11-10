@@ -1050,6 +1050,8 @@ void ReadSettings() {
     // move_stick_ramp_most times. 0 keeps the speed of the push.
     t.move_stick_ramp = number("move_stick_ramp", 1);
     t.move_stick_ramp_most = number("move_stick_ramp_most", 32);
+    // A fly at a house, a rock or a tree trunk: 1 slides past it, 0 stops.
+    t.fly_solid_slide = number("fly_solid_slide", 1);
     t.test_keys = number("test_keys", 0) != 0;
     // Tests with no key press, for a desktop run: the game's zoom to the
     // Temple at an update of the camera mode, and the test key of god_spawn.

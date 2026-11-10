@@ -82,6 +82,8 @@ int TabletopGodMoveKindValue();
 void TabletopGodMoveKindCycle();
 int TabletopGodMoveRampValue();
 void TabletopGodMoveRampToggle();
+int TabletopGodFlySlideValue();
+void TabletopGodFlySlideToggle();
 int WorldGrabTestValue();
 void WorldGrabCycleTest();
 // The teleport (teleport.cpp).
@@ -416,6 +418,9 @@ const Switch kSwitches[] = {
     {kGroupView, L"Speed ramp", L"Full push gets faster", "move_stick_ramp",
      TabletopGodMoveRampValue,
      [](const char*) { TabletopGodMoveRampToggle(); }, L"off|on"},
+    {kGroupView, L"Fly at solids", L"Fly past a house or a tree",
+     "fly_solid_slide", TabletopGodFlySlideValue,
+     [](const char*) { TabletopGodFlySlideToggle(); }, L"stop|slide"},
     {kGroupView, L"Vignette", L"Edges dark in a move", "comfort_vignette",
      VignetteValue, VignetteChange, L"off|gentle|strong"},
     {kGroupView, L"Head blinder", L"Cover the view in the land",
@@ -808,6 +813,9 @@ const wchar_t* const kTips[] = {
     L"On: after 1 second of a full push of the walk stick the speed doubles "
     L"each 2 seconds, up to 32 times. A smaller push goes back to its own "
     L"speed at once. Off: the speed of the push only.",
+    // Fly at solids
+    L"Slide: a fly slides past a house, a rock or a tree trunk, and only a "
+    L"push straight at it stops. Stop: a fly stops 30 cm short of it.",
     // Vignette
     L"The edges of the view go dark while a control moves the view: a walk, "
     L"a zoom, a turn, a teleport or a grab of the world. Off, gentle or "

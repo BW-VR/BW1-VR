@@ -963,15 +963,26 @@ event.
     already puts the head that high (4000 units for each meter, the land
     2.5 m below the head). At the ceiling the move up stops, and the move
     across goes on.
-  - The solids (`FlySolidStop`). With `god_zoom_solid_stop=1` a step stops
-    where the head is `god_zoom_solid_cm` (30) out of a house, a rock or a
-    tree trunk, as a zoom step does (section 2, "Houses at a small scale"),
-    with the solids that the first eye pass of the frame before kept within
-    1.5 m of the head (`TabletopZoomSolidReachM`). A head that is already
-    nearer may go on while it does not come nearer. The player steers away
-    from the solid to go on. The solids near the head need `head_blinder=1`
-    and `head_blinder_objects=1` (the defaults): with 0 the fly does not
-    stop at a house.
+  - The solids (`FlySolidStop`, `FlySlide` in `walk_math.h`). With
+    `god_zoom_solid_stop=1` the head stays `god_zoom_solid_cm` (30) out of a
+    house, a rock or a tree trunk (the solids of section 2, "Houses at a
+    small scale"), with the solids that the first eye pass of the frame
+    before kept within 1.5 m of the head (`TabletopZoomSolidReachM`). With
+    `fly_solid_slide=1` a step that goes into that shell slides past the
+    solid: only the part of the step along the outward direction of the
+    solid at the head comes off (the gradient of the distance to the
+    solid), and the part along the solid stays. A second pass does the same
+    at the end of the step, for a corner. So a fly at a slant goes round a
+    tree, and a fly forward with the head pitched up goes up the wall of a
+    house and over its roof. Only a push straight at the middle of a solid
+    stops (less than 1 percent of the step is along it). The slide adds no
+    part away from the solid, and a stick at rest moves nothing. A head
+    that is already nearer than the shell may go on while it does not come
+    nearer. With `fly_solid_slide=0` a step stops short of the shell along
+    its own direction, and the player steers away to go on. The switch "Fly
+    at solids" of the debug page changes the key. The solids near the head
+    need `head_blinder=1` and `head_blinder_objects=1` (the defaults): with
+    0 the fly does not see a house.
   - High over the land at a small scale, the game keeps its own fog (400 to
     900 units) and its own distance at which objects vanish (700 units),
     because the God view changes them only above 3 times the life size
@@ -1025,6 +1036,7 @@ event.
 | `move_stick_trace` | 0 | A test for a desktop run: the log has one line for each of the first N frames of each walk or fly (at most 2000 lines in a game) |
 | `move_stick_ramp` | 1 | 1: a push of 90 percent or more gets faster with its time, in the walk and in the fly. 0: the speed of the push only. The switch "Speed ramp" of the debug page. Not in the launcher |
 | `move_stick_ramp_most` | 32 | The largest factor of the speed ramp, 1 to 64 |
+| `fly_solid_slide` | 1 | With `god_zoom_solid_stop=1`, 1: a fly slides past a house, a rock or a tree trunk, and only a push straight at it stops. 0: a fly stops short of it. The switch "Fly at solids" of the debug page |
 
 The switch "Move kind" of the debug page goes from the walk that follows the
 land (`move_type=0`, `move_stick_follow_land=1`) to the walk that keeps its
@@ -1077,8 +1089,15 @@ R times the speed of the push"). Each trace line has the factor of its
 frame. The trace of a fly has the step up and the clearance of the head
 (the measure of the head blinder) in each frame. The line of the end of a
 fly also gives how far its floor lifted the view, the least clearance after
-a step, and the count of the steps that stopped short of a solid, and a
-step that stops short of a solid has one line in each fly:
+a step, how many solids the fly met, and how many steps slid past one or
+stopped at one. Each solid that the fly slides past or stops at has one
+line, and one more when the way changes from a slide to a stop:
+
+```
+god view     : the fly slides past the Tree 1632AEE0 at X Y Z: the whole step puts your head 26.7 cm out of it, and your head stays 30.0 cm out of it (the shell is 30 cm, fly_solid_slide=1). Your head is at X Y Z, and the middle of the solid is D degrees to the right of straight ahead in the room, frame N
+```
+
+The trace of a fly:
 
 ```
 god view     : fly trace, frame F of the fly: T ms, a step of S cm of the room (U cm up, the speed times R), the waist point at X Y Z, the land under your head at H and B cm below your head, a clearance of C cm, frame N
@@ -2128,6 +2147,19 @@ render size, because the recipes depend on it.
   has "40.0 degrees above level". The land under the head goes from 62.9 to
   1895.4 cm below the head with each step up more than 0, and the factor is
   1.00 to fly frame 60, 2.83 at 240 and 7.13 at 400.
+- The floor of the fly [R]: the fly with the stick above (the head 45
+  degrees down) has no line of the head blinder. Each of its 135 trace lines
+  of the first fly has a clearance of 10.00 cm or more, and where the slope
+  rises at the floor the step up is more than 0 (42 lines, for example
+  "0.633 cm up ... a clearance of 10.00 cm"). A level fly into the hills
+  (`move_stick_ramp=0`, no `fake_head_pitch`, the step `lstick_up@900+300`)
+  has no line of the head blinder. Over level land the steps are 2.49 to
+  2.65 cm with "0.000 cm up", where the hill comes within 10 cm the steps
+  go up ("a step of 4.597 cm of the room (3.855 cm up ...), a clearance of
+  10.00 cm"), and past the top they are level again. The line of the end
+  has "The floor of the fly lifted the view 37.3 cm on 18 frames, and the
+  least clearance of your head after a step was 10.0 cm", and 150.0 cm of
+  the room each second.
 
 **The mouse pan and the tutorial events** need a run with the test mouse. Use
 `play_mode=0` (it must log the God view), `-NEWGAME` on Land 1,

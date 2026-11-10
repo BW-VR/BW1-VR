@@ -89,6 +89,9 @@ struct TabletopSettings {
   // largest factor, 1 to 64.
   int move_stick_ramp = 1;         // move_stick_ramp: 1 on, 0 off
   int move_stick_ramp_most = 32;   // move_stick_ramp_most: the top factor
+  // A fly at a solid (god_zoom_solid_stop=1): 1 slides past it, and only a
+  // push straight at it stops. 0 stops the step short of it.
+  int fly_solid_slide = 1;         // fly_solid_slide: 1 slides, 0 stops
   // A test for a desktop run: the log has a line for each of the first N
   // frames of each walk. 0 is off.
   int move_stick_trace = 0;        // move_stick_trace: frames to log
@@ -219,6 +222,9 @@ int TabletopGodMoveStickValue();
 void TabletopGodMoveKindCycle();
 int TabletopGodMoveKindValue();
 void TabletopGodSetMoveType(int type, const char* by);
+// The switch "Fly at solids" of the debug page (fly_solid_slide).
+void TabletopGodFlySlideToggle();
+int TabletopGodFlySlideValue();
 // The switch "Speed ramp" of the debug page (move_stick_ramp).
 void TabletopGodMoveRampToggle();
 int TabletopGodMoveRampValue();

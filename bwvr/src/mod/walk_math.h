@@ -343,6 +343,94 @@ inline float FlyFloor(float center_y, float after, float before, float least,
   return center_y + (floor - after) * scale;
 }
 
+// THE SLIDE OF A FLY PAST A SOLID (fly_solid_slide=1). dist(q) is the
+// distance of a world point from the nearest solid (a signed distance:
+// solid_math::Least), p is the head now, and step is the step of the frame,
+// in the same units. need is the shell: the head stays `need` out of the
+// solid, or at its distance now when it is already nearer.
+//
+// A step that stays out of the shell goes as it is (kSlideFree). Else the
+// part of the step that goes into the solid comes off: the part along the
+// outward direction n of the solid at the head (the gradient of dist, with
+// central differences of h), when it points in. What stays is the part
+// along the solid, so a push at a slant goes round a tree trunk, a push up
+// at a wall goes up the wall and over the roof. A second pass does the same
+// at the end of that step, for a corner. When the step still goes into the
+// shell, it goes as far along as the shell lets it (20 halvings, as
+// zoom_math::StepShare). The slide never adds a part away from the solid,
+// and a step of 0 stays 0. When the part along the solid is less than
+// kSlideLeast of the step (a push straight at the middle of a solid), the
+// result is kSlideStop. With slide false the step only goes as far as the
+// shell lets it along its own direction (the stop of a zoom step), and the
+// result is kSlideStop.
+const int kSlideFree = 0;
+const int kSlideAlong = 1;
+const int kSlideStop = 2;
+const float kSlideLeast = 0.01f;
+
+template <typename Dist>
+inline bool Outward(Dist dist, const float p[3], float h, float out[3]) {
+  for (int i = 0; i < 3; ++i) {
+    float a[3] = {p[0], p[1], p[2]}, b[3] = {p[0], p[1], p[2]};
+    a[i] += h;
+    b[i] -= h;
+    out[i] = dist(a) - dist(b);
+  }
+  const float length =
+      sqrtf(out[0] * out[0] + out[1] * out[1] + out[2] * out[2]);
+  if (!(length > 0.0f)) return false;
+  for (int i = 0; i < 3; ++i) out[i] /= length;
+  return true;
+}
+
+template <typename Dist>
+inline int FlySlide(Dist dist, const float p[3], const float step[3],
+                    float need, float h, bool slide, float out[3]) {
+  for (int i = 0; i < 3; ++i) out[i] = step[i];
+  const auto after = [&](const float s[3]) {
+    const float q[3] = {p[0] + s[0], p[1] + s[1], p[2] + s[2]};
+    return dist(q);
+  };
+  const float now = dist(p);
+  const float floor = now < need ? now : need;
+  if (!(after(step) < floor)) return kSlideFree;
+  const float full =
+      sqrtf(step[0] * step[0] + step[1] * step[1] + step[2] * step[2]);
+  int result = kSlideStop;
+  if (slide) {
+    for (int pass = 0; pass < 2; ++pass) {
+      float at[3] = {p[0], p[1], p[2]};
+      if (pass == 1) {
+        for (int i = 0; i < 3; ++i) at[i] += out[i];
+      }
+      float n[3];
+      if (!Outward(dist, at, h, n)) break;
+      const float in = out[0] * n[0] + out[1] * n[1] + out[2] * n[2];
+      if (in < 0.0f) {
+        for (int i = 0; i < 3; ++i) out[i] -= in * n[i];
+      }
+      if (!(after(out) < floor)) break;
+    }
+    const float along =
+        sqrtf(out[0] * out[0] + out[1] * out[1] + out[2] * out[2]);
+    result = along >= kSlideLeast * full ? kSlideAlong : kSlideStop;
+  }
+  if (after(out) < floor) {
+    float lo = 0.0f, hi = 1.0f;
+    for (int i = 0; i < 20; ++i) {
+      const float mid = 0.5f * (lo + hi);
+      const float s[3] = {out[0] * mid, out[1] * mid, out[2] * mid};
+      if (after(s) >= floor) {
+        lo = mid;
+      } else {
+        hi = mid;
+      }
+    }
+    for (int i = 0; i < 3; ++i) out[i] *= lo;
+  }
+  return result;
+}
+
 // The degrees of a direction below level, for the log: up is less than 0.
 inline float DegreesDown(const float direction[3]) {
   const float flat =

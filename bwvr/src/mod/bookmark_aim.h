@@ -30,6 +30,11 @@ void BookmarkAimFrame();
 // ray, so the draw offers the objects in it.
 bool BookmarkAimWantsCone();
 
+// hand_direct.cpp, once a frame: true while the aim needs the cone and the
+// cone must not wait for the far grab (bookmark_aim_hold=1). So the draw
+// offers the objects of the cone also with far_grab=0.
+bool BookmarkAimConeAlone();
+
 // controllers.cpp, once a pump, before the grip goes to the far grab and the
 // grip machine. grip is the grip of the pointing hand. A press sets the
 // bookmark at the target. The answer is true while the grip belongs to the

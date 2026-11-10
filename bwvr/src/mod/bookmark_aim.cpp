@@ -27,14 +27,30 @@
 // and not the object under the Hand. Nothing follows a bookmark: the follow of
 // the game (Shift and the number) is not on the ring.
 //
+// THE OBJECTS OF THE AIM come from the list of the first eye pass of the draw
+// (hand_direct.cpp): the objects near the Hand, and the objects in the cone
+// of the aim ray. The far grab offers that cone, and with far_grab=0 the aim
+// offers it alone. THE HOLD: the object of the last frame stays the target
+// while the ray is in the wider hold round it (bookmark_aim_math.h). When the
+// draw does not offer it in a frame, the mod reads its place from its own
+// mesh, while it lives. So a villager that walks and a sheep behind a tree
+// keep the aim until the ray goes off them.
+//
 // While the aim is on, the grip belongs to it: no grab of the world, no far
 // grab and no press of the game. B of the pointing hand, the menu button and
 // the ring stop the aim.
+//
+// After a grip on an object, the log gives the record of the bookmark three
+// times: its object and its map point, and the place of the object.
 //
 // THE KEYS of bwvr.ini:
 //
 //   bookmark_aim=1        1 the seal with the plus starts the aim. 0 it sets
 //                         the bookmark at the Hand, as Ctrl and the number do
+//   bookmark_aim_hold=1   1 the aim offers the cone also with far_grab=0, and
+//                         the hold reads the place of the object. 0 the cone
+//                         only with far_grab=1, and an object that the draw
+//                         does not offer stays for 10 frames
 //   bookmark_test_aim     a test key: the word "aimmark" of the scripted
 //                         controller aims at "land" (the land in front) or
 //                         "living" (the nearest living thing of the cone)
@@ -47,6 +63,7 @@
 #include <string.h>
 
 #include "bookmark_aim.h"
+#include "bookmark_aim_math.h"
 #include "controller_hints.h"
 #include "controller_math.h"
 #include "creature_command_math.h"
@@ -68,6 +85,9 @@ float HandDirectRadius(void* object);
 bool HandDirectSeen(const float at[3], float radius);
 bool HandDirectLiving(void* object);
 const char* HandDirectClass(void* object);
+// The place of an object of an earlier frame from its own mesh, while it
+// lives. table is its first word from that frame.
+bool HandDirectObjectPoint(void* object, void* table, float position[3]);
 
 namespace {
 
@@ -93,16 +113,21 @@ struct MapCoords {
   float height;
 };
 
-// The aim: an object in a cone this wide past its own size, and the land up
-// to this far along the ray, in meters of the room.
-const float kConeDeg = 1.5f;
-// THE HOLD on an object: a player cannot keep a ray on a villager that
-// walks. So the object of the last frame stays the target while the ray is
-// within kKeepSize of its size and kKeepDeg round it, and for kKeepFrames
-// frames in which the draw does not offer it.
-const float kKeepSize = 1.6f;
-const float kKeepDeg = 4.0f;
-const int kKeepFrames = 10;
+// The bookmark records: 0x24 bytes each. Bit 0 of +4 is set while the
+// bookmark is set, +8 is the map point, +0x14 the object or null.
+const uintptr_t kMarks = 0x00C58B30;
+const int kMarkSize = 0x24;
+const int kMarkFlags = 4;
+const int kMarkPoint = 8;
+const int kMarkObject = 0x14;
+// A GameThingWithPos: its map point, in 1/6553.6 of a unit.
+const int kThingX = 0x14;
+const int kThingZ = 0x18;
+// The frames after the grip at which the log gives the record.
+const uint64_t kFollowFrames[3] = {2, 120, 300};
+
+// The aim: the land up to this far along the ray, in meters of the room. The
+// cone and the hold are in bookmark_aim_math.h.
 const float kLandMostM = 60.0f;
 const float kLandStepM = 0.05f;
 const float kRingCm = 10.0f;
@@ -123,14 +148,19 @@ struct Target {
 
 bool g_read = false;
 bool g_on = true;
+bool g_hold_reads = true;
 char g_test_aim[16] = "";
 bool g_active = false;
 int g_mark = -1;
 Target g_target = {};
 int g_last_kind = kTargetNone;
 void* g_last_object = nullptr;
-Target g_kept = {};
 int g_kept_misses = 0;
+uint64_t g_hold_reads_now = 0;  // frames of the hold from the mesh
+// The log of the record after a grip on an object.
+int g_follow_mark = -1;
+uint64_t g_follow_from = 0;
+int g_follow_step = 0;
 bool g_grip_before = false;
 bool g_need_up = false;    // the grip was down at the start of the aim
 bool g_hold = false;       // the grip that set the bookmark is still down
@@ -153,12 +183,21 @@ void Read() {
   char path[MAX_PATH];
   if (!IniPath(path)) return;
   g_on = GetPrivateProfileIntA("bwvr", "bookmark_aim", 1, path) != 0;
+  g_hold_reads =
+      GetPrivateProfileIntA("bwvr", "bookmark_aim_hold", 1, path) != 0;
   GetPrivateProfileStringA("bwvr", "bookmark_test_aim", "", g_test_aim,
                            sizeof(g_test_aim), path);
   ModLog("bookmark aim : bookmark_aim=%d: %s", g_on ? 1 : 0,
          g_on ? "the seal with the plus on the sheet of the places waits for "
                 "the grip at the point or the object of the aim ray"
               : "the seal with the plus sets the bookmark at the Hand");
+  ModLog("bookmark aim : bookmark_aim_hold=%d: %s", g_hold_reads ? 1 : 0,
+         g_hold_reads
+             ? "the aim offers the cone of its ray also with far_grab=0, and "
+               "an object that the draw does not offer keeps the aim at the "
+               "place of its mesh while the ray is on it"
+             : "the cone of the aim needs far_grab=1, and an object that the "
+               "draw does not offer keeps the aim for 10 frames");
 }
 
 void* Interface() {
@@ -183,60 +222,61 @@ void Aim() {
   const float land = command_math::RayLandDistance(
       origin, direction, step, kLandMostM * units,
       [](float x, float z) { return Ground(x, z); });
-  // THE OBJECT: the nearest to the ray in its size and a cone of kConeDeg,
-  // and not behind the land of the ray.
-  const float cone = tanf(kConeDeg * 0.01745329f);
-  const float keep_cone = tanf(kKeepDeg * 0.01745329f);
+  // THE OBJECT: the best fit to the ray (bookmark_aim_math.h), and not
+  // hidden by the land from the eye of the aim.
   float best = 1e30f;
-  bool last_seen = false;
-  for (int i = 0; i < HandDirectConeCount(); ++i) {
-    void* object = nullptr;
-    float at[3];
-    if (!HandDirectConeAt(i, &object, at) || object == nullptr) continue;
+  bool last_offered = false, last_seen = false;
+  const bool had_object = last.kind == kTargetObject;
+  const auto consider = [&](void* object, const float at[3], bool is_last) {
     const float radius = HandDirectRadius(object);
-    if (!(radius > 0.0f)) continue;
-    const float middle[3] = {at[0], at[1] + 0.7f * radius, at[2]};
-    const float v[3] = {middle[0] - origin[0], middle[1] - origin[1],
-                        middle[2] - origin[2]};
-    const float along =
-        v[0] * direction[0] + v[1] * direction[1] + v[2] * direction[2];
-    if (!(along > 0.3f * units)) continue;
-    const bool is_last = last.kind == kTargetObject && object == last.object;
-    if (land >= 0.0f && along > land + (is_last ? 2.0f : 1.0f) * radius) {
-      continue;
-    }
-    float off[3];
-    for (int k = 0; k < 3; ++k) off[k] = v[k] - along * direction[k];
-    const float across = controller_math::Length(off);
-    const float allowed = is_last ? kKeepSize * radius + along * keep_cone
-                                  : 0.9f * radius + along * cone;
-    if (across > allowed) continue;
+    const float middle[3] = {
+        at[0], at[1] + bookmark_aim_math::kMiddleShare * radius, at[2]};
+    const bookmark_aim_math::Fit fit = bookmark_aim_math::ObjectFit(
+        origin, direction, middle, radius, land, units, is_last);
+    if (!fit.ok) return;
     if (is_last) last_seen = true;
-    // The object of the last frame wins over a new one.
-    const float score = across / allowed + along / (200.0f * units) -
-                        (is_last ? 1.0f : 0.0f);
-    if (score >= best || !HandDirectSeen(at, radius)) continue;
-    best = score;
+    if (fit.score >= best || !HandDirectSeen(at, radius)) return;
+    best = fit.score;
     g_target.kind = kTargetObject;
     g_target.object = object;
     g_target.vtable = *reinterpret_cast<void* const*>(object);
     g_target.radius = radius;
-    g_target.meters = along / units;
+    g_target.meters = fit.along / units;
     g_target.name = HandDirectClass(object);
     for (int k = 0; k < 3; ++k) {
       g_target.point[k] = middle[k];
       g_target.base[k] = at[k];
     }
+  };
+  for (int i = 0; i < HandDirectConeCount(); ++i) {
+    void* object = nullptr;
+    float at[3];
+    if (!HandDirectConeAt(i, &object, at) || object == nullptr) continue;
+    const bool is_last = had_object && object == last.object;
+    if (is_last) last_offered = true;
+    consider(object, at, is_last);
   }
-  // The object of the last frame that the draw did not offer stays for a
-  // few frames, while it lives.
-  if (g_target.kind != kTargetObject && last.kind == kTargetObject &&
-      !last_seen && g_kept_misses < kKeepFrames &&
-      !IsBadReadPtr(last.object, 0x20) &&
-      *reinterpret_cast<void* const*>(last.object) == last.vtable) {
-    ++g_kept_misses;
-    g_target = last;
-    return;
+  // THE LAST TARGET OUT OF THE HOLD OR NOT OFFERED. With the hold that reads
+  // the place, the place in the list or the place of its mesh gives the fit.
+  // Else it stays for a few frames, while it lives.
+  if (had_object && !last_seen) {
+    bool place = g_hold_reads && last_offered;
+    float at[3];
+    if (g_hold_reads && !last_offered &&
+        HandDirectObjectPoint(last.object, last.vtable, at)) {
+      place = true;
+      consider(last.object, at, true);
+    }
+    const bookmark_aim_math::Keep keep = bookmark_aim_math::KeepLast(
+        g_hold_reads, place, last_seen, g_kept_misses);
+    if (keep == bookmark_aim_math::kKeepFit) ++g_hold_reads_now;
+    if (keep == bookmark_aim_math::kKeepCount &&
+        g_target.kind != kTargetObject && !IsBadReadPtr(last.object, 0x20) &&
+        *reinterpret_cast<void* const*>(last.object) == last.vtable) {
+      ++g_kept_misses;
+      g_target = last;
+      return;
+    }
   }
   if (g_target.kind == kTargetObject) g_kept_misses = 0;
   if (g_target.kind == kTargetObject || !(land > 0.0f)) return;
@@ -252,6 +292,50 @@ void Aim() {
     g_target.point[k] = point[k];
     g_target.base[k] = point[k];
   }
+}
+
+// THE RECORD OF THE BOOKMARK after a grip, for the log: whether the game
+// set it, its object and its map point, and the place of the object.
+// Bookmark::ProcessAll copies the place of the object into the map point
+// in each frame, so the two agree while the bookmark holds the object.
+void Follow() {
+  if (g_follow_mark < 0 || g_follow_step >= 3) return;
+  const uint64_t frame = ControllersFrameCount();
+  if (frame < g_follow_from + kFollowFrames[g_follow_step]) return;
+  ++g_follow_step;
+  const uint8_t* record = reinterpret_cast<const uint8_t*>(
+      kMarks + kMarkSize * static_cast<uintptr_t>(g_follow_mark));
+  if (IsBadReadPtr(record, kMarkSize)) return;
+  const bool set = (record[kMarkFlags] & 1) != 0;
+  const int32_t* point =
+      reinterpret_cast<const int32_t*>(record + kMarkPoint);
+  const float x = point[0] / kMapPerUnit, z = point[1] / kMapPerUnit;
+  void* object = *reinterpret_cast<void* const*>(record + kMarkObject);
+  if (!set) {
+    ModLog("bookmark aim : bookmark %d is not set, frame %llu",
+           g_follow_mark + 1, frame);
+  } else if (object == nullptr) {
+    ModLog("bookmark aim : bookmark %d holds no object: its map point is "
+           "%.1f %.1f, frame %llu", g_follow_mark + 1, x, z, frame);
+  } else {
+    const uint8_t* thing = static_cast<const uint8_t*>(object);
+    if (IsBadReadPtr(thing, kThingZ + 4)) return;
+    const float ox = *reinterpret_cast<const int32_t*>(thing + kThingX) /
+                     kMapPerUnit;
+    const float oz = *reinterpret_cast<const int32_t*>(thing + kThingZ) /
+                     kMapPerUnit;
+    ModLog("bookmark aim : bookmark %d holds the %s %p: its map point is "
+           "%.1f %.1f, and the object is at %.1f %.1f, frame %llu",
+           g_follow_mark + 1, HandDirectClass(object), object, x, z, ox, oz,
+           frame);
+  }
+  if (g_follow_step >= 3) g_follow_mark = -1;
+}
+
+void FollowFrom(int mark) {
+  g_follow_mark = mark;
+  g_follow_from = ControllersFrameCount();
+  g_follow_step = 0;
 }
 
 void Stop(const char* why) {
@@ -288,6 +372,7 @@ bool Set() {
            "%llu", g_mark + 1, g_target.name != nullptr ? g_target.name : "?",
            object, g_target.base[0], g_target.base[2], g_target.meters,
            frame);
+    FollowFrom(g_mark);
     return true;
   }
   if (g_target.kind != kTargetLand) {
@@ -311,6 +396,7 @@ bool Set() {
          "(Bookmark::SetBookMark), %.1f m of the room along the ray, frame "
          "%llu", g_mark + 1, g_target.point[0], g_target.point[2],
          g_target.meters, frame);
+  FollowFrom(g_mark);
   return true;
 }
 
@@ -329,6 +415,7 @@ bool BookmarkAimStart(int mark) {
   g_target = Target{};
   g_last_kind = kTargetNone;
   g_last_object = nullptr;
+  g_kept_misses = 0;
   g_need_up = true;
   ++g_starts;
   ModLog("bookmark aim : the aim of bookmark %d starts. The pointing hand "
@@ -341,6 +428,7 @@ bool BookmarkAimStart(int mark) {
 bool BookmarkAimActive() { return g_active; }
 
 void BookmarkAimFrame() {
+  Follow();
   if (!g_active) return;
   bool set[7];
   const wchar_t* note = nullptr;
@@ -367,6 +455,8 @@ void BookmarkAimFrame() {
 }
 
 bool BookmarkAimWantsCone() { return g_active; }
+
+bool BookmarkAimConeAlone() { return g_active && g_hold_reads; }
 
 bool BookmarkAimPumpGrip(bool grip) {
   const bool press = grip && !g_grip_before;
@@ -477,7 +567,8 @@ bool BookmarkAimTestPoint(float out[3]) {
 void BookmarkAimReport() {
   if (g_starts + g_sets + g_misses + g_stops == 0) return;
   ModLog("bookmark aim : %llu aims started, %llu bookmarks set, %llu grips "
-         "that set nothing, %llu aims stopped this window", g_starts, g_sets,
-         g_misses, g_stops);
-  g_starts = g_sets = g_misses = g_stops = 0;
+         "that set nothing, %llu aims stopped, %llu frames in which the "
+         "place of the mesh held the object this window", g_starts, g_sets,
+         g_misses, g_stops, g_hold_reads_now);
+  g_starts = g_sets = g_misses = g_stops = g_hold_reads_now = 0;
 }

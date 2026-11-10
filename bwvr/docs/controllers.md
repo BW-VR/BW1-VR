@@ -1723,7 +1723,8 @@ ring holds those functions on the hand that does not point.
 The code is `radial_menu.cpp` (the settings, the game side, the picture, the
 frame), `radial_menu_math.h` (the items, the pick, the ring step by step),
 `ring_icon_math.h` (the icons), `ring_sheet_math.h` (the sheets of the places
-and of the leashes) and `bookmark_aim.cpp` (the aim of a new bookmark).
+and of the leashes), `bookmark_aim.cpp` (the aim of a new bookmark) and
+`bookmark_aim_math.h` (the fit and the hold of the aim).
 `controllers.cpp` has small parts: `ControllersRingHand`, the call of
 `RadialMenuFrame` at the end of `ControllersFrame`, the call of
 `RadialMenuPump` in `ControllersPump`, and one test in `TriggerBlocks`.
@@ -1985,6 +1986,7 @@ first time.
 | `ring_icons` | 1 | 1 each item is a round seal with its icon and its word under it (10.4). 0 each item is a seal with its word |
 | `places_sheet` | 1 | 1 the item `places` goes to the sheet of the places (10.11). 0 it opens the panel of places (`ui-layer.md`, section 22) |
 | `bookmark_aim` | 1 | 1 the seal with the plus of the sheet of the places waits for the grip at the aim of the pointing hand (10.11). 0 it sets the bookmark at the Hand, as Ctrl and the number do |
+| `bookmark_aim_hold` | 1 | 1 the aim offers the cone of its ray also with `far_grab=0`, and the place of the mesh of the object keeps the hold when the draw does not offer it (10.11). 0 the cone only with `far_grab=1`, and an object that the draw does not offer keeps the aim for 10 frames |
 | `leash_pictures` | 1 | 1 the tiles of the sheet of the leashes show the picture of the leash that turns, from the files of the game (10.12). 0 the icon of each kind |
 | `bookmark_test_aim` | | A test key: the word `aimmark` of the scripted controller aims at the nearest living thing of the cone with `living` |
 | `places_panel` | 1 | 0 the word `places` is an empty slot. With `ring_pages=0`, page 2 as made then has `mark_set`, `mark_go` and `mark_back` |
@@ -2372,9 +2374,19 @@ the sheet: it moves the view by itself.
 
 **The plus** (`bookmark_aim=1`). The ring closes, and the pointing hand
 shows its ray. Its card says "Set a bookmark" for the grip and "Stop" for B.
-An object in the ray gets the gold halo: the object must be in its own size
-and 1.5 degrees round the ray, and in front of the land of the ray. Else
-the land point of the ray gets a gold ring of 10 cm. A press of the grip
+An object in the ray gets the gold halo: the object must be in 0.9 of its
+own size and 1.5 degrees round the ray, and in front of the land of the
+ray. Else the land point of the ray gets a gold ring of 10 cm.
+
+**The hold** (`bookmark_aim_hold=1`). The object with the halo keeps it
+while the ray stays in 1.6 of its size and 4 degrees round it, so a
+villager or a sheep that walks keeps the halo until the ray goes off it.
+The objects come from the first eye pass of the draw: the objects near the
+Hand, and the objects in a cone of 12 degrees round the aim ray. The far
+grab offers that cone, and with `far_grab=0` the aim offers it alone (the
+far grab selects nothing then). When the draw does not offer the object of
+the halo in a frame, the mod reads its place from its mesh while it lives.
+The rules are in `bookmark_aim_math.h`. A press of the grip
 sets the first bookmark that is not set at that target, and the controller
 gives the pulse `activate`. A press with no target gives the pulse
 `refused`, and the aim stays. B of the pointing hand, the menu button and
@@ -2385,11 +2397,13 @@ selects nothing then.
 **How the mod sets it** (`bookmark_aim.cpp`). The game's own functions, on
 the game thread at the pump, behind the gates of the bookmark keys:
 
-- An object: `fn_00439F70` (cdecl: the bookmark, the object). The bookmark
-  holds the object. `Bookmark::ProcessAll` `0x00439DD0` copies the map
-  point of the object into the bookmark in each frame. So the seal of the
-  bookmark goes to the place where the object is at that time, and nothing
-  follows it after that.
+- An object: `fn_00439F70` (cdecl: the bookmark, the object). This is
+  what Ctrl and the number do when the pick record of the game has an
+  object under the pointer. The bookmark holds the object.
+  `Bookmark::ProcessAll` `0x00439DD0` copies the map point of the object
+  into the bookmark in each frame. So the seal of the bookmark goes to the
+  place where the object is at that time, and nothing follows it after
+  that.
 - A land point: `Bookmark::SetBookMark` `0x00439E50` (cdecl: the
   bookmark, a `MapCoords`). The game sets the bookmark on the object of its
   pick record (`GInterface+0x400`) when it has one, and that object is
@@ -2397,7 +2411,10 @@ the game thread at the pump, behind the gates of the bookmark keys:
   call and puts it back.
 
 Both functions keep the offset of the game camera from the point, as the
-key Ctrl and the number does. With `bookmark_aim=0` the plus sends Ctrl
+key Ctrl and the number does. 2, 120 and 300 frames after a grip, the log
+gives the record of the bookmark: "bookmark 2 holds the Sheep ...: its map
+point is ..., and the object is at ...", or "holds no object" for a land
+point. With `bookmark_aim=0` the plus sends Ctrl
 and the number, and the game sets the bookmark at the Hand.
 
 ### 10.12 The sheet of the leashes

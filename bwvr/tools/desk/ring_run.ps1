@@ -18,7 +18,10 @@
             (no choice), More, then "names" two times.
     places  the sheet of the places: the plus and a grip on the land, the
             plus and "aimmark" with a grip on a living thing, the seal of
-            bookmark 1, the bin of bookmark 2, and the plus with B.
+            bookmark 1, the bin of bookmark 2, and the plus with B. After
+            each grip the lines "bookmark N holds" give the record of the
+            bookmark 2, 120 and 300 frames later. Give -More "far_grab=0" or
+            "far_grab=1" to fix the far grab of the run.
     leash   the sheet of the leashes: the hand over each tile, then a
             choice of Compassion.
 
@@ -152,4 +155,4 @@ $set = "$set;fake_controller_left_points=$($script:points -join ' ')"
 "steps: $($script:steps -join ' ')"
 "set: $set"
 & (Join-Path $desk 'temple_run.ps1') -Name $Name -Dll $Dll -NoEnter -Steps ($script:steps -join ' ') -Set $set -Seconds $seconds `
-    -Pattern '^(ring  |bookmark aim|hint card|eye capture|god view|controllers  : the (fake (hand aims|trigger|y|grip)|word aim)|game start|hooks        : comfort)'
+    -Pattern '^(ring  |bookmark aim|far grab    : (far_grab=0|on\.)|hint card|eye capture|god view|controllers  : the (fake (hand aims|trigger|y|grip)|word aim)|game start|hooks        : comfort)'

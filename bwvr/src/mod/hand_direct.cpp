@@ -7532,7 +7532,11 @@ void FarFrameStep(bool active) {
   // A bulk take, or the totem that the Hand moves (SelectSource).
   f.take = g_face != nullptr ? SelectSource(g_face) : nullptr;
   const float life = HeadPoseScale();
-  if (active && FarGrabOn()) {
+  // THE CONE FOR THE AIM OF A NEW BOOKMARK ALONE (bookmark_aim.cpp,
+  // bookmark_aim_hold=1). With far_grab=0 the ray and the cone are made as
+  // for the far grab, but the far grab is never ready, so it selects nothing.
+  const bool cone_alone = active && !FarGrabOn() && BookmarkAimConeAlone();
+  if (active && (FarGrabOn() || cone_alone)) {
     f.usable = true;
     if (!TabletopOwnsView()) {
       f.usable = false;
@@ -7585,6 +7589,10 @@ void FarFrameStep(bool active) {
     if (f.ready && !f.have_ray) {
       f.ready = false;
       f.why = "the aim ray is not known";
+    }
+    if (cone_alone) {
+      f.ready = false;
+      f.why = "far_grab=0";
     }
   }
   FarGrabFrame(f);
@@ -9698,6 +9706,22 @@ bool HandDirectNearObject(void** object, float position[3]) {
 // the first word of the object from a frame in which the draw offered it.
 bool HandDirectObjectLives(void* object, void* table) {
   return ObjectLives(object, table);
+}
+
+// For bookmark_aim.cpp: the place of an object of an earlier frame, from the
+// translation of its mesh, as the draw reads it for a candidate. False when
+// the object does not live or has no mesh.
+bool HandDirectObjectPoint(void* object, void* table, float position[3]) {
+  if (!ObjectLives(object, table)) return false;
+  const uint8_t* model = *reinterpret_cast<uint8_t* const*>(
+      static_cast<uint8_t*>(object) + kObjectMesh);
+  if (model == nullptr ||
+      IsBadReadPtr(model, kMeshTranslation + 3 * sizeof(float))) {
+    return false;
+  }
+  const float* at = reinterpret_cast<const float*>(model + kMeshTranslation);
+  for (int i = 0; i < 3; ++i) position[i] = at[i];
+  return true;
 }
 
 bool HandDirectSeen(const float at[3], float radius) {

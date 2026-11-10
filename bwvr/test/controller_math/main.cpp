@@ -3646,6 +3646,7 @@ void CreatureChecks() {
 #include "glow_checks.h"
 #include "ray_card_checks.h"
 #include "places_checks.h"
+#include "bookmark_aim_checks.h"
 #include "debug_window_checks.h"
 #include "settings_panel_checks.h"
 #include "button_map_checks.h"
@@ -4103,6 +4104,7 @@ int main() {
   ray_card_checks::GlowAloneChecks();
   ray_card_checks::RayCardChecks();
   places_checks::PlacesChecks();
+  bookmark_aim_checks::BookmarkAimChecks();
   debug_window_checks::DebugWindowChecks();
   settings_panel_checks::SettingsPanelChecks();
   button_map_checks::ButtonMapChecks();

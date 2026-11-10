@@ -120,7 +120,10 @@ foreach ($c in @($choices | Sort-Object { $_[0] })) {
     $enter = "$enter $($ring.Steps)".Trim()
     $left = "$left $($ring.Points)".Trim()
 }
-$keys = 'grab_hand=1'
+# ring_pages=0: the ring with one page has the item "enter" in slot 7. The
+# ring with pages has no item for the Temple, and slot 7 is a different
+# item there.
+$keys = 'grab_hand=1;ring_pages=0'
 if ($left) { $keys = "$keys;fake_controller_left_points=$left" }
 # In a test save the steps count from the frame at which the controller first
 # places the Hand, as frame 800. The start is 10 s shorter than the start of

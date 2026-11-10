@@ -245,7 +245,7 @@ const char* const kCardName[kCards] = {
     "subtitle card", "ring", "keyboard", "bubble card",
     "first card of a button", "second card of a button",
     "third card of a button", "fourth card of a button",
-    "ray card", "ring of the right eye"};
+    "ray card", "card of the end of the ray", "ring of the right eye"};
 static_assert(kCardRingRight + 1 == kCards,
               "each card has a name");
 // What a card holds, for the line that says where it goes after a failure.
@@ -254,6 +254,7 @@ const char* const kCardHolds[kCards] = {"hints", "hints", "subtitles",
                                         "pulled miracles", "hints", "hints",
                                         "hints", "hints",
                                         "rays over the panels",
+                                        "ends of the rays over the panels",
                                         "hands in front of the ring"};
 // The runtime refused a frame with a quad of the interface panel.
 bool g_panel_refused = false;
@@ -2901,7 +2902,8 @@ void XrScreen::RecordVideoLayers(const float eye_position[3], uint32_t width,
         kCardSubtitles,       kCardHintPointing,    kCardHintOther,
         kCardHintButton0,     kCardHintButton0 + 1, kCardHintButton0 + 2,
         kCardHintButton0 + 3, kCardRing,            kCardRingRight,
-        kCardBubble,          kCardKeyboard,        kCardRay};
+        kCardBubble,          kCardKeyboard,        kCardRay,
+        kCardRayTip};
     for (int i = 0; i < kCards; ++i) {
       const int card = card_order[i];
       if (g_have_staged_card[card] && g_staged_card[card].visible &&
@@ -3543,15 +3545,16 @@ bool XrScreen::BuildFrame() {
     // only while the player holds its control, so it draws over all of them.
     // The spell book uses the quad of the ring, and the bubble that the hand
     // pulls out of the book draws over the book. The ray of the pointing
-    // hand over the panels goes last, because it ends on a panel or on the
-    // keyboard.
+    // hand over the panels goes after them, because it ends on a panel or on
+    // the keyboard. The glow at its end goes last, over the ray.
     XrCompositionLayerQuad* card_quads = b.card_quads;
     bool* with_card = b.with_card;
     const int card_order[kCards] = {
         kCardSubtitles,       kCardHintPointing,    kCardHintOther,
         kCardHintButton0,     kCardHintButton0 + 1, kCardHintButton0 + 2,
         kCardHintButton0 + 3, kCardRing,            kCardRingRight,
-        kCardBubble,          kCardKeyboard,        kCardRay};
+        kCardBubble,          kCardKeyboard,        kCardRay,
+        kCardRayTip};
     for (int i = 0; i < kCards; ++i) {
       const int card = card_order[i];
       if (g_have_staged_card[card] && g_staged_card[card].visible &&

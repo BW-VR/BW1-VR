@@ -152,6 +152,7 @@
 #include "one_walk.h"
 #include "overlay_math.h"
 #include "ray_glow_math.h"
+#include "ray_tip_math.h"
 #include "teleport.h"
 
 extern void ModLog(const char* format, ...);
@@ -165,7 +166,7 @@ bool ControllersOwnPointer();
 bool ControllersMenuRay(float from[3], float to[3], float* units);
 // ray_card.cpp: the ray of the menu as a quad layer over the panels in the
 // room. True when the ray of this frame is there.
-bool RayCardFrame(bool ray, bool glow, bool only, float glow_half_m,
+bool RayCardFrame(bool ray, bool glow, bool only, bool tip, float glow_half_m,
                   float tube_radius_m, const float rgb[3], float seconds,
                   uint64_t frame);
 void RayCardReport();
@@ -324,7 +325,10 @@ Vertex g_vertices[kMaxVertices];
 // triangles and the corners of one eye need.
 const int kGlowMaxPoints = 320;
 const int kGlowMaxLines = 8;
-const int kGlowMaxTriangles = kGlowMaxPoints * glow_math::kTrianglesPerSegment;
+// The most glows at the end of a ray (ray_tip) in one frame.
+const int kTipMaxSpots = 2;
+const int kGlowMaxTriangles = kGlowMaxPoints * glow_math::kTrianglesPerSegment +
+                              kTipMaxSpots * ray_tip_math::kTriangles;
 struct GlowLine {
   int first;
   int count;
@@ -342,6 +346,18 @@ bool g_ray_glow = true;
 // ray_glow_only: the glow of a ray is the whole ray, with no tube under it.
 bool g_ray_glow_only = true;
 bool g_trail_on = true;
+// THE GLOW AT THE END OF THE MENU RAY (ray_tip=1, ray_tip_math.h): the ends
+// of this frame in the world. Each eye pass builds a disc from each, because
+// the disc faces the eye. ray_tip=0 puts a small cross at the end.
+bool g_ray_tip = true;
+struct TipSpot {
+  float p[3];
+  float units;  // world units in a meter of the room
+  float rgb[3];
+};
+TipSpot g_tip_spot[kTipMaxSpots];
+int g_tip_spots = 0;
+bool g_said_ray_tip = false;
 
 // THE STATES the draw changes. The depth buffer stays on as the game has it.
 // Only when it is off does the draw turn it on. The meshes write depth and
@@ -1222,20 +1238,31 @@ void BuildFar() {
 // player where it points. Warm white, 2 mm of the room across. It draws with
 // overlay=0 too.
 // A RAY OF THE POINTING HAND: a tube along `line`, a mark at its end, the
-// light of the ray, and with `glow` its glow. Returns the triangles added.
-int AddRayLine(float line[2][3], float units, bool glow) {
+// light of the ray, and with `glow` its glow. With `tip` the mark is the glow
+// of ray_tip_math.h, which each eye pass builds. Returns the triangles added.
+int AddRayLine(float line[2][3], float units, bool glow, bool tip) {
   const int start = g_count;
   if (RayTube(glow && AddRayGlow(line, 2, units, kMenuGlowM, kMenuRay))) {
     g_count += overlay_math::BuildTube(line, 2, kMenuRayRadiusM * units,
                                        &g_world[g_count],
                                        kMaxTriangles - g_count);
   }
+  if (tip && g_tip_spots < kTipMaxSpots) {
+    TipSpot& spot = g_tip_spot[g_tip_spots++];
+    for (int k = 0; k < 3; ++k) {
+      spot.p[k] = line[1][k];
+      spot.rgb[k] = kMenuRay[k];
+    }
+    spot.units = units;
+  } else {
+    tip = false;
+  }
   // A MARK AT THE END: a small cross across the ray. In a room of the Temple
   // the game's Hand does not show, so the end of the line is the cursor, and
   // a line of this width is hard to see on a wall some meters away. The cross
   // grows with the length of the ray, so it has the same size in the view at
-  // each distance.
-  {
+  // each distance. With the glow at the end there is no cross.
+  if (!tip) {
     float d[3] = {line[1][0] - line[0][0], line[1][1] - line[0][1],
                   line[1][2] - line[0][2]};
     const float length = sqrtf(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
@@ -1285,12 +1312,12 @@ void BuildMenuRay() {
   float line[2][3], units = 0.0f;
   const bool ray =
       ControllersMenuRay(line[0], line[1], &units) && units > 0.0f;
-  if (RayCardFrame(ray, g_ray_glow, g_ray_glow_only, kMenuGlowM,
+  if (RayCardFrame(ray, g_ray_glow, g_ray_glow_only, g_ray_tip, kMenuGlowM,
                    kMenuRayRadiusM, kMenuRay, g_seconds, g_frame) ||
       !ray) {
     return;
   }
-  g_menu_ray_triangles = AddRayLine(line, units, true);
+  g_menu_ray_triangles = AddRayLine(line, units, true, g_ray_tip);
   static bool said = false;
   if (!said && g_menu_ray_triangles > 0) {
     said = true;
@@ -1318,7 +1345,9 @@ void BuildFlatRay() {
     g_flat_ray[0][k] = origin[k];
     g_flat_ray[1][k] = origin[k] + direction[k] * length;
   }
-  AddRayLine(g_flat_ray, units, false);
+  // The cut scene window draws no glow (DrawFlat), so this ray keeps the
+  // cross at its end.
+  AddRayLine(g_flat_ray, units, false, false);
   g_have_flat_ray = true;
   if (g_flat_ray_hits) ++g_flat_hits;
 }
@@ -1418,10 +1447,12 @@ void ProjectTips(int eye, const float m[12], float near_plane, float hx,
 int DrawGlow(IDirect3DDevice7* device, const float m[12], float near_plane,
              float hx, float hy, HRESULT* result) {
   *result = S_OK;
-  if (g_glow_lines == 0 && g_wall_count == 0) return 0;
+  if (g_glow_lines == 0 && g_wall_count == 0 && g_tip_spots == 0) return 0;
   float eye[3];
   int triangles = 0;
-  if (g_glow_lines > 0 && glow_math::CameraPlace(m, eye)) {
+  const bool have_eye = (g_glow_lines > 0 || g_tip_spots > 0) &&
+                        glow_math::CameraPlace(m, eye);
+  if (have_eye) {
     for (int l = 0; l < g_glow_lines; ++l) {
       const GlowLine& line = g_glow_line[l];
       const int made = glow_math::BuildRibbon(
@@ -1431,6 +1462,28 @@ int DrawGlow(IDirect3DDevice7* device, const float m[12], float near_plane,
         g_glow_opacity[t] = line.opacity;
       }
       triangles += made;
+    }
+    // THE GLOW AT THE END OF A RAY, after the ribbons, so it is over the end
+    // of its ray. Its radius is a share of the distance from this eye.
+    for (int s = 0; s < g_tip_spots; ++s) {
+      const TipSpot& spot = g_tip_spot[s];
+      const float distance = gesture_trail_math::Distance(spot.p, eye);
+      const float radius =
+          ray_tip_math::RadiusM(distance / spot.units) * spot.units;
+      const int made = ray_tip_math::BuildSpot(
+          spot.p, radius, eye, spot.rgb, &g_glow_triangle[triangles],
+          kGlowMaxTriangles - triangles);
+      for (int t = triangles; t < triangles + made; ++t) {
+        g_glow_opacity[t] = ray_tip_math::kOpacity;
+      }
+      triangles += made;
+      if (!g_said_ray_tip && made > 0) {
+        g_said_ray_tip = true;
+        ModLog("overlay      : the glow at the end of the ray is drawn, frame "
+               "%llu: %d triangles in this eye, %.1f cm across, %.2f m from "
+               "the eye", g_frame, made, radius * 200.0f / spot.units,
+               distance / spot.units);
+      }
     }
   }
   // THE WALL at the edge of the influence: triangles of the world with their
@@ -1789,6 +1842,27 @@ void OverlaySetRayGlowOnly(bool on) {
 
 int OverlayRayGlowOnlyValue() { return g_ray_glow_only ? 1 : 0; }
 
+void OverlaySetRayTip(bool on) {
+  g_ray_tip = on;
+  ModLog("overlay      : ray_tip=%d: %s", on ? 1 : 0,
+         on ? "the end of the menu ray is a round soft glow that faces the "
+              "eye, with no outline, in the eye pictures and over the panels"
+            : "the end of the menu ray is a small cross in the eye pictures, "
+              "and a disc in a ring of dark ink over the panels");
+}
+
+int OverlayRayTipValue() { return g_ray_tip ? 1 : 0; }
+
+void OverlayRayTipChange(const char* by) {
+  g_ray_tip = !g_ray_tip;
+  ControllersGrabPulse(1, 0.5f, g_ray_tip ? 0.40f : 0.08f);
+  ModLog("overlay      : %s: ray_tip=%d. %s, frame %llu", by,
+         g_ray_tip ? 1 : 0,
+         g_ray_tip ? "The end of the menu ray is a round glow"
+                   : "The end of the menu ray is a cross or a disc with ink",
+         ControllersFrameCount());
+}
+
 void OverlayRayGlowOnlyChange(const char* by) {
   g_ray_glow_only = !g_ray_glow_only;
   ControllersGrabPulse(1, 0.5f, g_ray_glow_only ? 0.40f : 0.08f);
@@ -1879,6 +1953,7 @@ void OverlayFrame() {
   g_teleport_triangles = 0;
   g_glow_points = 0;
   g_glow_lines = 0;
+  g_tip_spots = 0;
   g_glow_triangles = 0;
   g_glow_eye_ticks[0] = g_glow_eye_ticks[1] = 0;
   g_mesh_hands = false;
@@ -1944,6 +2019,7 @@ void OverlayIntroFrame(const float opacity[2]) {
   g_teleport_triangles = 0;
   g_glow_points = 0;
   g_glow_lines = 0;
+  g_tip_spots = 0;
   g_mesh_hands = false;
   for (int h = 0; h < kHands; ++h) {
     g_hand_valid[h] = false;
@@ -2080,7 +2156,7 @@ void OverlayDraw() {
     return;
   }
   if (g_count == 0 && !g_mesh_hands && g_glow_lines == 0 &&
-      g_wall_count == 0 && !HintModelHasDraw()) {
+      g_tip_spots == 0 && g_wall_count == 0 && !HintModelHasDraw()) {
     return;
   }
   const int eye = g_eye;

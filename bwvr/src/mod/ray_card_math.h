@@ -62,9 +62,11 @@ struct Look {
 };
 
 // glow_half_m is the half width of the glow over a tube, as the ray in the
-// eye pictures has it, and tube_radius_m the radius of its tube.
+// eye pictures has it, and tube_radius_m the radius of its tube. With mark
+// false the strip has no mark and stops at the end of the ray: the glow of
+// ray_tip_math.h is the end (ray_tip=1).
 inline Look LookOf(bool glow, bool only, float glow_half_m,
-                   float tube_radius_m) {
+                   float tube_radius_m, bool mark = true) {
   Look look;
   look.glow = glow;
   look.only = glow && only;
@@ -74,7 +76,8 @@ inline Look LookOf(bool glow, bool only, float glow_half_m,
   look.half_width =
       !glow ? tube_radius_m * kPlainHalfInRadii
             : glow_half_m * (look.only ? ray_glow_math::kOnlyWidth : 1.0f);
-  look.end_radius = kEndM < look.half_width ? kEndM : look.half_width;
+  look.end_radius =
+      !mark ? 0.0f : (kEndM < look.half_width ? kEndM : look.half_width);
   return look;
 }
 
@@ -284,6 +287,11 @@ inline void TexelOf(const Look& look, const float rgb[3], float length,
       }
       a = cover + a * (1.0f - cover);
     }
+  }
+  if (!(look.end_radius > 0.0f)) {
+    for (int k = 0; k < 3; ++k) rgba[k] = Clamp01(c[k]);
+    rgba[3] = Clamp01(a);
+    return;
   }
   // THE MARK AT THE END: the ink ring, then the disc of the color over it.
   const float e = s - length;

@@ -1073,7 +1073,7 @@ default. Each control has one job, and one button opens the game menu.
 | `gesture_trail` | 1 | 1: a ribbon follows the point of the draw while the draw button is held. 0: no trail (`miracles.md`, "The trail at the fingertip"). The switch "Gesture trail" of the debug page. Not in the launcher, and a save of the launcher removes it (`launcher.md`, "Retired keys") |
 | `ray_glow` | 1 | 1: the menu ray, the tether of the far grab and the arc of the teleport have a glow with a light that runs along the line from the hand. 0: plain tubes (`hand-model.md`, "The glow ribbons"). The switch "Ray glow" of the debug page. Not in the launcher, and a save of the launcher removes it (`launcher.md`, "Retired keys") |
 | `ray_glow_only` | 1 | With `ray_glow=1`. 1: the glow is the whole line, with no tube, 20 percent narrower and with a solid core. 0: the glow is over the tube (`hand-model.md`, "The glow ribbons"). The switch "Glow only" of the debug page. Not in the launcher |
-| `ray_over_panels` | 1 | 1: while a panel in the room is open, the menu ray is a quad layer over the panels, with a mark at its end. 0: the ray stays in the eye pictures, under the panels (`ui-layer.md`, "The ray over the panels"). The switch "Ray on panels" of the debug page. Not in the launcher |
+| `ray_over_panels` | 1 | 1: while a panel in the room is open, the menu ray is a quad layer over the panels, with the glow of `ray_tip` at its end. 0: the ray stays in the eye pictures, under the panels (`ui-layer.md`, "The ray over the panels"). The switch "Ray on panels" of the debug page. Not in the launcher |
 | `teleport` | 1 | 1: A makes the teleport. 0: A makes a jump |
 | `teleport_switch` | 1 | The switch of the game that the press of A keeps to. 1: the drag of the land, as the walk with the stick. 0: the double click jump (`god-view.md`, section 14.1). Not in the launcher |
 | `button_layout` | 1 | The layout of the buttons of the hand that does not point (5.1). 1: the menu button of the left controller opens the game menu, the second face button opens the ring, the first face button opens the spell book (`spell_book`), and the stick does not drive the ring. 0: the second face button opens the game menu, the first face button opens the ring, and the stick can drive the ring. The test key Ctrl and the Menu key goes between the two (`test_keys=1`). Not in the launcher |
@@ -2713,11 +2713,14 @@ is a point in the room.
   rule.
 
 **The mark at the end.** The Hand of the game does not show in a room, so the
-end of the line is the cursor. The overlay draws a small cross there, across
-the ray (`BuildMenuRay` in `overlay.cpp`). From its middle to an end the cross
-is 0.4 percent of the length of the ray, and 6 mm at the least. So it has the
-same size in the view on a wall 2 m away and on a wall 10 m away. The ray of
-a dialog box has the same cross.
+end of the line is the cursor. With `ray_tip=1` (the default) the overlay
+draws a round soft glow there, which faces each eye (`hand-model.md`, "The
+glow at the end of the menu ray"). Its radius is 1.3 percent of its distance
+from the eye, so it has the same size in the view on a wall 2 m away and on
+a wall 6 m away. With `ray_tip=0` the mark is a small cross across the ray
+(`AddRayLine` in `overlay.cpp`). From its middle to an end the cross is 0.4
+percent of the length of the ray, and 6 mm at the least. The ray of a dialog
+box has the same mark.
 
 ### 11.3 The buttons
 

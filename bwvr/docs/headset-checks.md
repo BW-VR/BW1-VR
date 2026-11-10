@@ -149,8 +149,9 @@ want.
     place, a panel that hides the pointing hand, keys, buttons or a ring that
     are blurred or hard to read or hard to hit with the ray, a ray that does
     not meet the arrow of the game, or a thumb that lets go of Y. Wrong
-    also: a ray that a panel or the welcome page hides, or a mark at the end
-    of the ray that is hard to see on the paper. With
+    also: a ray that a panel or the welcome page hides, or a glow at the end
+    of the ray that is not round, has an outline, is hard to see on the paper
+    or on the land, or is not at the depth of the panel. With
     `debug_menu=1`, also open the debug window, read a note, and scroll a
     long group with the stick. Wrong: rows or notes hard to read, arrows hard
     to hit, or a scroll that is too fast or too slow. Open the VR

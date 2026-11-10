@@ -1795,6 +1795,10 @@ picture shows it, and the hand picks the tile that it is over
 its box. The release chooses the tile, and a release in the middle chooses
 nothing. With the stick, the stick at its end is 13 cm from the middle.
 
+The ring is the quad layer `kCardRing`. A hand in front of the ring shows in
+front of it, in each eye, and a hand behind it is under it
+(`card_hand_front=1`, `ui-layer.md`, "A hand in front of a card").
+
 ### 10.2 The items
 
 The words are the words of `bwvr.ini`. "How" is what the mod writes into the

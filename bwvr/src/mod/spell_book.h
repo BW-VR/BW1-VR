@@ -59,5 +59,12 @@ void SpellBookOrbsChange(const char* by);
 int SpellBookAllValue();
 void SpellBookAllChange(const char* by);
 
+// hand_glow.cpp: true while the book is open with spell_book_point=1. Then
+// the glow at the Hand's point does not show: the page shows the point of
+// the pick.
+bool SpellBookHidesGlow();
+int SpellBookPointValue();
+void SpellBookPointChange(const char* by);
+
 // controllers.cpp, once a report window.
 void SpellBookReport();

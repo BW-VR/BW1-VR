@@ -204,6 +204,8 @@ void TargetGlowReport();
 // overlay.cpp: the mod's own meshes. See docs/hand-model.md, "Overlay
 // renderer".
 void OverlayFrame();
+// hand_cut.cpp
+void HandCutFrame();
 void OverlayPassEye(int eye);
 void OverlayReport();
 void InfluenceEdgeReport();
@@ -1654,6 +1656,9 @@ void __fastcall Process3dEngineBody(void* self, void* unused) {
   FrameTimeBeforePasses();
   EyeCleanBeginPair();
   g_in_pass = true;
+  // The hands in front of the page of the spell book or of the ring, with the
+  // hands of this frame and the views of the eye pictures of this frame.
+  HandCutFrame();
   // ONE ROLL FOR BOTH EYES.
   //
   // It is read here, not inside the loop. The scene walk can rewrite it

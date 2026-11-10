@@ -118,7 +118,9 @@ want.
     the row over the palm. Wrong: a book or a row that is hard to read or to
     reach, a pull that feels stiff or loose, a book that opens by accident,
     a bubble that looks wrong, or an orb in a cell that is not in its hole
-    of the page or is hard to see over the land behind it.
+    of the page or is hard to see over the land behind it. The pointing hand
+    must show in front of the page when it is in front, with no edge of
+    page over it or band of land beside it.
 17. **A gesture and a cast.** Draw miracles in the air, draw a circle for
     Storm or a shield, and try the switch "Gesture point" (debug page,
     Miracles). Take a miracle out with a shake and with a tap of B. Wrong: a

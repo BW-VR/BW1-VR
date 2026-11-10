@@ -78,6 +78,7 @@
 #include "radial_menu.h"
 #include "spell_book.h"
 #include "text_fit.h"
+#include "hand_cut.h"
 #include "gesture_panel.h"
 #include "script_frame_math.h"
 #include "temple.h"
@@ -6189,6 +6190,7 @@ void ControllersReport() {
   ControlsPageReport();
   SpellBookReport();
   text_fit::Report();
+  HandCutReport();
   GesturePanelReport();
   TempleReport();
   TextClickReport();

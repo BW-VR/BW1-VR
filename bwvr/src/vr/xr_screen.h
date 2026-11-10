@@ -104,6 +104,12 @@ struct PanelQuad {
 //   kCardRay           the ray of the pointing hand while it ends on a panel
 //                      in the room, over all the other quads (docs/ui-layer.md,
 //                      "The ray over the panels")
+//   kCardRingRight     the picture of the ring or of the spell book for the
+//                      right eye, while a hand is in front of it. Then
+//                      kCardRing is for the left eye only, and each picture
+//                      has holes where the hand is in front of the page for
+//                      its eye (hand_cut.cpp, docs/ui-layer.md, "A hand in
+//                      front of a card")
 const int kCardHintPointing = 0;
 const int kCardHintOther = 1;
 const int kCardSubtitles = 2;
@@ -113,7 +119,8 @@ const int kCardBubble = 5;
 const int kCardHintButton0 = 6;
 const int kHintButtonCards = 4;
 const int kCardRay = 10;
-const int kCards = 11;
+const int kCardRingRight = 11;
+const int kCards = 12;
 
 // True for a card that holds hints: the two hint cards and the cards of
 // the buttons.
@@ -148,6 +155,10 @@ struct CardLayer {
   // the settings window, the debug window, the welcome page) on the quad of
   // this card, for the report of the view for videos.
   bool room_panel;
+  // The eyes that see the quad: 0 both, 1 the left eye only, 2 the right
+  // eye only (XrCompositionLayerQuad::eyeVisibility). The view for videos
+  // shows a quad of the left eye or of both eyes.
+  int eye;
 };
 
 // THE CUT SCENE WINDOW of one frame (docs/cutscene-window.md). All poses are

@@ -778,7 +778,13 @@ dark panel with an alpha of 0.86 and white Segoe UI letters.
 
 **The pick.** The grip point of the pointing hand within 45 percent of a cell
 of the middle of an item, and 6 cm in front of or behind the book, picks it
-(`Pick`). The item stays until the hand is 65 percent of a cell away, or 9
+(`Pick`). A hand in front of the page shows in front of it, in each eye, and
+a hand behind it is under the page (`card_hand_front=1`, `ui-layer.md`, "A
+hand in front of a card"). With `spell_book_point=1` the page shows a small
+ring with a dot at the foot of the grip point while that point is 9 cm or
+less from the page: it fades with the distance. While the book is open the
+glow at the Hand's point does not show, because a grip on the page takes
+from the book and not from the world. The item stays until the hand is 65 percent of a cell away, or 9
 cm in front or behind. The item under the hand gets a gold halo and a light
 cell. The title of the book and the card of the pointing hand name it:
 "[Grip] Hold and pull out Fireball". Each new item gives the pulse `tick` on
@@ -1374,6 +1380,8 @@ so the plain game has no flat band.
 | `gesture_panel_cm` | 30 | The width of the row of the gesture pictures over the palm, in cm, for 3 pictures or more, 10 to 80 |
 | `spell_book_bubble` | 1 | 1: the bubble that the hand pulls out is the game's own bubble. 0: it is a flat picture with the two gestures |
 | `spell_book_orbs` | 1 | 1: each cell of the book shows the orb of the game. 0: a flat picture with the two gestures of the miracle |
+| `spell_book_point` | 1 | 1: the page shows the point of the pick, and the glow at the Hand's point does not show while the book is open. 0: no mark, and the glow as always |
+| `card_hand_front` | 1 | 0: the page of the book is over the hands, also where a hand is in front of it (`ui-layer.md`, "A hand in front of a card") |
 | `hint_card_style` | 1 | 1: the book is a page of parchment with dark ink, as the hint cards. 0: the dark panel with white letters. The key of the hint cards (`controller-hints.md`, 9.5) |
 | `debug_all_miracles` | 0 | 1: each town of the player knows every miracle of the game, its Worship Site shows up to 6 of them, and each site has no limit of prayer power. For tests |
 | `gesture_point` | 1 | 1: the tip of the index finger draws a gesture. 0: the grip point draws it. Not in the launcher |
@@ -1387,7 +1395,8 @@ a short pulse for 0.
 
 **The debug page** (`debug_menu=1`, the group Miracles): "Unlock all"
 changes `debug_all_miracles`, "Spell book" changes `spell_book`, "Book orbs"
-changes `spell_book_orbs`, "Book pull" changes `spell_book_pull_cm` between
+changes `spell_book_orbs`, "Book point" changes `spell_book_point`, "Book
+pull" changes `spell_book_pull_cm` between
 0 and its value in `bwvr.ini` (10 when that is 0), "Book bubble" changes
 `spell_book_bubble`, "Miracle hand" changes `miracle_hand`, "Gesture point"
 changes `gesture_point` (grip or fingertip), and "Gesture trail" changes

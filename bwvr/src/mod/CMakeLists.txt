@@ -75,6 +75,7 @@ add_library(bwvr_mod SHARED
     card_scroll.cpp
     text_click.cpp
     text_fit.cpp
+    hand_cut.cpp
     hand_direct.cpp
     hand_glow.cpp
     target_glow.cpp

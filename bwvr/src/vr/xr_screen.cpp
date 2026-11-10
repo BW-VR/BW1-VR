@@ -245,15 +245,16 @@ const char* const kCardName[kCards] = {
     "subtitle card", "ring", "keyboard", "bubble card",
     "first card of a button", "second card of a button",
     "third card of a button", "fourth card of a button",
-    "ray card"};
-static_assert(kCardRay + 1 == kCards,
+    "ray card", "ring of the right eye"};
+static_assert(kCardRingRight + 1 == kCards,
               "each card has a name");
 // What a card holds, for the line that says where it goes after a failure.
 const char* const kCardHolds[kCards] = {"hints", "hints", "subtitles",
                                         "items of the ring", "keys",
                                         "pulled miracles", "hints", "hints",
                                         "hints", "hints",
-                                        "rays over the panels"};
+                                        "rays over the panels",
+                                        "hands in front of the ring"};
 // The runtime refused a frame with a quad of the interface panel.
 bool g_panel_refused = false;
 
@@ -303,6 +304,8 @@ VideoQuad* VideoAdd(int kind, int index) {
 
 void VideoCard(int card, const CardLayer& layer, uint64_t view,
                uint32_t view_format) {
+  // The view for videos is the left eye.
+  if (layer.eye == 2) return;
   VideoQuad* q = VideoAdd(kVideoCard, card);
   if (q == nullptr) return;
   for (int i = 0; i < 3; ++i) q->position[i] = layer.position[i];
@@ -2811,7 +2814,9 @@ bool XrScreen::Impl::SendCard(int index, const CardLayer& card,
   // multiplied by the alpha, which is what the card holds.
   quad->layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
   quad->space = space;
-  quad->eyeVisibility = XR_EYE_VISIBILITY_BOTH;
+  quad->eyeVisibility = card.eye == 1   ? XR_EYE_VISIBILITY_LEFT
+                        : card.eye == 2 ? XR_EYE_VISIBILITY_RIGHT
+                                        : XR_EYE_VISIBILITY_BOTH;
   quad->subImage.swapchain = chain.swapchain;
   // With the clear edge the quad shows the picture and its frame of clear
   // texels. The quad grows by the share of the frame, so the picture keeps
@@ -2895,8 +2900,8 @@ void XrScreen::RecordVideoLayers(const float eye_position[3], uint32_t width,
     const int card_order[kCards] = {
         kCardSubtitles,       kCardHintPointing,    kCardHintOther,
         kCardHintButton0,     kCardHintButton0 + 1, kCardHintButton0 + 2,
-        kCardHintButton0 + 3, kCardRing,            kCardBubble,
-        kCardKeyboard, kCardRay};
+        kCardHintButton0 + 3, kCardRing,            kCardRingRight,
+        kCardBubble,          kCardKeyboard,        kCardRay};
     for (int i = 0; i < kCards; ++i) {
       const int card = card_order[i];
       if (g_have_staged_card[card] && g_staged_card[card].visible &&
@@ -3545,8 +3550,8 @@ bool XrScreen::BuildFrame() {
     const int card_order[kCards] = {
         kCardSubtitles,       kCardHintPointing,    kCardHintOther,
         kCardHintButton0,     kCardHintButton0 + 1, kCardHintButton0 + 2,
-        kCardHintButton0 + 3, kCardRing,            kCardBubble,
-        kCardKeyboard, kCardRay};
+        kCardHintButton0 + 3, kCardRing,            kCardRingRight,
+        kCardBubble,          kCardKeyboard,        kCardRay};
     for (int i = 0; i < kCards; ++i) {
       const int card = card_order[i];
       if (g_have_staged_card[card] && g_staged_card[card].visible &&

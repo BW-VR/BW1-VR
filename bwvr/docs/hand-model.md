@@ -1607,7 +1607,9 @@ around the point, so the player cannot see where it is. A glow sits on it. It sa
 the grip does there now.
 
 By default the disc shows only while a press of the grip at the point acts on
-something (`hand_glow_idle=0`). The disc over nothing and the disc while the
+something (`hand_glow_idle=0`). While the spell book is open the disc does
+not show (`spell_book_point=1`): a grip on the page takes from the book, and
+the page shows the point of its pick (`miracles.md`, "The pick"). The disc over nothing and the disc while the
 Hand holds an object show only with `hand_glow_idle=1`.
 
 **What it shows.** The look comes from the game's interface hand mode

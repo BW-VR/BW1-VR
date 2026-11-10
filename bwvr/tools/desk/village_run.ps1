@@ -43,7 +43,7 @@
 #                gesture_panel=1 and the book on the palm.
 # The other kinds (charge, store, neartake, land, job, tree, throw,
 # throwlive, throwhouse, throwhouselow, throwpile, probe, workshop, site, build, scaffold,
-# turn, fartake, fartotem, choice, look, book, unlock, controls, rayover, walk, wall,
+# turn, fartake, fartotem, choice, look, book, bookhand, unlock, controls, rayover, walk, wall,
 # housestop, headhouse, pinch, small,
 # aimsign, aimmiracle, aimpast, tglow, tooltip) have a comment at their steps
 # below.
@@ -221,6 +221,25 @@ if ($Kind -eq 'totem') {
                  'x@1540+4 shot@1560+1'
     }
     $keys = "$keys;spell_book_test_save=16"
+} elseif ($Kind -eq 'bookhand') {
+    # The pointing hand in front of the page of the spell book and behind it
+    # (bwvr/docs/ui-layer.md, "A hand in front of a card"). X opens the book,
+    # and each word "book" steps the right hand to the next item, 0 cm, 5 cm
+    # in front of the page and 5 cm behind it (spell_book_test_depths). Then
+    # the word "pull" moves the hand 15 cm toward the head, and back. X
+    # closes the book. The lines "hand cut" give the holes of each eye, and
+    # the pictures bwvr-handcut-left and -right have them (hand_cut_test_save).
+    # With the renderer Vulkan and video_view=1 each shot also writes
+    # bwvr-vk-video-N.bmp: the left eye with the book over it, as the headset
+    # composes it. -Set "card_hand_front=0" gives the page over the hand.
+    if ($Plan -eq '') { $Plan = 'gosite' }
+    if ($Census -eq '') { $Census = '890' }
+    if ($Seconds -eq 0) { $Seconds = 40 }
+    if ($Steps -eq '') {
+        $Steps = $pre + 'seek@920+1 x@1000+4 book@1030+1 shot@1050+1 book@1080+1 shot@1100+1 ' +
+                 'book@1130+1 shot@1150+1 pull@1170+10 shot@1200+1 pull@1220+10 x@1300+4'
+    }
+    $keys = "$keys;spell_book_test_depths=0 5 -5;hand_cut_test_save=6;spell_book_test_save=8;video_view=1;test_frame_rate=60"
 } elseif ($Kind -eq 'unlock') {
     # The switch "Unlock all miracles" of the debug window, with no keyboard
     # (bwvr/docs/miracles.md, "The debug switch"). Y and the left hand choose
@@ -909,6 +928,9 @@ if ($Kind -eq 'tglow') {
 }
 if ($Kind -eq 'palm') {
     $pattern ='^gesture panel:|^spell book   : (the book|the palm)|^controllers  : the fake left hand'
+}
+if ($Kind -eq 'bookhand') {
+    $pattern = '^spell book   : (test|the book|spell_book_point)|^hand cut     :|^controllers  : the (word book|fake hand steps)|^video view   : (video_view|the eye picture)'
 }
 if ($Kind -eq 'unlock') {
     $pattern = '^spell book   :|^book bubble  :|^text fit     : (check: text_fit|.*cut)|^debug page   :|^debug window : (the window (opens|closes)|the trigger)|' +

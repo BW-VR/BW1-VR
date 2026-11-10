@@ -314,6 +314,11 @@ int SpellBookAllValue();
 void SpellBookAllChange(const char* by);
 int SpellBookOrbsValue();
 void SpellBookOrbsChange(const char* by);
+int SpellBookPointValue();
+void SpellBookPointChange(const char* by);
+// A hand in front of the page of the book and of the ring (hand_cut.cpp).
+int HandCutValue();
+void HandCutChange(const char* by);
 // The draw of a gesture (controllers.cpp, overlay.cpp).
 int ControllersGesturePointValue();
 void ControllersGesturePointChange(const char* by);
@@ -615,6 +620,8 @@ const Switch kSwitches[] = {
      L"off|on"},
     {kGroupInterface, L"Text click", L"Trigger clicks a text of the game",
      "text_click", TextClickValue, TextClickChange, L"off|on"},
+    {kGroupInterface, L"Hand in front", L"A hand in front of the book or ring",
+     "card_hand_front", HandCutValue, HandCutChange, L"under page|in front"},
 
     // Hand
     {kGroupHand, L"Catch moving", L"Reach for an object that moves",
@@ -752,6 +759,9 @@ const Switch kSwitches[] = {
     {kGroupMiracles, L"Book orbs", L"The game's orbs in the spell book",
      "spell_book_orbs", SpellBookOrbsValue, SpellBookOrbsChange,
      L"pictures|orbs"},
+    {kGroupMiracles, L"Book point", L"Mark of the pick on the page",
+     "spell_book_point", SpellBookPointValue, SpellBookPointChange,
+     L"off|on"},
     {kGroupMiracles, L"Book pull", L"Pull a miracle out of the book",
      "spell_book_pull_cm", SpellBookPullValue, SpellBookPullChange,
      L"off|on"},
@@ -1051,6 +1061,10 @@ const wchar_t* const kTips[] = {
     // Text click
     L"On: while a text of the game waits for a click, the card shows its "
     L"prompt and the trigger clicks it. Off: the usual rule of a hint.",
+    // Hand in front
+    L"In front: a hand that is nearer to the eye than the page of the spell "
+    L"book or of the ring shows in front of it, in each eye. Under page: the "
+    L"page is over the hands.",
     // Catch moving
     L"Extra reach for an object that moves. Pick: on the pick reach only. "
     L"Rest: on all of the reach at rest. Open: as Rest, the guard ends at an "
@@ -1214,6 +1228,9 @@ const wchar_t* const kTips[] = {
     // Book orbs
     L"Orbs: each cell of the spell book shows the orb of the game, the glass "
     L"ball with the miracle in it. Pictures: a flat picture with the gestures.",
+    // Book point
+    L"On: a ring with a dot on the page shows the point that picks an item, "
+    L"and the glow at the Hand's point does not show while the book is open.",
     // Book pull
     L"On: the hand pulls a miracle out of the book. Off: the grip takes the "
     L"miracle at once.",

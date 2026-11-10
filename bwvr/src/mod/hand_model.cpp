@@ -1454,6 +1454,17 @@ bool HandModelIndexTip(int hand, float out[3]) {
 
 bool HandModelBuilt() { return g_built[0].valid || g_built[1].valid; }
 
+int HandModelWorldMesh(int hand, const float** points, const uint32_t** index,
+                       int* vertices) {
+  if (hand < 0 || hand > 1 || !g_built[hand].valid || g_mesh.index == nullptr) {
+    return 0;
+  }
+  *points = g_built[hand].world;
+  *index = g_mesh.index;
+  *vertices = g_mesh.vertices;
+  return g_mesh.triangles;
+}
+
 void HandModelSetRoomLight(bool on) { g_room_light = on; }
 
 void HandModelSetFrontDepth(bool on) { g_front_depth = on; }

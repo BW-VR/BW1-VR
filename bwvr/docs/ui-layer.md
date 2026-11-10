@@ -3111,3 +3111,77 @@ inside the box.
 
 A game text on a hint card (a tooltip of the game) is measured when it
 shows: a cut of a game text has its log line in a normal play.
+
+## 28. A hand in front of a card
+
+The spell book and the ring are the quad layer `kCardRing`, and the runtime
+draws a quad layer over the eye pictures. The hands of the mod are in the
+eye pictures. With no more than that, the page of the book hides the hand
+that picks an item, also when the hand is in front of the page, and the
+ring hides the hand that moves over it. The code is in
+`src/mod/hand_cut.cpp`, with the pure math in `hand_cut_math.h`.
+
+**The real order** (`card_hand_front=1`). Once a frame, after the hands are
+built and before the eye passes, for each eye:
+
+1. Each triangle of the mesh of each hand (`HandModelWorldMesh`, skinned on
+   the CPU in the world) goes into the LOCAL space of OpenXR, and is cut to
+   its part in front of the plane of the page (`ClipFront`).
+2. That part goes onto the page along the lines from the eye
+   (`OntoPage`). The eye is the view that the projection layer of that eye
+   declares (`StereoDeclaredView`), so the hole is where that eye picture
+   has the hand.
+3. The parts fill a mask of the page, with 2 by 2 samples in each pixel
+   (`FillConvex`). The mask grows by 1 pixel, for the time between the draw
+   and the display.
+
+The page gets a hole where the mask is, and the eye sees its eye picture,
+with the hand, through it. A part of the hand behind the page makes no
+hole, so the page stays over it. The two eyes see the hand at two places of
+the page, so while a hand is in front of the page, the card goes out as two
+quads in one place: `kCardRing` for the left eye and `kCardRingRight` for
+the right eye (`XrCompositionLayerQuad::eyeVisibility`), each with its own
+holes. When no hand is in front, the card is one quad for both eyes, as
+before. The text stays sharp, because the page is still a quad layer. The
+view for videos shows the quad of the left eye.
+
+**The ways that the mod does not use.** A hole for both eyes in one picture
+must be the union of the two places of the hand, so each eye sees the land
+in a band beside the hand. A second draw of the hand on a layer of its own
+needs the pixels of the hand of each eye from the GPU. The book in the eye
+pictures with the depth test loses the sharp text of a layer. A depth
+layer (`XR_KHR_composition_layer_depth`) is not certain with each runtime,
+and the order of a quad layer over a projection layer does not change with
+it.
+
+**The other cards.** The keyboard, the panel of places, the debug window
+and the VR Settings window take the ray, and the ray goes over them
+(section 25), so no hand touches them. The ring and its sheets (the places
+and the leashes) are the quad of the ring, so they get the same cut. The
+hints and the subtitles take no touch.
+
+**Limits.** The low poly hands (`hand_model=0`) have no mesh here, so they
+make no hole. The hole is the whole mesh: the part of the wrist that the
+texture of the game fades also makes a hole. A head that moves fast between
+the draw and the display can show the page 1 or 2 pixels into the edge of
+the hand.
+
+**The log.** One line when a hand comes in front of a page and when it goes:
+
+```
+hand cut     : frame N, a hand is in front of the page of the spell book: 4210 px of holes for the left eye and 3986 px for the right eye. The card goes out as one quad for each eye
+hand cut     : frame N, no hand is in front of the page of the spell book now. The card goes out as one quad for both eyes
+hand cut     : this window a hand was in front of a page in 120 frames: the card went out as one quad for each eye. The largest hole of an eye had 5120 px, and the longest cut took 0.40 ms
+```
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `card_hand_front` | 1 | 0: the page of the spell book and of the ring is over the hands, also where a hand is in front of it. The switch "Hand in front" of the debug page (group Interface) |
+| `hand_cut_test_save` | 0 | Test key. N: saves the pictures of both eyes of the first N frames with a cut, at most one each 30 frames, as `bwvr-handcut-left-<frame>.bmp` and `bwvr-handcut-right-<frame>.bmp` |
+
+The math checks are in `test/controller_math/hand_cut_checks.h`: the cut of
+a triangle at the plane, the place on the page from each eye (4 mm apart
+for a point 5 cm in front of a page 45 cm away), no hole for a point behind
+the page or for an eye behind it, the fill of a polygon and its box, and
+the cover of a half pixel. The recipe `village_run.ps1 -Kind bookhand`
+puts the hand on the page, 5 cm in front of it and 5 cm behind it.

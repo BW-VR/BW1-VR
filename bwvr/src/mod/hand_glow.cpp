@@ -124,6 +124,8 @@ bool HandDirectNearTarget(float center[3], float* radius, float* half_height,
 // or of the frame before, or null.
 void* HandDirectNearTargetObject(bool* acts);
 bool HandDirectGlowIdle();
+// spell_book.cpp: the book is open, and its page shows the point of the pick.
+bool SpellBookHidesGlow();
 // overlay.cpp: the world to camera matrix of this eye pass, with the camera
 // matrices put back as they were.
 void OverlayEyeMatrix(float m[12]);
@@ -818,6 +820,10 @@ void HandGlowDraw() {
   if (!HandDirectGlowFacts(point, &length, &mode, &holding, &eye, &frame)) {
     return;
   }
+  // While the spell book is open, a grip on its page takes from the book.
+  // The page shows the point of the pick, so the glow of the world does not
+  // show (spell_book_point=1).
+  if (SpellBookHidesGlow()) return;
   if (eye < 0 || eye > 1 || g_asked_frame[eye] == frame) return;
   g_asked_frame[eye] = frame;
 

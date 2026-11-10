@@ -29,7 +29,14 @@
 // The switch at 0 puts the flags back. The miracles stay.
 //
 // THE PICTURE shares the quad layer of the ring (kCardRing): the book does
-// not open while the ring shows, and the ring closes the book.
+// not open while the ring shows, and the ring closes the book. A hand in
+// front of the page shows in front of it (hand_cut.cpp, card_hand_front=1).
+//
+// THE POINT OF THE PICK (spell_book_point=1). The grip point of the pointing
+// hand picks an item, along the normal of the page. So the page shows a
+// mark at the foot of that point while the hand is near the page, and the
+// glow at the Hand's point (hand_glow.cpp) does not show while the book is
+// open: a grip on the page takes from the book, not from the world.
 //
 // THE ORBS (spell_book_orbs=1). Each cell shows the orb of the game: the
 // glass ball with the miracle in it, as on the land and in the Hand. The game
@@ -62,6 +69,13 @@
 //                            power. For tests
 //   spell_book_orbs=1        each cell shows the orb of the game. 0: a flat
 //                            picture with the two gestures of the miracle
+//   spell_book_point=1       the mark of the point of the pick on the page,
+//                            and no glow at the Hand's point while the book
+//                            is open. 0: no mark, and the glow as always
+//   spell_book_test_depths   a test key: for each word "book" of the
+//                            scripted controller in turn, the distance of
+//                            the hand in front of the page in cm, for
+//                            example "0 5 -5" (below 0 behind the page)
 //   spell_book_test_save=0   a test key: the mod saves the first N pictures
 //                            of the book as bwvr-book-NNNNN.bmp
 //   hint_card_style=1        1: the book is a page of parchment with dark
@@ -73,6 +87,7 @@
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <wchar.h>
 
@@ -92,6 +107,8 @@
 #include "spell_book_math.h"
 #include "temple.h"
 #include "text_fit.h"
+#include "hand_cut.h"
+#include "hand_cut_math.h"
 
 extern void ModLog(const char* format, ...);
 
@@ -353,6 +370,7 @@ bool g_style = true;      // hint_card_style: the book is a page of parchment
 bool g_game_bubble = true;  // the game draws the bubble that the hand pulls out
 bool g_palm = true;       // spell_book_palm: the palm that turns up opens it
 bool g_orbs = true;       // spell_book_orbs: the cells show the orbs of the game
+bool g_point = true;      // spell_book_point: the mark of the point of the pick
 bool g_game_ok = false;   // the functions of the game have their bytes
 
 bool IniPath(char path[MAX_PATH]) {
@@ -388,6 +406,7 @@ void ReadSettings() {
   g_style = IniKey("hint_card_style", 1) != 0;
   g_palm = IniKey("spell_book_palm", 1) != 0;
   g_orbs = IniKey("spell_book_orbs", 1) != 0;
+  g_point = IniKey("spell_book_point", 1) != 0;
   g_game_ok =
       SameBytes(kCanRequest, kCanRequestBytes, sizeof(kCanRequestBytes)) &&
       SameBytes(kSendPacket, kSendPacketBytes, sizeof(kSendPacketBytes)) &&
@@ -428,6 +447,11 @@ void ReadSettings() {
                   "the miracle in it"
                 : "each cell shows a flat picture with the two gestures of "
                   "the miracle");
+  ModLog("spell book   : spell_book_point=%d: %s", g_point ? 1 : 0,
+         g_point ? "the page shows the point of the pick, and the glow at the "
+                   "Hand's point does not show while the book is open"
+                 : "no mark of the point of the pick, and the glow at the "
+                   "Hand's point as always");
   if (!g_game_ok) {
     ModLog("spell book   : the functions of the game do not have the bytes "
            "of v1.42, so the book does not open");
@@ -730,6 +754,15 @@ bool g_raster_failed = false;
 bool g_page = false;  // the book is a page of parchment (hint_card_style=1)
 uint8_t g_base[kTexture * kTexture * 4];
 uint8_t g_staged[kTexture * kTexture * 4];
+// The staged picture for the right eye while a hand is in front of the page
+// (hand_cut.cpp), and whether the cut changed g_staged in this frame.
+uint8_t g_staged_right[kTexture * kTexture * 4];
+bool g_hand_dirtied = false;
+// The foot of the grip point of the pointing hand on the page this frame:
+// meters to the right and up, and its distance in front of the page.
+bool g_point_valid = false;
+float g_point_at[3] = {0.0f, 0.0f, 0.0f};
+bool g_staged_marked = false;
 int g_width_px = 0, g_height_px = 0;
 Look g_drawn;
 bool g_have_drawn = false;
@@ -1587,13 +1620,59 @@ void PlaceBubble(int type, const float at[3], const float head[3],
   StageBubble(at, head);
 }
 
+// THE MARK of the point of the pick (spell_book_point=1): while the grip
+// point of the pointing hand is near the page, a small ring with a dot
+// shows at its foot on the page. It fades with the distance from the page,
+// and it is gone past the distance that keeps a pick (kKeepDepthM).
+const float kMarkRadiusM = 0.004f;
+const float kMarkDotM = 0.0015f;
+const float kMarkMargin = 0.02f;
+
+bool MarkShows() {
+  if (!g_point || !g_point_valid || !g_have_plane) return false;
+  const Layout l = LayoutFor(g_drawn.count);
+  return fabsf(g_point_at[2]) <= kKeepDepthM &&
+         fabsf(g_point_at[0]) <= 0.5f * l.width_m + kMarkMargin &&
+         fabsf(g_point_at[1]) <= 0.5f * l.height_m + kMarkMargin;
+}
+
+void DrawMark() {
+  const float cx = 0.5f * g_width_px + g_point_at[0] * kPixelsPerMeter;
+  const float cy = 0.5f * g_height_px - g_point_at[1] * kPixelsPerMeter;
+  const float outer = kMarkRadiusM * kPixelsPerMeter;
+  const float inner = outer - 3.0f;
+  const float dot = kMarkDotM * kPixelsPerMeter;
+  float a = 1.0f - fabsf(g_point_at[2]) / kKeepDepthM;
+  if (a < 0.35f) a = 0.35f;
+  const Rgb& ring = g_page ? kPageInk : kWhite;
+  const Rgb& middle = g_page ? kPageHalo : kHalo;
+  const int x0 = static_cast<int>(floorf(cx - outer - 1.0f));
+  const int x1 = static_cast<int>(ceilf(cx + outer + 1.0f));
+  const int y0 = static_cast<int>(floorf(cy - outer - 1.0f));
+  const int y1 = static_cast<int>(ceilf(cy + outer + 1.0f));
+  for (int y = y0 < 0 ? 0 : y0; y < y1 && y < g_height_px; ++y) {
+    uint8_t* row = g_staged + static_cast<size_t>(y) * kTexture * 4;
+    for (int x = x0 < 0 ? 0 : x0; x < x1 && x < g_width_px; ++x) {
+      const float dx = x + 0.5f - cx, dy = y + 0.5f - cy;
+      const float r = sqrtf(dx * dx + dy * dy);
+      const float band = hand_cut_math::MarkCover(r, outer) *
+                         (1.0f - hand_cut_math::MarkCover(r, inner));
+      Over(row + x * 4, ring, 0.85f * a * band);
+      Over(row + x * 4, middle, a * hand_cut_math::MarkCover(r, dot));
+    }
+  }
+}
+
 // The book picture of this frame, with the hole of the game's bubble when it
 // is in front of the page. The hole is clear in its middle and soft at its
 // edge.
 void StagePicture(uint64_t frame) {
   const bool holed = g_hole_frame == frame && g_hole_frame != 0;
-  if (g_staged_new || holed || g_staged_holed) {
+  const bool marked = MarkShows();
+  if (g_staged_new || holed || g_staged_holed || g_hand_dirtied || marked ||
+      g_staged_marked) {
     g_staged_new = false;
+    g_hand_dirtied = false;
     g_staged_serial = bwvr::XrScreen::NewCardSerial();
     for (int y = 0; y < g_height_px; ++y) {
       memcpy(g_staged + static_cast<size_t>(y) * kTexture * 4,
@@ -1602,6 +1681,8 @@ void StagePicture(uint64_t frame) {
     }
   }
   g_staged_holed = holed;
+  g_staged_marked = marked;
+  if (marked) DrawMark();
   if (!holed) return;
   const float cx = 0.5f * g_width_px + g_hole.x * kPixelsPerMeter;
   const float cy = 0.5f * g_height_px - g_hole.y * kPixelsPerMeter;
@@ -1903,6 +1984,7 @@ void SpellBookFrame() {
   float point[3], point_turn[4], unused_head[3];
   bool unused_left = false;
   int hover = -1;
+  g_point_valid = false;
   if (g_pull.state != kPullNone) {
     // While the bubble is out of the book, or on its way back, the pick
     // stays on its item.
@@ -1912,6 +1994,8 @@ void SpellBookFrame() {
     float in_plane[3];
     InPlane(g_plane, point, in_plane);
     hover = Pick(g_layout, in_plane, current);
+    g_point_valid = true;
+    for (int i = 0; i < 3; ++i) g_point_at[i] = in_plane[i];
   }
   const int hover_type = hover >= 0 ? g_items[hover].type : -1;
   if (hover_type != g_hover_type) {
@@ -1962,7 +2046,10 @@ void SpellBookFrame() {
   layer.height = g_height_px / kPixelsPerMeter;
   layer.serial = g_staged_serial;
   bwvr::XrScreen::StageCard(bwvr::kCardRing, layer);
+  HandCutOffer(layer, g_staged_right, &g_hand_dirtied, "spell book");
 }
+
+bool SpellBookHidesGlow() { return g_open && g_point; }
 
 bool SpellBookPumpGrip(bool grip_down) {
   if (!g_on) return false;
@@ -2049,14 +2136,36 @@ int SpellBookHint(MiracleLine lines[kMiracleLines]) {
 
 bool SpellBookTestItem(float out[3]) {
   if (!g_open || !g_have_plane || g_count == 0) return false;
+  // spell_book_test_depths: for each word "book" in turn, the distance of
+  // the hand in front of the page in cm (below 0 behind it), a test key.
+  static int depths[8] = {0};
+  static int depth_count = -1;
+  static int depth_next = 0;
+  if (depth_count < 0) {
+    depth_count = 0;
+    char path[MAX_PATH], text[128] = "";
+    if (IniPath(path)) {
+      GetPrivateProfileStringA("bwvr", "spell_book_test_depths", "", text,
+                               sizeof(text), path);
+    }
+    char* context = nullptr;
+    for (char* word = strtok_s(text, " ,", &context);
+         word != nullptr && depth_count < 8;
+         word = strtok_s(nullptr, " ,", &context)) {
+      depths[depth_count++] = atoi(word);
+    }
+  }
+  const int depth_cm =
+      depth_count > 0 ? depths[depth_next++ % depth_count] : 0;
   const int i = g_test_item % g_count;
   ++g_test_item;
   float x = 0.0f, y = 0.0f;
   ItemCenter(g_layout, i, &x, &y);
   PointOn(g_plane, x, y, out);
+  for (int k = 0; k < 3; ++k) out[k] += g_plane.normal[k] * depth_cm * 0.01f;
   ModLog("spell book   : test: the word \"book\" steps the pointing hand to "
-         "item %d (%s) of the book, frame %llu", i,
-         NarrowName(g_items[i].type), ControllersFrameCount());
+         "item %d (%s) of the book, %d cm in front of the page, frame %llu",
+         i, NarrowName(g_items[i].type), depth_cm, ControllersFrameCount());
   return true;
 }
 
@@ -2112,6 +2221,22 @@ void SpellBookBubbleChange(const char* by) {
          g_game_bubble ? 1 : 0,
          g_game_bubble ? "The game draws the bubble that the hand pulls out"
                        : "The bubble that the hand pulls out is a flat picture",
+         ControllersFrameCount());
+}
+
+int SpellBookPointValue() {
+  ReadSettings();
+  return g_game_ok ? (g_point ? 1 : 0) : kDebugCannot;
+}
+
+void SpellBookPointChange(const char* by) {
+  ReadSettings();
+  g_point = !g_point;
+  ControllersGrabPulse(1, 0.5f, g_point ? 0.40f : 0.08f);
+  ModLog("spell book   : %s: spell_book_point=%d. %s, frame %llu", by,
+         g_point ? 1 : 0,
+         g_point ? "The page shows the point of the pick"
+                 : "No mark of the point of the pick",
          ControllersFrameCount());
 }
 

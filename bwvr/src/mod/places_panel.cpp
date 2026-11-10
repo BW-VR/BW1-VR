@@ -80,6 +80,7 @@
 
 #include "../vr/xr_screen.h"
 #include "card_scroll.h"
+#include "text_fit.h"
 #include "controllers.h"
 #include "cutscene_window.h"
 #include "haptics.h"
@@ -362,8 +363,7 @@ void DrawSeal(kit::Canvas* c, int m, int set, void*) {
   SetTextColor(c->dc, RGB(255, 255, 255));
   RECT rect = {w[0], baseline - g_digit_font.ascent, w[2],
                baseline - g_digit_font.ascent + g_digit_font.height};
-  DrawTextW(c->dc, digit, -1, &rect,
-            DT_SINGLELINE | DT_NOPREFIX | DT_CENTER | DT_TOP);
+  text_fit::Draw(c->dc, digit, rect, DT_CENTER | DT_TOP, 1, "places sheet");
   GdiFlush();
   card_scroll::SealInk(picture, c->bits, w[0], w[1], w[2], w[3], 0);
   if (set == 0) kit::Fade(c, s);
@@ -749,4 +749,31 @@ void PlacesPanelReport() {
   }
   g_opens = g_presses = g_refused = g_keys = g_draws = 0;
   g_draw_ms = g_draw_most_ms = 0.0;
+}
+
+// THE CHECK of the words (text_fit_test=1): the word of each button in its
+// key, and the note of each button and of each press in the box of the note.
+// See text_fit.h.
+void PlacesPanelTextFitTest() {
+  if (!ParchmentStart()) return;
+  HDC dc = g_canvas.dc;
+  int n[4];
+  NoteBox(n);
+  const auto note = [&](const wchar_t* text) {
+    text_fit::Check(dc, g_note_font.font, text, n[2] - n[0], n[3] - n[1], 1,
+                    "places sheet");
+  };
+  for (int b = 0; b < kButtons; ++b) {
+    int r[4];
+    ButtonRect(b, r);
+    text_fit::Check(dc, g_button_font.font, kKindWord[KindOf(b)], r[2], r[3],
+                    1, "places sheet");
+    wchar_t words[64];
+    HoverNote(b, words, 64);
+    note(words);
+  }
+  note(L"Bookmark 9 is not set");
+  note(L"Bookmark 9 is set at the Hand");
+  note(L"Bookmark 9 is removed");
+  note(L"Not now");
 }

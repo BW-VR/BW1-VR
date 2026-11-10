@@ -104,6 +104,7 @@
 #include "hint_card_math.h"
 #include "places_panel.h"
 #include "radial_menu.h"
+#include "text_fit.h"
 #include "radial_menu_math.h"
 #include "ring_sheet_math.h"
 #include "bookmark_aim.h"
@@ -1501,8 +1502,8 @@ void RasterPlain(const Look& look) {
     badge[i].right = badge[i].left + w;
     badge[i].top = static_cast<LONG>(cy) - h / 2;
     badge[i].bottom = badge[i].top + h;
-    const UINT flags = DT_SINGLELINE | DT_NOPREFIX | DT_CENTER | DT_VCENTER |
-                       DT_END_ELLIPSIS;
+    // The words fit the badge (text_fit.h): a smaller font, no ellipsis.
+    const UINT flags = DT_CENTER | DT_VCENTER;
     RECT r = badge[i];
     r.left += kBadgePad / 2;
     r.right -= kBadgePad / 2;
@@ -1511,15 +1512,15 @@ void RasterPlain(const Look& look) {
       r.bottom = r.top + 44;
       badge_split[i] = r.bottom;
       SelectObject(g_dc, g_switch_font);
-      DrawTextW(g_dc, word, -1, &r, flags);
+      text_fit::Draw(g_dc, word, r, flags, 1, "ring badge");
       RECT v = r;
       v.top = badge_split[i] - 4;
       v.bottom = badge[i].bottom - 8;
       SelectObject(g_dc, g_value_font);
-      DrawTextW(g_dc, value, -1, &v, flags);
+      text_fit::Draw(g_dc, value, v, flags, 1, "ring badge");
     } else {
       SelectObject(g_dc, g_badge_font);
-      DrawTextW(g_dc, word, -1, &r, flags);
+      text_fit::Draw(g_dc, word, r, flags, 1, "ring badge");
     }
   }
   RECT card;
@@ -1557,9 +1558,8 @@ void RasterPlain(const Look& look) {
       split = name.bottom;
     }
     SelectObject(g_dc, name_font);
-    DrawTextW(g_dc, look.name, -1, &name,
-              DT_SINGLELINE | DT_NOPREFIX | DT_CENTER | DT_VCENTER |
-                  DT_END_ELLIPSIS);
+    text_fit::Draw(g_dc, look.name, name, DT_CENTER | DT_VCENTER, 1,
+                   "ring card");
     if (two) {
       RECT note = card;
       note.left += kCardPad - 8;
@@ -1567,9 +1567,8 @@ void RasterPlain(const Look& look) {
       note.top = split;
       note.bottom = card.bottom - 14;
       SelectObject(g_dc, g_note_font);
-      DrawTextW(g_dc, look.note, -1, &note,
-                DT_SINGLELINE | DT_NOPREFIX | DT_CENTER | DT_VCENTER |
-                    DT_END_ELLIPSIS);
+      text_fit::Draw(g_dc, look.note, note, DT_CENTER | DT_VCENTER, 1,
+                     "ring card");
     }
   }
   GdiFlush();
@@ -1821,14 +1820,14 @@ int WorkWidth(const ScrollFont& f, const wchar_t* text) {
 }
 
 // The letters of one line, white on black, centered from left to right, on
-// the baseline.
+// the baseline. A text that is too wide gets a smaller font on the same
+// baseline (text_fit.h).
 void WorkLetters(const ScrollFont& f, const wchar_t* text, int left, int right,
                  int baseline) {
   SelectObject(g_work_dc, f.font);
   RECT r = {left, baseline - f.ascent, right, baseline - f.ascent + f.height};
-  DrawTextW(g_work_dc, text, -1, &r,
-            DT_SINGLELINE | DT_NOPREFIX | DT_CENTER | DT_TOP |
-                DT_END_ELLIPSIS | DT_NOCLIP);
+  text_fit::Draw(g_work_dc, text, r, DT_CENTER | DT_TOP | DT_NOCLIP, 1,
+                 "ring scroll");
 }
 
 // Clears w by h pixels of the work picture and of its letters.
@@ -3422,4 +3421,48 @@ void RadialMenuReport() {
   g_raster_ms = g_stage_ms = 0.0;
   g_baked = 0;
   g_bake_ms = 0.0;
+}
+
+// THE CHECK of the words (text_fit_test=1): each word of an item, each
+// label, value and name of a switch of the debug page, and each group, in
+// the widest badge and card of each look. See text_fit.h.
+void RadialMenuTextFitTest() {
+  if (!RasterStart()) return;
+  const int badge_w = kBadgeMost - kBadgePad;
+  const int card_w = kCardWide - 2 * (kCardPad - 8);
+  const bool scroll = ScrollStart();
+  const int seal_w = kBadgeMost - 2 * kSealInside;
+  const int scroll_card_w = kCardWide + kScrollCardMore -
+                            card_scroll::kWordsLeft - card_scroll::kWordsRight;
+  const auto words = [&](HFONT plain, const ScrollFont* sealed,
+                         const wchar_t* text, int plain_w, int plain_h,
+                         int sealed_w) {
+    text_fit::Check(g_dc, plain, text, plain_w, plain_h, 1, "ring (plain)");
+    if (scroll) {
+      text_fit::Check(g_work_dc, sealed->font, text, sealed_w, sealed->height,
+                      1, "ring (scroll)");
+    }
+  };
+  for (int item = kItemNone + 1; item < kItems; ++item) {
+    words(g_badge_font, &g_seal_word, kItemInfo[item].word, badge_w,
+          kBadgeHeight, seal_w);
+    words(g_name_font, &g_card_name, kItemInfo[item].name, card_w, 50,
+          scroll_card_w);
+  }
+  for (int g = 0; g < DebugGroupCount(); ++g) {
+    words(g_badge_font, &g_seal_word, DebugGroupName(g), badge_w,
+          kBadgeHeight, seal_w);
+  }
+  for (int i = 0; i < DebugSwitchCount(); ++i) {
+    words(g_switch_font, &g_seal_switch, DebugSwitchLabel(i), badge_w, 44,
+          seal_w);
+    words(g_value_font, &g_card_long, DebugSwitchName(i), card_w, 50,
+          scroll_card_w);
+    const int values = DebugSwitchValueCount(i);
+    for (int v = 0; v < values; ++v) {
+      wchar_t value[32];
+      DebugSwitchValueText(i, v, value, 32);
+      words(g_value_font, &g_seal_value, value, badge_w, 44, seal_w);
+    }
+  }
 }

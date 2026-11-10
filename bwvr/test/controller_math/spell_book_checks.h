@@ -55,7 +55,7 @@ inline void SpellBookChecks() {
           thirty.columns * 10 + thirty.rows, 65);
     Near("a cell of a book of 30 is 4 cm", thirty.cell_m, 0.04, 1e-6);
     const Layout none = LayoutFor(0);
-    Check(none.count == 0 && none.width_m == kLeastWidthM &&
+    Check(none.count == 0 && none.width_m == kEmptyWidthM &&
               none.height_m == kEmptyHeightM,
           "a book with no miracle has the title and one line", none.count, 0);
     // The last row of 5 items in 3 columns has its 2 items in the middle.
@@ -66,6 +66,35 @@ inline void SpellBookChecks() {
     Near("the last row is in the middle of the book", x3 + x4, 0.0, 1e-6);
     Check(PixelsOf(0.1234f) % 2 == 0, "the pixels of a side are even",
           PixelsOf(0.1234f), 396);
+  }
+
+  // THE ORBS. The orb of each item is inside its cell at each count, and
+  // its middle is 0.10 of a cell above the middle of the cell.
+  {
+    bool inside = true;
+    for (int n = 1; n <= kMaxItems; ++n) {
+      const Layout l = LayoutFor(n);
+      for (int i = 0; i < n; ++i) {
+        float cx = 0.0f, cy = 0.0f, ox = 0.0f, oy = 0.0f;
+        ItemCenter(l, i, &cx, &cy);
+        OrbCenter(l, i, &ox, &oy);
+        const float r = kBubbleShare * l.cell_m;
+        if (fabsf(ox - cx) + r > 0.5f * l.cell_m + 1e-6f ||
+            oy + r > cy + 0.5f * l.cell_m + 1e-6f ||
+            oy - r < cy - 0.5f * l.cell_m - 1e-6f) {
+          inside = false;
+        }
+      }
+    }
+    Check(inside, "the orb of each item is inside its cell", inside, 1);
+    const Layout l = LayoutFor(4);
+    float cx = 0.0f, cy = 0.0f, ox = 0.0f, oy = 0.0f;
+    ItemCenter(l, 2, &cx, &cy);
+    OrbCenter(l, 2, &ox, &oy);
+    Near("the orb is 0.10 of a cell above the middle of its cell, m",
+         oy - cy, 0.10 * l.cell_m, 1e-6);
+    Near("an orb in a cell of 6.5 cm is 4.3 cm across, cm",
+         2.0 * kBubbleShare * l.cell_m * 100.0, 4.29, 1e-3);
   }
 
   // THE PLACE OF THE BOOK. With the grip pose of no turn, the book of the

@@ -150,6 +150,7 @@
 #include "temple.h"
 #include "teleport.h"
 #include "text_click.h"
+#include "text_fit.h"
 #include "tree_plant_math.h"
 #include "village.h"
 
@@ -460,7 +461,7 @@ const int kMaxLines = 4;
 const int kMaxGameLines = 3;
 struct Line {
   wchar_t button[24];  // empty for a line with no button
-  wchar_t text[48];
+  wchar_t text[96];
   int tone;
   uint32_t code;       // the mouse button code of a hint of the game, or 0
   bool click;          // the prompt of a text that waits for a click
@@ -1422,14 +1423,75 @@ bool HasPictures(const Content& content) {
   return false;
 }
 
+// THE FIT OF THE LINES (text_fit.h). A text that is too wide for the card
+// gets a smaller font, down to the floor, and then a second row. A card has
+// at most kMostRows rows. When the second rows do not fit, each line keeps
+// one row, and a text that is still too wide is cut (and logged).
+const int kMostRows = 4;
+
+struct LineFit {
+  int rows;   // 1 or 2
+  int width;  // the widest row of the text, in pixels
+  int step;   // the step of the font (text_fit_math::kStepPercent)
+};
+
+// The height of a line of `rows` rows: the badge height for one row.
+int BlockHeight(int rows) { return rows * kRow - (kRow - kBadgeHeight); }
+
+// The fit of each line with the font of its text. x0[i] is the left of the
+// text of line i, and `right` the right end of the words on a card of the
+// widest size. Returns the count of rows.
+int FitLines(const Content& content, HFONT font, const int* x0, int right,
+             LineFit* out) {
+  text_fit_math::Fit fit[kMaxLines] = {};
+  int rows = 0;
+  SelectObject(g_dc, font);
+  for (int pass = 0; pass < 2; ++pass) {
+    rows = 0;
+    const int most = pass == 0 ? 2 : 1;
+    for (int i = 0; i < content.count; ++i) {
+      fit[i] = text_fit::Measure(g_dc, content.line[i].text, right - x0[i],
+                                 BlockHeight(most), most);
+      out[i].rows = fit[i].lines > 1 ? 2 : 1;
+      out[i].step = fit[i].step;
+      rows += out[i].rows;
+    }
+    if (rows <= kMostRows) break;
+  }
+  for (int i = 0; i < content.count; ++i) {
+    out[i].width = 0;
+    SelectObject(g_dc, text_fit::StepFont(g_dc, font, fit[i].step));
+    for (int k = 0; k < fit[i].lines; ++k) {
+      SIZE size = {0, 0};
+      GetTextExtentPoint32W(g_dc, content.line[i].text + fit[i].start[k],
+                            fit[i].length[k], &size);
+      if (size.cx > out[i].width) out[i].width = size.cx;
+    }
+  }
+  SelectObject(g_dc, font);
+  return rows;
+}
+
+// The top of each line, from the top of the first row.
+void LineTops(const Content& content, const LineFit* fits, int top0,
+              int* top) {
+  int at = top0;
+  for (int i = 0; i < content.count; ++i) {
+    top[i] = at;
+    at += fits[i].rows * kRow;
+  }
+}
+
 // The pictures of the lines into the base picture of a card. x is the left
-// of the column of the pictures, and top0 the top of the first row.
+// of the column of the pictures, and top[i] the top of line i.
 void PutPictures(const Content& content, CardState* card, bool scroll, int x,
-                 int top0, int card_w, int card_h) {
+                 const int* top, const LineFit* fits, int card_w,
+                 int card_h) {
   for (int i = 0; i < content.count; ++i) {
     const uint8_t* picture = Picture(content.line[i], scroll);
     if (picture == nullptr) continue;
-    const int y = top0 + i * kRow + (kBadgeHeight - hint_picture::kSize) / 2;
+    const int y =
+        top[i] + (BlockHeight(fits[i].rows) - hint_picture::kSize) / 2;
     hint_picture::Put(picture, card->base, static_cast<int>(kHintCardWidth),
                       card_w, card_h, x, y);
   }
@@ -1442,8 +1504,8 @@ bool RasterPlain(const Content& content, CardState* card) {
   const int width = static_cast<int>(kHintCardWidth);
   const int height = static_cast<int>(kHintCardHeight);
   int badge_x0[kMaxLines], badge_x1[kMaxLines], text_x0[kMaxLines];
-  int text_w[kMaxLines];
-  int most = 0;
+  int top[kMaxLines], badge_top[kMaxLines];
+  LineFit fits[kMaxLines] = {};
   const bool pictures = HasPictures(content);
   for (int i = 0; i < content.count; ++i) {
     const Line& line = content.line[i];
@@ -1459,14 +1521,21 @@ bool RasterPlain(const Content& content, CardState* card) {
       x = badge_x1[i] + kBadgeGap;
     }
     text_x0[i] = x;
-    text_w[i] = TextWidth(g_text_font, line.text);
-    int end = x + text_w[i];
+  }
+  const int rows =
+      FitLines(content, g_text_font, text_x0, width - kPad - 4, fits);
+  LineTops(content, fits, kPad, top);
+  int most = 0;
+  for (int i = 0; i < content.count; ++i) {
+    const Line& line = content.line[i];
+    badge_top[i] = top[i] + (BlockHeight(fits[i].rows) - kBadgeHeight) / 2;
+    int end = text_x0[i] + fits[i].width;
     if (line.text[0] == 0 && line.button[0] != 0) end = badge_x1[i];
     if (end > most) most = end;
   }
   int card_w = most + kPad + 4;
   if (card_w > width) card_w = width;
-  int card_h = 2 * kPad + content.count * kRow - (kRow - kBadgeHeight);
+  int card_h = 2 * kPad + rows * kRow - (kRow - kBadgeHeight);
   if (card_h > height) card_h = height;
 
   // The letters, white on black. The green of a pixel is its cover.
@@ -1475,21 +1544,21 @@ bool RasterPlain(const Content& content, CardState* card) {
   }
   for (int i = 0; i < content.count; ++i) {
     const Line& line = content.line[i];
-    const int top = kPad + i * kRow;
     if (line.button[0] != 0) {
-      RECT r = {badge_x0[i], top, badge_x1[i], top + kBadgeHeight};
+      RECT r = {badge_x0[i], badge_top[i], badge_x1[i],
+                badge_top[i] + kBadgeHeight};
       SelectObject(g_dc, g_badge_font);
       DrawTextW(g_dc, line.button, -1, &r,
                 DT_SINGLELINE | DT_NOPREFIX | DT_CENTER | DT_VCENTER |
                     DT_NOCLIP);
     }
     if (line.text[0] != 0) {
-      RECT r = {text_x0[i], top, card_w - kPad, top + kBadgeHeight};
+      RECT r = {text_x0[i], top[i], card_w - kPad,
+                top[i] + BlockHeight(fits[i].rows)};
       if (r.right > r.left) {
         SelectObject(g_dc, g_text_font);
-        DrawTextW(g_dc, line.text, -1, &r,
-                  DT_SINGLELINE | DT_NOPREFIX | DT_LEFT | DT_VCENTER |
-                      DT_END_ELLIPSIS | DT_NOCLIP);
+        text_fit::Draw(g_dc, line.text, r, DT_LEFT | DT_VCENTER | DT_NOCLIP,
+                       fits[i].rows, "hint card");
       }
     }
   }
@@ -1497,10 +1566,11 @@ bool RasterPlain(const Content& content, CardState* card) {
 
   for (int y = 0; y < card_h; ++y) {
     const float py = static_cast<float>(y) + 0.5f;
-    const int row = (y - kPad) / kRow;
-    const bool in_row = y >= kPad && row >= 0 && row < content.count &&
-                        y < kPad + row * kRow + kBadgeHeight;
-    const bool badge_row = in_row && content.line[row].button[0] != 0;
+    int row = -1;
+    for (int i = 0; i < content.count; ++i) {
+      if (y >= badge_top[i] && y < badge_top[i] + kBadgeHeight) row = i;
+    }
+    const bool badge_row = row >= 0 && content.line[row].button[0] != 0;
     uint8_t* out = card->base + (y * width) * 4;
     const uint32_t* letters = g_bits + y * width;
     for (int x = 0; x < card_w; ++x, out += 4) {
@@ -1516,10 +1586,10 @@ bool RasterPlain(const Content& content, CardState* card) {
       float alpha = kCardAlpha;
       Rgb ink = kTextColor;
       if (badge_row && x >= badge_x0[row] - 1 && x <= badge_x1[row]) {
-        const float top = static_cast<float>(kPad + row * kRow);
+        const float btop = static_cast<float>(badge_top[row]);
         const float badge_cover = RoundCover(
-            px, py, static_cast<float>(badge_x0[row]), top,
-            static_cast<float>(badge_x1[row]), top + kBadgeHeight,
+            px, py, static_cast<float>(badge_x0[row]), btop,
+            static_cast<float>(badge_x1[row]), btop + kBadgeHeight,
             kBadgeRadius);
         const Rgb& badge = kBadgeColor[content.line[row].tone & 3];
         color.r += (badge.r - color.r) * badge_cover;
@@ -1543,7 +1613,9 @@ bool RasterPlain(const Content& content, CardState* card) {
       out[3] = static_cast<uint8_t>(255.0f * alpha + 0.5f);
     }
   }
-  if (pictures) PutPictures(content, card, false, kPad, kPad, card_w, card_h);
+  if (pictures) {
+    PutPictures(content, card, false, kPad, top, fits, card_w, card_h);
+  }
   card->rect_w = card_w;
   card->rect_h = card_h;
   card->drawn = content;
@@ -1587,8 +1659,9 @@ bool RasterScroll(const Content& content, CardState* card, int seed) {
   const int width = static_cast<int>(kHintCardWidth);
   const int height = static_cast<int>(kHintCardHeight);
   int seal_x0[kMaxLines], seal_x1[kMaxLines], text_x0[kMaxLines];
+  int top[kMaxLines], seal_top[kMaxLines];
   wchar_t seal_word[kMaxLines][24];
-  int most = 0;
+  LineFit fits[kMaxLines] = {};
   const bool pictures = HasPictures(content);
   for (int i = 0; i < content.count; ++i) {
     const Line& line = content.line[i];
@@ -1607,13 +1680,21 @@ bool RasterScroll(const Content& content, CardState* card, int seed) {
       x = seal_x1[i] + kBadgeGap;
     }
     text_x0[i] = x;
-    int end = x + TextWidth(g_scroll_text_font, line.text);
+  }
+  const int rows = FitLines(content, g_scroll_text_font, text_x0,
+                            width - card_scroll::kWordsRight, fits);
+  LineTops(content, fits, card_scroll::kPaperTop + kPad, top);
+  int most = 0;
+  for (int i = 0; i < content.count; ++i) {
+    const Line& line = content.line[i];
+    seal_top[i] = top[i] + (BlockHeight(fits[i].rows) - kBadgeHeight) / 2;
+    int end = text_x0[i] + fits[i].width;
     if (line.text[0] == 0 && line.button[0] != 0) end = seal_x1[i];
     if (end > most) most = end;
   }
   int card_w = most + card_scroll::kWordsRight;
   if (card_w > width) card_w = width;
-  const int body_h = 2 * kPad + content.count * kRow - (kRow - kBadgeHeight);
+  const int body_h = 2 * kPad + rows * kRow - (kRow - kBadgeHeight);
   int card_h = card_scroll::kPaperTop + body_h + card_scroll::kPaperBottom;
   if (card_h > height) card_h = height;
   const int text_right = card_w - card_scroll::kWordsRight;
@@ -1625,14 +1706,13 @@ bool RasterScroll(const Content& content, CardState* card, int seed) {
                      card_scroll::kPaperTop + body_h, seed);
   for (int i = 0; i < content.count; ++i) {
     if (seal_word[i][0] == 0) continue;
-    const int top = card_scroll::kPaperTop + kPad + i * kRow;
-    card_scroll::Seal(picture, seal_x0[i], top, seal_x1[i],
-                      top + kBadgeHeight, content.line[i].tone & 3,
+    card_scroll::Seal(picture, seal_x0[i], seal_top[i], seal_x1[i],
+                      seal_top[i] + kBadgeHeight, content.line[i].tone & 3,
                       seed + 50 + i * 7);
   }
 
   // The words, white on black, with the capital letter in the middle of the
-  // row. Then the ink.
+  // row (or of the two rows). Then the ink.
   for (int y = 0; y < card_h; ++y) {
     memset(g_bits + y * width, 0, static_cast<size_t>(card_w) * 4);
   }
@@ -1640,13 +1720,23 @@ bool RasterScroll(const Content& content, CardState* card, int seed) {
   for (int i = 0; i < content.count; ++i) {
     const Line& line = content.line[i];
     if (line.text[0] == 0 || text_right <= text_x0[i]) continue;
-    const int top = card_scroll::kPaperTop + kPad + i * kRow;
-    const int baseline = top + (kBadgeHeight + kScrollTextCap) / 2;
+    // The baseline of the first line of the text. One line has its capital
+    // letter in the middle of the row. Two lines, one pitch apart, have
+    // their middle in the middle of the two rows.
+    const int block = BlockHeight(fits[i].rows);
+    int baseline = top[i] + (kBadgeHeight + kScrollTextCap) / 2;
+    if (fits[i].rows > 1) {
+      const int pitch =
+          text_fit::LinePitch(g_dc, g_scroll_text_font, fits[i].step);
+      const int cap =
+          kScrollTextCap * text_fit_math::kStepPercent[fits[i].step] / 100;
+      baseline = top[i] + (block - pitch + cap) / 2;
+    }
+    const int box_h = fits[i].rows > 1 ? block : g_scroll_text_height;
     RECT r = {text_x0[i], baseline - g_scroll_text_ascent, text_right,
-              baseline - g_scroll_text_ascent + g_scroll_text_height};
-    DrawTextW(g_dc, line.text, -1, &r,
-              DT_SINGLELINE | DT_NOPREFIX | DT_LEFT | DT_TOP |
-                  DT_END_ELLIPSIS | DT_NOCLIP);
+              baseline - g_scroll_text_ascent + box_h};
+    text_fit::Draw(g_dc, line.text, r, DT_LEFT | DT_TOP | DT_NOCLIP,
+                   fits[i].rows, "hint card");
   }
   GdiFlush();
   card_scroll::Ink(picture, g_bits, 0, 0, card_w, card_h, seed);
@@ -1655,12 +1745,12 @@ bool RasterScroll(const Content& content, CardState* card, int seed) {
   SelectObject(g_dc, g_scroll_seal_font);
   for (int i = 0; i < content.count; ++i) {
     if (seal_word[i][0] == 0) continue;
-    const int top = card_scroll::kPaperTop + kPad + i * kRow;
-    for (int y = top; y < top + kBadgeHeight && y < card_h; ++y) {
+    const int stop = seal_top[i];
+    for (int y = stop; y < stop + kBadgeHeight && y < card_h; ++y) {
       memset(g_bits + y * width + seal_x0[i], 0,
              static_cast<size_t>(seal_x1[i] - seal_x0[i]) * 4);
     }
-    const int baseline = top + (kBadgeHeight + kScrollSealCap) / 2;
+    const int baseline = stop + (kBadgeHeight + kScrollSealCap) / 2;
     RECT r = {seal_x0[i], baseline - g_scroll_seal_ascent, seal_x1[i],
               baseline - g_scroll_seal_ascent + g_scroll_seal_height};
     DrawTextW(g_dc, seal_word[i], -1, &r,
@@ -1669,13 +1759,13 @@ bool RasterScroll(const Content& content, CardState* card, int seed) {
   GdiFlush();
   for (int i = 0; i < content.count; ++i) {
     if (seal_word[i][0] == 0) continue;
-    const int top = card_scroll::kPaperTop + kPad + i * kRow;
-    card_scroll::SealInk(picture, g_bits, seal_x0[i], top, seal_x1[i],
-                         top + kBadgeHeight, content.line[i].tone & 3);
+    card_scroll::SealInk(picture, g_bits, seal_x0[i], seal_top[i],
+                         seal_x1[i], seal_top[i] + kBadgeHeight,
+                         content.line[i].tone & 3);
   }
   if (pictures) {
-    PutPictures(content, card, true, card_scroll::kWordsLeft,
-                card_scroll::kPaperTop + kPad, card_w, card_h);
+    PutPictures(content, card, true, card_scroll::kWordsLeft, top, fits,
+                card_w, card_h);
   }
 
   card->rect_w = card_w;
@@ -3593,4 +3683,49 @@ void HintCardReport() {
     g_cards[h].side_changes = 0;
   }
   for (int i = 0; i < kContexts; ++i) g_prompt_shows[i] = 0;
+}
+
+// THE CHECK of the words (text_fit_test=1): a line of text in the box of a
+// line of a card, in each look, with the badge of a button before it, as
+// RasterPlain and RasterScroll place it. See text_fit.h.
+void HintCardCheckLine(const wchar_t* text) {
+  if (!RasterStart()) return;
+  const int width = static_cast<int>(kHintCardWidth);
+  for (int look = 0; look < 2; ++look) {
+    if (look == 1 && !ScrollStart()) break;
+    int x0, right;
+    HFONT font;
+    if (look == 0) {
+      x0 = kPad + TextWidth(g_badge_font, L"Grip") + 2 * kBadgePad + kBadgeGap;
+      right = width - kPad - 4;
+      font = g_text_font;
+    } else {
+      int seal = TextWidth(g_scroll_seal_font, L"GRIP") + 2 * kScrollSealPad;
+      if (seal < kScrollSealMin) seal = kScrollSealMin;
+      x0 = card_scroll::kWordsLeft + seal + kBadgeGap;
+      right = width - card_scroll::kWordsRight;
+      font = g_scroll_text_font;
+    }
+    text_fit::Check(g_dc, font, text, right - x0, BlockHeight(2), 2,
+                    look == 0 ? "hint card (plain)" : "hint card (scroll)");
+  }
+}
+
+void HintCardTextFitTest() {
+  // The lines of the mod that are longest, and a long line of the length of
+  // a long tooltip of the game.
+  const wchar_t* const kTexts[] = {
+      L"Close and swing to slap",
+      L"Put the leash on",
+      L"Open to stop",
+      L"Tap to cancel, or shake",
+      L"Use the miracle",
+      L"Hold to collect",
+      L"Pull farther to take it",
+      L"Open to put it back",
+      L"Put your hand on a miracle",
+      L"No miracle to ask for now",
+      L"Your Creature learns from what you do and from what you let it do",
+  };
+  for (const wchar_t* text : kTexts) HintCardCheckLine(text);
 }

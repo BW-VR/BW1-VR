@@ -1,5 +1,6 @@
 // The game's own bubble of a miracle that the hand pulls out of the spell
-// book (book_bubble.cpp, docs/miracles.md, "The pull").
+// book, and the orbs in its cells (book_bubble.cpp, docs/miracles.md, "The
+// pull" and "The orbs").
 #pragma once
 
 #include <stdint.h>
@@ -9,6 +10,11 @@
 // calls it in each frame that the bubble shows.
 void BookBubbleShow(int seed, const float world[3], float units_per_meter,
                     uint64_t frame);
+// spell_book_orbs=1: the orb of the seed type `seed` in a cell of the book
+// shows in this frame at the world point `world`, with the radius
+// radius_units in world units. One call for each cell in each frame.
+void BookBubbleShowOrb(int seed, const float world[3], float radius_units,
+                       uint64_t frame);
 // sky_detail.cpp: once in each eye pass, after the overlay's meshes.
 void BookBubbleDraw();
 // gesture_panel.cpp, inside its draw of an eye pass, with the camera of the
@@ -21,4 +27,5 @@ void BookBubbleDrawPart(int seed, const float world[3], float radius_units,
 // picture of the bubble.
 bool BookBubbleFailed();
 // The counts of the report window, for the report line of the book.
-void BookBubbleCounts(int* shown_frames, int* draws, int* made);
+void BookBubbleCounts(int* shown_frames, int* draws, int* made,
+                      int* orb_draws);

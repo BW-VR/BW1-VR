@@ -31,6 +31,14 @@
 // THE PICTURE shares the quad layer of the ring (kCardRing): the book does
 // not open while the ring shows, and the ring closes the book.
 //
+// THE ORBS (spell_book_orbs=1). Each cell shows the orb of the game: the
+// glass ball with the miracle in it, as on the land and in the Hand. The game
+// draws it in its own picture of each eye (book_bubble.cpp) at the middle of
+// the bubble of the cell, on the plane of the book. The page has a hole
+// there, so the orb shows through it. The orb of a miracle that the game
+// refuses now is behind a veil of the page. The words of the book fit their
+// boxes (text_fit.h): a smaller font, then more lines, and no ellipsis.
+//
 // THE PULL (spell_book_pull_cm). The grip on an item does not take the
 // miracle at once. The bubble of the item comes out of the book on an
 // elastic band, on a quad of its own (kCardBubble), and its cell shows an
@@ -52,6 +60,8 @@
 //   debug_all_miracles=0     1: each Worship Site of the player has every
 //                            miracle of the game, with no limit of prayer
 //                            power. For tests
+//   spell_book_orbs=1        each cell shows the orb of the game. 0: a flat
+//                            picture with the two gestures of the miracle
 //   spell_book_test_save=0   a test key: the mod saves the first N pictures
 //                            of the book as bwvr-book-NNNNN.bmp
 //   hint_card_style=1        1: the book is a page of parchment with dark
@@ -81,6 +91,7 @@
 #include "spell_book.h"
 #include "spell_book_math.h"
 #include "temple.h"
+#include "text_fit.h"
 
 extern void ModLog(const char* format, ...);
 
@@ -94,6 +105,8 @@ void EyeCaptureSaveUi(const char* name, uint64_t frame, int style,
 
 // A Creature miracle: its chain starts with the inverse spiral.
 bool IsCreatureType(int type);
+// hint_card.cpp: the check of a line of a hint card (text_fit_test=1).
+void HintCardCheckLine(const wchar_t* text);
 
 namespace {
 
@@ -339,6 +352,7 @@ int g_pull_ini = 10;      // the value of bwvr.ini, for the debug page
 bool g_style = true;      // hint_card_style: the book is a page of parchment
 bool g_game_bubble = true;  // the game draws the bubble that the hand pulls out
 bool g_palm = true;       // spell_book_palm: the palm that turns up opens it
+bool g_orbs = true;       // spell_book_orbs: the cells show the orbs of the game
 bool g_game_ok = false;   // the functions of the game have their bytes
 
 bool IniPath(char path[MAX_PATH]) {
@@ -373,6 +387,7 @@ void ReadSettings() {
   g_game_bubble = IniKey("spell_book_bubble", 1) != 0;
   g_style = IniKey("hint_card_style", 1) != 0;
   g_palm = IniKey("spell_book_palm", 1) != 0;
+  g_orbs = IniKey("spell_book_orbs", 1) != 0;
   g_game_ok =
       SameBytes(kCanRequest, kCanRequestBytes, sizeof(kCanRequestBytes)) &&
       SameBytes(kSendPacket, kSendPacketBytes, sizeof(kSendPacketBytes)) &&
@@ -408,6 +423,11 @@ void ReadSettings() {
                   "not point turns up and stays up for 0.4 s, and it closes "
                   "when that palm turns down"
                 : "only the button opens the book");
+  ModLog("spell book   : spell_book_orbs=%d: %s", g_orbs ? 1 : 0,
+         g_orbs ? "each cell shows the orb of the game, the glass ball with "
+                  "the miracle in it"
+                : "each cell shows a flat picture with the two gestures of "
+                  "the miracle");
   if (!g_game_ok) {
     ModLog("spell book   : the functions of the game do not have the bytes "
            "of v1.42, so the book does not open");
@@ -694,6 +714,7 @@ struct Look {
   int hover;
   int pulled;        // the item whose bubble is out of the book, or -1
   bool all;
+  bool orbs;         // the cells have holes for the orbs of the game
   wchar_t title[48];
   wchar_t note[64];
 };
@@ -817,8 +838,33 @@ void CellPixel(const Layout& l, int i, float* x, float* y) {
 void Bubble(const Layout& l, int i, float* x, float* y, float* r) {
   CellPixel(l, i, x, y);
   const float cell = static_cast<float>(CellSize(l));
-  *y -= 0.10f * cell;
-  *r = 0.33f * cell;
+  *y -= kBubbleRise * cell;
+  *r = kBubbleShare * cell;
+}
+
+// The orb of a dim item has this share of the page cleared over it.
+const float kOrbVeilClear = 0.55f;
+
+// The boxes of the words, in pixels of a picture w by h: the band at the
+// top (or the upper half of a book with no item), the note of a book with no
+// item, and the name under the bubble of item i.
+void TitleBox(int count, int w, int h, RECT* out) {
+  const int title_px = static_cast<int>(kTitleM * kPixelsPerMeter);
+  *out = {16, 2, w - 16, count == 0 ? h / 2 + 4 : title_px};
+}
+
+void EmptyNoteBox(int w, int h, RECT* out) { *out = {16, h / 2, w - 16, h - 6}; }
+
+void NameBox(const Layout& l, int i, RECT* out) {
+  float bx = 0.0f, by = 0.0f, br = 0.0f;
+  Bubble(l, i, &bx, &by, &br);
+  float cx = 0.0f, cy = 0.0f;
+  CellPixel(l, i, &cx, &cy);
+  const float cell = static_cast<float>(CellSize(l));
+  *out = {static_cast<LONG>(cx - 0.5f * cell + 4),
+          static_cast<LONG>(by + br + 2),
+          static_cast<LONG>(cx + 0.5f * cell - 4),
+          static_cast<LONG>(cy + 0.5f * cell - 2)};
 }
 
 // The picture of one gesture type in a box of side `side` at x, y (its
@@ -875,21 +921,23 @@ void Raster(const Look& look) {
   }
   // The band at the top: the title, or the note in its place. A book with
   // no item has the title in its upper half and the note in its lower half.
+  // Each text fits its box (text_fit.h).
   const int title_px = static_cast<int>(kTitleM * kPixelsPerMeter);
   const bool note_in_band = look.count > 0 && look.note[0] != 0;
   {
-    RECT band = {16, 2, w - 16, look.count == 0 ? h / 2 + 4 : title_px};
+    RECT band;
+    TitleBox(look.count, w, h, &band);
     SelectObject(g_dc, note_in_band ? g_note_font : g_title_font);
-    DrawTextW(g_dc, note_in_band ? look.note : look.title, -1, &band,
-              DT_SINGLELINE | DT_NOPREFIX | DT_CENTER | DT_VCENTER |
-                  DT_END_ELLIPSIS);
+    text_fit::Draw(g_dc, note_in_band ? look.note : look.title, band,
+                   DT_CENTER | DT_VCENTER, look.count == 0 ? 2 : 1,
+                   note_in_band ? "spell book note" : "spell book title");
   }
   if (look.count == 0 && look.note[0] != 0) {
-    RECT note = {16, h / 2, w - 16, h - 6};
+    RECT note;
+    EmptyNoteBox(w, h, &note);
     SelectObject(g_dc, g_note_font);
-    DrawTextW(g_dc, look.note, -1, &note,
-              DT_SINGLELINE | DT_NOPREFIX | DT_CENTER | DT_VCENTER |
-                  DT_END_ELLIPSIS);
+    text_fit::Draw(g_dc, look.note, note, DT_CENTER | DT_VCENTER, 2,
+                   "spell book note");
   }
   const int size = SizeIndex(l);
   const float cell = static_cast<float>(CellSize(l));
@@ -901,18 +949,16 @@ void Raster(const Look& look) {
     // The two gestures of the chain in the bubble: the start (the spiral or
     // the inverse spiral) small at the left, and the gesture of the miracle
     // larger at the right. A bubble that the hand pulls out has no gestures
-    // in the book: they go with the bubble.
-    if (i != look.pulled) DrawBubbleShapes(look.type[i], bx, by, br);
-    float cx = 0.0f, cy = 0.0f;
-    CellPixel(l, i, &cx, &cy);
-    RECT name = {static_cast<LONG>(cx - 0.5f * cell + 4),
-                 static_cast<LONG>(by + br + 2),
-                 static_cast<LONG>(cx + 0.5f * cell - 4),
-                 static_cast<LONG>(cy + 0.5f * cell - 2)};
+    // in the book: they go with the bubble. With the orbs, the cell has the
+    // orb of the game in place of the gestures.
+    if (i != look.pulled && !look.orbs) {
+      DrawBubbleShapes(look.type[i], bx, by, br);
+    }
+    RECT name;
+    NameBox(l, i, &name);
     SelectObject(g_dc, g_name_font[size]);
-    DrawTextW(g_dc, BadgeName(look.type[i]), -1, &name,
-              DT_SINGLELINE | DT_NOPREFIX | DT_CENTER | DT_VCENTER |
-                  DT_END_ELLIPSIS);
+    text_fit::Draw(g_dc, BadgeName(look.type[i]), name, DT_CENTER | DT_VCENTER,
+                   1, "spell book name");
   }
   GdiFlush();
   const double t_text = NowSeconds();
@@ -987,6 +1033,20 @@ void Raster(const Look& look) {
           Over(out, halo_color, ring);
         } else {
           Over(out, ring_color, ring_alpha * ring);
+        }
+        if (look.orbs) {
+          // The hole of the orb. The game draws the orb in the eye picture
+          // under the page. A miracle that the game refuses now keeps a veil
+          // of the page over its orb.
+          const float clear = Clamp01(halo.fill + 0.5f - d) *
+                              (look.can[i] ? 1.0f : kOrbVeilClear);
+          if (clear > 0.0f) {
+            const float keep = 1.0f - clear;
+            for (int k = 0; k < 4; ++k) {
+              out[k] = static_cast<uint8_t>(out[k] * keep + 0.5f);
+            }
+          }
+          continue;
         }
         Over(out, fill,
              (look.can[i] ? 0.95f : 0.6f) * Clamp01(halo.fill + 0.5f - d));
@@ -1073,7 +1133,7 @@ bool RasterBubble(int type, const Layout& l) {
   }
   const int size = SizeIndex(l);
   const float cell = static_cast<float>(CellSize(l));
-  const float br = 0.33f * cell;
+  const float br = kBubbleShare * cell;
   const float halo = br + 0.16f * cell;
   int side = static_cast<int>(2.0f * halo + 6.0f);
   side += side & 1;
@@ -1151,6 +1211,7 @@ void BuildLook(Look* look) {
     }
   }
   look->all = g_all;
+  look->orbs = g_orbs && !BookBubbleFailed();
   for (int i = 0; i < g_count; ++i) {
     look->type[i] = g_items[i].type;
     look->can[i] = g_items[i].can;
@@ -1614,6 +1675,36 @@ void ShowBubble(const GameNow* g, uint64_t frame) {
   PlaceBubble(g_pull.type, at, head, frame);
 }
 
+// THE ORBS of this frame: the game draws the orb of each item at the middle
+// of its bubble on the plane of the book, with the radius of the bubble. The
+// item whose bubble is out of the book has no orb in its cell.
+uint64_t g_orb_frames = 0;
+bool g_said_orbs = false;
+
+void ShowOrbs(const Look& look, uint64_t frame) {
+  if (!look.orbs || !g_have_plane) return;
+  const Layout l = LayoutFor(look.count);
+  int shown = 0;
+  for (int i = 0; i < look.count; ++i) {
+    if (i == look.pulled) continue;
+    float x = 0.0f, y = 0.0f;
+    OrbCenter(l, i, &x, &y);
+    float at[3], world[3], units = 0.0f;
+    PointOn(g_plane, x, y, at);
+    if (!ControllersLocalToWorld(at, world, &units)) return;
+    BookBubbleShowOrb(look.type[i], world,
+                      kBubbleShare * l.cell_m * units, frame);
+    ++shown;
+  }
+  if (shown > 0) ++g_orb_frames;
+  if (shown > 0 && !g_said_orbs) {
+    g_said_orbs = true;
+    ModLog("spell book   : the game draws %d orbs in the cells of the book, "
+           "each %.1f cm across, frame %llu", shown,
+           2.0f * kBubbleShare * l.cell_m * 100.0f, frame);
+  }
+}
+
 }  // namespace
 
 bool IsCreatureType(int type) {
@@ -1854,6 +1945,7 @@ void SpellBookFrame() {
       bwvr::XrScreen::CardFailed(bwvr::kCardRing) || RadialMenuShows()) {
     return;
   }
+  ShowOrbs(g_drawn, frame);
   StagePicture(frame);
   bwvr::CardLayer layer = {};
   layer.visible = true;
@@ -2023,6 +2115,23 @@ void SpellBookBubbleChange(const char* by) {
          ControllersFrameCount());
 }
 
+int SpellBookOrbsValue() {
+  ReadSettings();
+  return g_game_ok && !BookBubbleFailed() ? (g_orbs ? 1 : 0) : kDebugCannot;
+}
+
+void SpellBookOrbsChange(const char* by) {
+  ReadSettings();
+  g_orbs = !g_orbs;
+  g_have_drawn = false;
+  ControllersGrabPulse(1, 0.5f, g_orbs ? 0.40f : 0.08f);
+  ModLog("spell book   : %s: spell_book_orbs=%d. %s, frame %llu", by,
+         g_orbs ? 1 : 0,
+         g_orbs ? "Each cell shows the orb of the game"
+                : "Each cell shows a flat picture with the gestures",
+         ControllersFrameCount());
+}
+
 int SpellBookAllValue() {
   ReadSettings();
   return g_game_ok ? (g_all ? 1 : 0) : kDebugCannot;
@@ -2042,7 +2151,10 @@ void SpellBookAllChange(const char* by) {
 }
 
 void SpellBookReport() {
-  if (g_opens + g_closes + g_refusals + g_requests + g_pulls == 0) return;
+  if (g_opens + g_closes + g_refusals + g_requests + g_pulls + g_orb_frames ==
+      0) {
+    return;
+  }
   ModLog("spell book   : the book opened %llu times and closed %llu times "
          "this window: %llu pulls (%llu snaps, %llu back into the book), "
          "%llu miracles taken, %llu requests to the game, %llu "
@@ -2053,16 +2165,98 @@ void SpellBookReport() {
          g_arrived, g_refusals, g_palm_opens, g_palm_closes, g_rasters,
          g_raster_ms);
   int shown = 0, draws = 0, made = 0;
-  BookBubbleCounts(&shown, &draws, &made);
+  int orb_draws = 0;
+  BookBubbleCounts(&shown, &draws, &made, &orb_draws);
   if (shown + draws + made > 0) {
     ModLog("spell book   : the game's bubble showed in %d frames this window, "
            "with %d draws (one for each eye pass). The game made %d parts of "
            "it (the glass ball and the graphic of a miracle)", shown, draws,
            made);
   }
+  if (g_orb_frames > 0 || orb_draws > 0) {
+    ModLog("spell book   : the orbs of the game showed in the cells of the book "
+           "in %llu frames this window, with %d draws of an orb",
+           g_orb_frames, orb_draws);
+    g_orb_frames = 0;
+  }
   g_pulls = g_snaps = g_backs = 0;
   g_opens = g_closes = g_plucks = g_requests = g_arrived = g_refusals = 0;
   g_palm_opens = g_palm_closes = 0;
   g_rasters = 0;
   g_raster_ms = 0.0;
+}
+
+// THE CHECK of the words (text_fit_test=1): each text that the book can
+// show, in its box, with its font. See text_fit.h.
+void SpellBookTextFitTest() {
+  ReadSettings();
+  if (!RasterStart()) return;
+  const wchar_t* const kEmptyWhys[] = {L"You have no Worship Site",
+                                       L"Your Worship Site has no miracle"};
+  const wchar_t* const kWhys[] = {
+      L"The Hand must be empty", L"The miracle charges now",
+      L"No prayer power. Villagers must worship", L"The game refuses it now"};
+  const auto check = [](HFONT font, const wchar_t* text, const RECT& box,
+                        int lines, const char* where) {
+    text_fit::Check(g_dc, font, text, box.right - box.left,
+                    box.bottom - box.top, lines, where);
+  };
+  {
+    const Layout l = LayoutFor(0);
+    const int w = PixelsOf(l.width_m), h = PixelsOf(l.height_m);
+    RECT box;
+    TitleBox(0, w, h, &box);
+    check(g_title_font, L"No miracle to ask for now", box, 2,
+          "spell book title");
+    EmptyNoteBox(w, h, &box);
+    for (const wchar_t* why : kEmptyWhys) {
+      check(g_note_font, why, box, 2, "spell book note");
+    }
+  }
+  // The counts where the cell gets smaller.
+  const int counts[] = {1, 9, 16, kSeedTypes};
+  for (int count : counts) {
+    const Layout l = LayoutFor(count);
+    const int w = PixelsOf(l.width_m), h = PixelsOf(l.height_m);
+    const int saved_w = g_width_px, saved_h = g_height_px;
+    g_width_px = w;
+    g_height_px = h;
+    RECT band;
+    TitleBox(count, w, h, &band);
+    check(g_title_font, L"Miracles", band, 1, "spell book title");
+    check(g_title_font, L"Miracles: all (test)", band, 1, "spell book title");
+    for (int type = 0; type < kSeedTypes; ++type) {
+      wchar_t title[48];
+      swprintf_s(title, L"%s (again)", kSeedName[type]);
+      check(g_title_font, title, band, 1, "spell book title");
+    }
+    for (const wchar_t* why : kWhys) {
+      check(g_note_font, why, band, 1, "spell book note");
+    }
+    RECT name;
+    NameBox(l, 0, &name);
+    for (int type = 0; type < kSeedTypes; ++type) {
+      check(g_name_font[SizeIndex(l)], BadgeName(type), name, 1,
+            "spell book name");
+    }
+    g_width_px = saved_w;
+    g_height_px = saved_h;
+  }
+  // The lines of the pointing card while the book is open (SpellBookHint).
+  HintCardCheckLine(L"Pull farther to take it");
+  HintCardCheckLine(L"Open to put it back");
+  HintCardCheckLine(L"Put your hand on a miracle");
+  HintCardCheckLine(L"No miracle to ask for now");
+  for (const wchar_t* why : kEmptyWhys) HintCardCheckLine(why);
+  for (int type = 0; type < kSeedTypes; ++type) {
+    wchar_t line[96];
+    swprintf_s(line, L"Hold and pull out %s", kSeedName[type]);
+    HintCardCheckLine(line);
+    swprintf_s(line, L"Take %s", kSeedName[type]);
+    HintCardCheckLine(line);
+    for (const wchar_t* why : kWhys) {
+      swprintf_s(line, L"%s: %s", kSeedName[type], why);
+      HintCardCheckLine(line);
+    }
+  }
 }

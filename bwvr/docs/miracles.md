@@ -738,26 +738,38 @@ worship" or "The game refuses it now". The last miracle
 item. When the hand is on it, the title of the book has "(again)" after its
 name.
 
-**The picture.** Each item is a bubble with the pictures of its two gestures:
-the start of the chain (the spiral or the inverse spiral) small at the left,
-and the gesture of the miracle at the right. A dot marks where each gesture
-starts. The pictures come from the first template of each gesture type in
-`Data\Gestures.jty`, as the game holds them (`GGame+0x250064`). A miracle of
-the god has a blue bubble, and a Creature miracle an amber one. The name is
-under the bubble. The cells are 6.5 cm for up to 9 items, 5 cm for up to 16
-and 4 cm for more. The book uses the quad layer of the ring (`kCardRing`), so
-it is sharp and never double. The items in the book are pictures of the
-mod. The bubble that the hand pulls out is the bubble of the game (see "The
-pull"). A book with no item says "No miracle to ask for now" and the
+**The picture.** Each item is a bubble with the orb of the game in it: the
+glass ball with the miracle in it, as on the land and in the Hand (see "The
+orbs in the cells" below, `spell_book_orbs=1`). The name is under the
+bubble. The cells are 6.5 cm for up to 9 items, 5 cm for up to 16 and 4 cm
+for more, and a bubble is 0.66 of a cell across. The book uses the quad
+layer of the ring (`kCardRing`), so it is sharp and never double. The bubble
+that the hand pulls out is the bubble of the game too (see "The pull"). A
+book with no item is 20 by 6 cm. It says "No miracle to ask for now" and the
 reason: "You have no Worship Site" or "Your Worship Site has no miracle".
+
+With `spell_book_orbs=0` each bubble is a flat picture of the mod with the
+pictures of the two gestures of the miracle: the start of the chain (the
+spiral or the inverse spiral) small at the left, and the gesture of the
+miracle at the right. A dot marks where each gesture starts. The pictures
+come from the first template of each gesture type in `Data\Gestures.jty`, as
+the game holds them (`GGame+0x250064`). A miracle of the god has a blue
+bubble, and a Creature miracle an amber one. When a check of the game's code
+of the bubble fails, the book shows these pictures too.
+
+**The words fit.** The title, the note and each name fit their box
+(`text_fit.h`, `ui-layer.md`, "Words that fit"). A text that is too wide gets
+a smaller font, down to 70 percent of its size. Then the title and the note
+of a book with no item go on two lines. No text of the book ends in an
+ellipsis.
 
 With `hint_card_style=1` (the default, the launcher row "Card look") the
 book is a page of the parchment of the hint cards (`controller-hints.md`,
 9.11): opaque, with a torn and burnt edge 4 px inside the picture, so each
 cell keeps its place. The words are in dark brown Alegreya at the capital
 letter height of Segoe UI, a dim item is light brown, and the reason of a
-refusal is red brown. The bubbles keep their blue and amber fill with white
-gestures. The cell under the hand is tan with a deep gold halo, and the
+refusal is red brown. The flat pictures (`spell_book_orbs=0`) keep their blue and amber fill
+with white gestures. The cell under the hand is tan with a deep gold halo, and the
 other bubbles have a brown ring. The halo stays inside the tan cell: its
 outer edge is 4 px below the top of the cell or 0.16 of a cell out from the
 bubble, and it is 0.10 of a cell wide or more, so the fill of that bubble
@@ -830,6 +842,24 @@ With `spell_book_bubble=0`, or when a check of the game's code fails, the
 bubble is a flat picture on a quad of its own (`kCardBubble`): the gold halo,
 the fill and the two gestures, facing the head.
 
+**The orbs in the cells** (`spell_book_orbs=1`). Each item of the open book
+has the orb of the game in its bubble, made and drawn as the bubble of the
+pull (`BookBubbleShowOrb`). The orb has the radius of the bubble of the cell
+(2.1 cm in a cell of 6.5 cm, 1.3 cm in a cell of 4 cm), and its middle is
+the middle of the bubble on the plane of the book (`OrbCenter`). The icon
+turns and the particles play as on the land: that is the game's own
+animation of the orb. The orb moves with the book, so with the hand, one to
+one. The page has a round hole for each orb, in the base picture of the
+book, with a soft edge over 1 pixel. The orb is on the plane of the page, so
+the hole is the same for both eyes. The ring round the bubble and the gold
+halo of the item under the hand stay on the page. An item that the game
+refuses now keeps 45 percent of the page over its orb, so it is dim. The
+item whose bubble the hand pulls out has its empty socket and no orb. Each
+orb is one draw of the graphic and one of the ball in each eye pass: 6 orbs
+are 12 draws of the game in a pass. The land in front of the book hides an
+orb, as it hides the bubble of the pull. With `spell_book_orbs=0` the
+bubbles are the flat pictures of the mod.
+
 The two hands both make the pull: a move of the hand of the book away from
 the pointing hand also pulls. The card has "Pull farther to take it" and
 "[Grip] Open to put it back" while the bubble is out. A close of the book
@@ -893,9 +923,13 @@ of the palm is the axis of `BookCenter` (+x of the grip of the left hand,
 
 With `spell_book_palm=0` only the button opens the book.
 
-### The debug switch "All miracles" (`debug_all_miracles=1`)
+### The debug switch "Unlock all" (`debug_all_miracles=1`)
 
-A switch for tests, default 0. With 1, once a second:
+A switch for tests, default 0. It is the first row of the group Miracles of
+the debug page and of the debug window: the item "debug" of the ring
+(`debug_menu=1`), then the tab Miracles, then "Unlock all miracles". The
+trigger of the pointing hand changes it, so it needs no keyboard. With 1,
+once a second:
 
 - Each town of the player knows the magic types of the 30 miracles of the
   game, 24 magic types in all (`Town::AddMagicTypesHeld` `0x0073D380`, the
@@ -1339,6 +1373,7 @@ so the plain game has no flat band.
 | `gesture_panel` | 1 | 0: no row over the palm. The game draws its gesture pictures at the corner of its screen, and the headset does not show them |
 | `gesture_panel_cm` | 30 | The width of the row of the gesture pictures over the palm, in cm, for 3 pictures or more, 10 to 80 |
 | `spell_book_bubble` | 1 | 1: the bubble that the hand pulls out is the game's own bubble. 0: it is a flat picture with the two gestures |
+| `spell_book_orbs` | 1 | 1: each cell of the book shows the orb of the game. 0: a flat picture with the two gestures of the miracle |
 | `hint_card_style` | 1 | 1: the book is a page of parchment with dark ink, as the hint cards. 0: the dark panel with white letters. The key of the hint cards (`controller-hints.md`, 9.5) |
 | `debug_all_miracles` | 0 | 1: each town of the player knows every miracle of the game, its Worship Site shows up to 6 of them, and each site has no limit of prayer power. For tests |
 | `gesture_point` | 1 | 1: the tip of the index finger draws a gesture. 0: the grip point draws it. Not in the launcher |
@@ -1350,12 +1385,13 @@ The keys are read from `bwvr.ini`. None of them is in the launcher.
 changes `miracle_hand`. The pointing controller gives a long pulse for 1 and
 a short pulse for 0.
 
-**The debug page** (`debug_menu=1`, the group Creature): "Spell book" changes
-`spell_book`, "Book pull" changes `spell_book_pull_cm` between 0 and its
-value in `bwvr.ini` (10 when that is 0), "Book bubble" changes
-`spell_book_bubble`, "All miracles" changes `debug_all_miracles`, "Gesture
-point" changes `gesture_point` (grip or fingertip), and "Gesture trail"
-changes `gesture_trail`. The hand that does not point gives a long pulse for
+**The debug page** (`debug_menu=1`, the group Miracles): "Unlock all"
+changes `debug_all_miracles`, "Spell book" changes `spell_book`, "Book orbs"
+changes `spell_book_orbs`, "Book pull" changes `spell_book_pull_cm` between
+0 and its value in `bwvr.ini` (10 when that is 0), "Book bubble" changes
+`spell_book_bubble`, "Miracle hand" changes `miracle_hand`, "Gesture point"
+changes `gesture_point` (grip or fingertip), and "Gesture trail" changes
+`gesture_trail`. The hand that does not point gives a long pulse for
 1 and a short pulse for 0. These switches have no key of the keyboard. Choose
 "Gesture point" between two draws.
 

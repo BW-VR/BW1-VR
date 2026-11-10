@@ -1427,8 +1427,9 @@ Alegreya SC. With `hint_card_style=0` the pictures are the plain cards. In
 these runs a new picture of the scroll takes 0.55 to 1.1 ms, and a plain one
 0.3 to 0.9 ms. The first picture of the scroll takes about 14 ms: it makes
 the noise tile and loads the fonts (about 8.5 ms), and GDI draws each letter
-of the new fonts for the first time. A line that is too long for 19 cm ends
-in "..." in both looks.
+of the new fonts for the first time. A line that is too long for 19 cm gets
+a smaller font, down to 70 percent, and then a second row of the card, in
+both looks (`ui-layer.md`, "Words that fit"). A card has at most 4 rows.
 
 The checks in a headset are in `headset-checks.md`, and the checks that a
 desktop run can prove are in `roadmap.md`, R12.
@@ -1524,7 +1525,8 @@ halo of the same color and a thin edge in ink.
 or the seal, with 10 px to it. While one line of a card has a picture, each
 line of a button has the place of a picture, so the badges and the seals
 stay in one column. A line with no button starts at the left edge. A picture makes its line 70 px wider. A line that is too
-long for 19 cm ends in "...", as with no picture.
+long for 19 cm gets a smaller font, and then a second row, as with no
+picture.
 
 **The cost.** The mod makes each picture one time for each look and tone
 (`Bake`), and keeps 24 of them. A new picture of a card copies the pictures

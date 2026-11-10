@@ -1,9 +1,9 @@
 // The spell book (docs/miracles.md, "The spell book"): a press of the first
 // face button of the hand that does not point opens a book over that hand.
-// It holds the miracles that the player can ask for now, each with the
-// pictures of its gestures. The pointing hand picks one, and its grip takes
-// the miracle: the request goes to the game in its own way, as at the end of
-// a chain of gestures. The debug switch "All miracles" gives each Worship
+// It holds the miracles that the player can ask for now, each with the orb
+// of the game (or the pictures of its gestures). The pointing hand picks one,
+// and its grip takes the miracle: the request goes to the game in its own
+// way, as at the end of a chain of gestures. The debug switch "Unlock all" gives each Worship
 // Site of the player every miracle of the game, with no cost in prayer
 // power.
 
@@ -50,10 +50,12 @@ int SpellBookHint(MiracleLine lines[kMiracleLines]);
 // meters. False when the book is closed or empty.
 bool SpellBookTestItem(float out[3]);
 
-// The switches of the debug page (debug_menu.cpp): spell_book and
-// debug_all_miracles.
+// The switches of the debug page (debug_menu.cpp): spell_book,
+// spell_book_orbs and debug_all_miracles.
 int SpellBookValue();
 void SpellBookChange(const char* by);
+int SpellBookOrbsValue();
+void SpellBookOrbsChange(const char* by);
 int SpellBookAllValue();
 void SpellBookAllChange(const char* by);
 

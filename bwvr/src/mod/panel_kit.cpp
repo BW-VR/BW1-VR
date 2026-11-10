@@ -1,6 +1,7 @@
 // The parts of a panel in the room. See panel_kit.h.
 
 #include "panel_kit.h"
+#include "text_fit.h"
 
 #include <math.h>
 #include <string.h>
@@ -61,8 +62,7 @@ void Letters(Canvas* c, const Font& f, const wchar_t* words, const int b[4]) {
                baseline - f.ascent + f.height};
   HRGN clip = CreateRectRgn(b[0], b[1], b[2], b[3]);
   SelectClipRgn(c->dc, clip);
-  DrawTextW(c->dc, words, -1, &rect,
-            DT_SINGLELINE | DT_NOPREFIX | DT_CENTER | DT_TOP);
+  text_fit::Draw(c->dc, words, rect, DT_CENTER | DT_TOP, 1, "panel");
   SelectClipRgn(c->dc, nullptr);
   DeleteObject(clip);
   GdiFlush();
@@ -397,8 +397,20 @@ void InkWordsIn(Canvas* c, const card_scroll::Picture& to, const Font& font,
   const UINT side = align == kLeftAlign    ? DT_LEFT
                     : align == kRightAlign ? DT_RIGHT
                                            : DT_CENTER;
-  LettersBox(c, font, words, box, rect,
-             DT_SINGLELINE | DT_NOPREFIX | DT_TOP | side);
+  // One line that fits the box: a smaller font on the same baseline, and no
+  // ellipsis (text_fit.h).
+  const size_t row = static_cast<size_t>(box[2] - box[0]) * 4;
+  for (int y = box[1]; y < box[3]; ++y) {
+    memset(c->bits + static_cast<size_t>(y) * c->width + box[0], 0, row);
+  }
+  SelectObject(c->dc, font.font);
+  SetTextColor(c->dc, RGB(255, 255, 255));
+  HRGN clip = CreateRectRgn(box[0], box[1], box[2], box[3]);
+  SelectClipRgn(c->dc, clip);
+  text_fit::Draw(c->dc, words, rect, DT_TOP | side, 1, "panel");
+  SelectClipRgn(c->dc, nullptr);
+  DeleteObject(clip);
+  GdiFlush();
   card_scroll::Ink(to, c->bits, box[0], box[1], box[2], box[3], seed);
 }
 
@@ -572,8 +584,7 @@ void PlainText(Canvas* c, HFONT font, COLORREF color, const wchar_t* words,
   SelectObject(c->dc, font);
   SetTextColor(c->dc, color);
   RECT rect = {box[0], box[1], box[2], box[3]};
-  DrawTextW(c->dc, words, -1, &rect,
-            DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+  text_fit::Draw(c->dc, words, rect, DT_CENTER | DT_VCENTER, 1, "panel");
 }
 
 void PlainButton(Canvas* c, const int rect[4], int look, const wchar_t* word,

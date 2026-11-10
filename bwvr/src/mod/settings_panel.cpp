@@ -65,6 +65,7 @@
 #include "places_panel.h"
 #include "radial_menu.h"
 #include "settings_panel.h"
+#include "text_fit.h"
 #include "settings_panel_math.h"
 #include "spell_book.h"
 
@@ -573,8 +574,8 @@ void RasterPlain(const Look& look) {
     int box[4];
     WelcomeControlBox(k, box);
     RECT rect = {box[0], box[1], box[2], box[3]};
-    DrawTextW(c->dc, lines[k], -1, &rect,
-              DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+    text_fit::Draw(c->dc, lines[k], rect, DT_LEFT | DT_VCENTER, 1,
+                   "welcome page");
   }
   for (int part = 0; part < kWelcomeParts; ++part) {
     int r[4];

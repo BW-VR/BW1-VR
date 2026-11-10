@@ -3,7 +3,9 @@
 //
 // WHY. The bubble on the elastic band of the book is the bubble of the game:
 // the glass ball with the miracle in it, as the player sees it on the land.
-// At the snap it goes, and the game's Miracle is in the Hand.
+// At the snap it goes, and the game's Miracle is in the Hand. With
+// spell_book_orbs=1 each cell of the book has the same orb of the game, in
+// the middle of the bubble of the cell (BookBubbleShowOrb).
 //
 // WHAT THE GAME DRAWS [V]. A bubble on the land has two parts:
 // - A glass ball: the mesh .\data\spells\meshes\O_Bibble_up.l3d with a
@@ -140,17 +142,40 @@ float g_ball_frame = 0.0f;
 uint64_t g_ball_step_frame = 0;
 void* g_graphic[kSeedTypes] = {};
 
-// What shows in this frame. The game thread writes it in SpellBookFrame, and
-// the draw of the same thread reads it.
-int g_seed = -1;
-float g_world[3] = {0.0f, 0.0f, 0.0f};
-float g_units = 0.0f;
+// What shows in this frame: the bubble that the hand pulls out, and the orbs
+// of the cells of the book. The game thread writes it in SpellBookFrame, and
+// the draw of the same thread reads it. radius is in world units.
+struct Show {
+  int seed;
+  float world[3];
+  float radius;
+  bool orb;
+};
+const int kMostShows = 40;
+Show g_shows[kMostShows];
+int g_show_count = 0;
 uint64_t g_frame = 0;
 
 int g_shown_frames = 0;
 int g_draws = 0;
 int g_made = 0;
+int g_orb_draws = 0;
 bool g_said_first = false;
+bool g_said_orb = false;
+
+void AddShow(int seed, const float world[3], float radius, bool orb,
+             uint64_t frame) {
+  if (frame != g_frame) {
+    g_frame = frame;
+    g_show_count = 0;
+  }
+  if (g_show_count >= kMostShows) return;
+  Show& s = g_shows[g_show_count++];
+  s.seed = seed;
+  for (int i = 0; i < 3; ++i) s.world[i] = world[i];
+  s.radius = radius;
+  s.orb = orb;
+}
 
 bool SameBytes(uintptr_t address, const void* bytes, size_t count) {
   const void* at = reinterpret_cast<const void*>(address);
@@ -313,27 +338,29 @@ void BookBubbleShow(int seed, const float world[3], float units_per_meter,
       !(units_per_meter > 0.0f)) {
     return;
   }
-  g_seed = seed;
-  for (int i = 0; i < 3; ++i) g_world[i] = world[i];
-  g_units = units_per_meter;
-  g_frame = frame;
+  AddShow(seed, world, spell_book_math::kBubbleRadiusM * units_per_meter,
+          false, frame);
   ++g_shown_frames;
 }
 
+void BookBubbleShowOrb(int seed, const float world[3], float radius_units,
+                       uint64_t frame) {
+  if (g_failed || seed < 0 || seed >= kSeedTypes || !(radius_units > 0.0f)) {
+    return;
+  }
+  AddShow(seed, world, radius_units, true, frame);
+}
+
 void BookBubbleDraw() {
-  if (g_seed < 0 || g_failed) return;
-  // Only the bubble of this frame or of the frame before: a pull that
-  // stopped draws nothing.
+  if (g_show_count == 0 || g_failed) return;
+  // Only the bubbles of this frame or of the frame before: a pull that
+  // stopped, or a book that closed, draws nothing.
   const uint64_t now = ControllersFrameCount();
   if (now > g_frame + 1) {
-    g_seed = -1;
+    g_show_count = 0;
     return;
   }
   if (!Check() || !MakeBall()) return;
-  void* graphic = Graphic(g_seed);
-  if (graphic == nullptr) return;
-
-  const float s = spell_book_math::kBubbleRadiusM * g_units / kBallUnits;
 
   const size_t bytes = sizeof(float) * 12;
   float scaled[12], unscaled[12], copy[12], inverse[12];
@@ -349,9 +376,29 @@ void BookBubbleDraw() {
          bytes);
   StereoReapplyEye();
 
-  // The miracle first, then the glass over it.
-  DrawGraphic(graphic, g_world, s, 0xFF);
-  DrawBall(g_world, s, 0xFF);
+  bool pull = false;
+  int orbs = 0;
+  for (int k = 0; k < g_show_count; ++k) {
+    const Show& show = g_shows[k];
+    void* graphic = Graphic(show.seed);
+    if (graphic == nullptr) continue;
+    const float s = show.radius / kBallUnits;
+    // The miracle first, then the glass over it.
+    DrawGraphic(graphic, show.world, s, 0xFF);
+    DrawBall(show.world, s, 0xFF);
+    if (show.orb) {
+      ++orbs;
+    } else {
+      pull = true;
+    }
+    if (!show.orb && !g_said_first) {
+      g_said_first = true;
+      ModLog("book bubble  : the game draws the bubble of the seed type %d at "
+             "%.2f %.2f %.2f, the ball %.1f cm across at the scale %.4f, frame "
+             "%llu", show.seed, show.world[0], show.world[1], show.world[2],
+             2.0f * spell_book_math::kBubbleRadiusM * 100.0f, s, now);
+    }
+  }
 
   memcpy(reinterpret_cast<void*>(bw::tech::kWorldToCamera), scaled, bytes);
   memcpy(reinterpret_cast<void*>(bw::tech::kWorldToCameraUnscaled), unscaled,
@@ -359,13 +406,13 @@ void BookBubbleDraw() {
   memcpy(reinterpret_cast<void*>(bw::tech::kWorldToCameraCopy), copy, bytes);
   memcpy(reinterpret_cast<void*>(bw::tech::kCameraToWorldInverse), inverse,
          bytes);
-  ++g_draws;
-  if (!g_said_first) {
-    g_said_first = true;
-    ModLog("book bubble  : the game draws the bubble of the seed type %d at "
-           "%.2f %.2f %.2f, the ball %.1f cm across at the scale %.4f, frame "
-           "%llu", g_seed, g_world[0], g_world[1], g_world[2],
-           2.0f * spell_book_math::kBubbleRadiusM * 100.0f, s, now);
+  if (pull) ++g_draws;
+  g_orb_draws += orbs;
+  if (orbs > 0 && !g_said_orb) {
+    g_said_orb = true;
+    ModLog("book bubble  : the game draws %d orbs of the spell book in this "
+           "eye pass, the first at %.2f %.2f %.2f, frame %llu", orbs,
+           g_shows[0].world[0], g_shows[0].world[1], g_shows[0].world[2], now);
   }
 }
 
@@ -383,11 +430,14 @@ void BookBubbleDrawPart(int seed, const float world[3], float radius_units,
 
 bool BookBubbleFailed() { return g_failed; }
 
-void BookBubbleCounts(int* shown_frames, int* draws, int* made) {
+void BookBubbleCounts(int* shown_frames, int* draws, int* made,
+                      int* orb_draws) {
   *shown_frames = g_shown_frames;
   *draws = g_draws;
   *made = g_made;
+  *orb_draws = g_orb_draws;
   g_shown_frames = 0;
   g_draws = 0;
   g_made = 0;
+  g_orb_draws = 0;
 }

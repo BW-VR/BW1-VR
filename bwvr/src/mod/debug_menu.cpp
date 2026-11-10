@@ -312,6 +312,8 @@ int SpellBookBubbleValue();
 void SpellBookBubbleChange(const char* by);
 int SpellBookAllValue();
 void SpellBookAllChange(const char* by);
+int SpellBookOrbsValue();
+void SpellBookOrbsChange(const char* by);
 // The draw of a gesture (controllers.cpp, overlay.cpp).
 int ControllersGesturePointValue();
 void ControllersGesturePointChange(const char* by);
@@ -361,14 +363,15 @@ enum Group {
   kGroupHand,
   kGroupThrow,
   kGroupCreature,
+  kGroupMiracles,
   kGroupSound,
   kGroupTemple,
   kGroups
 };
 
 const wchar_t* const kGroupName[kGroups] = {
-    L"View",  L"Picture",  L"Render", L"Interface", L"Hand",
-    L"Throw", L"Creature", L"Sound",  L"Temple"};
+    L"View",  L"Picture",  L"Render",   L"Interface", L"Hand",
+    L"Throw", L"Creature", L"Miracles", L"Sound",     L"Temple"};
 
 struct Switch {
   int group;
@@ -732,8 +735,6 @@ const Switch kSwitches[] = {
     {kGroupCreature, L"Slap speed", L"Speed of a slap", "creature_slap_mps",
      HandDirectSlapValue, HandDirectSlapChange,
      L"ini|0.7 m/s|1.0 m/s|1.3 m/s|1.6 m/s"},
-    {kGroupCreature, L"Miracle hand", L"A miracle is in the real hand",
-     "miracle_hand", MiracleHandValue, MiracleHandChange, L"off|on"},
     {kGroupCreature, L"Totem hand", L"The totem follows the real hand",
      "totem_hand", VillageTotemValue, VillageTotemChange, L"off|on"},
     {kGroupCreature, L"Hold target", L"Halo on the thing at the Hand",
@@ -741,20 +742,28 @@ const Switch kSwitches[] = {
     {kGroupCreature, L"Scaffold turn", L"Wrist turns a scaffold building",
      "scaffold_wrist_turn", VillageWristTurnValue, VillageWristTurnChange,
      L"off|on"},
-    {kGroupCreature, L"Spell book", L"X opens the spell book", "spell_book",
+
+    // Miracles
+    {kGroupMiracles, L"Unlock all", L"Unlock all miracles, no cost (test)",
+     "debug_all_miracles", SpellBookAllValue, SpellBookAllChange, L"off|on",
+     nullptr, true, L"Unlock all miracles"},
+    {kGroupMiracles, L"Spell book", L"X opens the spell book", "spell_book",
      SpellBookValue, SpellBookChange, L"off|on"},
-    {kGroupCreature, L"Book pull", L"Pull a miracle out of the book",
+    {kGroupMiracles, L"Book orbs", L"The game's orbs in the spell book",
+     "spell_book_orbs", SpellBookOrbsValue, SpellBookOrbsChange,
+     L"pictures|orbs"},
+    {kGroupMiracles, L"Book pull", L"Pull a miracle out of the book",
      "spell_book_pull_cm", SpellBookPullValue, SpellBookPullChange,
      L"off|on"},
-    {kGroupCreature, L"Book bubble", L"The game's bubble on the pull",
+    {kGroupMiracles, L"Book bubble", L"The game's bubble on the pull",
      "spell_book_bubble", SpellBookBubbleValue, SpellBookBubbleChange,
      L"flat|game"},
-    {kGroupCreature, L"All miracles", L"All miracles, no cost (test)",
-     "debug_all_miracles", SpellBookAllValue, SpellBookAllChange, L"off|on"},
-    {kGroupCreature, L"Gesture point", L"Point that draws a gesture",
+    {kGroupMiracles, L"Miracle hand", L"A miracle is in the real hand",
+     "miracle_hand", MiracleHandValue, MiracleHandChange, L"off|on"},
+    {kGroupMiracles, L"Gesture point", L"Point that draws a gesture",
      "gesture_point", ControllersGesturePointValue,
      ControllersGesturePointChange, L"grip|fingertip"},
-    {kGroupCreature, L"Gesture trail", L"Trail at the fingertip",
+    {kGroupMiracles, L"Gesture trail", L"Trail at the fingertip",
      "gesture_trail", OverlayTrailValue, OverlayTrailChange, L"off|on"},
 
     // Sound
@@ -1186,9 +1195,6 @@ const wchar_t* const kTips[] = {
     // Slap speed
     L"The speed of the hand that a slap needs. Ini: the value of the ini. A "
     L"hard slap needs 1.8 times this speed.",
-    // Miracle hand
-    L"On: a miracle is in the real hand, with a target, a cancel and lines. "
-    L"Off: the game places the Hand with the miracle.",
     // Totem hand
     L"On: the totem follows the real hand. Off: the game moves the totem with "
     L"the screen rows of the pixel of the Hand point.",
@@ -1199,18 +1205,24 @@ const wchar_t* const kTips[] = {
     L"On: with a scaffold in the Hand, a roll of the wrist turns the building "
     L"one to one, and the building does not turn by itself. Off: the "
     L"building turns by itself, as in the game.",
+    // Unlock all
+    L"For a test only. Each town knows each miracle, the spell book shows up "
+    L"to 6, and the miracles cost no prayer power.",
     // Spell book
     L"On: the first face button of the hand that does not point opens the "
     L"spell book. Off: that button has no job.",
+    // Book orbs
+    L"Orbs: each cell of the spell book shows the orb of the game, the glass "
+    L"ball with the miracle in it. Pictures: a flat picture with the gestures.",
     // Book pull
     L"On: the hand pulls a miracle out of the book. Off: the grip takes the "
     L"miracle at once.",
     // Book bubble
     L"Game: the bubble that the hand pulls out is the bubble of the game. "
     L"Flat: a flat picture with the two gestures.",
-    // All miracles
-    L"For a test only. Each town knows each miracle, the spell book shows up "
-    L"to 6, and the miracles cost no prayer power.",
+    // Miracle hand
+    L"On: a miracle is in the real hand, with a target, a cancel and lines. "
+    L"Off: the game places the Hand with the miracle.",
     // Gesture point
     L"Fingertip: the tip of the index finger draws a gesture. Grip: the grip "
     L"point draws it.",

@@ -77,6 +77,7 @@
 #include "bookmark_aim.h"
 #include "radial_menu.h"
 #include "spell_book.h"
+#include "text_fit.h"
 #include "gesture_panel.h"
 #include "script_frame_math.h"
 #include "temple.h"
@@ -4931,6 +4932,7 @@ void ControllersFrame() {
   ControlsPageWarmFrame();
   SpellBookFrame();
   GesturePanelFrame();
+  TextFitTestFrame();
 }
 
 namespace {
@@ -6186,6 +6188,7 @@ void ControllersReport() {
   SettingsPanelReport();
   ControlsPageReport();
   SpellBookReport();
+  text_fit::Report();
   GesturePanelReport();
   TempleReport();
   TextClickReport();

@@ -3042,3 +3042,72 @@ desktop run, and saves the levels and the model views.
 Only a headset shows whether the runtime samples the mip levels of a quad
 (the OpenXR specification lets the runtime choose), and how the text and
 the edge of the cards look.
+
+## 27. Words that fit
+
+Each card and panel of the mod draws its words with `text_fit::Draw`
+(`src/mod/text_fit.cpp`, the pure math in `text_fit_math.h`). No text of
+the mod ends in an ellipsis.
+
+**The rule.** A text that is too wide for its box first gets a smaller
+font, one step at a time: 90, 80 and 70 percent of its size. 70 percent is
+the floor: a capital letter of a card is then still more than 0.5 degrees
+high at the place of the card. A text that is still too wide at the floor
+goes on more lines, if its box has room for them: the fewest lines, and for
+them the largest step that fits. A line breaks at a space. Only a text that
+does not fit on the most lines at the floor is cut. The log then has one
+line for each such text and place:
+
+```
+text fit     : spell book note: the text "..." does not fit in 480 by 90 px, even at 70 percent of its size on 2 lines, so it is cut
+```
+
+The smaller steps are copies of the font of the box (`GetObjectW`, then
+`CreateFontIndirectW` with a smaller height), made one time and kept. A
+smaller font on one line keeps the baseline of the font of the design, so
+the words stay on the line of the card.
+
+**Where.** The boxes that can take two lines are the title and the note of
+a spell book with no item, and a line of a hint card (a second row of the
+card, at most 4 rows in a card). The other boxes take one line: a name in a
+cell of the spell book, a badge, a seal and the card of the ring, a tab, a
+label and a value of the debug window and of the VR Settings window, a line
+of the controls of the welcome page, a key of the keyboard, a button, a
+note and a seal of the panel of places, and the words of the page
+Controls. A paragraph (the note of the debug window) wraps as before.
+
+**The check** (`text_fit_test=1`, a test key). At the first frame, each card
+and panel measures the texts that it can show, in its own boxes and with its
+own fonts: the spell book (each title, note and name, at each size of a
+cell), the hint card (the lines of the spell book and the longest lines of
+the mod, in both looks), the ring (each word and name of an item, each
+group, and each label, name and value of a switch, in both looks), the debug
+window and the VR Settings window (each tab, label and value word), the
+keyboard (each key, with and with no shift) and the panel of places (each
+button and note). The log has one line for each text that needs a smaller
+font or more lines, one line for each cut, and the counts:
+
+```
+text fit     : check: spell book title: "No miracle to ask for now" fits in 480 by 98 px at 70 percent of its size on 1 line
+text fit     : check: text_fit_test=1: 1234 texts of the cards and panels measured in their boxes: 40 at a smaller font, 3 on more lines, 0 cut
+```
+
+Each report window has the counts of the draws that needed a smaller font
+or more lines, and of the cuts:
+
+```
+text fit     : this window 3 texts had a smaller font, 1 went on more lines, and 0 were cut
+```
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `text_fit_test` | 0 | Test key. 1: the check of the words of each card and panel at the first frame |
+
+The math checks are in `test/controller_math/text_fit_checks.h`: a text
+that fits keeps its font, each step of the ladder, the floor, two lines
+before a cut, the break at a space, the fewest lines first, a word that is
+wider than the box, and for many widths, each fit keeps each word in order
+inside the box.
+
+A game text on a hint card (a tooltip of the game) is measured when it
+shows: a cut of a game text has its log line in a normal play.

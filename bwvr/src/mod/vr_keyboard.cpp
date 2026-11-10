@@ -48,6 +48,7 @@
 
 #include "../vr/xr_screen.h"
 #include "card_scroll.h"
+#include "text_fit.h"
 #include "menu_room.h"
 #include "vr_keyboard_math.h"
 
@@ -329,7 +330,7 @@ void Raster(const Look& look) {
     SelectObject(g_dc, k.kind == vr_keyboard_math::kChar ? g_font : g_word_font);
     SetTextColor(g_dc, text);
     RECT rect = {r[0], r[1], r[0] + r[2], r[1] + r[3]};
-    DrawTextW(g_dc, label, -1, &rect, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+    text_fit::Draw(g_dc, label, rect, DT_CENTER | DT_VCENTER, 1, "keyboard");
   }
   GdiFlush();
   // Opaque: the alpha of each pixel is 255, so the color needs no change for
@@ -487,8 +488,8 @@ void DrawKey(int i, bool shift, int look) {
                           : (digit ? g_ink_digit_font : g_ink_font));
   SetTextColor(g_dc, RGB(255, 255, 255));
   RECT rect = {x0, baseline - ascent, x1, baseline - ascent + height};
-  DrawTextW(g_dc, label, -1, &rect,
-            DT_SINGLELINE | DT_NOPREFIX | DT_CENTER | DT_TOP | DT_NOCLIP);
+  text_fit::Draw(g_dc, label, rect, DT_CENTER | DT_TOP | DT_NOCLIP, 1,
+                 "keyboard");
   GdiFlush();
   if (wax) {
     card_scroll::SealInk(picture, g_bits, x0 + kWaxInsetX, y0 + kWaxInsetY,
@@ -710,4 +711,22 @@ void VrKeyboardReport() {
   g_keys = 0;
   g_draws = 0;
   g_draw_ms = g_draw_most_ms = 0.0;
+}
+
+// THE CHECK of the words (text_fit_test=1): the letter or the word of each
+// key, with and with no shift, in the face of its key. See text_fit.h.
+void VrKeyboardTextFitTest() {
+  if (!RasterStart()) return;
+  for (int i = 0; i < vr_keyboard_math::kKeyCount; ++i) {
+    const vr_keyboard_math::Key& k = vr_keyboard_math::kKeys[i];
+    int r[4];
+    vr_keyboard_math::KeyRect(i, kWidth, kHeight, kMargin, kGap, r);
+    for (int shift = 0; shift < 2; ++shift) {
+      wchar_t label[8];
+      Label(i, shift != 0, label);
+      text_fit::Check(g_dc,
+                      k.kind == vr_keyboard_math::kChar ? g_font : g_word_font,
+                      label, r[2], r[3], 1, "keyboard");
+    }
+  }
 }

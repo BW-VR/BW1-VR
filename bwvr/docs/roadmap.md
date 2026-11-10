@@ -52,8 +52,9 @@ These items come before the other work.
 - **P20. The spell book: the open parts.** X opens a spell book over the
   hand that does not point, and the pointing hand pulls a miracle out of it
   with the grip: the game's own request (`spell_book=1`,
-  `spell_book_pull_cm=10`, `debug_all_miracles` for tests, `miracles.md`,
-  "The spell book"). The recipe `village_run.ps1 -Kind book` shows the
+  `spell_book_pull_cm=10`, the orbs of the game in the cells
+  `spell_book_orbs=1`, `debug_all_miracles` for tests on the debug page,
+  group Miracles, `miracles.md`, "The spell book"). The recipe `village_run.ps1 -Kind book` shows the
   open, the halo, the card, the pull, the spring back, the take and a
   refusal. The checks of the book, the row of gestures and the draw are in
   `headset-checks.md`, "What the owner checks", and in R12. Open:
@@ -66,8 +67,8 @@ These items come before the other work.
     limit of 6 icons"). Every miracle needs icons of the site that do not
     come from the Village Centre (`WorshipSite::AddSpellIconIfNecessary`
     `0x0077C9E0`).
-  - The items in the book are flat pictures with the gestures. Only the
-    bubble that the hand pulls out is the game's own bubble.
+  - The orbs in the cells: only a headset shows how they look in their
+    holes of the page, with the land behind the glass.
   - The leash gestures and the scribble are not in the book.
 ### Faults in play
 

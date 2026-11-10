@@ -31,7 +31,9 @@ const int kTexture = 1024;
 const float kTitleM = 0.030f;
 // The width of a book with no item, or with few items.
 const float kLeastWidthM = 0.16f;
-// The height of a book with no item: the title and one line.
+// The size of a book with no item: the title and the reason, each on a line
+// of its own at the size of the design.
+const float kEmptyWidthM = 0.20f;
 const float kEmptyHeightM = 0.060f;
 
 // The center of the book from the grip point, in the axes of the grip pose:
@@ -71,7 +73,7 @@ inline Layout LayoutFor(int count) {
     l.columns = 0;
     l.rows = 0;
     l.cell_m = 0.0f;
-    l.width_m = kLeastWidthM;
+    l.width_m = kEmptyWidthM;
     l.height_m = kEmptyHeightM;
     return l;
   }
@@ -103,6 +105,19 @@ inline void ItemCenter(const Layout& l, int i, float* x, float* y) {
       row == l.rows - 1 ? l.count - row * l.columns : l.columns;
   *x = (column - 0.5f * (in_row - 1)) * l.cell_m;
   *y = 0.5f * l.height_m - kTitleM - (row + 0.5f) * l.cell_m;
+}
+
+// THE BUBBLE of a cell: its radius is kBubbleShare of a cell, and its middle
+// is kBubbleRise of a cell above the middle of the cell. The name is under
+// it. With spell_book_orbs=1 the orb of the game is there, on the plane of
+// the book.
+const float kBubbleShare = 0.33f;
+const float kBubbleRise = 0.10f;
+
+// The middle of the bubble of item i, in meters from the center of the book.
+inline void OrbCenter(const Layout& l, int i, float* x, float* y) {
+  ItemCenter(l, i, x, y);
+  if (l.columns > 0 && i >= 0 && i < l.count) *y += kBubbleRise * l.cell_m;
 }
 
 // The size of the picture in pixels for a layout. Even numbers, so the

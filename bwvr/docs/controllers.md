@@ -1083,7 +1083,7 @@ default. Each control has one job, and one button opens the game menu.
 | `move_stick_follow_land` | 1 | In the walk with the stick, 1: the height of the view follows the land under the head through a smooth filter. 0: the view keeps its height (`god-view.md`, section 5.7). Not in the launcher: a save of the launcher removes it. The switch "Move kind" of the debug page |
 | `miracle_cancel_ms` | 400 | The longest press of the second face button that takes a miracle out of the Hand |
 | `spell_book` | 1 | 1: the first face button of the hand that does not point opens the spell book (`miracles.md`). 0: that button has no job. The switch "Spell book" of the debug page. Not in the launcher |
-| `debug_all_miracles` | 0 | 1: up to 6 miracles in the spell book (the slots of a Village Centre), with no cost in prayer power. For tests. The switch "All miracles" of the debug page. Not in the launcher |
+| `debug_all_miracles` | 0 | 1: up to 6 miracles in the spell book (the slots of a Village Centre), with no cost in prayer power. For tests. The switch "Unlock all" of the debug page, the first row of the group Miracles. Not in the launcher |
 | `controller_hints` | 1 | 1 shows the controller words in the hints and the help text of the game while a controller owns the pointer. 0 leaves every hint as the game draws it (`controller-hints.md`) |
 | `text_click` | 1 | 1: while a text of the game waits for a click, its prompt shows on the hint card in each view, and a press of the trigger goes to the game as the left button: no Creature command, no seed, and with the Hand off the view too. 0: the prompt has the rule of each other hint of the left button, and the trigger keeps its other jobs (`controller-hints.md`, section 10) |
 | `hint_profile` | (none) | A test key. Forces the words of one profile, for example `valve/index_controller` |
@@ -2176,7 +2176,7 @@ release of the button on it chooses it, as on `places`.
 
 | Part | What it does |
 | --- | --- |
-| The tabs at the left | One for each group: View, Picture, Render, Interface, Hand, Throw, Creature, Sound, Temple. A press shows the switches of the group. The tab of the group that shows is bright gold |
+| The tabs at the left | One for each group: View, Picture, Render, Interface, Hand, Throw, Creature, Miracles, Sound, Temple. A press shows the switches of the group. The tab of the group that shows is bright gold |
 | A row with a toggle | A switch with two values. The word of the value, and a slot with a knob of wax: green at the right for the value 1, red at the left for 0. A press anywhere on the row changes it |
 | A row with two arrows | A switch with more values, or with a number. The right arrow makes the step of the test key. The left arrow makes a step back for "Throw speed", "Land speed" and "Video height". For each other switch the left arrow makes the same step as the right arrow, because the change function of a test key steps one way only, and many of them go between the value of the ini and one other value |
 | A dim row | A switch that cannot change now (its part is off, its hook is not in, or it is for the other renderer). It says "not now", and a press gives the pulse `refused` |
@@ -2205,7 +2205,7 @@ to it.
 
 | Page | Items |
 | --- | --- |
-| The groups | View, Picture, Render, Interface, Hand, Throw, Creature, Sound, Temple: each group that has a switch now |
+| The groups | View, Picture, Render, Interface, Hand, Throw, Creature, Miracles, Sound, Temple: each group that has a switch now |
 | A group | Its switches. A badge has the word of the switch, and its value under it in a second color (10.4), for example "One walk" and "on". The card in the middle has the name of the switch and its ini key with the value, for example `one_walk=1 (on)` |
 
 Each page has `back` in the bottom slot: from a group to the page of the

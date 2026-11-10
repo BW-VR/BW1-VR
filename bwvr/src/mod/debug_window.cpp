@@ -83,6 +83,7 @@
 #include "cutscene_window.h"
 #include "debug_menu.h"
 #include "debug_window.h"
+#include "text_fit.h"
 #include "debug_window_math.h"
 #include "haptics.h"
 #include "panel_kit.h"
@@ -964,8 +965,7 @@ void PlainWords(HFONT font, COLORREF color, const wchar_t* words,
   SelectObject(c->dc, font);
   SetTextColor(c->dc, color);
   RECT rect = {box[0], box[1], box[2], box[3]};
-  DrawTextW(c->dc, words, -1, &rect,
-            side | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+  text_fit::Draw(c->dc, words, rect, side | DT_VCENTER, 1, "debug window");
 }
 
 void RasterPlain(const Look& look) {
@@ -1789,4 +1789,39 @@ void DebugWindowReport() {
   }
   g_opens = g_presses = g_steps = g_refused = g_draws = g_hover_draws = 0;
   g_draw_ms = g_draw_most_ms = g_hover_most_ms = 0.0;
+}
+
+// THE CHECK of the words (text_fit_test=1): the tab of each group, and the
+// label and each value word of each row, of the debug switches and of the
+// settings, in their boxes of the parchment. See text_fit.h.
+void DebugWindowTextFitTest() {
+  if (!ParchmentStart()) return;
+  HDC dc = g_canvas.dc;
+  const WindowRows* lists[2] = {&kDebugRows, SettingsPanelRows()};
+  const char* const where[2] = {"debug window", "settings window"};
+  for (int k = 0; k < 2; ++k) {
+    const WindowRows* src = lists[k];
+    if (src == nullptr) continue;
+    for (int g = 0; g < src->groups(); ++g) {
+      text_fit::Check(dc, g_tab_font.font, src->group_name(g), kTabWidth,
+                      kTabHeight, 1, where[k]);
+    }
+    int label[4], toggle[4], arrows[4];
+    LabelBox(label);
+    ValueBox(kRowToggle, toggle);
+    ValueBox(kRowArrows, arrows);
+    for (int i = 0; i < src->count(); ++i) {
+      if (!src->in_window(i)) continue;
+      text_fit::Check(dc, g_label_font.font, src->label(i),
+                      label[2] - label[0], label[3] - label[1], 1, where[k]);
+      const int values = src->value_count(i);
+      const int* box = values == 2 ? toggle : arrows;
+      for (int v = 0; v < values; ++v) {
+        wchar_t word[32];
+        src->value_text(i, v, word, 32);
+        text_fit::Check(dc, g_value_font.font, word, box[2] - box[0],
+                        box[3] - box[1], 1, where[k]);
+      }
+    }
+  }
 }

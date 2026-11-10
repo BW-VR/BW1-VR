@@ -65,3 +65,7 @@ void HintCardLearnDone(int skill, const char* how);
 void HintCardFollowTooltips(int tooltip_level);
 // Once a report window.
 void HintCardReport();
+
+// The check of the words (text_fit_test=1, text_fit.h): `text` in the box of
+// a line of a card, in each look. spell_book.cpp gives its lines here too.
+void HintCardCheckLine(const wchar_t* text);

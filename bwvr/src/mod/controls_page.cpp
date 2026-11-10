@@ -60,6 +60,7 @@
 
 #include "button_map_math.h"
 #include "card_scroll.h"
+#include "text_fit.h"
 #include "controller_art_math.h"
 #include "controllers.h"
 #include "controls_layout_math.h"
@@ -379,8 +380,7 @@ void Words(uint8_t* to, int style, int font, const wchar_t* words,
   SetTextColor(dc, RGB(255, 255, 255));
   SetBkMode(dc, TRANSPARENT);
   RECT rect = {b[0], b[1], b[2], b[3]};
-  DrawTextW(dc, words, -1, &rect,
-            DT_SINGLELINE | DT_NOPREFIX | DT_VCENTER | align);
+  text_fit::Draw(dc, words, rect, DT_VCENTER | align, 1, "controls page");
   GdiFlush();
   for (int y = b[1]; y < b[3]; ++y) {
     const uint32_t* letters =
@@ -1768,8 +1768,8 @@ void DrawPage(kit::Canvas* c, const int box[4], int style, int hover,
         SetTextColor(c->dc, b.can ? RGB(230, 190, 110) : RGB(140, 140, 140));
         SetBkMode(c->dc, TRANSPARENT);
         RECT jr = {job_box[0], job_box[1], job_box[2], job_box[3]};
-        DrawTextW(c->dc, job, -1, &jr,
-                  DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+        text_fit::Draw(c->dc, job, jr, DT_LEFT | DT_VCENTER, 1,
+                       "controls page");
         GdiFlush();
         if (b.can) {
           DownMark(plain, r[2] - 18.0f, (r[1] + r[3]) * 0.5f + 1.0f,

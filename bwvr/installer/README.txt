@@ -948,7 +948,7 @@ see it, about 30 cm across. Moves of the Hand without B do not draw.
 
 The spell book is the other way. Press X on your left hand: a book
 opens over that hand with each miracle that your Worship Sites can
-give you now, and the pictures of its gestures. Put your right hand
+give you now, each in its orb of the game. Put your right hand
 on a miracle: a gold halo shows on it, the controller ticks, and the
 card on your hand names it. Close the grip to take the miracle. The
 game takes the prayer power as for the gestures, and the Miracle
@@ -957,8 +957,9 @@ now, and the card says why. Press X again to close the book. With the
 left hand as the pointing hand, A opens the book at your right hand.
 Set spell_book=0 in bwvr.ini to give X no job.
 
-For tests, set debug_all_miracles=1 in bwvr.ini, or use "All
-miracles" on the debug page of the ring. Then your towns know every
+For tests, set debug_all_miracles=1 in bwvr.ini, or use "Unlock all
+miracles" in the group Miracles of the debug window (the item "debug"
+of the ring). Then your towns know every
 miracle of the game, and your Worship Sites have no limit of prayer
 power. A village shows at most 6 miracles, so the book has 6 of them.
 A save that you make then keeps these miracles.

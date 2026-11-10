@@ -43,7 +43,7 @@
 #                gesture_panel=1 and the book on the palm.
 # The other kinds (charge, store, neartake, land, job, tree, throw,
 # throwlive, throwhouse, throwhouselow, throwpile, probe, workshop, site, build, scaffold,
-# turn, fartake, fartotem, choice, look, book, controls, rayover, walk, wall,
+# turn, fartake, fartotem, choice, look, book, unlock, controls, rayover, walk, wall,
 # housestop, headhouse, pinch, small,
 # aimsign, aimmiracle, aimpast, tglow, tooltip) have a comment at their steps
 # below.
@@ -221,6 +221,34 @@ if ($Kind -eq 'totem') {
                  'x@1540+4 shot@1560+1'
     }
     $keys = "$keys;spell_book_test_save=16"
+} elseif ($Kind -eq 'unlock') {
+    # The switch "Unlock all miracles" of the debug window, with no keyboard
+    # (bwvr/docs/miracles.md, "The debug switch"). Y and the left hand choose
+    # "debug" in slot 3 of page 1 of the ring, and the debug window opens.
+    # The trigger presses the tab Miracles (tab7) and its first row, "Unlock
+    # all miracles": debug_all_miracles goes to 1, and once a second the towns
+    # learn each miracle. Close closes the window. X opens the spell book with
+    # the orbs of the game in its cells (spell_book_orbs=1), and the word
+    # "book" steps the right hand to two items. X closes the book. Each
+    # picture of the window and of the book is saved, and the check of the
+    # words runs at the first frame (text_fit_test=1). The eye pictures
+    # (shot, with the renderer dxwrapper) show the orbs, but not the book:
+    # the book is a quad layer. -Set "spell_book_orbs=0" gives the flat
+    # pictures.
+    if ($Plan -eq '') { $Plan = 'gosite' }
+    if ($Census -eq '') { $Census = '890,1300' }
+    if ($Seconds -eq 0) { $Seconds = 50 }
+    if ($Parts -eq '') { $Parts = 'tab7 row0 close' }
+    $ring = Get-BwvrRingChoice 3 1000
+    if ($Steps -eq '') {
+        $Steps = $pre + 'seek@920+1 ' + $ring.Steps + ' aimdebug@1080+1 trigger@1090+4 shot@1110+1 ' +
+                 'aimdebug@1130+1 trigger@1140+4 shot@1160+1 aimdebug@1180+1 trigger@1190+4 ' +
+                 'x@1300+4 shot@1320+1 book@1340+1 shot@1352+1 book@1380+1 shot@1392+1 x@1450+4'
+    }
+    $keys = "$keys;debug_menu=1;debug_window=1;welcome_done=1;" +
+            "radial_menu_items=leash,places,recenter,debug,more,settings,names,pause;" +
+            "fake_controller_left_points=$($ring.Points);debug_test_parts=$Parts;" +
+            "debug_window_test_save=6;spell_book_test_save=8;text_fit_test=1;test_frame_rate=60"
 } elseif ($Kind -eq 'controls') {
     # The page Controls of the VR Settings window (bwvr/docs/ui-layer.md,
     # "The page Controls", and bwvr/docs/controllers.md, "The map of the
@@ -882,8 +910,12 @@ if ($Kind -eq 'tglow') {
 if ($Kind -eq 'palm') {
     $pattern ='^gesture panel:|^spell book   : (the book|the palm)|^controllers  : the fake left hand'
 }
+if ($Kind -eq 'unlock') {
+    $pattern = '^spell book   :|^book bubble  :|^text fit     : (check: text_fit|.*cut)|^debug page   :|^debug window : (the window (opens|closes)|the trigger)|' +
+               '^ring         : the player chose|^controllers  : the word (aimdebug|book)'
+}
 if ($Kind -eq 'book') {
-    $pattern = '^spell book   :|^village      : (test key|the pool|the miracle icon)|^miracle      : (?!miracle_).*(active in the Hand|left the Hand|takes)|' +
+    $pattern = '^spell book   :|^book bubble  :|^village      : (test key|the pool|the miracle icon)|^miracle      : (?!miracle_).*(active in the Hand|left the Hand|takes)|' +
                '^controllers  : (the fake x|the word book|the first face button)|^haptics      : (cast|refused)|^hand         : state'
 }
 # The hint cards of this hand go in the list: the left hand for the page

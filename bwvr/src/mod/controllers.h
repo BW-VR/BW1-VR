@@ -87,6 +87,12 @@ struct GrabSettings {
   int limit = 3400;        // units from the map center, (2560, 0, 2560)
   int min_height = 6;      // units above the land
   int max_speed = 0;       // units a second, 0 is no cap
+  // The gain of a grab with one hand in the God view (grab_gain_math.h):
+  // grab_boost 1 on, 0 the grab is 1:1. The reach in cm of the room and
+  // the largest gain of the distance part.
+  bool boost = true;       // grab_boost
+  int boost_reach_cm = 50; // grab_boost_reach_cm
+  int boost_most = 50;     // grab_boost_most
   bool probe = false;      // log the game's land drag gain
 };
 

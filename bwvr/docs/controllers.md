@@ -1101,7 +1101,10 @@ default. Each control has one job, and one button opens the game menu.
 
 The other keys of the Hand (the reach, the size, the throw, the Creature) are
 in `hand.md`, `throw.md` and `creature.md`. The keys of the grab of the world
-are in `god-view.md`, section 5.6.
+are in `god-view.md`, section 5.6. A grab with one hand has a gain
+(`grab_boost`, `god-view.md`, 5.1): land far below the hand comes up faster
+than the hand, and at a small scale the land moves across faster. Land near
+the hand at a scale of 16 units per meter or more moves 1:1.
 
 ### 5.3 Files and functions
 

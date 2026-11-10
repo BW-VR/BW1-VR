@@ -443,6 +443,13 @@ launcher (key grab_hand). 1 uses the grip of your other hand. 2 also
 uses the grip of the pointing hand when the Hand is empty and not
 over an object. 0 turns the grab off.
 
+When the land is far below your hand, a pull up with one grip brings
+the land up faster than your hand: land 20 m below comes near in
+three pulls. Land near your hand moves with your hand. When you are
+as small as a villager, a pull to the side also moves the land
+farther, up to 4 times. Set grab_boost=0 in bwvr.ini to move the land
+exactly with your hand.
+
 To change the direction of the left stick, set "Movement direction"
 in the launcher (key move_stick). Head direction moves you where your
 head faces. Controller direction moves you where the left controller

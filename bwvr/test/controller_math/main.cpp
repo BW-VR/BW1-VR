@@ -3619,6 +3619,7 @@ void CreatureChecks() {
 #include "catch_checks.h"
 #include "one_walk_checks.h"
 #include "walk_checks.h"
+#include "grab_gain_checks.h"
 #include "blt_copy_checks.h"
 #include "save_picture_checks.h"
 #include "read_ahead_checks.h"
@@ -4077,6 +4078,7 @@ int main() {
   catch_checks::CatchChecks();
   one_walk_checks::OneWalkChecks();
   walk_checks::WalkChecks();
+  grab_gain_checks::GrabGainChecks();
   comfort_checks::ComfortChecks();
   video_view_checks::VideoViewChecks();
   video_layers_checks::VideoLayersChecks();

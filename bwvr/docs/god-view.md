@@ -560,11 +560,13 @@ the table by the grips") is the same as on the table, with the vertical grab
 and the ground limits added.
 
 - One hand (the other hand's grip, the left grip by default): the land moves
-  one to one with the hand, across and up and down. A hand that moves up
-  raises the land by the same distance, and a hand that moves down lowers it
-  (`TableGrabSolve` with `vertical`, then `GodGroundHeight` for the limits of
-  section 3). At a limit the land stops and does not jump. The height of the
-  waist point is the height of the press plus the rise of the hand.
+  with the hand, across and up and down. A hand that moves up raises the
+  land, and a hand that moves down lowers it (`TableGrabSolve` with
+  `vertical`, then `GodGroundHeight` for the limits of section 3). At a
+  limit the land stops and does not jump. With the land at the hand and a
+  scale of 16 units per meter or more the move is one to one. The gain of
+  the grab below changes that for land far below the hand and for a small
+  scale.
 - Both grips: the land turns about up with the hands and scales with their
   spread, about the land point under the middle of the hands. The height of
   the press stays, so two hands move the land only across.
@@ -582,6 +584,53 @@ and the ground limits added.
   0x308 for a pan, 0x300 and the direction for a turn, and 0x304 for a zoom.
 
 The sticks are refused while a grip holds the world.
+
+**The gain of the grab** (`grab_boost`, 1, `grab_gain_math.h`). A player at
+the villager scale can find the land 20 m below the head, and a grab of 60
+cm at a time then takes 33 pulls. So a grab with one hand has two gains, each
+on its own axis:
+
+| Part | Axis | Gain | With the defaults |
+| --- | --- | --- | --- |
+| The distance | Up | `d / reach`, at least 1 and at most `grab_boost_most` (50). `d` is the land below the hand, `reach` is `grab_boost_reach_cm` (50) | 1 for land within 50 cm of the hand, 4 for land 2 m below, 40 for land 20 m below |
+| The scale | Across | The factor of the speed of the stick (section 5.7, the curve of `move_stick_scale_*`), at least 1 | 4 at 1 unit per meter, 1.46 at 7.5, 1 from 16 up |
+
+- The solve takes a hand point of its own. At the press it is the hand. In
+  each solve it moves by the step of the hand since the solve before, with
+  the gains of that solve. So a gain that changes in a pull makes no jump,
+  and a hand at rest moves nothing at each gain.
+- Up, the gain falls with the distance during the pull. `LandUp` takes the
+  exact answer for each step, so the land comes up to `reach` below the
+  hand by the gain, and never nearer: there is no overshoot. Then the land
+  is 1:1 with the hand. Land 20 m below the hand comes to 1.03 m below it in
+  three pulls of 60 cm (0.5 + 19.5 e^-3.6), and to 0.66 m in four.
+- A move down of the hand is 1:1, so the land never drops away fast. The
+  limits of section 3 stay: a pull that takes the land farther than 2.5 m
+  below the head stops at the limit, and a pull that brings far land nearer
+  acts from each depth. At a limit the hand point of the solve goes to the
+  height of the pose, so a move back acts at once.
+- The distance part acts up only. With the land 20 m below the hand its
+  gain is 40, and a small move of the hand to the side would throw the view
+  meters to the side in each pull. The scale part acts across only: in
+  height the hand holds the ground at the waist, and a gain there would
+  move the land away from the hand with each small move up or down.
+- Two hands (the turn and the zoom) keep the real hands, 1:1. The test step
+  of the grab "one to one" (Shift F11, "Grab test" of the debug page) turns
+  the gain off too.
+- With `grab_boost=0` the grab is 1:1 at each distance and scale. The switch
+  "Grab gain" of the debug page changes the key while the game runs, with a
+  short pulse for 1:1 and a long pulse for the gain. A grab that holds
+  ends.
+- The comfort vignette counts the move of the view in the room, so a pull
+  with a large gain darkens the edges as a fast walk does (section 5.8).
+
+The log has a line for each press with the gain (at most 60 in a game), and
+a line at the release with the way of the hand and of the land:
+
+```
+grab         : the gain of the grab (grab_boost=1): 40.00 up, with the land 20.00 m below the hand (reach 50 cm, at most 50), and 1.00 across at 100.00 units per meter, frame 1450
+grab         : the hand went 60.0 cm and the land 1423.0 cm in the room. The gain of the grab was 12.74 to 40.00 up and 1.00 to 1.00 across (grab_boost=1)
+```
 
 The code is in `world_grab.cpp` (the state machine, `TableAnchor`,
 `TableSolve`) and `controllers.cpp` (the grip points and the buttons).
@@ -800,6 +849,9 @@ All in `[bwvr]`.
 | `grab_smoothing_ms` | 35 | The ease of the grip points. 0 is no smoothing |
 | `grab_press_pct` | 70 | The squeeze that starts a grab |
 | `grab_release_pct` | 50 | The squeeze that ends it |
+| `grab_boost` | 1 | The gain of a grab with one hand in the God view (5.1). 1: land far below the hand comes up faster than the hand, and at a small scale the land moves across faster. 0: 1:1. The switch "Grab gain" of the debug page. Not in the launcher |
+| `grab_boost_reach_cm` | 50 | Land within this distance below the hand is held 1:1 up, in cm of the room |
+| `grab_boost_most` | 50 | The largest gain of the distance part |
 | `grab_gain_mode` | 1 | Game camera grab only. 1 the land looks glued to the hand, 0 one to one |
 | `grab_gain_pct` | 100 | Game camera grab only. Multiplies `g` |
 | `grab_gain_max` | 60 | Game camera grab only. The most `g` can be |
@@ -899,8 +951,9 @@ event.
   key, and at 1 unit per meter it is 4 times. The comfort vignette counts
   the move in the room (section 5.8), so at a large factor it stays at its
   full darkness. With `move_stick_scale=0` the speed is the speed of the key
-  at each scale. The grab of the world has no factor: the land stays at the
-  hand. The switch "Speed by scale" of the debug page changes the key while
+  at each scale. The grab of the world has a gain of its own with the same
+  curve across (section 5.1, "The gain of the grab"). The switch "Speed by
+  scale" of the debug page changes the key while
   the game runs, with a short pulse for 0 and a long pulse for 1. A walk or
   a fly that runs stops.
 - **The speed ramp** (`move_stick_ramp`, 1). While the stick is pushed to 90
@@ -1065,10 +1118,12 @@ event.
     (a story, a load) keep the land under the head at its height in the
     room, at most 2.5 m below the head.
   - The way back to the land at the waist is a grab of one hand that pulls
-    the land up (1:1 with the hand, so 2.5 m takes about four pulls of 60
-    cm), or a ground step up of the keyboard. A zoom out also brings a deep land up toward
-    2.5 m below the head, and with `god_zoom_far_level=1` the next zoom in
-    keeps it there.
+    the land up. With the gain of the grab (5.1) land 20 m below the hand
+    comes to about 1 m below it in three pulls of 60 cm. With
+    `grab_boost=0` the pull is 1:1, so 2.5 m takes about four pulls. A
+    ground step up of the keyboard also brings the land up. A zoom out
+    brings a deep land up toward 2.5 m below the head, and with
+    `god_zoom_far_level=1` the next zoom in keeps it there.
   - The fly stops in the frame in which the stick comes back, as the walk
     does. There is no glide and no ease.
   - The comfort vignette counts the move up and down too (section 5.8).

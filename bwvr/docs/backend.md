@@ -6063,6 +6063,7 @@ item.
 | None | `debug_menu=1` | A fly at a house, a rock or a tree trunk: it stops short of it, or it slides past it. A short and a long pulse (`fly_solid_slide`, `god-view.md`, section 5.7). The debug page only | View, Fly at solids |
 | None | `debug_menu=1` | A zoom in over a land more than 2.5 m below the head: about a level 2.5 m below the head, or about the land. A short and a long pulse (`god_zoom_far_level`, `god-view.md`, section 2). The debug page only | View, Deep zoom |
 | None | `debug_menu=1` | The speed of the walk and the fly with the stick: the same at each scale, or times the factor of the scale (4 at 1 unit per meter, 0.6 from 44 up). A short and a long pulse (`move_stick_scale`, `god-view.md`, section 5.7). The debug page only | View, Speed by scale |
+| None | `debug_menu=1` | The grab of the world with one hand: 1:1, or with the gain for land far below the hand and for a small scale. A short and a long pulse (`grab_boost`, `god-view.md`, section 5.1). The debug page only | View, Grab gain |
 
 The launcher has no row for `test_keys`. It is off by default, and a tester or a
 desktop run writes it in `bwvr.ini` (a save of the launcher keeps it). The row

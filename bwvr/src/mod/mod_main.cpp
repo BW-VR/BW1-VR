@@ -1685,6 +1685,12 @@ void ReadSettings() {
     g.vertical_pct = number("grab_vertical_pct", 100);
     g.smoothing_ms = number("grab_smoothing_ms", 35);
     g.max_speed = number("grab_max_speed", 0);
+    // The gain of a grab with one hand in the God view: land far below the
+    // hand comes up faster than the hand, and at a small scale the land
+    // moves across faster than the hand. 0 keeps the grab 1:1.
+    g.boost = number("grab_boost", 1) != 0;
+    g.boost_reach_cm = number("grab_boost_reach_cm", 50);
+    g.boost_most = number("grab_boost_most", 50);
     // The grip levels and the limits.
     g.press_pct = number("grab_press_pct", 70);
     g.release_pct = number("grab_release_pct", 50);

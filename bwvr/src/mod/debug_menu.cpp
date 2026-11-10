@@ -90,6 +90,8 @@ int TabletopGodFlySlideValue();
 void TabletopGodFlySlideToggle();
 int WorldGrabTestValue();
 void WorldGrabCycleTest();
+int WorldGrabBoostValue();
+void WorldGrabBoostToggle();
 // The teleport (teleport.cpp).
 int TeleportRingValue();
 void TeleportRingChange(const char* by);
@@ -481,6 +483,9 @@ const Switch kSwitches[] = {
     {kGroupView, L"Speed by scale", L"Stick faster when zoomed in",
      "move_stick_scale", TabletopGodMoveScaleValue,
      [](const char*) { TabletopGodMoveScaleToggle(); }, L"off|on"},
+    {kGroupView, L"Grab gain", L"Grab brings far land fast", "grab_boost",
+     WorldGrabBoostValue, [](const char*) { WorldGrabBoostToggle(); },
+     L"1:1|gain"},
 
     // Picture
     {kGroupPicture, L"Scene window", L"Cut scene on a screen in the room",
@@ -903,6 +908,10 @@ const wchar_t* const kTips[] = {
     L"On: the walk and the fly with the stick are up to 4 times faster when "
     L"zoomed in (1 unit per meter) and 0.6 times as fast when zoomed out. "
     L"Off: the same speed in the room at each scale.",
+    // Grab gain
+    L"Gain: a grab with one hand brings land far below the hand up faster "
+    L"than the hand, and when zoomed in moves the land across up to 4 times "
+    L"the hand. 1:1: the land moves with the hand.",
     // Scene window
     L"On: a cut scene of the God view plays on a screen in the room. Off: it "
     L"plays in the full view, with held shots.",

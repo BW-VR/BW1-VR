@@ -153,6 +153,10 @@ void TabletopMove(const table_math::TablePose& pose);
 // ground limits of docs/god-view.md, "The ground height". False when the God view does
 // not own the view. cut is true when a limit held the height back.
 bool TabletopGodLimitHeight(table_math::TablePose* pose, bool* cut);
+// The God view: how far the land is below a point of the room of the table,
+// in meters, in the pose of now. False when the God view does not own the
+// view. For the gain of the grab (world_grab.cpp).
+bool TabletopGodLandBelow(const float point[3], float* below_m);
 
 // The game's switches for the turn and the zoom of a grab: each one that is
 // off sets its flag to false.
@@ -247,6 +251,8 @@ int TabletopGodFlySlideValue();
 void TabletopGodMoveScaleToggle();
 int TabletopGodMoveScaleValue();
 float TabletopGodMoveScaleFactor();
+// The same curve with or without move_stick_scale, for the grab.
+float TabletopGodScaleCurve();
 // The switch "Deep zoom" of the debug page (god_zoom_far_level).
 void TabletopGodZoomFarToggle();
 int TabletopGodZoomFarValue();

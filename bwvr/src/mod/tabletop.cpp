@@ -3982,6 +3982,22 @@ bool TabletopGodLimitHeight(TablePose* pose, bool* cut) {
   return true;
 }
 
+// For the gain of the grab (world_grab.cpp): how far the land is below a
+// point of the room (meters, in the room of the table), in the pose of now.
+// False when the God view does not own the view.
+bool TabletopGodLandBelow(const float point[3], float* below_m) {
+  if (!g_installed || !g_have_table || !g_settings.god) return false;
+  float room[3];
+  TableRoom(room);
+  const TablePose pose = Pose();
+  if (!(pose.scale > 0.0f)) return false;
+  float at[3];
+  PoseWorld(pose, room, point, at);
+  *below_m = point[1] - GroundInRoom(pose, room,
+                                     GroundAt(ClampMap(at[0]), ClampMap(at[2])));
+  return true;
+}
+
 // THE GAME'S SWITCHES FOR THE GRAB. A two hand grab turns the land only when
 // the game lets the camera turn (bit 2), and zooms only when it lets the
 // camera zoom (bit 4). world_grab.cpp passes these to the solve, which then
@@ -4724,6 +4740,18 @@ int TabletopGodMoveScaleValue() {
 
 float TabletopGodMoveScaleFactor() {
   return g_installed && g_settings.god ? MoveScaleFactor(g_scale) : 1.0f;
+}
+
+// The curve of the speed by the scale at the scale now, with the numbers of
+// move_stick_scale_* and with or without move_stick_scale, for the scale
+// part of the gain of the grab (grab_gain_math.h).
+float TabletopGodScaleCurve() {
+  if (!g_installed || !g_settings.god) return 1.0f;
+  return walk_math::ScaleFactor(
+      g_scale, g_settings.move_stick_scale_ref_x10 * 0.1f,
+      g_settings.move_stick_scale_power_pct * 0.01f,
+      g_settings.move_stick_scale_low_pct * 0.01f,
+      g_settings.move_stick_scale_high_pct * 0.01f);
 }
 
 uint64_t TabletopGodViewVersion() { return g_god_version; }

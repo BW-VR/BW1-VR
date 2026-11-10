@@ -74,8 +74,10 @@ float TabletopViewScale();
 uint64_t TabletopGodViewVersion();
 bool TabletopGodWalkActive();
 float TabletopGodMoveScaleFactor();
-// controllers.cpp: a grip holds the world.
+// controllers.cpp: a grip holds the world. world_grab.cpp: the gain of the
+// grab in the last solve.
 bool ControllersGrabHeld();
+float WorldGrabGainNow();
 
 namespace {
 
@@ -105,6 +107,7 @@ struct ScaleFrame {
   uint64_t version;         // of the God view
   bool walk, grab;
   float move_factor;        // the factor of the speed by the scale
+  float grab_gain;          // the larger gain of the grab (WorldGrabGainNow)
   double seconds;           // the clock at the first pass of the frame
   bool have_cam[2];
   float cam[2][3];          // the cameras of the eye passes, world
@@ -160,6 +163,7 @@ struct ScaleTotals {
   double walk_factor_sum;       // the factor of the speed by the scale
   uint64_t grab_frames;
   double grab_units, grab_hand_m;
+  float grab_gain_least, grab_gain_most;  // the gain of the grab
 };
 ScaleTotals g_scale_totals = {};
 Anchor g_head_anchor = {};
@@ -245,13 +249,17 @@ void ScaleLine(const char* why) {
               t.walk_up * to_cm, factor,
               factor > 0.0 ? t.walk_across * to_cm / factor : 0.0);
   }
-  char grab[200] = "";
+  char grab[320] = "";
   if (t.grab_frames > 0 && eyes > 0.0) {
     sprintf_s(grab, " In %llu frames of a grab of the world the camera of "
               "the game went %.2f units, %.1f cm of the room at the units "
-              "per meter of the eyes, and the grips went %.1f cm.",
+              "per meter of the eyes, and the grips went %.1f cm. The gain "
+              "of the grab was %.2f to %.2f (grab_boost, 1 is one to one).",
               t.grab_frames, t.grab_units, t.grab_units / eyes * 100.0,
-              t.grab_hand_m * 100.0);
+              t.grab_hand_m * 100.0,
+              t.grab_gain_least > t.grab_gain_most ? t.grab_gain_most
+                                                   : t.grab_gain_least,
+              t.grab_gain_most);
   }
   ModLog("scale check  : %s. The God view is at %.3f units per meter. The "
          "eye cameras of the game give %.3f units per meter (%.3f to %.3f, "
@@ -354,6 +362,12 @@ void ScaleTake(const ScaleFrame& f) {
       t.walk_factor_sum += f.move_factor;
     }
     if (f.grab && b.grab) {
+      if (t.grab_frames == 0 || f.grab_gain < t.grab_gain_least) {
+        t.grab_gain_least = f.grab_gain;
+      }
+      if (t.grab_frames == 0 || f.grab_gain > t.grab_gain_most) {
+        t.grab_gain_most = f.grab_gain;
+      }
       ++t.grab_frames;
       t.grab_units += units;
       float most = 0.0f;
@@ -495,6 +509,7 @@ void ViewCheckEye(int eye, const float m[12], float near_plane, float half_x,
     f.walk = TabletopGodWalkActive();
     f.grab = ControllersGrabHeld();
     f.move_factor = TabletopGodMoveScaleFactor();
+    f.grab_gain = WorldGrabGainNow();
     f.seconds = Clock();
     f.pointing = -1;
     f.have_hand = ReadGame3(kGameHandPosition, f.hand);

@@ -3557,6 +3557,88 @@ void CreatureChecks() {
     Check(!CreaturePanelPoint(eyes, above, 0.30f, 0.15f, 0.5f, 1.5f, at),
           "a head right over the eyes has no place", 0, 0);
   }
+
+  // THE PANEL OVER THE CREATURE (creature_panel_over): a panel 11 degrees
+  // wide and 6 degrees high in half, 2 degrees over the top of the body,
+  // 10 cm nearer than the top, 0.6 to 1.5 m from the eyes, 25 degrees over
+  // eye level at most.
+  {
+    const float kDegree = 0.01745329f;
+    const float eyes[3] = {0.0f, 1.6f, 0.0f};
+    const auto up_of = [&](const float p[3]) {
+      const float dx = p[0] - eyes[0], dz = p[2] - eyes[2];
+      return atan2f(p[1] - eyes[1], sqrtf(dx * dx + dz * dz)) / kDegree;
+    };
+    const auto yaw_of = [&](const float p[3]) {
+      return atan2f(p[0] - eyes[0], p[2] - eyes[2]) / kDegree;
+    };
+    const float over_top[3] = {0.2f, 0.9f, -0.8f};
+    float at[3];
+    Check(CreatureOverPoint(eyes, over_top, 6.0f, 2.0f, 0.10f, 0.6f, 1.5f,
+                            25.0f, at),
+          "a place over a Creature at the waist", 1, 1);
+    Near("the panel is right over the Creature: the same yaw", yaw_of(at),
+         yaw_of(over_top), 1e-3);
+    Near("its middle is 8 degrees over the top of the Creature, so its lower "
+         "edge is 2 degrees over it", up_of(at) - up_of(over_top), 8.0, 1e-3);
+    Near("it is 10 cm nearer than the top", Distance(at, eyes),
+         Distance(over_top, eyes) - 0.10f, 1e-4);
+    const float far_top[3] = {2.0f, 1.0f, -9.0f};
+    CreatureOverPoint(eyes, far_top, 6.0f, 2.0f, 0.10f, 0.6f, 1.5f, 25.0f, at);
+    Near("a Creature 9 m away: the panel comes to 1.5 m, over it",
+         Distance(at, eyes), 1.5, 1e-4);
+    Near("and it keeps the yaw of the Creature", yaw_of(at), yaw_of(far_top),
+         1e-3);
+    const float near_top[3] = {0.05f, 1.4f, -0.2f};
+    CreatureOverPoint(eyes, near_top, 6.0f, 2.0f, 0.10f, 0.6f, 1.5f, 25.0f,
+                      at);
+    Near("a Creature at the face: the panel goes out to 0.6 m",
+         Distance(at, eyes), 0.6, 1e-4);
+    const float tall_top[3] = {0.0f, 2.6f, -1.0f};
+    CreatureOverPoint(eyes, tall_top, 6.0f, 2.0f, 0.10f, 0.6f, 1.5f, 25.0f,
+                      at);
+    Near("a top 45 degrees over eye level: the panel is at the top's angle, "
+         "not lower", up_of(at), up_of(tall_top), 1e-3);
+    const float mid_top[3] = {0.0f, 1.95f, -1.0f};
+    CreatureOverPoint(eyes, mid_top, 6.0f, 2.0f, 0.10f, 0.6f, 1.5f, 25.0f, at);
+    Near("a top 19 degrees over eye level: the panel goes up to 25 degrees",
+         up_of(at), 25.0, 1e-2);
+    const float above[3] = {0.0f, 3.0f, 0.0f};
+    Check(!CreatureOverPoint(eyes, above, 6.0f, 2.0f, 0.10f, 0.6f, 1.5f,
+                             25.0f, at),
+          "a top right over the eyes has no place", 0, 0);
+    float angle = 0.0f, ratio = 0.0f;
+    const float a[3] = {0.0f, 1.6f, -1.0f}, b[3] = {1.0f, 1.6f, -1.0f};
+    Check(AngleAndRatio(eyes, a, b, &angle, &ratio) &&
+              fabsf(angle - 45.0f) < 1e-3f &&
+              fabsf(ratio - sqrtf(2.0f)) < 1e-4f,
+          "the angle and the ratio of two places", angle, 45.0);
+  }
+
+  // THE HEIGHT OF A SLAP (creature_slap_height): a capsule 1.1 high (S = 1)
+  // on the land at 0.
+  {
+    Capsule slap_body;
+    slap_body.base[0] = slap_body.base[1] = slap_body.base[2] = 0.0f;
+    slap_body.height = 1.1f;
+    slap_body.radius = 0.4f;
+    const float level_from[3] = {-1.0f, 0.5f, 0.0f};
+    const float level_to[3] = {1.0f, 0.5f, 0.0f};
+    Near("a level slap at 0.5 S counts at 0.5 S",
+         SlapPathHeight(slap_body, level_from, level_to), 0.5, 1e-4);
+    const float down_from[3] = {-1.0f, 0.5f, 0.0f};
+    const float down_to[3] = {1.0f, -0.2f, 0.0f};
+    Near("a slap down that ends at the land counts where it met the axis, "
+         "0.15 S", SlapPathHeight(slap_body, down_from, down_to), 0.15, 1e-3);
+    const float top_from[3] = {-1.0f, 2.2f, 0.0f};
+    const float top_to[3] = {1.0f, 0.4f, 0.0f};
+    Near("a slap from over the head counts at 1.05 S at most",
+         SlapPathHeight(slap_body, top_from, top_to), 1.05, 1e-4);
+    const float low_from[3] = {-1.0f, 0.0f, 0.0f};
+    const float low_to[3] = {1.0f, -0.5f, 0.0f};
+    Near("a slap at the land counts at 0.05 S at least",
+         SlapPathHeight(slap_body, low_from, low_to), 0.05, 1e-4);
+  }
 }
 
 #include "aim_checks.h"

@@ -107,6 +107,8 @@ struct PanelQuad {
 //   kCardRayTip        the glow at the end of that ray, over the ray
 //                      (docs/hand-model.md, "The glow at the end of the menu
 //                      ray")
+//   kCardCreature      the Creature panel over the head of the Creature
+//                      (docs/ui-layer.md, "The Creature panel")
 const int kCardHintPointing = 0;
 const int kCardHintOther = 1;
 const int kCardSubtitles = 2;
@@ -117,7 +119,8 @@ const int kCardHintButton0 = 6;
 const int kHintButtonCards = 4;
 const int kCardRay = 10;
 const int kCardRayTip = 11;
-const int kCards = 12;
+const int kCardCreature = 12;
+const int kCards = 13;
 
 // True for a card that holds hints: the two hint cards and the cards of
 // the buttons.

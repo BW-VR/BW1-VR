@@ -24,6 +24,7 @@
 #   creature_recipe.ps1 -Name x22 -Dll <dll> -Kind ring
 #   creature_recipe.ps1 -Name x23 -Dll <dll> -Kind ring -Set "far_grab_max_m=1"
 #   creature_recipe.ps1 -Name x24 -Dll <dll> -Kind ring -Set "command_look=0"
+#   creature_recipe.ps1 -Name x25 -Dll <dll> -Kind touch -Set "subtitle_card_test=1"
 #
 #   creature_recipe.ps1 -Name x9 -Dll <dll> -Kind leash -NewGame
 #
@@ -148,8 +149,9 @@
 #   The Creature with no press (bwvr/docs/creature.md, "The stroke with the
 #   open hand"). After two zoom steps in, the Hand's point goes to the body
 #   of the Creature with the grip open. The Creature panel shows, and after
-#   0.2 s the mod holds the Action button of the game: the Creature state.
-#   Four strokes and a swing of the arm with the open hand (no slap). The
+#   0.1 s the mod holds the Action button of the game: the Creature state.
+#   Four strokes and a swing of the arm with the open hand (a slap, and with
+#   -Set "creature_open_slap=0" no slap). The
 #   hand goes back to its point at frame 1800, and the panel stays for 3 s:
 #   a picture at frame 1840 has it, and a picture at frame 2060 does not.
 #   Then the hand takes the nearest object that it can hold, for the hints of
@@ -157,6 +159,25 @@
 #   also saves near frame 830: the card of a save. With
 #   -Set "creature_stroke_open=0;creature_panel_linger=0;hint_card_saving=0"
 #   the same steps give no press, no panel and no card of a save.
+# -Kind touch:
+#   The stroke and the slap with the open hand (bwvr/docs/creature.md, "The
+#   stroke with the open hand"). After two zoom steps in, the Hand's point
+#   goes to the body of the Creature with the grip open, and the mod holds the
+#   Action button of the game. Then 17 steps of 2 cm (the word "nudge"), 15
+#   frames apart: strokes, the first one with the first step in the Creature
+#   state. Then three steps to 12 cm on the other side (the word "slap"), 40
+#   and 80 frames apart: each one goes through the body (a slap), and between
+#   them the hand waits about 9 cm out of the body, as in the wind up of a
+#   slap (the press stays). Then the Hand's point goes onto the body, 12 cm
+#   up, and 12 cm down in one frame: a slap from over the head. The hand goes away at frame
+#   1650, and the Creature panel over the Creature stays for 3 s: a picture
+#   at frame 1700 has it, with the picture of the Creature card when the
+#   subtitle card runs (subtitle_card_test=1), and a picture at frame 1950
+#   does not. With -Set "creature_open_slap=0;creature_touch_easy=0;
+#   creature_stroke_wait=1;creature_slap_height=0;creature_panel_over=0" the
+#   same steps give the old way: the first stroke 2 s after the start of the
+#   state, a press that ends at the wind up, no slap with the open hand, and
+#   the panel on the subtitle card.
 # -Kind wide:
 #   The grip on the Creature in the wide reach (hand_wide_creature,
 #   bwvr/docs/grab.md, "The Creature has the wide reach too"). After two zoom
@@ -328,6 +349,25 @@ if ($Kind -eq 'stay') {
              'nudge@1260+1 nudge@1310+1 nudge@1360+1 nudge@1410+1 ' +
              'slap@1580+1 slap@1660+1 point@1800+1 shot@1840+1 shot@2060+1 ' +
              'seek@2150+1 grip@2160+300 point@2300+1'
+} elseif ($Kind -eq 'touch') {
+    # The seek comes four times, 15 frames apart, because the Creature walks
+    # until the press stops it. Each "nudge" steps 2 cm to the other side:
+    # about 0.4 m/s over the 50 ms of the speed, a stroke. Each "slap" steps
+    # to 12 cm on the other side of the middle, so each one goes through the
+    # body. The fifth seek puts the point on the body again,
+    # the sixth 12 cm up and the seventh 12 cm down (seek_step_cm=12). No
+    # picture comes in the press: the frame of a picture can take 250 ms, and
+    # the controller then lets go of its buttons.
+    $new = 80
+    $watch = 0
+    $keys = 'fake_head_pitch=-25;seek_step_cm=12;' +
+            $keys.Replace('seek_plan=creature', 'seek_plan=creature,creature,creature,creature,creature,up,down')
+    $nudges = (0..16 | ForEach-Object { "nudge@$(1000 + 15 * $_)+1" }) -join ' '
+    $steps = 'stick_up@800+10 stick_up@830+10 look@860+1200 point@900+1 ' +
+             "seek@930+1 seek@945+1 seek@960+1 seek@975+1 $nudges " +
+             'slap@1330+1 slap@1370+1 slap@1450+1 ' +
+             'seek@1530+1 seek@1545+1 seek@1560+1 ' +
+             'point@1650+1 shot@1700+1 shot@1950+1'
 } elseif ($Kind -eq 'tie') {
     # The second press of the trigger comes 17 frames after the first one: a
     # double press. The walk takes about 1500 frames, so a new game runs
@@ -417,10 +457,18 @@ if ($Kind -eq 'gift' -or $Kind -eq 'giftfree') {
                '^grip         : the (pick up is over|grip opens|click to let go|object left)|' +
                '^hand creature: the body of|^hooks        : the (packet with|hand-over)'
 }
+if ($Kind -eq 'touch') {
+    $pattern = '^hand creature: (a press|the Creature state|a stroke|a slap|a hard slap|the press ends|the hand went into|' +
+               'creature_stroke_wait|creature_slap_height|\d+ presses with no camera)|' +
+               '^controllers  : (creature_stroke_open|creature_open_slap|creature_touch_easy|the open hand|the press of the open hand)|' +
+               '^ui panel     : (creature_panel_over|the Hand is at|the Hand left|the Creature panel (goes|drew|was over))|' +
+               '^ui panel     : frame \d+, the Creature card|^subtitles    : frame \d+, the subtitle card:|' +
+               '^hint card    : frame \d+, the pointing card now says|^hand pick    : seek plan'
+}
 if ($Kind -eq 'open') {
     $pattern = '^hand creature: (a press|the Creature state|a stroke|a slap|a hard slap|the press ends|the hand went into)|' +
-               '^controllers  : (creature_stroke_open|the open hand|the press of the open hand)|' +
-               '^ui panel     : (creature_panel_linger|the Hand is at|the Hand left|the Creature panel (goes|drew))|' +
+               '^controllers  : (creature_stroke_open|creature_open_slap|creature_touch_easy|the open hand|the press of the open hand)|' +
+               '^ui panel     : (creature_panel_linger|creature_panel_over|the Hand is at|the Hand left|the Creature panel (goes|drew|was over))|' +
                '^save card    : |^hooks        : GameOSFile|^hint card    : (hint_card_saving|frame \d+, the game saves|frame \d+, the pointing card now says)|' +
                '^hand pick    : seek plan'
 }

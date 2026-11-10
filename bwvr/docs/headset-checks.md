@@ -106,12 +106,13 @@ want.
 
 ### The Creature
 
-14. **Stroke, slap and look.** Stroke the Creature slowly at each zoom, slap
-    it with the arm and with the wrist, and lean while it looks at you. Also
-    rest the open hand in its body and move it slowly, and reach past it to
+14. **Stroke, slap and look.** With the open hand, stroke the Creature
+    slowly at each zoom, and hit it fast with the arm, with the wrist and
+    down from over its head. Lean while it looks at you, and reach past it to
     a thing near it. Wrong: a slap that does not count, a stroke that counts
-    as a slap, a touch in the air, a look past your head, a stroke when the
-    hand only goes past, or a Creature panel that goes on and off.
+    as a slap, a first stroke that comes late, a touch in the air, a look
+    past your head, a stroke when the hand only goes past, or a Creature
+    panel that goes on and off, is hard to read, or is not over the Creature.
 15. **Leash and commands.** With the leash on, tap the trigger at
     places and things, give it an object, and shake the leash hand. Wrong: the
     Creature goes to a different place, a command or a change of the leash
@@ -249,6 +250,15 @@ agents: the log does not tell the item yet.
 - **The Creature panel on its quad** (`ui_panel=1`, N15). Key:
   `ui_panel=1`. Log: `ui panel     :` gives the frames on which the
   Creature panel drew and the times that it went to the room.
+- **The Creature panel over the Creature** (`creature_panel_over`). Log:
+  `ui panel     : the Creature panel goes over the Creature` gives its place
+  and its distance, and the report gives the frames on the Creature card and
+  the new places.
+- **The touch of the Creature** (`creature_open_slap`, `creature_touch_easy`,
+  `creature_stroke_wait`, `creature_slap_height`). Log: `hand creature:`
+  gives each stroke and slap, and each fast hand that did not slap with the
+  reason and the height that the game read. `controllers  :` gives the start
+  and the end of each press of the open hand.
 - **Heal on a sick villager**, for example in the plague quest (N6). Log:
   `the game casts Heal`. Needs a log line: the health of the villagers under
   the cast, before it and after it.

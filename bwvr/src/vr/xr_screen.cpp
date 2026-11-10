@@ -245,8 +245,8 @@ const char* const kCardName[kCards] = {
     "subtitle card", "ring", "keyboard", "bubble card",
     "first card of a button", "second card of a button",
     "third card of a button", "fourth card of a button",
-    "ray card", "card of the end of the ray"};
-static_assert(kCardRayTip + 1 == kCards,
+    "ray card", "card of the end of the ray", "Creature card"};
+static_assert(kCardCreature + 1 == kCards,
               "each card has a name");
 // What a card holds, for the line that says where it goes after a failure.
 const char* const kCardHolds[kCards] = {"hints", "hints", "subtitles",
@@ -254,7 +254,8 @@ const char* const kCardHolds[kCards] = {"hints", "hints", "subtitles",
                                         "pulled miracles", "hints", "hints",
                                         "hints", "hints",
                                         "rays over the panels",
-                                        "ends of the rays over the panels"};
+                                        "ends of the rays over the panels",
+                                        "Creature panels"};
 // The runtime refused a frame with a quad of the interface panel.
 bool g_panel_refused = false;
 
@@ -2902,7 +2903,8 @@ void XrScreen::RecordVideoLayers(const float eye_position[3], uint32_t width,
     }
   } else {
     const int card_order[kCards] = {
-        kCardSubtitles,       kCardHintPointing,    kCardHintOther,
+        kCardSubtitles,       kCardCreature,        kCardHintPointing,
+        kCardHintOther,
         kCardHintButton0,     kCardHintButton0 + 1, kCardHintButton0 + 2,
         kCardHintButton0 + 3, kCardRing,            kCardBubble,
         kCardKeyboard, kCardRay,            kCardRayTip};
@@ -3552,7 +3554,8 @@ bool XrScreen::BuildFrame() {
     XrCompositionLayerQuad* card_quads = b.card_quads;
     bool* with_card = b.with_card;
     const int card_order[kCards] = {
-        kCardSubtitles,       kCardHintPointing,    kCardHintOther,
+        kCardSubtitles,       kCardCreature,        kCardHintPointing,
+        kCardHintOther,
         kCardHintButton0,     kCardHintButton0 + 1, kCardHintButton0 + 2,
         kCardHintButton0 + 3, kCardRing,            kCardBubble,
         kCardKeyboard, kCardRay,            kCardRayTip};

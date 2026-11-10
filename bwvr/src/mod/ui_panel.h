@@ -53,6 +53,11 @@ struct UiPanelSettings {
   // with no press, and for 3 s after the Hand left it. 0: only while a press
   // holds the Creature, as the game arms it.
   int creature_panel_linger = 1;            // creature_panel_linger
+  // 1: the Creature panel shows over the head of the Creature, turned to the
+  // eyes: with ui_panel=0 on a card of its own, and with ui_panel=1 and
+  // creature_panel=2 on its quad. 0: with ui_panel=0 on the subtitle card,
+  // and with ui_panel=1 beside the Creature.
+  int creature_panel_over = 1;              // creature_panel_over
   // With ui_panel=0 (docs/ui-layer.md, "The menus in the room"): 1 the
   // menus of the game on a panel that is fixed in the room, 0 the menus in
   // the eye pictures, fixed to the head.
@@ -132,6 +137,14 @@ void UiPanelReportRoutes();
 // (x0, y0, x1, y1 in pixels of the render), and the size of the render.
 bool UiPanelHelpBounds(float bounds[4], uint32_t* render_w,
                        uint32_t* render_h);
+// THE CREATURE PANEL ON ITS OWN CARD (creature_panel_over). While `on`, the
+// batches of the help scope are the Creature panel (fn_005178D0 draws them
+// in its call), and their bounds go apart from the bounds of the help text.
+// UiPanelCreatureBounds gives them (x0, y0, x1, y1 in pixels of the render)
+// and the size of the render.
+void UiPanelCreatureScope(bool on);
+bool UiPanelCreatureBounds(float bounds[4], uint32_t* render_w,
+                           uint32_t* render_h);
 // The fallback of the subtitle card: the help text draws in the eye pictures
 // at a fixed depth in meters. 0 gives it the interface depth.
 void UiDepthSetHelpDepth(float meters);

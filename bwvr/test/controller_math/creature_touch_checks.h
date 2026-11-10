@@ -19,6 +19,28 @@ struct Run {
 };
 
 template <typename Gap, typename Grip>
+Run HandRule(const creature_touch_math::Rule& rule, double seconds, Gap gap,
+             Grip grip, bool can_start = true, double keep_until = 1e9) {
+  using namespace creature_touch_math;
+  Run run;
+  Press press;
+  const double dt = 1.0 / 90.0;
+  for (int i = 0; i * dt <= seconds; ++i) {
+    const double t = i * dt;
+    const int e = Step(&press, t, can_start, t < keep_until, true,
+                       static_cast<float>(gap(t)), rule, grip(t));
+    if (e == creature_touch_math::kStart) {
+      ++run.starts;
+      if (run.start < 0.0) run.start = t;
+    } else if (e != creature_touch_math::kNothing && run.end < 0.0) {
+      run.end = t;
+      run.end_event = e;
+    }
+  }
+  return run;
+}
+
+template <typename Gap, typename Grip>
 Run Hand(double seconds, Gap gap, Grip grip, bool can_start = true,
          double keep_until = 1e9) {
   using namespace creature_touch_math;
@@ -138,6 +160,135 @@ inline void CreatureTouchChecks() {
                        [](double t) { return t >= 0.6 && t < 0.8; });
     Check(r.starts == 2, "a hand in the body after a grip presses again",
           r.starts, 2);
+  }
+
+  // THE EASY ZONE (creature_touch_easy=1): the start 8 cm from the skin for
+  // 0.1 s, the end 15 cm from the skin for 0.3 s.
+  {
+    const Rule easy = EasyRule(5.0f);
+    Check(easy.near_cm == 8.0f && easy.out_cm == 15.0f,
+          "the easy zone is 8 cm to start and 15 cm to end", easy.out_cm, 15);
+    Check(EasyRule(20.0f).out_cm == 20.0f,
+          "a reach of the touch over 15 cm counts in the easy zone",
+          EasyRule(20.0f).out_cm, 20);
+    const Run close = HandRule(easy, 1.0, [](double) { return 6.0; }, open);
+    Check(close.starts == 1 && close.start >= 0.09 && close.start <= 0.12,
+          "a hand 6 cm from the skin presses after 0.1 s", close.start, 0.1);
+    const Run away = HandRule(easy, 1.0, [](double) { return 9.0; }, open);
+    Check(away.starts == 0, "a hand 9 cm from the skin presses nothing",
+          away.starts, 0);
+    const Run pass =
+        HandRule(easy, 1.0,
+                 [](double t) { return t > 0.3 && t < 0.36 ? 2.0 : 20.0; },
+                 open);
+    Check(pass.starts == 0, "a hand that goes past the body in 0.06 s "
+          "presses nothing", pass.starts, 0);
+    // THE SWING OF A SLAP: near the body, a wind up to 14 cm for 0.5 s, and
+    // a hit through the body. The press stays on.
+    const Run wind =
+        HandRule(easy, 2.0,
+                 [](double t) {
+                   return t < 0.5 ? 4.0 : t < 1.0 ? 14.0 : t < 1.1 ? -2.0
+                                                               : 4.0;
+                 },
+                 open);
+    Check(wind.starts == 1 && wind.end < 0.0,
+          "the wind up of a slap to 14 cm keeps the press", wind.end, -1.0);
+    // A stroke that leaves the skin to 25 cm for 0.2 s keeps the press.
+    const Run lift =
+        HandRule(easy, 2.0,
+                 [](double t) { return t > 1.0 && t < 1.2 ? 25.0 : -1.0; },
+                 open);
+    Check(lift.starts == 1 && lift.end < 0.0,
+          "a hand that leaves for 0.2 s keeps the press", lift.end, -1.0);
+    // A hand that goes 25 cm away at 1.0 s ends the press 0.3 s later.
+    const Run gone = HandRule(
+        easy, 2.0, [](double t) { return t < 1.0 ? -1.0 : 25.0; }, open);
+    Check(gone.end >= 1.29 && gone.end <= 1.32 &&
+              gone.end_event == creature_touch_math::kEndOut,
+          "a hand 25 cm away ends the press after 0.3 s", gone.end, 1.3);
+    // The old rule is the step of before.
+    const Run old_far = HandRule(
+        OldRule(5.0f), 2.0, [](double t) { return t < 1.0 ? -1.0 : 6.0; },
+        open);
+    Check(old_far.start >= 0.19 && old_far.start <= 0.22 &&
+              old_far.end >= 1.0 && old_far.end < 1.02,
+          "the old rule: 0.2 s in the body, and the end 6 cm out at once",
+          old_far.end, 1.0);
+  }
+
+  // THE FIRST STROKE (creature_stroke_wait=0). The timers of the game at the
+  // start of the state are 0, and the bone of the last stroke is 3. With the
+  // game's own timers the first stroke on bone 3 needs a break of the contact
+  // and comes 2 s after the start at the earliest. With the timers of the mod
+  // it comes in the first frame.
+  {
+    StrokeTimers game = {0, 0, 0, 3};
+    int frame = 0;
+    while (frame < 400 && !StrokeTimersPass(game, 0.0f, 4, 10)) {
+      game.since_stroke += 10;
+      game.since_play += 10;
+      game.contact += 10;
+      ++frame;
+    }
+    Near("with the game's timers the first stroke comes after 2 s",
+         frame * 0.01, 2.0, 0.011);
+    StrokeTimers same = {0, 0, 0, 3};
+    for (int i = 0; i < 300; ++i) {
+      same.since_stroke += 10;
+      same.since_play += 10;
+      same.contact += 10;
+    }
+    Check(!StrokeTimersPass(same, 0.0f, 3, 10),
+          "the game strokes the same bone again only after a break",
+          StrokeTimersPass(same, 0.0f, 3, 10), 0);
+    StrokeTimers mod = {0, 0, 0, 3};
+    FirstStrokeTimers(&mod);
+    Check(StrokeTimersPass(mod, 0.0f, 3, 10) &&
+              StrokeTimersPass(mod, -1.0f, 3, 10) &&
+              StrokeTimersPass(mod, 1.0f, 5, 10),
+          "with the timers of the mod the first stroke comes at once, on "
+          "each bone and at each total", 1, 1);
+    StrokeTimers later = {5000, 9000, 4000, 2};
+    FirstStrokeTimers(&later);
+    Check(later.since_stroke == 5000 && later.since_play == 9000 &&
+              later.contact == 4000,
+          "the mod never makes a timer smaller", later.since_play, 9000);
+  }
+
+  // THE PANEL OVER THE CREATURE STAYS.
+  {
+    OverHold h;
+    Check(OverMoves(&h, true, 0.0f, 1.0f, 0.0),
+          "the panel takes its place when it shows", 1, 1);
+    Check(!OverMoves(&h, false, 5.0f, 1.1f, 0.1),
+          "a Creature that breathes and turns moves no panel", 0, 0);
+    bool moved = false;
+    double at = -1.0;
+    for (int i = 1; i <= 90; ++i) {
+      const double t = 1.0 + i / 90.0;
+      if (OverMoves(&h, false, 20.0f, 1.0f, t) && !moved) {
+        moved = true;
+        at = t - 1.0;
+      }
+    }
+    Check(moved && at >= 0.49 && at <= 0.52,
+          "a Creature 20 degrees away moves the panel after 0.5 s", at, 0.5);
+    OverHold f;
+    OverMoves(&f, true, 0.0f, 1.0f, 0.0);
+    bool flick = false;
+    for (int i = 1; i <= 180; ++i) {
+      const float angle = i % 2 == 0 ? 20.0f : 3.0f;
+      if (OverMoves(&f, false, angle, 1.0f, i / 90.0)) flick = true;
+    }
+    Check(!flick, "a place that comes and goes moves no panel", flick, 0);
+    OverHold r;
+    OverMoves(&r, true, 0.0f, 1.0f, 0.0);
+    bool walked = false;
+    for (int i = 1; i <= 60; ++i) {
+      if (OverMoves(&r, false, 2.0f, 1.6f, i / 90.0)) walked = true;
+    }
+    Check(walked, "a Creature that walks far off moves the panel", walked, 1);
   }
 
   // THE SPEED. The open hand never reaches the speed of a slap, at each limit

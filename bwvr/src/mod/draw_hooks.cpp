@@ -171,6 +171,11 @@ bool g_card_takes_help = false;
 // x0, y0, x1, y1.
 float g_card_bounds[4] = {0.0f, 0.0f, 0.0f, 0.0f};
 bool g_have_card_bounds = false;
+// The bounds of the Creature panel in this frame, apart from the help text
+// (UiPanelCreatureScope).
+bool g_card_creature_scope = false;
+float g_card_creature_bounds[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+bool g_have_card_creature_bounds = false;
 // THE FALLBACK. When the card is wanted and cannot go out, the help text
 // draws in the eye pictures at this fixed depth in meters, and not at the
 // interface depth, which changes with the world. 0 is the interface depth.
@@ -2387,20 +2392,23 @@ bool PanelTake(int scope, DrawAndClipFn original, D3DPRIMITIVETYPE type,
   if (route != nullptr) ++route->panel;
   g_panel_drew[scope == kScopeMenu ? kPanelMenu : kPanelHelp] = true;
   // The bounds of the help text of this frame, for the rect of the subtitle
-  // card.
+  // card. The Creature panel has bounds of its own.
   if (scope != kScopeMenu && verts != nullptr && fvf == kExpectedFvf) {
-    if (!g_have_card_bounds) {
-      g_card_bounds[0] = g_card_bounds[1] = 1e30f;
-      g_card_bounds[2] = g_card_bounds[3] = -1e30f;
-      g_have_card_bounds = true;
+    float* b = g_card_creature_scope ? g_card_creature_bounds : g_card_bounds;
+    bool* have = g_card_creature_scope ? &g_have_card_creature_bounds
+                                       : &g_have_card_bounds;
+    if (!*have) {
+      b[0] = b[1] = 1e30f;
+      b[2] = b[3] = -1e30f;
+      *have = true;
     }
     const uint8_t* vertex = static_cast<const uint8_t*>(verts);
     for (uint32_t i = 0; i < count; ++i) {
       const float* f = reinterpret_cast<const float*>(vertex);
-      if (f[0] < g_card_bounds[0]) g_card_bounds[0] = f[0];
-      if (f[1] < g_card_bounds[1]) g_card_bounds[1] = f[1];
-      if (f[0] > g_card_bounds[2]) g_card_bounds[2] = f[0];
-      if (f[1] > g_card_bounds[3]) g_card_bounds[3] = f[1];
+      if (f[0] < b[0]) b[0] = f[0];
+      if (f[1] < b[1]) b[1] = f[1];
+      if (f[0] > b[2]) b[2] = f[0];
+      if (f[1] > b[3]) b[3] = f[1];
       vertex += kVertexStride;
     }
   }
@@ -2879,6 +2887,7 @@ void UiPanelRouteFrame(int mode, bool on, bool check) {
   g_panel_drew[0] = g_panel_drew[1] = false;
   g_card_takes_help = g_panel_frame && mode == kUiPanelSubtitles;
   g_have_card_bounds = false;
+  g_have_card_creature_bounds = false;
   g_menu_route = false;
 }
 
@@ -2909,6 +2918,23 @@ bool UiPanelHelpBounds(float bounds[4], uint32_t* render_w,
   return true;
 }
 
+void UiPanelCreatureScope(bool on) { g_card_creature_scope = on; }
+
+bool UiPanelCreatureBounds(float bounds[4], uint32_t* render_w,
+                           uint32_t* render_h) {
+  if (!g_have_card_creature_bounds || g_panel_failed) return false;
+  const bw::tech::InfoTransform* info =
+      reinterpret_cast<const bw::tech::InfoTransform*>(bw::tech::kInfoTransform);
+  if (IsBadReadPtr(info, sizeof(*info)) || info->res_x <= 0 ||
+      info->res_y <= 0) {
+    return false;
+  }
+  for (int i = 0; i < 4; ++i) bounds[i] = g_card_creature_bounds[i];
+  *render_w = static_cast<uint32_t>(info->res_x);
+  *render_h = static_cast<uint32_t>(info->res_y);
+  return true;
+}
+
 // The fallback of the subtitle card: the help text draws in the eye pictures
 // at a fixed depth in meters. 0 gives it the interface depth.
 void UiDepthSetHelpDepth(float meters) { g_help_depth_m = meters; }
@@ -2931,6 +2957,7 @@ void UiPanelRouteOutside(int mode, bool on, bool check) {
   PanelRelease();
   g_card_takes_help = false;
   g_have_card_bounds = false;
+  g_have_card_creature_bounds = false;
   g_panel_mode = mode;
   g_panel_frame = false;
   g_panel_outside = on && mode != kUiPanelOff;

@@ -73,6 +73,14 @@
 //   frame. Each other part of CHand::Draw still runs. The mouse player sees
 //   the game's Hand as the game draws it.
 //
+//   THE FLOW ON THE HAND. The effects of CHand::Draw include PHandFX::Draw
+//   0x0068D0C0 (CHand+0x4948, vtable +0x10). While a miracle is in the Hand
+//   it draws the Hand's mesh a second time at 0x0068D578, with the material
+//   of S_Hand_Flow.raw: an atlas of 8 by 8 frames, added light, in the color
+//   of the player [V]. With hand_hide_all=1 the hook skips that draw too, in
+//   each state, and the mod's pointing hand takes the flow
+//   (HandExactFlow, hand_model.cpp).
+//
 //   THE HELD OBJECT IN THE PALM. In the Holding state PrepareForDrawing puts
 //   the object's mesh at the Hand's point plus the hang offset (0x0046CA50 to
 //   0x0046CA97) [V]. After it, the mod puts the object in the palm of the
@@ -86,6 +94,8 @@
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <ddraw.h>
+#include <d3d.h>
 #include <intrin.h>
 #include <math.h>
 #include <stdint.h>
@@ -96,6 +106,7 @@
 #include "debug_menu.h"
 #include "hand_exact.h"
 #include "hand_exact_math.h"
+#include "hand_model.h"
 #include "miracle.h"
 
 extern void ModLog(const char* format, ...);
@@ -166,6 +177,7 @@ const int32_t kStateNormal = 1;
 const int32_t kStateCamera = 2;
 const int32_t kStateTug = 3;
 const int32_t kStateHolding = 4;
+const int32_t kStateTotem = 5;
 const int32_t kStateCreature = 7;
 const int32_t kStateGrain = 8;
 const int32_t kStatePlayAnim = 9;
@@ -183,6 +195,25 @@ const uintptr_t kDrawReturnA = 0x0046D25E;
 const uintptr_t kDrawReturnB = 0x0046D282;
 typedef void(__fastcall* MeshDrawFn)(void* mesh, void* unused);
 MeshDrawFn o_MeshDraw = nullptr;
+// THE FLOW ON THE HAND. PHandFX::Draw calls the same draw at 0x0068D578 with
+// the material of S_Hand_Flow.raw on the device [V 0x0068D50B to 0x0068D578].
+// Before the call it scales each texture point of the mesh by 0.125
+// (0x008AB620) and moves it to the cell of the frame: frame % frames gives
+// the cell, cell % 8 the column and cell / 8 the row. The color of the mesh
+// (+0x4C) is then the alpha of the flow (0.8, as a byte) and the color of the
+// player (GPlayer::GetPlayerColour). The material (type 0xD, fn_0082ECD0)
+// adds the texture times that color with the source alpha, with no depth
+// write.
+const uintptr_t kFlowCall = 0x0068D578;
+const uintptr_t kFlowReturn = 0x0068D57E;
+const int kHandFx = 0x4948;                 // the PHandFX of the Hand
+const uintptr_t kHandFxVtable = 0x00936C1C;
+const int kFxFrame = 0x58;                  // the frame of the flow, a float
+const int kFxFrames = 0x60;                 // the count of frames, a byte
+const float kFlowCell = 0.125f;             // 0x008AB620
+const int kFlowColumns = 8;
+const int kMeshColor = 0x4C;                // the color of the mesh object
+const uintptr_t kGameDevice = 0x00ECA638;   // LH3DRender::Direct3DDevice7
 // Morphable::GetAnim, thiscall (int animation, int), ret 8 [V].
 const uintptr_t kGetAnim = 0x00619650;
 typedef void*(__fastcall* GetAnimFn)(void* self, void* unused, int animation,
@@ -209,6 +240,8 @@ struct Settings {
   float roll = hx::kRestRollDeg;
   bool left_mesh = false;
   bool hide = true;        // hand_hide_game
+  bool hide_all = true;    // hand_hide_all
+  bool flow = true;        // hand_flow_glow
   bool wrist_lock = true;  // hand_wrist_lock
   bool hold_palm = true;   // hand_hold_palm
   bool hold_turn = true;   // hand_hold_turn
@@ -223,6 +256,12 @@ bool g_mesh_hooked = false;
 bool g_anim_hooked = false;
 // The mesh is hidden now: hand_hide_game, and the test key.
 bool g_hide_live = false;
+// The rule of the hide now (hand_hide_all and its switch), and the flow on
+// the mod's hand now (hand_flow_glow and its switch).
+bool g_hide_all_live = false;
+bool g_flow_live = false;
+// The call of the flow has the bytes that the mod knows.
+bool g_flow_known = false;
 
 // The roots of the last compose of each pose array, for the rebase.
 struct ArrayRoot {
@@ -292,6 +331,22 @@ bool g_said_hidden = false;
 bool g_said_vtable = false;
 bool g_key_down = false;
 uint64_t g_key_frame = 0;
+// THE FLOW ON THE HAND: the last flow that the game drew, and its frame.
+HandFlowGlow g_flow;
+uint64_t g_flow_frame = 0;
+bool g_have_flow = false;
+// This window: the draws of the flow that were hidden and the ones that went
+// to the mod's hand, and the hidden draws of the mesh in the Totem state.
+uint64_t g_flow_hidden = 0;
+uint64_t g_flow_taken = 0;
+uint64_t g_totem_hidden = 0;
+bool g_said_flow = false;
+bool g_said_no_flow = false;
+// The other calls that draw the Hand's mesh, for the log (at most 4).
+const int kOtherCalls = 4;
+uintptr_t g_other_back[kOtherCalls];
+int g_other_count = 0;
+uint64_t g_other_draws = 0;
 
 // THE HELD OBJECT IN THE PALM. The pose of the hand and of the object when
 // the object came into the hand, and the matrix of this frame.
@@ -367,6 +422,9 @@ void LoadSettings() {
     g_set.left_mesh =
         GetPrivateProfileIntA("bwvr", "hand_left_mesh", 0, path) != 0;
     g_set.hide = GetPrivateProfileIntA("bwvr", "hand_hide_game", 1, path) != 0;
+    g_set.hide_all =
+        GetPrivateProfileIntA("bwvr", "hand_hide_all", 1, path) != 0;
+    g_set.flow = GetPrivateProfileIntA("bwvr", "hand_flow_glow", 1, path) != 0;
     g_set.wrist_lock =
         GetPrivateProfileIntA("bwvr", "hand_wrist_lock", 1, path) != 0;
     g_set.hold_palm =
@@ -722,6 +780,14 @@ void CheckDrawn(const uint8_t* hand) {
 // the Hand in a state where the mod's hand stands for it, and the overlay drew
 // the pointing hand in this frame. So one hand is always there.
 //
+// THE RULE (hand_hide_all). With 1 the mod's hand stands for the game's Hand
+// in each state: also in the Totem state, where the game puts its Hand on the
+// top of the pole while the real hand moves the pole, and in each state that
+// the game adds later. Each draw of the mesh hides: the two calls of
+// CHand::Draw and the flow of PHandFX::Draw (`flow`). With 0 only the exact
+// states hide, and only the calls of CHand::Draw. The state of the Temple has
+// its own rule in both cases.
+//
 // IN A ROOM OF THE TEMPLE (temple_hide_hand, docs/controllers.md, 11.2) the
 // Hand has the state of the Temple, and the game puts it at the pixel of the
 // pointer, 5 units in front of the thing under the pointer. The direct hand
@@ -729,14 +795,17 @@ void CheckDrawn(const uint8_t* hand) {
 // pointer. So the mesh of the game's Hand is hidden while the ray is on. The
 // state, the place and the pick of the Hand stay as the game makes them: only
 // the draw of the mesh stops.
-bool HideNow(void* mesh) {
+bool HideNow(void* mesh, bool flow, int32_t* state_out) {
   bool active = false;
   const uint8_t* hand = static_cast<const uint8_t*>(HandDirectHand(&active));
   if (hand == nullptr) return false;
   if (*reinterpret_cast<void* const*>(hand + kHandMesh) != mesh) return false;
+  if (flow && !g_hide_all_live) return false;
   const int32_t state = *reinterpret_cast<const int32_t*>(hand + kHandState);
+  *state_out = state;
   if (state == kStateCitadel) {
     const bool hide = TempleHidesHand() && OverlayPointingHandDrawn();
+    if (flow) return hide;
     if (hide) {
       ++g_temple_hidden;
     } else {
@@ -750,8 +819,88 @@ bool HideNow(void* mesh) {
     }
     return hide;
   }
-  if (!active) return false;
-  return ExactState(state) && OverlayPointingHandDrawn();
+  if (!active || !OverlayPointingHandDrawn()) return false;
+  return g_hide_all_live || ExactState(state);
+}
+
+// THE FLOW ON THE HAND, in the call of the flow that the hook skips. The
+// game set the material of the flow on its device just before the call, so
+// stage 0 has the texture of S_Hand_Flow.raw. The mod keeps the texture, the
+// color of the mesh and the cell of the frame for the draw of its hand in the
+// same frame. The game keeps the texture with its material, so the mod holds
+// no reference.
+void TakeFlow(const void* mesh, const uint8_t* hand) {
+  IDirect3DDevice7* device =
+      *reinterpret_cast<IDirect3DDevice7* const*>(kGameDevice);
+  IDirectDrawSurface7* texture = nullptr;
+  if (device == nullptr || FAILED(device->GetTexture(0, &texture)) ||
+      texture == nullptr) {
+    if (!g_said_no_flow) {
+      g_said_no_flow = true;
+      ModLog("hand exact   : the device has no texture in the call of the flow, "
+             "so the mod's hand has no flow, frame %llu",
+             ControllersFrameCount());
+    }
+    return;
+  }
+  texture->Release();
+  int frames = 0, frame = 0, cell = 0;
+  const uint8_t* fx = *reinterpret_cast<const uint8_t* const*>(hand + kHandFx);
+  if (fx != nullptr && !IsBadReadPtr(fx, kFxFrames + 1) &&
+      *reinterpret_cast<const uintptr_t*>(fx) == kHandFxVtable) {
+    frames = fx[kFxFrames];
+    frame = static_cast<int>(
+        lrintf(*reinterpret_cast<const float*>(fx + kFxFrame)));
+    // The integer division of the game: the sign of the dividend.
+    cell = frames > 0 ? frame % frames : 0;
+  }
+  g_flow.texture = texture;
+  g_flow.color =
+      *reinterpret_cast<const uint32_t*>(static_cast<const uint8_t*>(mesh) +
+                                         kMeshColor);
+  g_flow.scale = kFlowCell;
+  g_flow.du = static_cast<float>(cell % kFlowColumns) * kFlowCell;
+  g_flow.dv = static_cast<float>(cell / kFlowColumns) * kFlowCell;
+  g_flow_frame = ControllersFrameCount();
+  g_have_flow = true;
+  ++g_flow_taken;
+  if (!g_said_flow) {
+    g_said_flow = true;
+    DDSURFACEDESC2 desc;
+    memset(&desc, 0, sizeof(desc));
+    desc.dwSize = sizeof(desc);
+    const bool known = SUCCEEDED(texture->GetSurfaceDesc(&desc));
+    ModLog("hand exact   : the game draws the flow on its Hand (PHandFX::Draw, "
+           "the call from 0x%08X). The mod does not draw that copy of the "
+           "Hand, and its pointing hand takes the flow: a texture of %u by %u, "
+           "the color 0x%08X, cell %d of %d (frame %d), frame %llu",
+           static_cast<unsigned>(kFlowCall),
+           known ? static_cast<unsigned>(desc.dwWidth) : 0u,
+           known ? static_cast<unsigned>(desc.dwHeight) : 0u, g_flow.color,
+           cell, frames, frame, g_flow_frame);
+  }
+}
+
+// A call that draws the Hand's mesh and that the hook does not know, once
+// for each return address (at most kOtherCalls), for the log.
+void NoteOtherDraw(void* mesh, uintptr_t back) {
+  bool active = false;
+  const uint8_t* hand = static_cast<const uint8_t*>(HandDirectHand(&active));
+  if (hand == nullptr || !active ||
+      *reinterpret_cast<void* const*>(hand + kHandMesh) != mesh) {
+    return;
+  }
+  ++g_other_draws;
+  for (int i = 0; i < g_other_count; ++i) {
+    if (g_other_back[i] == back) return;
+  }
+  if (g_other_count >= kOtherCalls) return;
+  g_other_back[g_other_count++] = back;
+  ModLog("hand exact   : the mesh of the game's Hand is also drawn by the call "
+         "before 0x%08X, which the mod does not hide. Hand state %d, frame %llu",
+         static_cast<unsigned>(back),
+         *reinterpret_cast<const int32_t*>(hand + kHandState),
+         ControllersFrameCount());
 }
 
 // The draw of a mesh of the Hand's class. It runs in each eye pass, and it
@@ -759,8 +908,20 @@ bool HideNow(void* mesh) {
 void __fastcall h_MeshDraw(void* mesh, void* unused) {
   if (g_hide_live) {
     const uintptr_t back = reinterpret_cast<uintptr_t>(_ReturnAddress());
-    if ((back == kDrawReturnA || back == kDrawReturnB) && HideNow(mesh)) {
+    const bool flow = g_flow_known && back == kFlowReturn;
+    const bool known = back == kDrawReturnA || back == kDrawReturnB || flow;
+    int32_t state = -1;
+    if (known && HideNow(mesh, flow, &state)) {
+      if (flow) {
+        ++g_flow_hidden;
+        bool active = false;
+        const uint8_t* hand =
+            static_cast<const uint8_t*>(HandDirectHand(&active));
+        if (g_flow_live && hand != nullptr) TakeFlow(mesh, hand);
+        return;
+      }
       ++g_hidden_draws;
+      if (state == kStateTotem) ++g_totem_hidden;
       if (!g_said_hidden) {
         g_said_hidden = true;
         ModLog("hand exact   : the mesh of the game's Hand is not drawn (the "
@@ -769,6 +930,7 @@ void __fastcall h_MeshDraw(void* mesh, void* unused) {
       }
       return;
     }
+    if (!known) NoteOtherDraw(mesh, back);
   }
   o_MeshDraw(mesh, unused);
 }
@@ -990,6 +1152,47 @@ int HandExactHideValue() {
   return g_installed && g_mesh_hooked ? (g_hide_live ? 1 : 0) : kDebugCannot;
 }
 
+// The switch of the rule of the hide (hand_hide_all): 1 each state and each
+// draw of the mesh, 0 the exact states and the calls of CHand::Draw only.
+void HandExactHideAllChange(const char* by) {
+  if (!g_installed || !g_mesh_hooked) return;
+  g_hide_all_live = !g_hide_all_live;
+  ControllersGesturePulse(0.5f, g_hide_all_live ? 0.30f : 0.08f);
+  ModLog("hand exact   : %s: the mesh of the game's Hand hides in %s, frame "
+         "%llu", by,
+         g_hide_all_live ? "EACH STATE, with the flow of a miracle"
+                         : "THE EXACT STATES ONLY, and the game draws its flow",
+         ControllersFrameCount());
+}
+int HandExactHideAllValue() {
+  return g_installed && g_mesh_hooked ? (g_hide_all_live ? 1 : 0)
+                                      : kDebugCannot;
+}
+
+// The switch of the flow on the mod's hand (hand_flow_glow). It shows only
+// while the rule hides the flow of the game (hand_hide_all=1).
+void HandExactFlowChange(const char* by) {
+  if (!g_installed || !g_flow_known) return;
+  g_flow_live = !g_flow_live;
+  ControllersGesturePulse(0.5f, g_flow_live ? 0.30f : 0.08f);
+  ModLog("hand exact   : %s: the flow of a miracle on the mod's hand is %s, "
+         "frame %llu", by, g_flow_live ? "ON" : "OFF", ControllersFrameCount());
+}
+int HandExactFlowValue() {
+  return g_installed && g_flow_known ? (g_flow_live ? 1 : 0) : kDebugCannot;
+}
+
+// For overlay.cpp: the flow that the game drew on its Hand in this frame and
+// that the mod's pointing hand takes. False when there is none.
+bool HandExactFlow(HandFlowGlow* out) {
+  if (!g_flow_live || !g_have_flow ||
+      g_flow_frame != ControllersFrameCount()) {
+    return false;
+  }
+  *out = g_flow;
+  return true;
+}
+
 namespace {
 
 // AN A/B IN THE HEADSET. With test_keys=1, the minus key of the number pad
@@ -1057,6 +1260,25 @@ void InstallOnePair() {
     }
   }
   g_hide_live = g_mesh_hooked;
+  // The call of the flow in PHandFX::Draw: call [edx+0x108].
+  g_flow_known = g_mesh_hooked && SameBytes(kFlowCall, call_b, sizeof(call_b));
+  g_hide_all_live = g_mesh_hooked && g_set.hide_all;
+  g_flow_live = g_flow_known && g_set.flow;
+  if (g_mesh_hooked) {
+    ModLog("hand exact   : hand_hide_all=%d: %s. hand_flow_glow=%d: %s",
+           g_set.hide_all ? 1 : 0,
+           g_set.hide_all
+               ? "the mesh of the game's Hand hides in each state (the Totem "
+                 "state too), and also its flow of a miracle"
+               : "the mesh of the game's Hand hides only in the exact states",
+           g_set.flow ? 1 : 0,
+           !g_flow_known
+               ? "the call of the flow is not as the mod knows it, so the "
+                 "game draws its flow"
+           : g_flow_live
+               ? "the flow of a miracle shows on the mod's pointing hand"
+               : "the mod's hand has no flow");
+  }
   if (SameBytes(kGetAnim, get_anim, sizeof(get_anim))) {
     g_anim_hooked = Hook(kGetAnim, reinterpret_cast<void*>(&h_GetAnim),
                          reinterpret_cast<void**>(&o_GetAnim),
@@ -1242,6 +1464,13 @@ void HandExactReport() {
          "Hand's mesh hidden, %llu frames with the held object in the palm. "
          "The last animation of the Hand is %d",
          g_locked_composes, g_hidden_draws, g_holds_placed, g_anim);
+  if (g_totem_hidden != 0 || g_flow_hidden != 0 || g_other_draws != 0) {
+    ModLog("hand exact   : this window %llu draws of the mesh in the Totem "
+           "state hidden, %llu draws of the flow of a miracle hidden (%llu "
+           "went to the mod's hand), and %llu draws by other calls",
+           g_totem_hidden, g_flow_hidden, g_flow_taken, g_other_draws);
+  }
+  g_totem_hidden = g_flow_hidden = g_flow_taken = g_other_draws = 0;
   g_locked_composes = g_hidden_draws = g_holds_placed = 0;
   g_exact_composes = g_game_composes = g_rebases = g_blends_ended = 0;
   g_checked_frames = g_drift_frames = 0;

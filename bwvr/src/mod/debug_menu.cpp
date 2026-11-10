@@ -237,6 +237,10 @@ int HandDirectTreeHintValue();
 void HandDirectTreeHintToggle(const char* by);
 int HandExactHideValue();
 void HandExactHideChange(const char* by);
+int HandExactHideAllValue();
+void HandExactHideAllChange(const char* by);
+int HandExactFlowValue();
+void HandExactFlowChange(const char* by);
 int HandFeelValue();
 void HandFeelChange(const char* by);
 int HandFeelPinchValue();
@@ -677,6 +681,10 @@ const Switch kSwitches[] = {
      L"off|on"},
     {kGroupHand, L"Game Hand", L"Mesh of the game's Hand", "hand_hide_game",
      HandExactHideValue, HandExactHideChange, L"shown|hidden"},
+    {kGroupHand, L"Hide rule", L"Where the game's Hand hides", "hand_hide_all",
+     HandExactHideAllValue, HandExactHideAllChange, L"exact|all"},
+    {kGroupHand, L"Hand flow", L"Glow of a miracle on the hand",
+     "hand_flow_glow", HandExactFlowValue, HandExactFlowChange, L"off|on"},
     {kGroupHand, L"Hand model", L"Model of the hands", "hand_model",
      HandModelSwapValue, HandModelSwapChange, L"low poly|game|file"},
     {kGroupHand, L"Hand look", L"Look of the hands", "", HandModelLookValue,
@@ -1128,6 +1136,13 @@ const wchar_t* const kTips[] = {
     // Game Hand
     L"Hidden: the mod hides the mesh of the game Hand while a controller "
     L"places it, and draws both hands. Shown: the game draws its Hand too.",
+    // Hide rule
+    L"All: the game Hand hides in each state, also at the totem, and the "
+    L"copy with the glow of a miracle hides too. Exact: it hides only where "
+    L"it follows the real hand.",
+    // Hand flow
+    L"On: while a miracle is in the Hand, your hand has the moving glow that "
+    L"the game puts on its Hand. Off: no glow. It needs the hide rule All.",
     // Hand model
     L"The hands that the mod draws. Low poly: simple hands. Game: the hand "
     L"mesh of the game. File: the hand mesh from a file.",

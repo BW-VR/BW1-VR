@@ -823,20 +823,60 @@ its vtable is `0x009A3068`, and `+0x108` there is `fn_00813BA0`, thiscall
 with no arguments and a plain `ret`. No other vtable points at it.
 
 A MinHook hook on `fn_00813BA0` skips the draw when three things are true:
-the return address is `0x0046D25E` or `0x0046D282`, the object is the Hand's
-mesh, and the controller places the Hand in an exact state while the overlay
-drew the pointing hand in this frame. So one hand is always there, each other
-part of `CHand::Draw` still runs, and the mouse player sees the game's Hand as
-the game draws it. MinHook puts the bytes back when the mod unloads. The hook
-is made only when the first bytes of the function, the two call sites and the
-vtable slot are as the disassembly gave them. In the states Invisible, Totem
-and MultiPickUp the game's Hand is not exact, so its mesh stays drawn. In the
-state Citadel, in a room of the Temple, the hook skips the draw while the ray
-of the pointing hand is on and the overlay drew that hand
-(`temple_hide_hand`, `controllers.md`, 11.1).
-The overlay then draws both of the mod's hands (see
+the call is one that the mod knows, the object is the Hand's mesh, and the
+controller places the Hand while the overlay drew the pointing hand in this
+frame. So one hand is always there, each other part of `CHand::Draw` still
+runs, and the mouse player sees the game's Hand as the game draws it. MinHook
+puts the bytes back when the mod unloads. The hook is made only when the
+first bytes of the function, the call sites and the vtable slot are as the
+disassembly gave them.
+
+**The rule** (`hand_hide_all`, default 1). The mod's pointing hand stands
+for the game's Hand in each state, and each draw of the mesh hides: the two
+calls of `CHand::Draw` (return addresses `0x0046D25E` and `0x0046D282`) and
+the flow of a miracle (`0x0068D57E`, below). The states that this covers past
+the exact states are Totem (state 5: the game puts its Hand on the top of the
+pole while the real hand moves the pole, `village.md`) and Invisible (state
+0, where the game draws its mesh only with `+0x47BC` set). MultiPickUp
+(state 6) never comes. With `hand_hide_all=0` only the exact states hide
+(Normal, Camera, Tug, Holding, Creature, Grain and PlayAnim), only the calls
+of `CHand::Draw` hide, and the game draws its Hand on the pole and its flow.
+In the state Citadel, in a room of the Temple, the hook skips the draw while
+the ray of the pointing hand is on and the overlay drew that hand
+(`temple_hide_hand`, `controllers.md`, 11.1), with both values. A call of
+`fn_00813BA0` for the Hand's mesh from another place is not hidden, and the
+log names it (below). The overlay draws both of the mod's hands (see
 [hand-model.md](hand-model.md)). The shadow of the game's Hand on the land
 still draws, with the game's fingers.
+
+**The flow of a miracle on the Hand** (`hand_flow_glow`, default 1) [V].
+`CHand::Draw` calls `PHandFX::Draw` `0x0068D0C0` through `CHand+0x4948`
+(vtable `0x00936C1C`, slot `+0x10`, `PHandFX::DrawHandFX`). When the first
+object in the Hand is a spell seed (vtable `+0x4C4`), or an object of type 3
+or 10, the alpha `+0x54` is 0.8. Then it draws the Hand's mesh a second time
+at `0x0068D578`, with the material of `data\textures\S_Hand_Flow.raw` (type
+`0xD`, `fn_0082ECD0`: alpha blend with the source alpha and one, no depth
+write, stage 0 the texture times the diffuse color). Before the draw it
+scales each texture point of the mesh by 0.125 and moves it to one cell of
+an atlas of 8 by 8: the frame `+0x58` (it moves with the time at the speed
+`+0x5C`) modulo the count `+0x60` gives the cell, `cell % 8` the column and
+`cell / 8` the row. The color of the mesh is `alpha * 255` and the color of
+the player (`GPlayer::GetPlayerColour`), so the flow of the first player is
+red. In the plain game the copy lies exactly on the Hand, and the Hand seems
+to glow. With the controller the mesh of the game has the fingers of its own
+animation and not the fingers of the mod's hand. So with `hand_hide_all=0`
+the copy is a second, red Hand beside the mod's hand while a miracle is in
+the Hand (Water and Food while they pour, each miracle that the Hand holds).
+
+With `hand_hide_all=1` the hook skips that draw. With `hand_flow_glow=1` it
+first keeps the texture on stage 0 of the device (`GetTexture`), the color
+of the mesh and the cell of the frame. In the same frame the mod's pointing
+hand draws a second time with them (`hand_model.cpp`): the same triangles at
+the same depth, each texture point moved into the cell, the color of the
+flow times the light of the game at each vertex, the texture times that
+color added with the source alpha, and no depth write. So one hand shows, at
+the real hand, with the game's own flow on it. With `hand_flow_glow=0` the
+mod's hand has no flow. The low poly hands have no flow.
 
 **The held object in the palm** (`hand_hold_palm`, `hand_hold_turn`). After
 `CHand::PrepareForDrawing` wrote the object's translation (`0x0046CA50` to
@@ -933,6 +973,8 @@ game's own: the trigger and the grip do not bend the game's fingers.
 | `hand_mesh_roll_deg` | 0 | The rest turn about its fingers |
 | `hand_wrist_lock` | 1 | 1 keeps the wrist bone of the game's Hand at the real wrist in each animation |
 | `hand_hide_game` | 1 | 1 hides the mesh of the game's Hand while the controller places it, and the overlay draws both hands. 0 draws the game's Hand too |
+| `hand_hide_all` | 1 | 1 hides the mesh of the game's Hand in each state (the Totem state too) and its flow of a miracle. 0 hides it only in the exact states, and the game draws its flow as a second Hand |
+| `hand_flow_glow` | 1 | 1 puts the game's flow of a miracle on the mod's pointing hand, while the game draws it. 0 no flow on the mod's hand. It needs `hand_hide_all=1` |
 | `hand_hold_palm` | 1 | 1 puts the held object in the palm of the mod's hand. 0 leaves it at the Hand's point |
 | `hand_hold_turn` | 1 | 1 turns the held object with the hand |
 | `hand_pinch` | 1 | 1 holds a small object between the thumb and the index finger (hand-model.md). 0 puts each object in the palm |
@@ -942,7 +984,9 @@ game's own: the trigger and the grip do not bend the game's fingers.
 The keys are read from `bwvr.ini` at the start. They are not in the launcher.
 With `test_keys=1`, the minus key of the number pad shows and hides the mesh
 of the game's Hand while the game runs. The pointing controller gives a long
-pulse for hidden and a short pulse for shown.
+pulse for hidden and a short pulse for shown. The debug page has the three
+switches "Game Hand" (`hand_hide_game`), "Hide rule" (`hand_hide_all`, exact
+or all) and "Hand flow" (`hand_flow_glow`).
 
 ### The log
 
@@ -963,6 +1007,21 @@ place in the palm and the distance between them. The report window counts the
 exact composes, the composes as the game made them, the old poses moved to the
 new root, the composes with the lock, the hidden draws, the frames with an
 object in the palm, and the frames with the wrist moved more than 0.5 cm.
+
+The rule of the hide and the flow, at the start, and in a window with one of
+them:
+
+```
+hand exact   : hand_hide_all=1: the mesh of the game's Hand hides in each state (the Totem state too), and also its flow of a miracle. hand_flow_glow=1: the flow of a miracle shows on the mod's pointing hand
+hand exact   : the game draws the flow on its Hand (PHandFX::Draw, the call from 0x0068D578). The mod does not draw that copy of the Hand, and its pointing hand takes the flow: a texture of <w> by <h>, the color 0x<argb>, cell <c> of <n> (frame <f>), frame <frame>
+hand model   : the flow of a miracle is drawn on the right hand, frame <frame>: <t> triangles, the color 0x<argb>, the cell at <du> <dv>
+hand exact   : this window <a> draws of the mesh in the Totem state hidden, <b> draws of the flow of a miracle hidden (<c> went to the mod's hand), and <d> draws by other calls
+hand model   : the flow of a miracle was on the pointing hand in <n> eye passes
+hand exact   : the mesh of the game's Hand is also drawn by the call before 0x<address>, which the mod does not hide. Hand state <s>, frame <frame>
+```
+
+The last line comes once for each other call (4 at most). A play with no
+such line has no other draw of the Hand's mesh.
 
 ### Tests
 

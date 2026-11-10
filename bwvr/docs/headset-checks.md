@@ -91,7 +91,8 @@ want.
 12. **Small targets.** Tap the icons of a Worship Site, reach for a scroll,
     move the totem pole, and tap a leash post at the door of the Temple.
     Wrong: a tap that hits the item beside the one that you want, a pole that
-    slides from the hand, or a count of the totem that is hard to hit.
+    slides from the hand, a count of the totem that is hard to hit, or a
+    second hand on the pole.
 13. **The building of a scaffold.** Hold a scaffold over the land and roll
     the wrist. Wrong: the building turns the other way than the wrist, turns
     when the hand only moves, or a full turn of the building is hard to
@@ -127,7 +128,8 @@ want.
     a different size on the land, or a way out that acts by accident or not
     at all.
 18. **Water on a fire.** Set a house on fire with a Fireball, and pour Water
-    on it. Wrong: the fire does not go out, or the pour looks wrong.
+    on it. Wrong: the fire does not go out, the pour looks wrong, a second
+    hand, or a red flow on the hand that looks wrong or is not on your hand.
 
 ### The Temple
 
@@ -135,7 +137,9 @@ want.
     through doors, point at things, and look down at the pool of the hall.
     Wrong: a room that turns or tilts with the head, a room of a wrong size,
     one dark eye, a pace that is too fast or too slow, a move at the pool, a
-    door that a tilted head cannot open, or a second hand in the room.
+    door that a tilted head cannot open, or a second hand in the room. Save
+    a game and look at its picture on the wall. Wrong: a picture that looks
+    blocky or rough at the edges.
 
 ### Menus and cards
 

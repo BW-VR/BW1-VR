@@ -457,6 +457,9 @@ back after it. The differences:
   (`FacesCamera`).
 - The hands draw after the arc, the ray and the tether of the overlay,
   because the wrist is not opaque.
+- While the game draws its flow of a miracle on its Hand, the pointing hand
+  draws a second time with the game's texture of the flow, added over it
+  (`hand_flow_glow`, hand.md, "The exact Hand").
 
 **When the low poly hands draw.** With `hand_model=0`. When a hand file of
 the game is not readable. When the device gives no texture. After the test

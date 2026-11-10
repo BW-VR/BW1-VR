@@ -1044,6 +1044,11 @@ void ReadSettings() {
     // How the stick moves the player: 0 walks over the land, and 1 flies
     // along the forward direction of the head or of the controller in 3D.
     t.move_type = number("move_type", 0);
+    // While the stick is pushed to 90 percent or more, the speed of the walk
+    // and of the fly grows with the time of the push, up to
+    // move_stick_ramp_most times. 0 keeps the speed of the push.
+    t.move_stick_ramp = number("move_stick_ramp", 1);
+    t.move_stick_ramp_most = number("move_stick_ramp_most", 32);
     t.test_keys = number("test_keys", 0) != 0;
     // Tests with no key press, for a desktop run: the game's zoom to the
     // Temple at an update of the camera mode, and the test key of god_spawn.

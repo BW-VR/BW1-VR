@@ -593,6 +593,9 @@ struct WalkHold {
   float forward3[3] = {0.0f, 0.0f, 1.0f};
   float right[2] = {1.0f, 0.0f};
   float climb = 0.0f;  // the fly: the sum of the steps up, meters of room
+  // The speed ramp: the seconds of the full push, and the largest factor.
+  float ramp_held = 0.0f;
+  float ramp_top = 1.0f;
   float start_center[2] = {0.0f, 0.0f};  // the waist point, x and z
   float start_under[2] = {0.0f, 0.0f};
   float under[2] = {0.0f, 0.0f};
@@ -2346,6 +2349,19 @@ const char* WalkRuleText(int rule) {
              : "the direction of your head";
 }
 
+// The speed ramp, for the log.
+const char* RampText() {
+  static char text[192];
+  if (g_settings.move_stick_ramp == 0) {
+    return "The speed stays the speed of the push (move_stick_ramp=0)";
+  }
+  sprintf_s(text, "After %.0f s of a push of %.0f%% or more the speed doubles "
+            "each %.0f s, up to %d times (move_stick_ramp=1)",
+            walk_math::kRampHoldSeconds, walk_math::kRampShare * 100.0f,
+            walk_math::kRampDoubleSeconds, g_settings.move_stick_ramp_most);
+  return text;
+}
+
 // The stick flies (move_type=1).
 bool Flies() { return g_settings.move_type == walk_math::kTypeFly; }
 
@@ -2354,8 +2370,9 @@ const char* MoveWord() { return Flies() ? "fly" : "walk"; }
 
 const char* FollowText() {
   if (Flies()) {
-    return "The view does not follow the land, and the land under your head "
-           "stays 10 cm to 2.5 m below your head (move_type=1)";
+    return "The view does not follow the land. The land under your head "
+           "stays 10 cm or more below your head, and your head at most 10000 "
+           "units over the land (move_type=1)";
   }
   return g_settings.move_stick_follow_land != 0
              ? "The height of the view follows the land under your head "
@@ -2434,6 +2451,11 @@ void StopWalk(const char* cause, bool view_stays) {
               "showed the frame before again for them.", g_walk.shown,
               g_walk.late, g_walk.period / 1e6);
   }
+  char ramped[96] = "";
+  if (g_walk.ramp_top > 1.0f) {
+    sprintf_s(ramped, " The speed ramp went up to %.2f times the speed of "
+              "the push (move_stick_ramp=1).", g_walk.ramp_top);
+  }
   char even[160] = "";
   if (g_walk.moved != 0) {
     sprintf_s(even, " A frame took %.1f to %.1f ms, and a step was %.2f to "
@@ -2447,7 +2469,7 @@ void StopWalk(const char* cause, bool view_stays) {
          "at %.1f %.1f and is at %.1f %.1f. The stick was pushed for %.3f s, "
          "which gives %.1f cm of the room each second, and the view moved on "
          "%llu of %llu frames (move_stick=%d, %.2f to %.2f units per "
-         "meter), frame %llu.%s%s%s%s%s",
+         "meter), frame %llu.%s%s%s%s%s%s",
          g_walk.type == walk_math::kTypeFly ? "fly" : "walk", cause,
          sqrtf(dx * dx + dz * dz), room_m * 100.0f, fabsf(degrees),
          degrees < -0.05f ? "left" : "right", g_walk.start_under[0],
@@ -2455,7 +2477,7 @@ void StopWalk(const char* cause, bool view_stays) {
          g_walk.seconds,
          g_walk.seconds > 0.0 ? g_walk.path * 100.0f / g_walk.seconds : 0.0,
          g_walk.moved, g_walk.frames, g_walk.rule, g_walk.start_scale, g_scale,
-         ControllersFrameCount(), hill, blind, land, even, late);
+         ControllersFrameCount(), hill, blind, land, ramped, even, late);
 }
 
 // THE WALK WITH THE STICK (move_stick, docs/god-view.md, "The walk with the
@@ -2480,10 +2502,15 @@ void StopWalk(const char* cause, bool view_stays) {
 // the controller in 3D, so a push while the player looks or points down
 // goes down. The stick to the side moves level, at right angles to forward
 // (walk_math::FlyRight). The view does not follow the land. The height has
-// the ground limits of the grab (TabletopGodLimitHeight): the land under the
-// head stays 10 cm to 2.5 m below the head, and at a limit only the move up
-// or down stops. A hill at the new place of the head stays below the head,
-// as in the walk.
+// the floor of the grab (the land under the head stays 10 cm or more below
+// the head) and a ceiling of kFlyCeilingUnits world units over the land
+// (walk_math::FlyHeight). At a limit only the move up or down stops. A hill
+// at the new place of the head stays below the head, as in the walk.
+//
+// THE SPEED RAMP (move_stick_ramp=1, walk_math.h). While the stick is pushed
+// to 90 percent or more, the speed of the walk and of the fly grows with
+// the time of that push, up to move_stick_ramp_most times. A smaller push
+// goes back to the speed of the push in the same frame.
 //
 // The pump of the controllers asks again before each frame
 // (TabletopGodWalk). A frame with no request moves nothing, so the walk
@@ -2597,6 +2624,8 @@ void ApplyGodWalk(double frame_seconds) {
     g_walk.rule = rule;
     g_walk.type = type;
     g_walk.climb = 0.0f;
+    g_walk.ramp_held = 0.0f;
+    g_walk.ramp_top = 1.0f;
     g_walk.have_forward = false;
     g_walk.start_center[0] = pose.center[0];
     g_walk.start_center[1] = pose.center[2];
@@ -2639,10 +2668,10 @@ void ApplyGodWalk(double frame_seconds) {
              "meter, with the land under your head at %.1f %.1f, %.1f cm "
              "below your head. Forward is %s (move_stick=%d), and it %s. A "
              "full push moves you %d cm of the room each second "
-             "(move_stick_speed_cm). %s, frame %llu.",
+             "(move_stick_speed_cm). %s. %s, frame %llu.",
              MoveWord(), pose.scale, under[0], under[2],
              g_walk.start_below * 100.0f, WalkRuleText(rule), rule, where,
-             g_settings.move_stick_speed_cm, FollowText(),
+             g_settings.move_stick_speed_cm, FollowText(), RampText(),
              ControllersFrameCount());
     }
   }
@@ -2672,7 +2701,16 @@ void ApplyGodWalk(double frame_seconds) {
     right[0] = g_walk.right[0];
     right[1] = g_walk.right[1];
   }
-  const float top = g_settings.move_stick_speed_cm * 0.01f;
+  // THE SPEED RAMP: the time of the full push, and the factor of the speed.
+  const float share = sqrtf(push[0] * push[0] + push[1] * push[1]);
+  g_walk.ramp_held =
+      g_settings.move_stick_ramp != 0
+          ? walk_math::RampSeconds(g_walk.ramp_held, share, seconds)
+          : 0.0f;
+  const float ramp = walk_math::RampFactor(
+      g_walk.ramp_held, static_cast<float>(g_settings.move_stick_ramp_most));
+  if (ramp > g_walk.ramp_top) g_walk.ramp_top = ramp;
+  const float top = g_settings.move_stick_speed_cm * 0.01f * ramp;
   TablePose next;
   if (fly) {
     float speed[3], step[3];
@@ -2695,11 +2733,16 @@ void ApplyGodWalk(double frame_seconds) {
   // And at most god_zone_margin past the camera zone of the game.
   CameraZoneLimitMove(g_center, &next.center[0], &next.center[2],
                       fly ? "the fly with the stick" : "the walk with the stick");
-  // THE HEIGHT OF A FLY: the ground limits of the grab. The land under the
-  // head stays 10 cm to 2.5 m below the head (kGroundNearest,
-  // kGroundFarthest, FloorHeadY). At a limit the height stops, and the move
+  // THE HEIGHT OF A FLY: the land under the head stays kGroundNearest or
+  // more below the head (FloorHeadY), and the head at most kFlyCeilingUnits
+  // world units over the land. At a limit the height stops, and the move
   // across goes on.
-  if (fly) TabletopGodLimitHeight(&next, nullptr);
+  if (fly && next.scale > 0.0f) {
+    next.center[1] = walk_math::FlyHeight(
+        next.center[1], g_center[1], LandUnderHead(next, room, head), room[1],
+        next.scale, FloorHeadY(head), kGroundNearest,
+        walk_math::kFlyCeilingUnits);
+  }
   if (next.center[0] == g_center[0] && next.center[2] == g_center[2] &&
       next.center[1] == g_center[1]) {
     return;
@@ -2784,18 +2827,18 @@ void ApplyGodWalk(double frame_seconds) {
   if (trace) ++g_walk_traces;
   if (trace && fly) {
     ModLog("god view     : fly trace, frame %llu of the fly: %.2f ms, a step "
-           "of %.3f cm of the room (%.3f cm up), the waist point at %.3f %.3f "
-           "%.3f, the land under your head at %.3f and %.2f cm below your "
-           "head, frame %llu",
+           "of %.3f cm of the room (%.3f cm up, the speed times %.2f), the "
+           "waist point at %.3f %.3f %.3f, the land under your head at %.3f "
+           "and %.2f cm below your head, frame %llu",
            g_walk.frames, seconds * 1000.0f, way * 100.0f, rose_m * 100.0f,
-           now.center[0], now.center[1], now.center[2], land,
+           ramp, now.center[0], now.center[1], now.center[2], land,
            g_walk.below * 100.0f, ControllersFrameCount());
   } else if (trace) {
     ModLog("god view     : walk trace, frame %llu of the walk: %.2f ms, a step "
-           "of %.3f cm of the room, the waist point at %.3f %.3f %.3f, the "
-           "land under your head at %.3f (filtered %.3f) and %.2f cm below "
-           "your head, frame %llu",
-           g_walk.frames, seconds * 1000.0f, way * 100.0f, now.center[0],
+           "of %.3f cm of the room (the speed times %.2f), the waist point at "
+           "%.3f %.3f %.3f, the land under your head at %.3f (filtered %.3f) "
+           "and %.2f cm below your head, frame %llu",
+           g_walk.frames, seconds * 1000.0f, way * 100.0f, ramp, now.center[0],
            now.center[1], now.center[2], land,
            g_follow.have ? g_follow.land.stage[1] : land,
            g_walk.below * 100.0f, ControllersFrameCount());
@@ -3062,11 +3105,11 @@ void LogMoveStick(const char* tag) {
   }
   ModLog("%s: move_stick=%d. While the stick of the hand that does not point "
          "is pushed, you %s. Forward is %s, and a full push moves you %d cm "
-         "of the room each second (move_stick_speed_cm). %s%s",
+         "of the room each second (move_stick_speed_cm). %s. %s%s",
          tag, rule,
          Flies() ? "fly along that direction in 3D" : "move over the land",
          WalkRuleText(rule), g_settings.move_stick_speed_cm, FollowText(),
-         keys);
+         RampText(), keys);
 }
 
 }  // namespace
@@ -3122,6 +3165,11 @@ void TabletopSetOptions(const TabletopSettings& settings) {
   g_settings.move_stick_follow_land =
       g_settings.move_stick_follow_land != 0 ? 1 : 0;
   g_settings.move_type = walk_math::Type(g_settings.move_type);
+  g_settings.move_stick_ramp = g_settings.move_stick_ramp != 0 ? 1 : 0;
+  if (g_settings.move_stick_ramp_most < 1) g_settings.move_stick_ramp_most = 1;
+  if (g_settings.move_stick_ramp_most > 64) {
+    g_settings.move_stick_ramp_most = 64;
+  }
   if (g_settings.move_stick_trace < 0) g_settings.move_stick_trace = 0;
   if (g_settings.move_stick_trace > 2000) g_settings.move_stick_trace = 2000;
 }
@@ -4279,6 +4327,25 @@ int TabletopGodMoveKindValue() {
   }
   return walk_math::Kind(g_settings.move_type,
                          g_settings.move_stick_follow_land);
+}
+
+// THE SWITCH "Speed ramp" of the debug page: move_stick_ramp off and on. A
+// walk or a fly that runs stops, and a stick that is still pushed starts
+// again at the speed of the push.
+void TabletopGodMoveRampToggle() {
+  if (!g_installed || !g_settings.god || !TestSwitchesOn()) return;
+  g_settings.move_stick_ramp = g_settings.move_stick_ramp != 0 ? 0 : 1;
+  StopWalk("the debug page changed move_stick_ramp", true);
+  ControllersGesturePulse(0.5f, g_settings.move_stick_ramp != 0 ? 0.40f
+                                                                : 0.08f);
+  ModLog("debug page   : %s", RampText());
+}
+
+int TabletopGodMoveRampValue() {
+  if (!g_installed || !g_settings.god || !TestSwitchesOn()) {
+    return kDebugCannot;
+  }
+  return g_settings.move_stick_ramp != 0 ? 1 : 0;
 }
 
 // The settings window (settings_panel.cpp): move_type.

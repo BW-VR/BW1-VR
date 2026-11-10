@@ -854,6 +854,25 @@ event.
   land, and at the life size scale it is 11 units a second. The step of a
   frame is the speed times the real time of the frame, and a frame counts at
   most 50 ms.
+- **The speed ramp** (`move_stick_ramp`, 1). While the stick is pushed to 90
+  percent of the top speed or more, the time of that push counts. After 1 s
+  the speed doubles each 2 s, up to `move_stick_ramp_most` (32) times
+  (`RampFactor` in `walk_math.h`):
+
+  ```
+  factor = 2 ^ ((t - 1 s) / 2 s), at most 32      t = the time of the full push
+  ```
+
+  A push under 90 percent sets the time to 0, so the speed goes back to the
+  speed of the push in the same frame. A release stops the walk in the same
+  frame, as before. The ramp acts in the walk and in the fly. At the scale
+  of a villager (1 unit for each meter) a full push is 1.5 units each
+  second, and 48 units each second after 11 s: 1000 units of the land take
+  about 29 s from rest. At 100 units for each meter the top is 4800 units
+  each second, so a player at that scale lets go before it. The comfort
+  vignette is at its full darkness from a move of 150 cm of the room each
+  second (section 5.8), so a faster move keeps it full. With
+  `move_stick_ramp=0` the speed is the speed of the push only.
 - **The time of a frame** (`god_display_time`, 1 is the default). The walk,
   the smooth zoom and the smoothing of the grips of a grab (5.1) take the
   time of a frame from the display times that the runtime predicts for two
@@ -925,13 +944,30 @@ event.
   ```
 
   - The view does not follow the land.
-  - The height has the ground limits of the grab (`TabletopGodLimitHeight`,
-    "The ground height"): the land under the head stays 10 cm to 2.5 m
-    below the head (below the height of the head at the recenter pose with
-    `head_blinder=1`, section 5.9). At a limit the move up or down stops,
-    and the move across goes on. So a fly down stops 10 cm over the land,
-    and a fly up stops 2.5 m over it. A hill at the new place of the head
-    stays below the head, as in the walk.
+  - The height (`FlyHeight` in `walk_math.h`). The floor is the floor of the
+    grab: the land under the head stays 10 cm or more below the head (below
+    the height of the head at the recenter pose with `head_blinder=1`,
+    section 5.9). The fly has no ceiling of 2.5 m, so a player at the scale
+    of a villager can fly over the island as a bird. The ceiling is 10000
+    world units over the land under the head, in world units so that a
+    small scale does not get a low ceiling. The far zoom already puts the
+    head that high (4000 units for each meter, the land 2.5 m below the
+    head). At a limit the move up or down stops, and the move across goes
+    on. A hill at the new place of the head stays below the head, as in the
+    walk.
+  - High over the land at a small scale, the game keeps its own fog (400 to
+    900 units) and its own distance at which objects vanish (700 units),
+    because the God view changes them only above 3 times the life size
+    scale (section 2). So from a great height the far land is in the fog.
+  - After a fly the land can be more than 2.5 m below the head. Nothing
+    moves the view back by itself. The walk starts its filter again at the
+    land under the head, so it keeps that height over the land and follows
+    the hills from there. The grab, the ground step and a zoom keep their
+    range of 10 cm to 2.5 m only for a move that goes farther out of it
+    (`GodGroundHeight`): a grab or a step that lowers the view acts, a move
+    up is stopped. A teleport and a move of the game camera to a new place
+    (a story, a load) put the land in the range again, as they do in each
+    view.
   - The fly stops in the frame in which the stick comes back, as the walk
     does. There is no glide and no ease.
   - The comfort vignette counts the move up and down too (section 5.8).
@@ -970,6 +1006,8 @@ event.
 | `god_display_time` | 1 | 1: the walk, the smooth zoom and the smoothing of the grips take the time of a frame from the display times of the headset. 0: from the time of the CPU |
 | `move_stick_follow_land` | 1 | 1: while the player walks, the height of the view follows the land under the head through the filter. 0: the view keeps its height. Not in the launcher: a save of the launcher removes it |
 | `move_stick_trace` | 0 | A test for a desktop run: the log has one line for each of the first N frames of each walk or fly (at most 2000 lines in a game) |
+| `move_stick_ramp` | 1 | 1: a push of 90 percent or more gets faster with its time, in the walk and in the fly. 0: the speed of the push only. The switch "Speed ramp" of the debug page. Not in the launcher |
+| `move_stick_ramp_most` | 32 | The largest factor of the speed ramp, 1 to 64 |
 
 The switch "Move kind" of the debug page goes from the walk that follows the
 land (`move_type=0`, `move_stick_follow_land=1`) to the walk that keeps its
@@ -1010,16 +1048,19 @@ With `move_stick_trace=N` the log also has one line for each of the first N
 frames of each walk:
 
 ```
-god view     : walk trace, frame 61 of the walk: 18.05 ms, a step of 2.707 cm of the room, the waist point at 2023.553 42.130 2487.737, the land under your head at 49.517 (filtered 40.547) and 52.61 cm below your head, frame 961
+god view     : walk trace, frame 61 of the walk: 18.05 ms, a step of 2.707 cm of the room (the speed times 1.00), the waist point at 2023.553 42.130 2487.737, the land under your head at 49.517 (filtered 40.547) and 52.61 cm below your head, frame 961
 ```
 
 A fly has the same lines with the word "fly". The line of the start also
 gives the degrees of forward below or above level, and the line of the end
-gives how far the fly went up or down in the room (`move_type=1`). The
-trace has the step up in each frame:
+gives how far the fly went up or down in the room (`move_type=1`). The line
+of the start names the speed ramp, and the line of the end gives the
+largest factor of the ramp when it went above 1 ("The speed ramp went up to
+R times the speed of the push"). Each trace line has the factor of its
+frame, and the trace of a fly has the step up in each frame:
 
 ```
-god view     : fly trace, frame F of the fly: T ms, a step of S cm of the room (U cm up), the waist point at X Y Z, the land under your head at H and B cm below your head, frame N
+god view     : fly trace, frame F of the fly: T ms, a step of S cm of the room (U cm up, the speed times R), the waist point at X Y Z, the land under your head at H and B cm below your head, frame N
 ```
 
 **An even walk.** The step of each frame is the speed times the real time
@@ -1898,9 +1939,15 @@ checks the pure functions at 7.5, 100 and 2000 units per meter:
   right of the head and goes straight down. A controller 60 degrees up goes
   up. A frame with no time and a stick at rest give no step. A step of 10 cm
   down and 20 cm ahead at 100 units for each meter moves the waist point 10
-  units down and 20 units ahead, also with a heading of 90 degrees. With the
-  ground limits of the grab a fly down stops with the land 10 cm below the
-  head, and a fly up stops with it 2.5 m below.
+  units down and 20 units ahead, also with a heading of 90 degrees. A fly
+  down stops with the land 10 cm below the head. A fly up goes past 2.5 m
+  and stops with the head 10000 units over the land, at 100 and at 1 unit
+  for each meter. A view over the ceiling or under the floor stays, cannot
+  go farther out, and can come back. The speed ramp: a push of 90 percent
+  or more counts its time and a push of 85 percent sets it to 0. The factor
+  is 1 in the first second, 2 after 3 s, 4 after 5 s and 32 from 11 s, and
+  a most of 1 is no ramp. At 1 unit for each meter and 60 frames a second,
+  1000 units take 29 s.
 - The teleport (14.8), the place at a game camera (15.9) and the player that a
   script sees (16.9) have their own checks.
 

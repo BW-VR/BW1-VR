@@ -893,6 +893,7 @@ The words that hold a button (or the stick at full) for `frames` frames:
 | `lgrip`, `ltrigger` | Grip, trigger of the left hand |
 | `gripdip` | While the word `grip` holds, the squeeze of the right grip reads 0.59 and not 1.0 for the frames of this word. One frame is a real hand that jerks away |
 | `lstick_left`, `lstick_right`, `lstick_up`, `lstick_down` | The stick of the left hand at full. Two words at the same time give a diagonal. The stick moves the player in the God view (`move_stick`), or drives the ring with `button_layout=0` |
+| `lstick_half` | The stick of the left hand forward at half of a full push: a push under the threshold of the speed ramp (`move_stick_ramp`, `god-view.md`, section 5.7) |
 | `lstick_click` | The stick click of the left hand. A hold of 1 s recenters the view (`recenter_hold`) |
 | `nofocus` | The headset session has no focus of the runtime. Both fake hands are not active, as `XrScreen` gives them then |
 
@@ -1077,6 +1078,7 @@ default. Each control has one job, and one button opens the game menu.
 | `teleport_switch` | 1 | The switch of the game that the press of A keeps to. 1: the drag of the land, as the walk with the stick. 0: the double click jump (`god-view.md`, section 14.1). Not in the launcher |
 | `button_layout` | 1 | The layout of the buttons of the hand that does not point (5.1). 1: the menu button of the left controller opens the game menu, the second face button opens the ring, the first face button opens the spell book (`spell_book`), and the stick does not drive the ring. 0: the second face button opens the game menu, the first face button opens the ring, and the stick can drive the ring. The test key Ctrl and the Menu key goes between the two (`test_keys=1`). Not in the launcher |
 | `move_stick`, `move_stick_speed_cm` | 1, 150 | The walk or the fly with the stick of the hand that does not point, in the God view: 1 along the direction of the head, 2 along the direction of the controller, 0 off (bwvr.ini only), and the speed of a full push in cm of the room for each second (`god-view.md`, section 5.7). The launcher row "Movement direction" |
+| `move_stick_ramp`, `move_stick_ramp_most` | 1, 32 | 1: a push of 90 percent or more of the stick of the hand that does not point gets faster with its time, up to 32 times, in the walk and in the fly. 0: the speed of the push only (`god-view.md`, section 5.7). The switch "Speed ramp" of the debug page. Not in the launcher |
 | `move_type` | 0 | 0: the stick walks over the land. 1: the stick flies along the forward direction of the head or of the controller in 3D, and the view does not follow the land (`god-view.md`, section 5.7). The launcher row "Movement type" |
 | `move_stick_follow_land` | 1 | In the walk with the stick, 1: the height of the view follows the land under the head through a smooth filter. 0: the view keeps its height (`god-view.md`, section 5.7). Not in the launcher: a save of the launcher removes it. The switch "Move kind" of the debug page |
 | `miracle_cancel_ms` | 400 | The longest press of the second face button that takes a miracle out of the Hand |

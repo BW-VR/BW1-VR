@@ -198,12 +198,44 @@ inline float FollowStep(LandFollow* follow, float land, float way,
   return follow->stage[1] - before;
 }
 
+// THE SPEED RAMP (move_stick_ramp=1). While the stick is pushed to
+// kRampShare of the top speed or more, the time of that push counts. For
+// the first kRampHoldSeconds nothing changes. Then the speed doubles each
+// kRampDoubleSeconds, up to `most` times the speed of the push:
+//
+//     factor = 2 ^ ((held - 1 s) / 2 s), at most `most`
+//
+// A push under kRampShare sets the time to 0, so the speed goes back to the
+// speed of the push in that frame. A frame with no push stops the walk, as
+// before. At the villager scale (1 unit for each meter) a full push is 1.5
+// units each second. With `most` 32 it is 48 units each second after 11 s,
+// and 1000 units of the land take about 30 s from rest.
+const float kRampShare = 0.9f;
+const float kRampHoldSeconds = 1.0f;
+const float kRampDoubleSeconds = 2.0f;
+
+// The time of the full push after a frame: before plus the time of the
+// frame while share is kRampShare or more, else 0.
+inline float RampSeconds(float before, float share, float seconds) {
+  if (!(share >= kRampShare)) return 0.0f;
+  if (!(seconds > 0.0f)) return before;
+  return before + seconds;
+}
+
+// The factor of the speed after `held` seconds of a full push. 1 for a most
+// of 1 or less.
+inline float RampFactor(float held, float most) {
+  if (!(most > 1.0f) || !(held > kRampHoldSeconds)) return 1.0f;
+  const float factor =
+      powf(2.0f, (held - kRampHoldSeconds) / kRampDoubleSeconds);
+  return factor > most ? most : factor;
+}
+
 // THE FLY (move_type=1). The stick moves the view along the forward
 // direction of the head or of the controller in 3D, so a push while the
 // player looks or points down goes down. The stick to the side moves level,
-// at right angles to that direction. The view does not follow the land. The
-// limits of the height are the ground limits of the grab (tabletop.cpp,
-// GodGroundHeight).
+// at right angles to that direction. The view does not follow the land.
+// The height has a floor and a ceiling (FlyHeight).
 
 // A unit vector from a direction. False for a direction with no length or
 // with a part that is not a number, and then out is not written.
@@ -265,6 +297,34 @@ inline void Fly(const table_math::TablePose& pose, const float step[3],
                            step[2] * pose.scale};
   *out = pose;
   table_math::Along(pose.center, basis, across, out->center);
+}
+
+// THE HEIGHT OF A FLY. The floor is the floor of the grab: the land under
+// the head stays nearest_m or more below the head (head_y, in the room).
+// The ceiling is in world units, so that a small scale does not get a low
+// ceiling: the head stays at most ceiling_units over the land. The far zoom
+// (4000 units for each meter, the land 2.5 m below the head) puts the head
+// 10000 units over the land, so that height is one that the view already
+// draws. As in GodGroundHeight (table_math.h), the result never moves the
+// height farther out of the range than `current` already is, so at a limit
+// the height stops and never jumps.
+//
+//     under(C.y) = room_y + (land - C.y) / s
+//     floor:   C.y >= land - (head_y - nearest_m - room_y) * s
+//     ceiling: C.y <= land - (head_y - room_y) * s + ceiling_units
+const float kFlyCeilingUnits = 10000.0f;
+
+inline float FlyHeight(float wanted, float current, float land, float room_y,
+                       float scale, float head_y, float nearest_m,
+                       float ceiling_units) {
+  if (!(scale > 0.0f)) return current;
+  float low = land - (head_y - nearest_m - room_y) * scale;
+  float high = land - (head_y - room_y) * scale + ceiling_units;
+  if (current < low) low = current;
+  if (current > high) high = current;
+  if (wanted < low) return low;
+  if (wanted > high) return high;
+  return wanted;
 }
 
 // The degrees of a direction below level, for the log: up is less than 0.

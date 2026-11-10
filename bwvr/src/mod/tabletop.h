@@ -84,6 +84,11 @@ struct TabletopSettings {
   // move_stick_follow_land), 1 flies along the forward direction in 3D
   // (walk_math.h, "The fly"). docs/god-view.md, "The walk with the stick".
   int move_type = 0;               // move_type: 0 walk, 1 fly
+  // The speed ramp of a full push of the stick (walk_math.h, "The speed
+  // ramp"): 1 on, 0 the speed of the push only. move_stick_ramp_most is the
+  // largest factor, 1 to 64.
+  int move_stick_ramp = 1;         // move_stick_ramp: 1 on, 0 off
+  int move_stick_ramp_most = 32;   // move_stick_ramp_most: the top factor
   // A test for a desktop run: the log has a line for each of the first N
   // frames of each walk. 0 is off.
   int move_stick_trace = 0;        // move_stick_trace: frames to log
@@ -214,6 +219,9 @@ int TabletopGodMoveStickValue();
 void TabletopGodMoveKindCycle();
 int TabletopGodMoveKindValue();
 void TabletopGodSetMoveType(int type, const char* by);
+// The switch "Speed ramp" of the debug page (move_stick_ramp).
+void TabletopGodMoveRampToggle();
+int TabletopGodMoveRampValue();
 
 // True while the table or the God view is on, also while it stands aside.
 bool TabletopIsOn();

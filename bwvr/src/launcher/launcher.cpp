@@ -290,8 +290,9 @@ const Setting kSettings[] = {
      "follows the hills, so the land stays at the same height below your "
      "hands. Fly: you move in the direction of Movement direction, also up "
      "and down. Look or point down and push the stick forward to go down. "
-     "The view does not follow the land, and the land stays between 10 cm "
-     "and 2.5 m below your head."},
+     "The view does not follow the land. It stops just above the land, and "
+     "you can fly up high, also at the size of a villager. A full push of "
+     "the stick gets faster the longer you hold it."},
     // move_stick 0 (no walk) is not in the list. The mod still takes it
     // from bwvr.ini for a test, and the launcher shows the default for it
     // (kShownAsDefault).

@@ -147,19 +147,77 @@ inline void FlyChecks() {
        next.center[0], 120.0, 1e-3);
   Near("and the height goes down the same", next.center[1], 40.0, 1e-4);
 
-  // THE GROUND LIMITS. The land is at 0, the room and the head at 0, and the
-  // scale 100. The view starts with the land 1 m below the head (C.y 100).
-  // Steps of 5 cm down stop with the land 10 cm below the head (C.y 10).
-  // Steps of 5 cm up stop with the land 2.5 m below it (C.y 250).
+  // THE HEIGHT. The land is at 0, the room and the head at 0, and the scale
+  // 100. The view starts with the land 1 m below the head (C.y 100). Steps
+  // of 5 cm down stop with the land 10 cm below the head (C.y 10). Steps up
+  // go past 2.5 m, the limit of the grab, and stop with the head 10000 units
+  // over the land (C.y 10000).
+  const float ceiling = kFlyCeilingUnits;
   float y = 100.0f;
   for (int i = 0; i < 40; ++i) {
-    y = GodGroundHeight(y - 5.0f, y, 0.0f, 0.0f, 100.0f, 0.0f, 0.10f, 2.50f);
+    y = FlyHeight(y - 5.0f, y, 0.0f, 0.0f, 100.0f, 0.0f, 0.10f, ceiling);
   }
   Near("a fly down stops with the land 10 cm below the head", y, 10.0, 1e-3);
   for (int i = 0; i < 80; ++i) {
-    y = GodGroundHeight(y + 5.0f, y, 0.0f, 0.0f, 100.0f, 0.0f, 0.10f, 2.50f);
+    y = FlyHeight(y + 5.0f, y, 0.0f, 0.0f, 100.0f, 0.0f, 0.10f, ceiling);
   }
-  Near("a fly up stops with the land 2.5 m below the head", y, 250.0, 1e-3);
+  Near("a fly up goes past 2.5 m below the head", y, 410.0, 1e-3);
+  for (int i = 0; i < 400; ++i) {
+    y = FlyHeight(y + 50.0f, y, 0.0f, 0.0f, 100.0f, 0.0f, 0.10f, ceiling);
+  }
+  Near("and it stops with the head 10000 units over the land", y, 10000.0,
+       1e-2);
+  // At the villager scale (1 unit for each meter) the ceiling is the same
+  // height in units: 10000 m of the room.
+  y = 2.0f;
+  for (int i = 0; i < 300; ++i) {
+    y = FlyHeight(y + 50.0f, y, 0.0f, 0.0f, 1.0f, 0.0f, 0.10f, ceiling);
+  }
+  Near("at 1 unit for each meter a fly up also stops at 10000 units", y,
+       10000.0, 1e-2);
+  Near("a view over the ceiling does not go down by itself",
+       FlyHeight(12000.0f, 12000.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.10f, ceiling),
+       12000.0, 1e-3);
+  Near("and it cannot go up", FlyHeight(12100.0f, 12000.0f, 0.0f, 0.0f, 1.0f,
+                                        0.0f, 0.10f, ceiling),
+       12000.0, 1e-3);
+  Near("but it can go down", FlyHeight(11900.0f, 12000.0f, 0.0f, 0.0f, 1.0f,
+                                       0.0f, 0.10f, ceiling),
+       11900.0, 1e-3);
+  Near("a view under the floor cannot go down", FlyHeight(-5.0f, 0.0f, 0.0f,
+                                                          0.0f, 1.0f, 0.0f,
+                                                          0.10f, ceiling),
+       0.0, 1e-3);
+
+  // THE SPEED RAMP.
+  Near("a full push counts its time", RampSeconds(0.5f, 1.0f, 0.25f), 0.75,
+       1e-6);
+  Near("a push of 90 percent counts", RampSeconds(0.5f, 0.9f, 0.25f), 0.75,
+       1e-6);
+  Near("a push of 85 percent sets the time to 0",
+       RampSeconds(5.0f, 0.85f, 0.25f), 0.0, 1e-9);
+  Near("a frame with no time keeps the time", RampSeconds(5.0f, 1.0f, 0.0f),
+       5.0, 1e-6);
+  Near("in the first second the speed stays", RampFactor(1.0f, 32.0f), 1.0,
+       1e-6);
+  Near("after 3 s it is 2 times", RampFactor(3.0f, 32.0f), 2.0, 1e-4);
+  Near("after 5 s it is 4 times", RampFactor(5.0f, 32.0f), 4.0, 1e-4);
+  Near("after 11 s it is 32 times", RampFactor(11.0f, 32.0f), 32.0, 1e-3);
+  Near("and it stops at 32 times", RampFactor(30.0f, 32.0f), 32.0, 1e-6);
+  Near("a most of 1 is no ramp", RampFactor(30.0f, 1.0f), 1.0, 1e-6);
+  // At the villager scale a full push is 1.5 units each second. 1000 units
+  // take about 29 s at 60 frames a second.
+  {
+    float held = 0.0f, went = 0.0f;
+    int frames = 0;
+    while (went < 1000.0f && frames < 60 * 120) {
+      held = RampSeconds(held, 1.0f, 1.0f / 60.0f);
+      went += 1.5f * RampFactor(held, 32.0f) / 60.0f;
+      ++frames;
+    }
+    Near("at 1 unit for each meter, 1000 units take about 29 s",
+         frames / 60.0f, 29.0, 0.5);
+  }
 }
 
 inline void WalkChecks() {

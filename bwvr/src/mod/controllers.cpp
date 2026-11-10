@@ -333,6 +333,9 @@ enum FakeInput {
   // The aim of a new bookmark: the aim of the right hand turns to the target
   // of the test key bookmark_test_aim (bookmark_aim.cpp).
   kAimMark,
+  // The stick of the left hand forward at half of a full push: a push under
+  // the threshold of the speed ramp (move_stick_ramp).
+  kLStickHalf,
   kInputCount
 };
 
@@ -348,7 +351,7 @@ const char* const kInputName[kInputCount] = {
     "aimtemple",  "gripdip",    "exit",       "bench",
     "lmenu",      "layoutkey",  "movekey",    "teleportkey", "promptkey",
     "book",       "lrot",       "aimplaces",  "lstick_click",
-    "aimdebug",   "aimmark"};
+    "aimdebug",   "aimmark",    "lstick_half"};
 
 // The fake hand positions for the word "point", in cm from the head center.
 const int kMaxPoints = 16;
@@ -771,6 +774,7 @@ void FakeHand(int index, bwvr::HandInput* out) {
                     (g_held[kLStickLeft] ? 1.0f : 0.0f);
     out->stick[1] = (g_held[kLStickUp] ? 1.0f : 0.0f) -
                     (g_held[kLStickDown] ? 1.0f : 0.0f);
+    if (g_held[kLStickHalf]) out->stick[1] += 0.5f;
     out->stick_click = g_held[kLStickClick];
   }
 }

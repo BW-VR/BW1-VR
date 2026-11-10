@@ -457,7 +457,12 @@ you set with the left grip stays your height above the land. Fly: you
 move where your head faces or where the controller points, also up
 and down. Look or point down and push the stick forward to go down.
 The view does not follow the land. It stops just above the land, and
-it goes up until the land is 2.5 m below you.
+you can fly up high, also when you are as small as a villager.
+
+When you hold the left stick all the way, the walk and the fly get
+faster: after 1 second the speed doubles each 2 seconds, up to 32
+times. A smaller push goes back to its own speed at once. Set
+move_stick_ramp=0 in bwvr.ini to keep one speed.
 
 Set button_layout=0 in bwvr.ini for a different layout of the left
 controller: Y opens the game menu, X opens the ring, and the left

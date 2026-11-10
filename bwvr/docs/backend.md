@@ -5947,6 +5947,7 @@ item.
 | Ctrl Menu key | `test_keys=1` | The layout of the buttons of the hand that does not point. The menu button of the left controller opens the game menu, Y opens the ring and the stick does not drive the ring, or Y opens the game menu and X and the stick open the ring. A long pulse and a short pulse on that hand (`button_layout`, `controllers.md`, 5.1). Shift must be up | View, Button layout |
 | Shift Menu key | `test_keys=1` | The walk with the stick of the hand that does not point steps from 1 to 2 to 0 and back: forward is the direction of the head, forward is the direction of that controller, or the stick does not move the player. A medium pulse, a long pulse and a short pulse (`move_stick`, `god-view.md`, section 5.7). Ctrl must be up | View, Stick walk |
 | None | `debug_menu=1` | The kind of move of the stick of the hand that does not point steps from the walk that follows the land, to the walk that keeps its height, to the fly, and back. A short, a medium and a long pulse (`move_type`, `move_stick_follow_land`, `god-view.md`, section 5.7). The debug page only | View, Move kind |
+| None | `debug_menu=1` | The speed ramp of a full push of the stick of the hand that does not point, off or on. A short and a long pulse (`move_stick_ramp`, `god-view.md`, section 5.7). The debug page only | View, Speed ramp |
 
 The launcher has no row for `test_keys`. It is off by default, and a tester or a
 desktop run writes it in `bwvr.ini` (a save of the launcher keeps it). The row
@@ -6040,6 +6041,7 @@ keys that the launcher sets.
 | `zoom_step` | 2 | See "Zoom in steps" |
 | `move_stick`, `move_stick_speed_cm` | 1, 150 | The walk or the fly with the stick of the hand that does not point, in the God view. See `god-view.md`, section 5.7 |
 | `move_type` | 0 | 0: the stick walks over the land. 1: the stick flies along the forward direction in 3D. See `god-view.md`, section 5.7 |
+| `move_stick_ramp`, `move_stick_ramp_most` | 1, 32 | The speed ramp of a full push of the stick, and its largest factor. See `god-view.md`, section 5.7 |
 | `move_stick_follow_land` | 1 | 1: in the walk with the stick, the height of the view follows the land under the head. 0: the view keeps its height. A save of the launcher removes it. See `god-view.md`, section 5.7 |
 | `button_layout` | 1 | The layout of the buttons of the hand that does not point. See `controllers.md`, 5.1 |
 | `drag_smoothing_ms` | 35 | See "Smoother drags far out" |

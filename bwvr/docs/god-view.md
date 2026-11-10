@@ -7,7 +7,9 @@ reach it. There is no reach gain and no Hand that grows. The reach comes from
 the world (`hand.md`).
 
 The God view is the main mode and the default. It works with motion
-controllers and with the mouse. The launcher offers it first.
+controllers and with the mouse. The launcher has no row for the play mode,
+and a save of the launcher removes `play_mode` from `bwvr.ini`, so a player
+always has the God view.
 
 The God view is the camera of the tabletop mode (`tabletop.md`) with a
 different room: the land is at the waist and there is no edge. The two modes
@@ -19,9 +21,9 @@ that math. This file has everything that is specific to the God view.
 | `play_mode` | View |
 | --- | --- |
 | 4 | The God view. The default |
-| 3 | The tabletop: the island is a model on a table in the room (`tabletop.md`). The launcher calls it "Tabletop (test)" |
-| 2 | A window that follows the head. Not in the launcher |
-| 1 | The stereoscopic window: a 3D screen in front of the player. The head does not move the camera |
+| 3 | The tabletop: the island is a model on a table in the room (`tabletop.md`). For tests |
+| 2 | A window that follows the head. For tests |
+| 1 | The stereoscopic window: a 3D screen in front of the player. The head does not move the camera. For tests |
 | 0 | Not a mode. A value of 0 in `bwvr.ini` gives the God view, and the mod logs it |
 
 ```
@@ -1128,7 +1130,7 @@ under the land. As in Half-Life: Alyx, an opaque overlay then fills the view
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `head_blinder` | 1 | 1: an opaque overlay when the head goes into the land, and the floor of the head is at the height of the head at the recenter pose. 0: the eyes see under the land, and the floor of the head follows the head. The launcher row "Head in the land". The switch "Head blinder" of the debug page |
+| `head_blinder` | 1 | 1: an opaque overlay when the head goes into the land, and the floor of the head is at the height of the head at the recenter pose. 0: the eyes see under the land, and the floor of the head follows the head. The switch "Head blinder" of the debug page. Not in the launcher, and a save of the launcher removes it (`launcher.md`, "Retired keys") |
 | `head_blinder_objects` | 1 | 1: a house, a rock and a tree trunk cover the view as the land does. 0: only the land counts, and the eyes see into a house. The switch "Blinder solids" of the debug page |
 | `solid_house_inset_pct` | 20 | Below the life size scale the box of a house is this percent smaller across, nearer to its walls (section 2, "Houses at a small scale"). It is the same box for the drawn hand (`hand-model.md`). 0 to 50. 0: the whole box at each scale |
 
@@ -1647,7 +1649,7 @@ box closes, the direct hand comes back on the same frame.
 
 ### Ini keys
 
-All in `[bwvr]`. The launcher has the play mode, the grab row, the two rows
+All in `[bwvr]`. The launcher has the grab row, the two rows
 of the zoom and the row of the walk with the stick. The keys of the teleport
 are in section 14.6, the keys of the grab are in section 5.6, the keys of
 the walk with the stick are in section 5.7, and the keys of the comfort of a

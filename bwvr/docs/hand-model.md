@@ -2072,8 +2072,8 @@ game's Hand does not cover (hand.md, "The exact Hand"). With
 too (hand.md, "8. The two real hands and which one is the Hand"). There is no launcher row.
 
 `ray_glow` (1): the glow ribbons of the rays (see "The glow ribbons"). 0 gives
-plain tubes. The launcher row "Glow on the rays", and the switch "Ray glow" of
-the debug page (the group Picture). `ray_glow_only` (1): with `ray_glow=1`
+plain tubes. The switch "Ray glow" of the debug page (the group Picture). The
+launcher has no row for it. `ray_glow_only` (1): with `ray_glow=1`
 the glow is the whole ray. 0 keeps the tube under the wider glow. The switch
 "Glow only" of the debug page. `gesture_trail` (1) is the trail of a
 gesture (`miracles.md`).

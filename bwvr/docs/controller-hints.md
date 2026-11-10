@@ -5,10 +5,12 @@ does with them while a controller is in use, how the hint cards work, and
 what is still open (pictures in the hints of the game).
 
 While a controller owns the pointer, the hints show on cards with prompts for
-the controller (section 9). With `hint_style=2` (the default) a hand with a
-hint shows the model of its controller, with each button of the hint lit and
-a small card for each lit button (9.14). With `hint_style=1` the cards are at
-the wrists. The words of
+the controller (section 9). The launcher row "Show 3D controller for hints"
+(`hint_controller`, on by default) chooses the look. On (`hint_style=2`): a
+hand with a hint shows the model of its controller, with each button of the
+hint lit and a small card for each lit button (9.14). Off (`hint_style=1`,
+`hint_card_pictures=0`): the cards are at the wrists, with the button words
+only. The words of
 the controller replace the mouse words in the game's help text (section 8).
 
 Marks: **[V]** verified (disassembly, symbols, the game files or the SDK
@@ -970,7 +972,7 @@ the help options of the game, so a player with "No ToolTips" sees them too.
 | `hint_learn` | 1 | With `hints_follow_game=0`: 1 a line of a prompt that teaches an action goes away after the player did the action 3 times, and comes back after 10 minutes of play with no use of it. Each line shows in a lesson of the tutorial. 0 each line shows always, and the mod counts nothing (9.10). Not in the launcher |
 | `hint_counts_test_file` | empty | Test key. The full path of the file of the counts. Empty is `bwvr-hint-counts.ini` beside `bwvr.ini` (9.10) |
 | `hint_card_style` | 1 | 1 each card is a parchment scroll with dark ink and a wax seal for each button word (9.11). 0 the plain dark card with white Segoe UI letters. The launcher row "Card look": "Scroll" is 1, "Plain" is 0. The same key sets the look of the spell book (`miracles.md`), of the ring (`controllers.md`, 10.4) and of the keyboard in the headset (`ui-layer.md`, section 21) |
-| `hint_card_pictures` | 1 | 1 each line of a button has a small picture of the controller with that button lit, before the badge or the seal (9.13). 0 the button word only. The launcher row "Button pictures on the cards" |
+| `hint_card_pictures` | from `hint_controller` | 1 each line of a button has a small picture of the controller with that button lit, before the badge or the seal (9.13). 0 the button word only. The default is 1 with `hint_controller=1` and 0 with `hint_controller=0` (9.14). Not in the launcher: a save of the launcher removes it, and a test can write it |
 | `hint_card_saving` | 1 | 1 while the game saves, the card of the pointing hand says "Saving..." (9.12). 0 the cards say nothing in a save |
 | `hint_card_save_test` | 0 | Test key. 1 saves each new picture of a card as `bwvr-hintcard-draw-NNN-FFFFF.bmp` over a checkerboard (NNN counts the pictures, FFFFF is the frame, 40 pictures at most) |
 | `font_warm` | 1 | 1 a thread of the mod draws each letter of each font of the cards one time at the start of the game (9.11, "The first draw of a font"). 0 the first draw of each font of a card makes its letters on the frame thread |
@@ -1471,7 +1473,7 @@ Code: `src/mod/hint_picture_math.h` (the picture) and `PutPictures` in
 `src/mod/hint_card.cpp` (the layout). The checks are in
 `test/controller_math/hint_picture_checks.h`.
 
-With `hint_card_pictures=1` (the default) each line of a button has a small
+With `hint_card_pictures=1` (the default with `hint_controller=1`) each line of a button has a small
 picture before its badge or its seal: a drawing of the controller with the
 button of the line lit. The words stay. A line with no button, or with a
 button that the drawing does not show, has no picture.
@@ -1597,7 +1599,7 @@ Quest, so the name of the headset (`XrSystemProperties`, the log line
 
 No profile yet, or an other profile, gives no model. Then that hand has the
 card at the wrist of `hint_style=1`, with the drawn pictures of the buttons
-(9.13). The same is true while a model loads, and when a model does not
+(9.13, `hint_card_pictures=1` with `hint_controller=1`). The same is true while a model loads, and when a model does not
 load. The bridge to the Steam Frame host does not send the name of the
 headset, so there a Touch profile gives the Touch Plus.
 
@@ -1695,7 +1697,8 @@ shows each card. The controller and the lines are in the eye pictures.
 
 | Key of `bwvr.ini` | Default | Meaning |
 | --- | --- | --- |
-| `hint_style` | 2 | 2 the controller in the hand, with a card for each lit button. 1 the cards at the wrists (9.3), with the pictures of the buttons (9.13). The launcher row "Hints with the controller" |
+| `hint_controller` | 1 | The launcher row "Show 3D controller for hints". 1 gives `hint_style=2` and `hint_card_pictures=1`: the controller in the hand, and a hand with no model has the cards at the wrists with the pictures of the buttons. 0 gives `hint_style=1` and `hint_card_pictures=0`: the cards at the wrists with the button words only (`hint_model_math.h`, `StyleOfSwitch` and `PicturesOfSwitch`) |
+| `hint_style` | from `hint_controller` | 2 the controller in the hand, with a card for each lit button. 1 the cards at the wrists (9.3). The default is 2 with `hint_controller=1` and 1 with `hint_controller=0`. Not in the launcher: a save of the launcher removes it, and a test can write it |
 | `hint_hand_opacity_pct` | 68 | The opacity of the hand while its controller shows, in percent. 35 is the fainter hand |
 | `hint_pulse` | 1 | 1 the lit buttons pulse, one beat a second from 35 percent of the light to full light. 0 a steady light |
 | `view_check` | 1 | 1 the check of the view (9.15) runs in the God view and writes its log lines. 0 no check |
@@ -1708,7 +1711,7 @@ live comparison.
 
 **The log.**
 
-- `hint model   : hint_style=2, ...` once, with the folder of the models,
+- `hint model   : hint_controller=1, hint_style=2, ...` once, with the folder of the models,
   and `hint model   : hint_hand_opacity_pct=68, ... hint_pulse=1, ...` with
   the opacity of the hand and the light of the lit buttons.
 - `hint model   : the right hand reports the profile "oculus/touch_controller"

@@ -143,7 +143,8 @@ A setting that only breaks the game when a person changes it is not a choice.
 The launcher does not offer these keys, and each save deletes them from
 `bwvr.ini`, so an old ini cannot keep a wrong value. The default of the mod is
 the right answer for each key. The keys still work when a person writes them by
-hand, for tests.
+hand, for tests. Each start from the launcher saves first, so a game that the
+launcher starts never reads a retired key from an old ini.
 
 | Key | The value the mod uses |
 | --- | --- |
@@ -162,6 +163,13 @@ hand, for tests.
 | `instant_jumps` | 1: a double click on the land takes the player there in one frame |
 | `camera_glide` | 0: the camera stops when the player releases the land |
 | `head_units_per_meter_x10` | 75: 7.5 game units for each meter, the life size scale |
+| `play_mode` | 4: the God view (`god-view.md`). 1 (the stereoscopic window) and 3 (the tabletop, `tabletop.md`) stay for tests |
+| `intro_vr` | 1: the Lionhead logo in 3D around the player (`intro.md`). 0, the flat intro, is for the desktop tests |
+| `head_blinder` | 1: a cover fills the view when the head goes into the land, a house or a rock (`god-view.md`, section 5.9) |
+| `gesture_trail` | 1: a gold ribbon follows the tip of the index finger while the player draws a gesture (`miracles.md`, "The trail at the fingertip") |
+| `ray_glow` | 1: the ray of the menu, the tether of the far grab and the arc of the teleport have a glow (`hand-model.md`, "The glow ribbons") |
+| `hint_style`, `hint_card_pictures` | The values that the row "Show 3D controller for hints" (`hint_controller`) gives: 2 and 1 when it is on, 1 and 0 when it is off (see "Controllers") |
+| `update_check` | None: the launcher asks for updates each time it opens and does not read the key (see "The update check") |
 
 The list `kRetiredKeys` also holds the keys of earlier modes (`head_tracking`,
 `immersive`) and the keys of the desktop test tools: `fake_head*`,
@@ -186,6 +194,7 @@ does not delete them, so a value that a person writes in `bwvr.ini` is kept.
 | `ui_shift_px`, `ui_adaptive` | 8, 1 | How far the interface sits in front of the player, and whether it comes nearer when the world in front of it is nearer |
 | `hint_scale_pct`, `hint_flat` | 20, 1 | The size and the depth of the game's hint beside the Hand in the eye pictures. With controllers the hints are on the hint cards (`controller-hints.md`) |
 | `zoom_step` | 2 | The step of one wheel click on the camera of the game (`backend.md`, "Zoom in steps"). The God view has its own zoom steps |
+| `test_keys` | 0 | 1 turns on the keys for tests (`backend.md`, "Keys for v1.0"). The desktop tests write it, and a tester can write it by hand. The debug menu has switches for the same rules |
 
 ## Settings
 
@@ -194,7 +203,7 @@ does not delete them, so a value that a person writes in `bwvr.ini` is kept.
 | Setting | Default | What it does |
 | --- | --- | --- |
 | One scene walk for both eyes (prototype) | On | Key `one_walk`. On also makes the render a quarter wider (`one_walk_guard_pct`, 25), see `backend.md`, "One walk for both eyes". It is before the resolution in the table, because a save writes the rows in order and the size reads it |
-| Margin around the view | None | Key `fov_margin_pct`, 0 to 30 in steps of 5. The game draws that many percent more on each side of the view of the headset, and the render has that many percent more pixels each way, so a degree keeps its pixels (`backend.md`, "A margin around the view"). It is before the resolution in the table for the same reason as the row above |
+| Margin around the view | 0% | A slider from 0 to 30 in steps of 5. Key `fov_margin_pct`. The game draws that many percent more on each side of the view of the headset, and the render has that many percent more pixels each way, so a degree keeps its pixels (`backend.md`, "A margin around the view"). It is before the resolution in the table for the same reason as the row above |
 | Resolution scale | 100% | A slider from 50 to 200 in steps of 5. Key `resolution_pct`. See "The resolution comes from the headset". |
 | Anisotropic filtering | 16x | A list: off, 2x, 4x, 8x, 16x. Key `anisotropy` (1, 2, 4, 8, 16). With the renderer Direct3D 9 the launcher also writes the level to `AnisotropicFiltering` in `dxwrapper\dxwrapper.ini`, because dxwrapper applies its own level to the Direct3D 9 device. A fixed 16 there would make "off" do nothing. dxwrapper reads 0 as "leave it to the game". The renderer Vulkan takes the level that the game sets on its textures, so it needs no other file. |
 | Enable texture mipmaps | on | Uses smaller copies of each texture in the distance. Key `force_mips`. |
@@ -234,12 +243,15 @@ where the parts are.
 
 ### View
 
+The mod plays in the God view (`god-view.md`), and the launcher has no row
+for the play mode (see "Retired keys"). The intro is in stereo
+(`intro.md`): the key `intro_motion` chooses its motion, and the launcher has
+no row for it.
+
 | Setting | Default | What it does |
 | --- | --- | --- |
-| Play mode | God view | Key `play_mode`, a value and not an index. 4 God view: the land is at your waist, so your hands can reach it, with motion controllers or with the mouse (see `god-view.md`). 1 Stereoscopic window: a 3D screen in front of you, and your head does not move the camera. 3 Tabletop (test): the island is a model on a table in front of you (see `tabletop.md`). A window that follows the head is mode 2, which the launcher does not offer. An ini with `play_mode=0` gets the God view. |
-| Intro in stereo | off | The Lionhead logo at the start shows in 3D around you. The view goes along the camera path of the game and does not turn. The menu button skips it. It is a test: no headset session has checked it. Key `intro_vr`. The key `intro_motion` chooses the motion, and the launcher has no row for it. See `intro.md`. |
-| View for videos | off | Key `video_view`. The game window on the PC shows a 16:9 part of the left eye, for a capture with OBS while the headset plays. The video has a smoothed head, and faint corner marks in the headset show its part. The cards, the subtitles, the ring and the panels of the headset are in the video, where the left eye sees them (`video_view_layers`). It needs the Vulkan renderer (`backend.md`, "The view for videos") |
-| Video lower by | 20% | A slider from 0 to 40 in steps of 5. Key `video_view_down_pct`: how far the middle of the video is below the middle of the view, in percent of the height of the view |
+| Video Capture Mode | off | Key `video_view`. The game window on the PC is the capture window: it shows a 16:9 part of the left eye, for a capture with OBS while the headset plays. The capture window has a smoothed head, and faint corner marks in the headset show its part. The cards, the subtitles, the ring and the panels of the headset are in the video, where the left eye sees them (`video_view_layers`). It needs the Vulkan renderer (`backend.md`, "The view for videos") |
+| Lower capture window | 20% | A slider from 0 to 40 in steps of 5. Key `video_view_down_pct`: how far the middle of the capture window is below the middle of the view, in percent of the height of the view |
 | Cut scenes | In a window | Key `cutscene_immersive`, a value. 0 In a window: a cut scene plays on the screen of the cut scene window (`cutscene-window.md`). 1 Around you: no window, and the camera of the game moves the player with all its motion (`script_camera=0`). A video of the game still plays on the screen (`cutscene_video_window`). |
 
 ### Moving around
@@ -257,19 +269,15 @@ move the camera in steps.
 | Move with the other stick | Head direction | Key `move_stick`, a value. In the God view the stick of the other hand (the left stick, or the right stick of a left handed player) moves you over the land while you push it, and you stop when you let it go. 1 Head direction: forward is where the head faces. 2 Controller direction: forward is where that controller points. 0 Off: the stick does not move you. A walk with a stick makes some players ill, so the row has Off (`god-view.md`, section 5.7). The key `move_stick_speed_cm` sets the speed, and the launcher has no row for it. |
 | Walk follows the land | On | Key `move_stick_follow_land`, a value. 1 On: while you move with the left stick, the height of the view follows the land under the head through a smooth filter, so the land stays at the same height below the hands. A long hill moves the view, a small bump does not, and the view moves only while the stick is pushed. 0 Off: the view keeps its height (`god-view.md`, section 5.7). |
 | Comfort vignette | Off | Key `comfort_vignette`, a value. 0 Off. 1 Gentle. 2 Strong. The edges of the view go dark while the player moves with a control: the walk with the stick, a zoom, a snap turn, a teleport and the grab of the world. A faster move gives a darker edge. Gentle is clear to 35 degrees from the middle of the eye, and strong is clear only to 22 degrees and black from 45 degrees (`god-view.md`, section 5.8). |
-| Head in the land | Cover the view | Key `head_blinder`, a value. 1 Cover the view: when the head goes into the land, a house or a rock, a gold and red overlay fills the view, so the player does not see under the land or into the house. It starts at the edge of the view 5 cm over the land, and the view is opaque at the land and under it. The house and the rock have their own key, `head_blinder_objects`, which the launcher does not show. 0 Off: the eyes see under the land (`god-view.md`, section 5.9). |
 | Blink when you jump or turn | off | Key `blink`, index 0 to 2: off, short (0.1 seconds), long (0.2 seconds). Black after a jump, a turn and a story camera cut. |
 
 ### Controllers
 
 | Setting | Default | What it does |
 | --- | --- | --- |
-| Hints with the controller | Controller in the hand | Key `hint_style`, a value. 2 Controller in the hand: while a hand has a hint, a faint model of its controller shows in that hand, each button of the hint is lit in gold, and each lit button has its own small scroll card with a line of ink to the button. 1 Cards at the wrists: one card beside each wrist. A controller with no model has the cards at the wrists (`controller-hints.md`, 9.14). |
-| Button pictures on the cards | on | Key `hint_card_pictures`. 1: each line of a button on a hint card has a small picture of the controller with that button lit, beside the button word. 0: the button word only (`controller-hints.md`, 9.13). |
 | Glow at the Hand's point | off | Key `hand_glow`. A small glow at the tip of the index finger shows the point of the Hand that picks up and clicks. It shows while a press of the grip acts on something (`hand-model.md`). |
-| Trail for gestures | on | Key `gesture_trail`. While you hold the draw button and draw a gesture, a gold ribbon follows the tip of the index finger. It fades after 1.5 s and goes out when the button goes up (`miracles.md`, "The trail at the fingertip"). |
-| Glow on the rays | on | Key `ray_glow`. The ray of the menu, the tether of the far grab and the arc of the teleport get a soft glow and a light that runs along them from the hand (`hand-model.md`, "The glow ribbons"). |
 | Grab the world | Grip of the other hand | Key `grab_hand`, a value. 1 Hold the grip of your other hand and move that hand to pull the world. Hold both grips to turn the world and to zoom. 2 Either grip: the grip of the pointing hand also grabs the world when the Hand is empty and not over an object. 0 Off. |
+| Show 3D controller for hints | on | Key `hint_controller`. 1: while a hand has a hint, a faint model of its controller shows in that hand, each button of the hint is lit in gold, and each lit button has its own small scroll card with a line of ink to the button (`controller-hints.md`, 9.14). A controller with no model has the cards at the wrists, with a small picture of each button (9.13). 0: the cards at the wrists with the button words only, with no model and no pictures. The mod reads the row as the defaults of two keys: 1 gives `hint_style=2` and `hint_card_pictures=1`, 0 gives `hint_style=1` and `hint_card_pictures=0` (`hint_model_math.h`, `StyleOfSwitch`). A test that writes one of the two keys still sets it. |
 
 These settings have no row in the launcher and none in the VR Settings
 window. Their keys still act, with the default of the table of their area:
@@ -290,14 +298,20 @@ See `controllers.md` for the full controls.
 
 | Setting | Default | What it does |
 | --- | --- | --- |
-| Check for updates | on | Key `update_check`. 1: each time the launcher opens, it asks GitHub for the latest version, and the status line says when a newer version is out. 0: the launcher does not ask. See "The update check" |
+| Use 4 GB of memory | on | Key `large_address`. See "What it does besides editing" and `backend.md`, "The address space" |
+
+The launcher asks GitHub for updates each time it opens. It has no row for
+the ask (see "The update check").
 
 ### Testing
 
 | Setting | Default | What it does |
 | --- | --- | --- |
-| Test keys | off | Key `test_keys`. Turns on the keys for tests. Each key changes one rule of the mod while the game runs, for a comparison. `backend.md` ("Keys for v1.0") and the player readme list them. F12 saves a picture of each eye in the game folder. A player does not need this. |
-| Debug menu | off | Key `debug_menu`. The ring of the left hand gets the item Debug. It opens the debug window with the switches of the test keys, and the ray and the trigger of the right hand change a switch at once, so a comparison needs no keyboard (`controllers.md`, 10.8). It does not need "Test keys". A player does not need this. |
+| Debug menu | off | Key `debug_menu`. The ring of the left hand gets the item Debug. It opens the debug window with its switches. Each switch changes one rule of the mod at once, and the ray and the trigger of the right hand change a switch, so a comparison needs no keyboard (`controllers.md`, 10.8). It does not need `test_keys`. A player does not need this. |
+
+The launcher has no row for `test_keys`. A save keeps the key, so a tester
+can write `test_keys=1` in `bwvr.ini` by hand (see "Settings that are not
+offered and that stay in the ini").
 
 F11 makes the direction of your head straight ahead. This key is always on.
 
@@ -412,10 +426,8 @@ in `src/common/update_check.h`, with checks in the math test.
   gives the cause, for example "Updates: no answer from ... (WinHTTP error
   12007 at the step send: no network, or no name server)."
 
-The row "Check for updates" in the group "Launcher" is the key
-`update_check`: 1 (the default) asks at each start, 0 does not ask. The
-launcher reads the key when it opens, so a change counts from the next
-start.
+The launcher asks each time it opens. It has no row and reads no key for the
+ask. A save removes `update_check` from `bwvr.ini` (see "Retired keys").
 
 A picture for a test (`-shot`, `--picture`) asks only with one of the
 words of a test before `-shot`: `-update-tag <tag>` takes the place of

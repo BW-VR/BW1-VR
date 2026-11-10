@@ -18,11 +18,11 @@
 // has two arrows, and a step goes round the list.
 //
 // THE LEAN WINDOW (settings_lean=1) has only the rows that a player changes:
-// the turn, the walk, the zoom, the comfort, the grab of the world and the
-// trail. The other lines of the table stay for settings_lean=0, and their
-// keys still act. The Hand and the hints follow the options of the game
+// the turn, the walk, the zoom, the comfort and the grab of the world. The
+// other lines of the table stay for settings_lean=0, and their keys still
+// act. The Hand and the hints follow the options of the game
 // (hand_follow_game, hints_follow_game), and the other keys have one value
-// that each player uses.
+// that each player uses (the trail of the gestures is always on).
 
 #pragma once
 
@@ -135,7 +135,7 @@ const Setting kTable[kSettings] = {
     {kGestureTrail, kGroupHands, "gesture_trail", L"Gesture trail",
      L"Trail for gestures", L"Off=0|On=1", 1, kNow,
      L"While you draw a gesture, a gold ribbon follows the tip of your index "
-     L"finger. It shows what you draw.", true},
+     L"finger. It shows what you draw.", false},
     {kOpenStroke, kGroupHands, "creature_stroke_open", L"Open hand stroke",
      L"Stroke with the open hand", L"Off=0|On=1", 1, kNow,
      L"Put your open hand on your Creature for a moment, then move it slowly "

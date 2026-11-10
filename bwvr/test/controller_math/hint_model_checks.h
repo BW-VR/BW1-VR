@@ -34,6 +34,17 @@ inline void HintModelChecks() {
   using hint_checks::Turn;
   printf("\nThe controller in the hand\n");
 
+  // THE ONE SWITCH of the launcher (hint_controller): on gives the controller
+  // in the hand and the pictures of a hand with no model, off gives the
+  // cards at the wrists with the button words only. Each value that is not
+  // 0 is on, as a checkbox of the launcher writes 1.
+  const bool by_switch =
+      hm::StyleOfSwitch(1) == 2 && hm::PicturesOfSwitch(1) == 1 &&
+      hm::StyleOfSwitch(0) == 1 && hm::PicturesOfSwitch(0) == 0 &&
+      hm::StyleOfSwitch(7) == 2 && hm::PicturesOfSwitch(-1) == 1;
+  Check(by_switch, "hint_controller=1 gives hint_style 2 with pictures, and 0 "
+        "gives hint_style 1 with the button words only", by_switch, 1);
+
   // THE MODEL OF EACH PROFILE.
   const char* touch = "oculus/touch_controller";
   const bool quest =

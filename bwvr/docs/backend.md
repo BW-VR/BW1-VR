@@ -3799,7 +3799,7 @@ vk window    : N presents through the swapchain of the window (N of a part, for 
 vk video     : N windows with quad layers, N quads drawn, N with no texture, N copies of the pixels of the CPU (X KB each), N draws with no copy because the picture did not change, X ms on the frame thread for each window
 ```
 
-The launcher has the rows "View for videos" and "Video lower by"
+The launcher has the rows "Video Capture Mode" and "Lower capture window"
 (`launcher.md`). With `debug_menu=1` the debug window has the switches
 "Video view", "Video marks", "Video layers" and the row "Video height", which moves the area
 5 percent up or down (`controllers.md`, 10.8).
@@ -5946,9 +5946,10 @@ item.
 | Ctrl Menu key | `test_keys=1` | The layout of the buttons of the hand that does not point. The menu button of the left controller opens the game menu, Y opens the ring and the stick does not drive the ring, or Y opens the game menu and X and the stick open the ring. A long pulse and a short pulse on that hand (`button_layout`, `controllers.md`, 5.1). Shift must be up | View, Button layout |
 | Shift Menu key | `test_keys=1` | The walk with the stick of the hand that does not point steps from 1 to 2 to 0 and back: forward is the direction of the head, forward is the direction of that controller, or the stick does not move the player. A medium pulse, a long pulse and a short pulse (`move_stick`, `god-view.md`, section 5.7). Ctrl must be up | View, Stick walk |
 
-The launcher shows `test_keys` as "Test keys", in a group named "Testing". It is off
-by default. The row "Debug menu" (`debug_menu`) under it puts the same switches in
-the debug window, which the ring opens.
+The launcher has no row for `test_keys`. It is off by default, and a tester or a
+desktop run writes it in `bwvr.ini` (a save of the launcher keeps it). The row
+"Debug menu" (`debug_menu`) in the group "Testing" puts the same switches in the
+debug window, which the ring opens.
 
 Why these keys. The game binds F1 to F9: F6 to F9 go to the Challenge Room, the Save
 Game Room, the Options Room and the Library (`ControlMap::LoadDefaults`,

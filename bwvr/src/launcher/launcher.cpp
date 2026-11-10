@@ -97,8 +97,7 @@ const Setting kSettings[] = {
      "right eye has a picture at its outer edge. A test build: report what "
      "looks wrong."},
     // Before the resolution too: the size of the render reads this key.
-    {kValues, "fov_margin_pct", "Margin around the view",
-     "None=0|5%=5|10%=10|15%=15|20%=20|25%=25|30%=30", 0,
+    {kSlider, "fov_margin_pct", "Margin around the view", "0|30|5|%", 0,
      "If you see black at the edge of the view when you turn your head fast, "
      "set a margin. The game then draws that much more on each side, and the "
      "picture has that many more pixels each way, so it stays as sharp. A "
@@ -191,24 +190,16 @@ const Setting kSettings[] = {
     {kBool, "foveation_show", "Show the parts with fewer details", nullptr, 0,
      "A blue colour over the parts with fewer shades or fewer pixels, so "
      "you can find the settings that you like. Turn it off to play. With "
-     "the test keys, Shift O and Shift P change the two kinds while you "
-     "play."},
+     "the debug menu, the switches Foveation and Fovea images change the "
+     "two kinds while you play."},
 
     {kGroup, nullptr, "View", nullptr, 0, nullptr},
-    {kValues, "play_mode", "Play mode",
-     "God view=4|Stereoscopic window=1|Tabletop (test)=3", 4,
-     "God view: the land is at your waist, so your hands can reach it. It "
-     "works with motion controllers and with the mouse. Controllers: push "
-     "the stick of your Hand forward or back to zoom. Hold the grip of your "
-     "other hand and pull to move the land, across and up and down. Your "
-     "Hand is the right controller, or the left one when the game has its "
-     "left handed option. Mouse: drag the "
-     "land to move it. Turn the "
-     "wheel to zoom one step. Press a tilt key to move the ground up or "
-     "down. Stereoscopic window: the game is on a 3D screen in front of "
-     "you, and your head does not move the camera. Tabletop: the island is "
-     "a model on a table in front of you. Walk around it and lean over it. "
-     "This mode is a test and is not complete."},
+    // Not offered: the mod plays in the God view (4). The other modes stay
+    // for tests (1 the stereoscopic window, 3 the tabletop). The player
+    // readme has the controls of the God view.
+    // {kValues, "play_mode", "Play mode",
+    //  "God view=4|Stereoscopic window=1|Tabletop (test)=3", 4,
+    //  "God view: the land is at your waist, so your hands can reach it."},
     // Not offered: 7.5 units for each meter is the life size scale, and a
     // different value makes the Hand and the world the wrong size.
     // {kInt, "head_units_per_meter_x10", "World scale, tenths per meter", nullptr,
@@ -216,11 +207,10 @@ const Setting kSettings[] = {
     //  "How many game units a real meter is worth, in tenths. 75 means 7.5 "
     //  "units, which keeps what your eyes see and what your neck feels the same "
     //  "size."},
-    {kBool, "intro_vr", "Intro in stereo", nullptr, 1,
-     "Shows the Lionhead logo at the start of the game in 3D around you. Your "
-     "view moves through the orbs on the path of the game, and it does not "
-     "turn: you look where your head looks. The menu button skips it. This "
-     "setting is a test. Off shows the intro flat."},
+    // Not offered: each player has the intro in stereo. intro_vr=0 (the
+    // flat intro) stays for the desktop tests.
+    // {kBool, "intro_vr", "Intro in stereo", nullptr, 1,
+    //  "Shows the Lionhead logo at the start of the game in 3D around you."},
     {kValues, "cutscene_immersive", "Cut scenes",
      "In a window=0|Around you=1", 0,
      "In a window: a cut scene of the game plays on a screen in front of "
@@ -228,19 +218,20 @@ const Setting kSettings[] = {
      "plays all around you, and the camera of the game moves you with all "
      "its motion. Choose it only if a camera that moves is no problem for "
      "you. A video of the game always plays on the screen."},
-    {kBool, "video_view", "View for videos", nullptr, 0,
-     "The game window on the PC shows a 16:9 part of the view of your left "
-     "eye, so that OBS or a different capture tool can record it while you "
-     "play in the headset. The video turns smoothly when your head shakes. "
-     "Faint corner marks in the headset show the part that the video "
-     "records, and the video does not show them. The cards, the subtitles, "
-     "the ring and the menu panels are in the video, where your left eye "
-     "sees them. It needs the Vulkan renderer. It costs a little frame "
-     "time."},
-    {kSlider, "video_view_down_pct", "Video lower by", "0|40|5|%", 20,
-     "How far the middle of the video is below the middle of your view, as "
-     "a percentage of the height of the view. In this game you look down "
-     "most of the time, so the default is 20%. 0% is the middle."},
+    {kBool, "video_view", "Video Capture Mode", nullptr, 0,
+     "The game window on the PC is the capture window: it shows a 16:9 part "
+     "of the view of your left eye, so that OBS or a different capture tool "
+     "can record it while you play in the headset. The capture window turns "
+     "smoothly when your head shakes. Faint corner marks in the headset show "
+     "the part that the capture window records, and the video does not show "
+     "them. The cards, the subtitles, the ring and the menu panels are in "
+     "the video, where your left eye sees them. It needs the Vulkan "
+     "renderer. It costs a little frame time."},
+    {kSlider, "video_view_down_pct", "Lower capture window", "0|40|5|%", 20,
+     "Only with Video Capture Mode. How far the middle of the capture window "
+     "is below the middle of your view, as a percentage of the height of "
+     "the view. In this game you look down most of the time, so the default "
+     "is 20%. 0% is the middle."},
 
     // Not offered: the sizes and the depth of the interface in the eye
     // pictures have settled defaults. With controllers the hints and the
@@ -337,12 +328,12 @@ const Setting kSettings[] = {
      "world. The middle of the view stays clear. A faster move gives a "
      "darker edge. Some people feel less ill with it. Gentle: the edges get "
      "darker. Strong: only the middle of the view stays clear."},
-    {kValues, "head_blinder", "Head in the land", "Cover the view=1|Off=0", 1,
-     "When your head goes into a hill, a house or a rock, a gold and red "
-     "cover fills your view, so you do not see under the land or into the "
-     "house. It starts at the edge of the view "
-     "when your head is 5 cm over the land. Lift your head and the view "
-     "comes back. Off: you see under the land."},
+    // Not offered: each player has the cover of the view when the head goes
+    // into the land.
+    // {kValues, "head_blinder", "Head in the land", "Cover the view=1|Off=0",
+    //  1,
+    //  "When your head goes into a hill, a house or a rock, a gold and red "
+    //  "cover fills your view."},
     {kChoice, "blink", "Blink when you jump or turn", "Off|Short|Long", 0,
      "Shows black for a moment when you jump or turn. Short is 0.1 seconds "
      "and long is 0.2 seconds. Some people find a jump easier with a blink."},
@@ -365,15 +356,14 @@ const Setting kSettings[] = {
      "A small glow at the tip of the index finger shows the point of the "
      "Hand that picks up and clicks. It shows while a press of the grip "
      "acts on something."},
-    {kBool, "gesture_trail", "Trail for gestures", nullptr, 1,
-     "While you hold the draw button (B, or Y with a left Hand) and draw a "
-     "gesture, a gold ribbon follows the tip of your index finger. It shows "
-     "what you draw. It fades after 1.5 seconds and goes out when you let "
-     "the button go. Off: the game shows no trail."},
-    {kBool, "ray_glow", "Glow on the rays", nullptr, 1,
-     "The ray of the menu, the line to a far object and the arc of the "
-     "teleport get a soft glow, and a light that runs along them from your "
-     "hand. Off: they are plain lines."},
+    // Not offered: each player has the trail of the gestures and the glow on
+    // the rays.
+    // {kBool, "gesture_trail", "Trail for gestures", nullptr, 1,
+    //  "While you draw a gesture, a gold ribbon follows the tip of your "
+    //  "index finger."},
+    // {kBool, "ray_glow", "Glow on the rays", nullptr, 1,
+    //  "The ray of the menu, the line to a far object and the arc of the "
+    //  "teleport get a soft glow."},
     {kValues, "grab_hand", "Grab the world",
      "Grip of the other hand=1|Either grip=2|Off=0", 1,
      "Hold the grip of your other hand. Move that hand to pull the world. "
@@ -388,14 +378,13 @@ const Setting kSettings[] = {
     //  "back after 10 minutes of play without that action. In a lesson of the "
     //  "tutorial, each line shows. Always: each line always shows. To show all "
     //  "lines again, delete bwvr-hint-counts.ini in the game folder."},
-    {kValues, "hint_style", "Hints with the controller",
-     "Controller in the hand=2|Cards at the wrists=1", 2,
-     "Controller in the hand: while a hand has a hint, a faint model of your "
-     "controller shows in that hand. Each button of the hint is lit in gold, "
-     "and each lit button has its own small card with a line to the button. "
-     "Cards at the wrists: one card beside each wrist, with a small picture "
-     "of the button. A controller with no model has the cards at the "
-     "wrists."},
+    {kBool, "hint_controller", "Show 3D controller for hints", nullptr, 1,
+     "While a hand has a hint, a faint model of your controller shows in "
+     "that hand. Each button of the hint is lit in gold, and each lit button "
+     "has its own small card with a line to the button. A controller with "
+     "no model has a card beside each wrist, with a small picture of each "
+     "button. Off: a card beside each wrist names the buttons, for example "
+     "Trigger, Grip, A or X, with no model and no pictures."},
     // Not offered: each player has the scroll look.
     // {kValues, "hint_card_style", "Card look", "Scroll=1|Plain=0", 1,
     //  "The look of the cards beside your wrists, of the spell book, of the "
@@ -404,10 +393,17 @@ const Setting kSettings[] = {
     //  "the trigger, amber for the grip). The spell book and the keyboard are "
     //  "pages of the same parchment. Each item of the ring is a wax seal. "
     //  "Plain: dark cards with white letters."},
-    {kBool, "hint_card_pictures", "Button pictures on the cards", nullptr, 1,
-     "Each line of a button on the cards beside your wrists has a small "
-     "picture of your controller, with that button lit. Off: the cards show "
-     "the button words only."},
+    // Not offered: the row "Show 3D controller for hints" (hint_controller)
+    // gives the values of the two keys of the hints. The keys stay for
+    // tests.
+    // {kValues, "hint_style", "Hints with the controller",
+    //  "Controller in the hand=2|Cards at the wrists=1", 2,
+    //  "Controller in the hand: a faint model of your controller shows in "
+    //  "the hand that has a hint."},
+    // {kBool, "hint_card_pictures", "Button pictures on the cards", nullptr,
+    //  1,
+    //  "Each line of a button on the cards beside your wrists has a small "
+    //  "picture of your controller, with that button lit."},
     // Not offered: each player has the stroke with the open hand.
     // {kBool, "creature_stroke_open", "Stroke with the open hand", nullptr, 1,
     //  "Put your open hand on your Creature and keep it there for a moment. "
@@ -423,24 +419,24 @@ const Setting kSettings[] = {
      "flag in the program of the game that gives the game 4 GB. Off: the "
      "launcher puts the original program back. The first change keeps a "
      "copy of the original program in the game folder."},
-    {kBool, "update_check", "Check for updates", nullptr, 1,
-     "Each time the launcher opens, it asks GitHub for the latest version "
-     "of the mod. When a newer version is out, the line at the bottom of "
-     "the window says so. Click that line to open the page of the new "
-     "version in your browser. Off: the launcher does not ask."},
+    // Not offered: the launcher always asks GitHub for the latest version
+    // (StartUpdateCheck).
+    // {kBool, "update_check", "Check for updates", nullptr, 1,
+    //  "Each time the launcher opens, it asks GitHub for the latest version "
+    //  "of the mod."},
 
     {kGroup, nullptr, "Testing", nullptr, 0, nullptr},
-    {kBool, "test_keys", "Test keys", nullptr, 0,
-     "Turns on the keys for tests. Each key changes one rule of the mod "
-     "while you play, so that you can compare, and the readme lists them. "
-     "F12 saves a picture of each eye in the game folder. A player does "
-     "not need this."},
+    // Not offered: the debug menu has the switches. test_keys=1 stays for
+    // the desktop tests and for a tester who writes it in bwvr.ini, so a
+    // save keeps it.
+    // {kBool, "test_keys", "Test keys", nullptr, 0,
+    //  "Turns on the keys for tests. A player does not need this."},
     {kBool, "debug_menu", "Debug menu", nullptr, 0,
      "Adds the item Debug to the ring of your left hand. It opens a window "
-     "with the switches of the test keys. The ray and the trigger of your "
-     "right hand change a switch at once, so you can compare in the headset "
-     "with no keyboard. It does not need the test keys. A player does not "
-     "need this."},
+     "of switches. Each switch changes one rule of the mod while you play, "
+     "so that you can compare. The ray and the trigger of your right hand "
+     "change a switch at once, with no keyboard. A player does not need "
+     "this."},
 };
 
 const int kSettingCount = sizeof(kSettings) / sizeof(kSettings[0]);
@@ -1040,17 +1036,12 @@ DWORD WINAPI AskForUpdate(void*) {
   return 0;
 }
 
-// Starts the ask when bwvr.ini has update_check=1. `test_tag` takes the
-// place of the answer, and `test_url` the place of the address. A picture
-// for a test (`picture`) asks only with one of them, so that the picture
-// does not change with the releases on GitHub.
+// Starts the ask each time the launcher opens. `test_tag` takes the place of
+// the answer, and `test_url` the place of the address. A picture for a test
+// (`picture`) asks only with one of them, so that the picture does not
+// change with the releases on GitHub.
 void StartUpdateCheck(bool picture, const char* test_tag,
                       const char* test_url) {
-  if (GetPrivateProfileIntA("bwvr", "update_check", 1, g_ini_path) == 0) {
-    strcpy_s(g_update.note, sizeof(g_update.note),
-             "Updates: off (update_check=0 in bwvr.ini).");
-    return;
-  }
   if (picture && test_tag == nullptr && test_url == nullptr) {
     strcpy_s(g_update.note, sizeof(g_update.note),
              "Updates: no ask for a picture of a test.");
@@ -1471,9 +1462,6 @@ void LoadAll() {
         break;
       case kValues: {
         int value = ReadIni(s.key, s.fallback);
-        // The God view replaced the immersive mode, play mode 0. An older
-        // bwvr.ini can still hold 0, and it shows the God view.
-        if (strcmp(s.key, "play_mode") == 0 && value == 0) value = 4;
         SendMessageA(g_control[i], CB_SETCURSEL, ChoiceIndex(s.choices, value),
                      0);
         break;
@@ -1616,11 +1604,15 @@ const char* const kRetiredKeys[] = {
     // Settings that the launcher offered before. Each has one right answer
     // in a headset, and the mod's default is that answer. The other
     // settings that are not offered now (the sizes and the depth of the
-    // interface, the hint, the zoom step) stay in the ini as they are, so a
-    // value that a person wrote by hand is kept.
+    // interface, the hint, the zoom step, test_keys) stay in the ini as they
+    // are, so a value that a person wrote by hand is kept. hint_style and
+    // hint_card_pictures get their values from the row hint_controller.
     "controller_hand", "controller_left_handed", "script_camera",
     "instant_jumps",
     "camera_glide",    "head_units_per_meter_x10",
+    "play_mode",       "intro_vr",         "head_blinder",
+    "gesture_trail",   "ray_glow",         "hint_style",
+    "hint_card_pictures", "update_check",
 };
 
 // dxwrapper sets its own anisotropic filtering on the Direct3D 9 device, from

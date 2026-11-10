@@ -569,7 +569,7 @@ the intro" is cleared when mode 2 runs.
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `intro_vr` | 0 | The intro in stereo |
+| `intro_vr` | 1 | The intro in stereo. 0: the flat intro, for the desktop tests. Not in the launcher: each player has the intro in stereo, and a save of the launcher removes the key |
 | `intro_motion` | 1 | 0: the camera stays at the rest pose. 1: the camera goes along the path of the game and does not turn. 2: the orbs are a model in front of the player, and the room stays still. 3: the camera of the game, with its turns |
 | `intro_speed_pct` | 100 | The speed of the effect clock in percent, 10 to 100 |
 | `intro_distance_cm` | 300 | The distance from the head to the plane of the logo at the rest pose, for `intro_motion` 0, 1 and 3 |
@@ -724,7 +724,7 @@ hand, so a flicker of one frame does not show.
 
 ### What only a headset can show
 
-No headset session has seen this state, so `intro_vr` stays 0.
+`intro_vr` is 1 for each player, and the launcher has no row to turn it off.
 
 - Two orbs that are neighbors in the picture can be far apart in depth, and
   the eye can then see one of them double. That is the geometry of the scene,

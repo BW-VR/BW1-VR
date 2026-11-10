@@ -29,6 +29,21 @@
 
 namespace hint_model {
 
+// --- the switch of the launcher ----------------------------------------------------
+
+// THE ONE SWITCH (hint_controller, the launcher row "Show 3D controller for
+// hints"). 1: the controller in the hand (hint_style=2), and a hand with no
+// model has the cards at the wrists with the pictures of the buttons, as
+// hint_style=2 always had. 0: the cards at the wrists (hint_style=1) with the
+// button words only (hint_card_pictures=0). The switch gives the defaults of
+// the two keys, so a key that a test writes still acts.
+inline int StyleOfSwitch(int hint_controller) {
+  return hint_controller != 0 ? 2 : 1;
+}
+inline int PicturesOfSwitch(int hint_controller) {
+  return hint_controller != 0 ? 1 : 0;
+}
+
 // --- the model of a controller ---------------------------------------------------
 
 // True when `text` has `part`, with no regard to the case of the letters.

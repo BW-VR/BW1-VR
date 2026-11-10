@@ -1342,10 +1342,9 @@ so the plain game has no flat band.
 | `hint_card_style` | 1 | 1: the book is a page of parchment with dark ink, as the hint cards. 0: the dark panel with white letters. The key of the hint cards (`controller-hints.md`, 9.5) |
 | `debug_all_miracles` | 0 | 1: each town of the player knows every miracle of the game, its Worship Site shows up to 6 of them, and each site has no limit of prayer power. For tests |
 | `gesture_point` | 1 | 1: the tip of the index finger draws a gesture. 0: the grip point draws it. Not in the launcher |
-| `gesture_trail` | 1 | 1: a ribbon follows the point of the draw (see "The trail at the fingertip"). 0: no trail. The launcher row "Trail for gestures" |
+| `gesture_trail` | 1 | 1: a ribbon follows the point of the draw (see "The trail at the fingertip"). 0: no trail. Not in the launcher: each player has the trail, and a save of the launcher removes the key (`launcher.md`, "Retired keys") |
 
-The keys are read from `bwvr.ini`. Only `hint_card_style` ("Card look")
-and `gesture_trail` are in the launcher.
+The keys are read from `bwvr.ini`. None of them is in the launcher.
 
 **The A/B key**, with `test_keys=1`: Ctrl with the 8 key of the number pad
 changes `miracle_hand`. The pointing controller gives a long pulse for 1 and

@@ -758,7 +758,7 @@ bool D3D9KeyHere(const char* keys) {
 //
 //   F11         the way the head faces now becomes straight ahead
 //
-// With test_keys=1 (the launcher's "Test keys" box), two more:
+// With test_keys=1 in bwvr.ini, two more:
 //
 //   F12         save both eye pictures in the game folder (eye_capture.cpp)
 //   Shift F12   the subtitles step through 25, 30, 35, 40 and 45 degrees

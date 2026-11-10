@@ -225,13 +225,14 @@ inline void SettingsPanelChecks() {
                       !InWindow(kRecenterHold, true) &&
                       !InWindow(kLeftHand, true) &&
                       !InWindow(kOpenStroke, true) &&
+                      !InWindow(kGestureTrail, true) &&
                       !InWindow(kHintLearn, true) &&
                       !InWindow(kCardStyle, true) &&
                       !InWindow(kSubtitleCard, true);
-    Check(lean_rows == 9 && gone && hidden_ok,
-          "the lean window has 9 rows, with no Teleport, Recenter hold, Hand, "
-          "Open hand stroke, Hints, Card look or Subtitle card, and the old "
-          "window has each row", lean_rows, 9);
+    Check(lean_rows == 8 && gone && hidden_ok,
+          "the lean window has 8 rows, with no Teleport, Recenter hold, Hand, "
+          "Open hand stroke, Gesture trail, Hints, Card look or Subtitle "
+          "card, and the old window has each row", lean_rows, 8);
     Check(TabCount(true) == 2 && TabCount(false) == 3 &&
               GroupOfTab(0, true) == kGroupMoving &&
               GroupOfTab(1, true) == kGroupHands &&

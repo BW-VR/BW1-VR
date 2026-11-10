@@ -82,8 +82,7 @@ of the mod. When a newer version is out and the PC is ready, the line
 at the bottom is blue and says so. Click the line to open the page of
 the new version in your browser. With no network, the launcher says
 nothing about updates. The ask sends only the version of the
-launcher. To stop the ask, clear "Check for updates" in the group
-Launcher, or set update_check=0 in bwvr.ini.
+launcher.
 
 Before each start, the launcher sets a flag in runblack.exe that
 gives the game 4 GB of memory space, not 2 GB. Without it, a large
@@ -113,11 +112,10 @@ The game shows its logos when it starts. To skip them, press a
 trigger or A, B, X or Y on a controller. Esc and a mouse click skip
 them too.
 
-The setting "Intro in stereo" is off at first. With it, the Lionhead
-logo is in 3D around you. Your view goes between the orbs on the path
-of the game, and then back to the place from which the logo shows.
-The view does not turn: you look where your head looks. The menu
-button skips the logo. This setting is a test. If the motion is not
+The Lionhead logo is in 3D around you. Your view goes between the
+orbs on the path of the game, and then back to the place from which
+the logo shows. The view does not turn: you look where your head
+looks. The menu button skips the logo. If the motion is not
 comfortable, set intro_motion=2 in bwvr.ini: the orbs are then a model
 in front of you, and the room stays still. intro_motion=0 gives a
 still view of the logo.
@@ -132,27 +130,30 @@ These are some of the groups of the launcher.
                   the view, how sharp the textures are, and how far
                   out models keep their full detail.
 
-  View            The play mode, the intro in stereo, and the cut
-                  scenes. The default play mode is the God view (see
-                  below). A cut scene plays on a screen in front of
-                  you. "Around you" plays it all around you, with the
-                  motion of the camera of the game. A video of the
-                  game always plays on the screen.
+  View            The cut scenes, and the Video Capture Mode. A cut
+                  scene plays on a screen in front of you. "Around
+                  you" plays it all around you, with the motion of the
+                  camera of the game. A video of the game always plays
+                  on the screen. With "Video Capture Mode", the game
+                  window on the PC is a capture window: a 16:9 part of
+                  the view of your left eye, for OBS or a different
+                  capture tool. "Lower capture window" moves that part
+                  down from the middle of your view.
 
   Moving around   Turns in steps, the zoom with the stick, the walk
                   with the left stick, and a blink when you jump or
                   turn.
 
-  Controllers     The glow at the Hand, the grab of the world, and the
-                  lines and the look of the hint cards.
+  Controllers     The glow at the Hand, the grab of the world, and
+                  "Show 3D controller for hints" (see HINTS AND
+                  SUBTITLES).
 
   Launcher        "Use 4 GB of memory": the launcher gives the game
                   4 GB of memory space before each start (see HOW TO
-                  START). "Check for updates": the launcher asks
-                  GitHub for the latest version each time it opens.
+                  START).
 
-  Testing         One box, which turns on keys for tests. The box
-                  is off, and a player does not need it.
+  Testing         "Debug menu" puts the item Debug on the ring (see
+                  THE RING). It is off, and a player does not need it.
 
 Every setting has a tooltip. Hold the pointer over a setting, and
 the tooltip tells you what the setting does.
@@ -169,9 +170,9 @@ when you save.
 THE GOD VIEW
 ------------
 
-The God view is the default play mode. The land is at your waist, so
-your hands can reach it. It works with motion controllers and with
-the mouse.
+The mod plays in the God view. The land is at your waist, so your
+hands can reach it. It works with motion controllers and with the
+mouse.
 
 When you move with the left stick, the view goes up and down
 smoothly with the hills, so the land stays below your hands. When you
@@ -324,8 +325,8 @@ THE KEYS
 The game keys and the mouse work as they always do. In the God
 view, the tilt keys move the ground (see THE GOD VIEW).
 
-With "Test keys" on, these keys work. Press them with the mouse
-still:
+With test_keys=1 in bwvr.ini, these keys work. They are for testers.
+Press them with the mouse still:
 
   F12                 Save a picture of each eye in the game folder.
   Shift F12           Move the subtitles down one step. After the
@@ -523,7 +524,7 @@ switch shows its value now, for example "One walk" with "on" under
 it. Choose a switch, and it changes at once, as its test key does.
 For 30 seconds after a choice, the ring opens on the same page again.
 Back goes to the page before. A switch that cannot change now is not
-on the page. The debug page does not need "Test keys".
+on the page. The debug page does not need test_keys=1.
 
 
 THE TEMPLE
@@ -592,13 +593,20 @@ For example, in the God view the trigger does not move the land, so the
 card does not say "Trigger Move". Set hint_card=0 in bwvr.ini to draw
 the hints in the view. Set controller_hints=0 to keep the mouse hints.
 
+"Show 3D controller for hints" in the launcher is on at first. While
+a hand has a hint, a faint model of your controller then shows in
+that hand. Each button of the hint is lit in gold, and each lit
+button has its own small card with a line to the button. A controller
+with no model has the cards beside the wrists, with a small picture
+of each button. Clear the box for the cards beside the wrists with
+the button words only, for example Trigger, Grip, A or X.
+
 A card is a small parchment scroll with dark letters. The button word
 is on a wax seal: green for the trigger, amber for the grip and red
 for the other buttons. The spell book and the keyboard for a name are
 pages of the same parchment, and each item of the ring menu is a wax
-seal.
-In the launcher, "Card look" is "Scroll" (the default) or "Plain" (key
-hint_card_style, 0 gives dark cards with white letters).
+seal. Set hint_card_style=0 in bwvr.ini for dark cards with white
+letters.
 
 Some lines of the game wait for a click. The text stays, and the card
 says "Trigger Continue" as its first line. Press the trigger. Until
@@ -634,10 +642,11 @@ A prompt that you know goes away. After you did its action 3 times
 After 10 minutes of play without that action, the line comes back,
 and your next use takes it away again. In a lesson of the tutorial,
 each line shows. The hints of the game stay: its own help options
-control them. In the launcher, "Hints" is "Until learned" (the
-default) or "Always" (key hint_learn, 0 shows each line always). The
-counts are in the file bwvr-hint-counts.ini in the game folder. To
-show each line again, delete that file.
+control them. The ToolTips option of the game (Help Options) chooses
+this rule: with "All ToolTips" each line always shows, and with each
+other value a line goes away. The counts are in the file
+bwvr-hint-counts.ini in the game folder. To show each line again,
+delete that file.
 
 With a tree in your Hand, the card says "Grip Plant" only when opening
 the grip plants the tree. If your Hand is more than 15 cm over the land,
@@ -789,8 +798,8 @@ is red when the object is outside your influence, and then the Hand
 cannot take it. A hill in front of an object hides it, so you cannot
 pick it. The sea does not hide an object. An object that rolls, flies
 or floats on the sea is a target too: the line follows it, and the pull
-brings it from the place where it is then. This works in the God view
-and in the Tabletop play mode, and not in a multiplayer game. Set
+brings it from the place where it is then. This works in the God view,
+and not in a multiplayer game. Set
 far_grab=0 in bwvr.ini to turn it off.
 
 When two objects are near the line of your hand, the choice follows
@@ -891,8 +900,7 @@ game then drops the object at once, and does not wait for its next
 game turn. Set release_at_once=0 in bwvr.ini to make the game wait
 for its next game turn.
 
-In the God view and in the Tabletop play mode, an object that you
-throw flies as a real object flies in your room: as fast as your hand
+In the God view, an object that you throw flies as a real object flies in your room: as fast as your hand
 moved, on the same arc, for the same time. Swing your hand and open
 the grip in the swing. A hard throw can kill a villager, as in the
 game. Open the grip with a still hand to put an object down. If your
@@ -1121,22 +1129,11 @@ pulse of a new target or a lock. Set world_haptics=0 in bwvr.ini to
 turn them off.
 
 
-TABLETOP
---------
-
-In the play mode "Tabletop (test)", the island is a model on a
-table. The Hand is where your hand is on the model, with no long
-reach. The left grip moves the land on the table: pull to slide it.
-Hold both grips, then turn your hands to turn the land, or spread
-them to zoom in. The table stays where it is, and the land stops
-when you let go.
-
-
 TEST KEYS OF THE NUMBER PAD
 ---------------------------
 
-With "Test keys" on in the launcher, some keys of the number pad
-switch between two ways of one behavior while you play. The
+With test_keys=1 in bwvr.ini, some keys of the number pad switch
+between two ways of one behavior while you play. The
 controller gives a long pulse for the way that is the default, and a
 short pulse for the other way. These keys are for testers. A player
 does not need them.

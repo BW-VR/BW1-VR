@@ -52,11 +52,16 @@
 //
 // THE KEYS of bwvr.ini:
 //
-//   hint_style=2          2 the controller in the hand with a card for each
-//                         lit button. 1 the cards at the wrists, with the
-//                         drawn pictures of the buttons. A hand with no
-//                         model has the cards of 1. Ctrl Shift H switches it,
-//                         with test_keys=1
+//   hint_controller=1     the row "Show 3D controller for hints" of the
+//                         launcher. 1 gives hint_style=2 and
+//                         hint_card_pictures=1. 0 gives hint_style=1 and
+//                         hint_card_pictures=0 (hint_model_math.h,
+//                         StyleOfSwitch)
+//   hint_style            2 the controller in the hand with a card for each
+//                         lit button. 1 the cards at the wrists. A hand with
+//                         no model has the cards of 1. The default comes from
+//                         hint_controller. Ctrl Shift H switches it, with
+//                         test_keys=1
 //   hint_body_fine=1      1 the simpler body of a heavy model has cells of
 //                         3.4 mm at most, and a cell for each side of the
 //                         normal, so the ink outline of a thin part does not
@@ -149,8 +154,12 @@ void ReadSettings() {
     strcpy_s(ini, folder);
     strcat_s(ini, "bwvr.ini");
   }
-  g_style = static_cast<int>(GetPrivateProfileIntA("bwvr", "hint_style", 2,
-                                                   ini));
+  // The switch of the launcher gives the default (hint_model_math.h,
+  // StyleOfSwitch). hint_style itself still acts, for a test.
+  const int controller =
+      static_cast<int>(GetPrivateProfileIntA("bwvr", "hint_controller", 1, ini));
+  g_style = static_cast<int>(GetPrivateProfileIntA(
+      "bwvr", "hint_style", hm::StyleOfSwitch(controller), ini));
   if (g_style != 1) g_style = 2;
   g_test_keys = GetPrivateProfileIntA("bwvr", "test_keys", 0, ini) != 0;
   g_body_fine = GetPrivateProfileIntA("bwvr", "hint_body_fine", 1, ini) != 0;
@@ -174,8 +183,9 @@ void ReadSettings() {
     strcpy_s(g_dir, folder);
     strcat_s(g_dir, "bwvr-controllers\\");
   }
-  ModLog("hint model   : hint_style=%d, %s. The models are in %s%s%s",
-         g_style,
+  ModLog("hint model   : hint_controller=%d, hint_style=%d, %s. The models "
+         "are in %s%s%s",
+         controller != 0 ? 1 : 0, g_style,
          g_style == 2 ? "while a hand has a hint, the model of its controller "
                         "shows in the hand with the buttons of the hint lit, "
                         "and each lit button has its own card"

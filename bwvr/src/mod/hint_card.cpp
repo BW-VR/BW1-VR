@@ -108,7 +108,9 @@
 //                        plain dark card with white Segoe UI letters
 //   hint_card_pictures=1  1 a line of a button has a small picture of the
 //                        controller with that button lit, before the button
-//                        word (hint_picture_math.h). 0 the button word only
+//                        word (hint_picture_math.h). 0 the button word only.
+//                        The default comes from hint_controller (1 gives 1,
+//                        0 gives 0, hint_model_math.h)
 //   hint_card_save_test=0  1 saves each new picture of a card as
 //                        bwvr-hintcard-draw-NNN-NNNNN.bmp (40 at most)
 //   hint_card_fonts_test_dir  a desktop test loads the fonts of the scroll
@@ -352,7 +354,13 @@ void ReadSettings() {
                         "while a press there acts on no object"
                       : "a grip hint of the game over the land shows");
   g_style = IniKey("hint_card_style", 1) != 0 ? 1 : 0;
-  g_pictures = IniKey("hint_card_pictures", 1) != 0 ? 1 : 0;
+  // The switch of the launcher gives the default (hint_model_math.h,
+  // PicturesOfSwitch). hint_card_pictures itself still acts, for a test.
+  g_pictures = IniKey("hint_card_pictures",
+                      hint_model::PicturesOfSwitch(
+                          IniKey("hint_controller", 1))) != 0
+                   ? 1
+                   : 0;
   ModLog("hint card    : hint_card_pictures=%d, %s", g_pictures,
          g_pictures != 0 ? "a line of a button has a small picture of the "
                            "controller with that button lit, before the "

@@ -3,8 +3,9 @@
 The tabletop mode shows the island as a model on a table in the room, about
 1.5 m across. The player walks around it and leans over it with full head
 tracking. With the Virtual Desktop passthrough mask, everything past the table
-is one key color, so the island stands on the real desk. The launcher offers it
-as "Tabletop (test)". The mode is a test and it is not complete.
+is one key color, so the island stands on the real desk. The mode is a test and
+it is not complete. The launcher has no row for it: a test writes `play_mode=3`
+in `bwvr.ini`, and a save of the launcher removes the key.
 
 The God view (play mode 4, `god-view.md`) uses the same camera and the same
 code, with the land at the player's waist and no edge. This file has the math
@@ -957,7 +958,7 @@ haptics. The throw with the slap of 12 cm (237 units) tests a longer swing.
 
 ## Keys
 
-All in `[bwvr]`. Only the play mode is in the launcher.
+All in `[bwvr]`. None is in the launcher.
 
 | Key | Default | Meaning |
 | --- | --- | --- |
@@ -998,7 +999,7 @@ with the mouse at rest is safe.
 | `src/mod/world_grab.cpp` | The grips move the table |
 | `src/mod/audio_listener.cpp` | The ears on the table |
 | `src/mod/spirit_anchor.cpp` | The spirits beside the table |
-| `src/mod/mod_main.cpp`, `src/launcher/launcher.cpp` | The keys, and the play mode row |
+| `src/mod/mod_main.cpp` | The keys |
 | `test/controller_math/main.cpp` | The checks of the table map, the hand, the throw, the grab and the ears |
 
 ## Known limits and open questions

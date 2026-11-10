@@ -2557,7 +2557,6 @@ program.
 | Moving | Comfort vignette | `comfort_vignette` | Off, Gentle, Strong |
 | Moving | Blink | `blink` | Off, Short, Long |
 | Hands | Grab the world | `grab_hand` | Off, Other grip, Either grip. At the next start |
-| Hands | Gesture trail | `gesture_trail` | Off, On |
 | Controls | The page of 24.6 | `button_map_hand`, `button_map_other` | A job for each button |
 
 A row of Off and On is a toggle, with Off first, so the knob is at the left
@@ -2576,6 +2575,7 @@ show them:
 | `recenter_hold` | The page Controls gives the recenter to a button |
 | `left_hand` | The left handed option of the game chooses the Hand (`hand_follow_game`, `controllers.md`, 5.6) |
 | `creature_stroke_open` | Each player has the stroke with the open hand |
+| `gesture_trail` | Each player has the trail of the gestures |
 | `hint_learn` | The ToolTips option of the game chooses it (`hints_follow_game`, `controller-hints.md`, 9.10) |
 | `hint_card_style` | Each player has the scroll look |
 | `subtitle_card` | Each player has the subtitle card |
@@ -2604,8 +2604,7 @@ which writes its own log line:
 | `snap_turn`, `smooth_turn_speed`, `blink` | `ComfortCameraSetSnap`, `ComfortCameraSetTurnSpeed`, `ComfortCameraSetBlink` |
 | `move_stick`, `move_stick_speed_cm`, `god_zoom_smooth` | `TabletopGodSetMoveStick`, `TabletopGodSetMoveSpeed`, `TabletopGodSetZoomSmooth`. A walk or a hold of the zoom that runs stops |
 | `comfort_vignette` | `VignetteSet` |
-| `gesture_trail` | `OverlaySetTrail` |
-| With `settings_lean=0`: `teleport`, `recenter_hold`, `left_hand`, `creature_stroke_open`, `hint_learn`, `hint_card_style` | `TeleportSetOn`, `ControllersSetRecenterHold`, `ControllersSetLeftHand`, `ControllersSetOpenStroke`, `HintCardSetLearn`, `HintCardSetStyle` |
+| With `settings_lean=0`: `teleport`, `recenter_hold`, `left_hand`, `gesture_trail`, `creature_stroke_open`, `hint_learn`, `hint_card_style` | `TeleportSetOn`, `ControllersSetRecenterHold`, `ControllersSetLeftHand`, `OverlaySetTrail`, `ControllersSetOpenStroke`, `HintCardSetLearn`, `HintCardSetStyle` |
 
 These functions do not need `test_keys=1`, and they give no pulse: the press
 of the row gives the pulse of the kit. The window never writes the registry

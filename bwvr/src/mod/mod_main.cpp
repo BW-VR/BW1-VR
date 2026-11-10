@@ -935,7 +935,7 @@ void ReadSettings() {
     g_tabletop = chosen.tabletop;
     g_table.god = chosen.god;
   }
-  // THE TABLE. Not in the launcher, except the play mode. All sizes are in
+  // THE TABLE. Not in the launcher. All sizes are in
   // the room. A scale of 0 fits the land to the table, and a center of -1 is
   // the middle of the land. table_key_color is a hex color such as FF00FF,
   // and empty or 0 leaves the sky as it is.
@@ -964,7 +964,8 @@ void ReadSettings() {
     const unsigned long rgb = strtoul(key, nullptr, 16) & 0xFFFFFFul;
     t.key = key[0] != 0 && rgb != 0;
     t.key_color = 0xFF000000u | static_cast<uint32_t>(rgb);
-    // THE GOD VIEW (play_mode=4). Not in the launcher, except the play mode.
+    // THE GOD VIEW (play_mode=4, the default). The launcher has no row for
+    // the play mode.
     // The ground is god_ground_down_cm below the head at the last recenter.
     // The view starts at god_units_per_meter, and a zoom step changes the
     // scale by god_zoom_step_pct, from god_near_units_per_meter_x10 up to
@@ -1342,8 +1343,9 @@ void ReadSettings() {
       GetPrivateProfileIntA("bwvr", "audio_test_tag", 0, path));
   g_audio_test_tag_bank = static_cast<int>(
       GetPrivateProfileIntA("bwvr", "audio_test_tag_bank", 1, path));
-  // The launcher's "Test keys" box. F12 saves both eye pictures and
-  // Shift F12 steps the subtitles. Off for players.
+  // The keys for tests: a desktop run or a tester writes test_keys=1. F12
+  // saves both eye pictures and Shift F12 steps the subtitles. Off for
+  // players.
   g_test_keys = GetPrivateProfileIntA("bwvr", "test_keys", 0, path) != 0;
   const bool xr_bridge_key =
       GetPrivateProfileIntA("bwvr", "xr_bridge", 0, path) == 1;

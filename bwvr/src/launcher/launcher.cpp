@@ -121,8 +121,8 @@ const Setting kSettings[] = {
      "frame time in busy places."},
     {kChoice, "cull_distance", "Model cull distance", "Game|2x|3x|5x|10x", 3,
      "How far out trees, villagers and buildings are drawn at all. The game "
-     "draws them to 700 units. The fog moves out by the same factor, so a "
-     "far model goes into the fog and the far land stays clear. Further "
+     "draws them to 700 units. The fog moves out as far as the models do, "
+     "so a far model goes into the fog and the far land stays clear. Further "
      "costs more frame time where the land has many objects."},
 
     {kGroup, nullptr, "Performance", nullptr, 0, nullptr},

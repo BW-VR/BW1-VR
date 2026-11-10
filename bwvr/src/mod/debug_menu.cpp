@@ -876,8 +876,8 @@ const wchar_t* const kTips[] = {
     L"How far out the map objects are drawn: trees, houses and villagers. "
     L"Game: 700 units, as in the game. Each step multiplies it.",
     // Cull fog
-    L"Follows: the fog starts and ends further out by the factor of the cull "
-    L"distance. Game: the fog of the game.",
+    L"Follows: the fog starts and ends further out, as far as the cull "
+    L"distance moves the map objects out. Game: the fog of the game.",
     // Advisor size
     L"An advisor at a place of the world. Near size: the size that it has for "
     L"the eye at its usual place. Game: the size of the game.",

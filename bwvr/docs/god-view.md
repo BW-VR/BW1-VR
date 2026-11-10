@@ -1635,7 +1635,7 @@ at the table scale"), but they follow the scale. The gain is `s / 7.5`.
 | Land detail lines | `0x00E9C4FC`, `0x00E9C4D4` | 1600 and 2500 times the gain |
 | Land texture line | `0x00E9C524` | the game's value times the gain, unless `table_textures=0` |
 | The Hand's reach | `CHand+0x4838` | 1800 times the gain, at most 5600 |
-| Fog | `0x00C37204` | the game's below a gain of 3, off above it. Below a gain of 3, `cull_fog=1` moves the fog start and end out by the factor of `cull_distance` |
+| Fog | `0x00C37204` | the game's below a gain of 3, off above it. Below a gain of 3, `cull_fog=1` moves the fog start and end out as far as `cull_distance` moves the map object distance out |
 | Reflection | `0x00E9CD8C` | the game's below a gain of 3, off above it |
 
 At the life size scale and below it every value is the game's own: a value

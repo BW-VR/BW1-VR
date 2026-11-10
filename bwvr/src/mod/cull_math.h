@@ -5,9 +5,11 @@
 // The game draws the map objects of a land block only when the block is
 // nearer than 700 units (0x00C37200). The fog of the sky goes from 400 to
 // 900 units in clear weather, and from 15 to 350 in rain. cull_distance
-// multiplies the 700, and with cull_fog=1 the fog start and end get the same
-// factor. So the far edge of the objects is at the same share of the fog as
-// in the game, in each weather.
+// multiplies the 700. With cull_fog=1 the fog start and end move out by the
+// ratio of the distance with the cull factor to the distance without it
+// (FogRatio). So the far edge of the objects stays at the same share of the
+// fog as without the setting, in each weather, and at a scale where the
+// setting does not change the distance the fog does not change either.
 
 #pragma once
 
@@ -43,9 +45,25 @@ inline float VanishGain(bool view_owns, float view_gain, float cull) {
   return view * extra;
 }
 
-// The factor of the fog: the cull factor with cull_fog=1, else 1.
-inline float FogFactor(bool follow, float cull) {
-  return follow && cull > 1.0f ? cull : 1.0f;
+// A distance that follows a gain: the game's value times the gain, at most
+// `most`, and never less than the game's value. A gain of 1 or less keeps
+// the game's value. tabletop.cpp writes its distances with this rule.
+inline float ScaledValue(float game, float gain, float most) {
+  if (!(gain > 1.0f)) return game;
+  float value = game * gain;
+  if (value > most) value = most;
+  if (!(value > game)) value = game;
+  return value;
+}
+
+// The factor of the fog: the map object distance with the cull factor
+// (gain `after`) over the distance without it (gain `before`), by the rule
+// of ScaledValue. 1 when the cull factor does not move the distance out, for
+// example where the cap `most` holds both.
+inline float FogRatio(float game, float before, float after, float most) {
+  const float from = ScaledValue(game, before, most);
+  const float to = ScaledValue(game, after, most);
+  return from > 0.0f && to > from ? to / from : 1.0f;
 }
 
 // The fog start and end that the sky asks for, times the factor.

@@ -15,10 +15,13 @@
 // WHAT THE MOD DOES. cull_distance multiplies the 700: tabletop.cpp writes it
 // once a frame, with the gain of the God view on top (CullDistanceFactor).
 // With cull_fog=1 a hook on fn_007FEAA0 multiplies the start and the end of
-// the sky by the same factor, before the game keeps them. So the far edge of
-// the objects is at the same share of the fog as in the game, in each
-// weather, and the far land is not in fog. Above a gain of 3 the God view
-// has the fog off, and the factor of the fog has no effect.
+// the sky, before the game keeps them, by the ratio of the distance with the
+// cull factor to the distance without it (CullDistanceSetFog). So the far
+// edge of the objects stays at the same share of the fog as without the
+// setting, in each weather, and the far land is not in fog. Where the cap of
+// 8000 units holds the distance with and without the factor, the ratio is
+// 1 and the fog does not change. Above a gain of 3 the God view has the fog
+// off, and the factor of the fog has no effect.
 //
 // Only with play_mode=3 and 4, where tabletop.cpp writes the distance. Each
 // frame latches the values (CullDistanceFrame), so both eye passes of a
@@ -104,7 +107,7 @@ const char* FactorWords(int index) {
 }
 
 const char* FogWords(int fog) {
-  return fog != 0 ? "the fog moves out by the same factor"
+  return fog != 0 ? "the fog moves out as far as the map objects do"
                   : "the fog of the game stays";
 }
 
@@ -180,7 +183,13 @@ void CullDistanceFrame() {
     Step("the test cull_test_frame");
   }
   g_frame_factor = cull_math::CullFactor(g_index);
-  g_frame_fog = cull_math::FogFactor(g_fog != 0, g_frame_factor);
+}
+
+// tabletop.cpp, TabletopApplyFrame, after it wrote the map object distance:
+// the ratio of the distance with the cull factor to the distance without it.
+void CullDistanceSetFog(float ratio) {
+  if (!g_installed) return;
+  g_frame_fog = g_fog != 0 && ratio > 1.0f ? ratio : 1.0f;
 }
 
 // The factor of the map object distance in this frame, 1 for the game's own.

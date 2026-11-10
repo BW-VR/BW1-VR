@@ -49,12 +49,45 @@ inline void CullChecks() {
        VanishGain(true, 4.0f, 5.0f), 20, 1e-5);
   Near("a factor under 1 counts as 1", VanishGain(true, 0.5f, 0.5f), 1, 0);
 
-  // The fog follows the factor only with cull_fog=1.
-  Near("cull_fog=1 gives the fog the cull factor", FogFactor(true, 5.0f), 5,
+  // The rule of the distances of tabletop.cpp.
+  Near("a gain of 1 keeps the game's value", ScaledValue(700.0f, 1.0f, 8000.0f),
+       700, 0);
+  Near("a gain of 5 gives 3500", ScaledValue(700.0f, 5.0f, 8000.0f), 3500,
+       1e-3);
+  Near("the cap holds the value", ScaledValue(700.0f, 20.0f, 8000.0f), 8000,
        0);
-  Near("cull_fog=0 keeps the fog of the game", FogFactor(false, 5.0f), 1, 0);
+  Near("never less than the game's value",
+       ScaledValue(9000.0f, 2.0f, 8000.0f), 9000, 0);
+
+  // The fog moves out only as far as the cull factor moves the distance out.
+  Near("the villager scale, 5 times: the fog 5 times",
+       FogRatio(700.0f, VanishGain(true, 0.13f, 1.0f),
+                VanishGain(true, 0.13f, 5.0f), 8000.0f),
+       5, 1e-5);
   Near("the game's cull distance keeps the fog of the game",
-       FogFactor(true, 1.0f), 1, 0);
+       FogRatio(700.0f, VanishGain(true, 0.13f, 1.0f),
+                VanishGain(true, 0.13f, 1.0f), 8000.0f),
+       1, 0);
+  Near("a gain of 2, 5 times: the fog 5 times",
+       FogRatio(700.0f, VanishGain(true, 2.0f, 1.0f),
+                VanishGain(true, 2.0f, 5.0f), 8000.0f),
+       5, 1e-5);
+  Near("a gain of 2.5, 5 times: the cap gives 8000 over 1750",
+       FogRatio(700.0f, VanishGain(true, 2.5f, 1.0f),
+                VanishGain(true, 2.5f, 5.0f), 8000.0f),
+       8000.0 / 1750.0, 1e-4);
+  // 100 units per meter is a gain of 13.3: the cap holds the distance with
+  // and without the factor, so the fog does not change.
+  Near("100 units per meter, 5 times: the fog of the game",
+       FogRatio(700.0f, VanishGain(true, 13.33f, 1.0f),
+                VanishGain(true, 13.33f, 5.0f), 8000.0f),
+       1, 0);
+  Near("the table: 8000 with and without the factor, the fog of the game",
+       FogRatio(700.0f, 1.0e6f, 1.0e6f, 8000.0f), 1, 0);
+  Near("the table off: the fog 5 times",
+       FogRatio(700.0f, 1.0f, 5.0f, 8000.0f), 5, 1e-5);
+  Near("no game value: the fog of the game", FogRatio(0.0f, 1.0f, 5.0f,
+       8000.0f), 1, 0);
 
   // The fog of clear weather and of rain, times the factor.
   {

@@ -164,6 +164,7 @@ bool HandDirectRealPoint(float out[3]);
 // factor of the map object distance, and its report.
 void CullDistanceFrame();
 float CullDistanceFactor();
+void CullDistanceSetFog(float ratio);
 void CullDistanceReport();
 
 namespace {
@@ -734,18 +735,22 @@ void ApplyScaled(Patch& p, bool live, float gain, float most) {
       p.original = *at;
       p.have = true;
     }
-    const float game = FloatOf(p.original);
-    float value = game * gain;
-    if (value > most) value = most;
-    // Never less than the game's own value.
-    if (!(value > game)) value = game;
-    p.wanted = Bits(value);
+    // Never more than `most`, never less than the game's own value.
+    p.wanted = Bits(cull_math::ScaledValue(FloatOf(p.original), gain, most));
     *at = p.wanted;
     p.written = p.wanted;
   } else if (p.have) {
     if (*at == p.written) *at = p.original;
     p.have = false;
   }
+}
+
+// The game's own map object distance: the value that the patch puts back,
+// or the value in place while the patch holds none.
+float VanishGame() {
+  if (g_vanish.have) return FloatOf(g_vanish.original);
+  if (!g_vanish.usable) return 0.0f;
+  return *reinterpret_cast<const float*>(kVanish);
 }
 
 // For the report.
@@ -3860,7 +3865,9 @@ bool TabletopEars(const float head[3], float out[3]) {
 //
 // THE CULL DISTANCE (cull_distance.cpp) multiplies the map object distance
 // on top, in each frame, also in the frames that the view does not own. On
-// the table the distance is kObjectsFar while the table owns the frame.
+// the table the distance is kObjectsFar while the table owns the frame. The
+// fog moves out by the ratio of the distance with the cull factor to the
+// distance without it, so where the cap holds both the fog does not change.
 void TabletopApplyFrame() {
   if (!g_installed) return;
   ++g_frames;
@@ -3873,8 +3880,11 @@ void TabletopApplyFrame() {
     const bool zoomed_out = g_live && gain >= kGodFarGain;
     ApplyPatch(g_fog, zoomed_out);
     ApplyPatch(g_reflection, zoomed_out);
-    ApplyScaled(g_vanish, true, cull_math::VanishGain(g_live, gain, cull),
-                kObjectsFar);
+    const float before = cull_math::VanishGain(g_live, gain, 1.0f);
+    const float after = cull_math::VanishGain(g_live, gain, cull);
+    ApplyScaled(g_vanish, true, after, kObjectsFar);
+    CullDistanceSetFog(cull_math::FogRatio(VanishGame(), before, after,
+                                           kObjectsFar));
     ApplyScaled(g_size_cap, g_live, gain, kSizeCapFar);
     ApplyScaled(g_detail_near, g_live, gain, kFar);
     ApplyScaled(g_detail_far, g_live, gain, kFar);
@@ -3883,7 +3893,11 @@ void TabletopApplyFrame() {
     for (Patch* p : g_patches) {
       if (p != &g_vanish) ApplyPatch(*p, g_live);
     }
-    ApplyScaled(g_vanish, true, g_live ? kFar : cull, kObjectsFar);
+    const float before = g_live ? kFar : 1.0f;
+    const float after = g_live ? kFar : cull;
+    ApplyScaled(g_vanish, true, after, kObjectsFar);
+    CullDistanceSetFog(cull_math::FogRatio(VanishGame(), before, after,
+                                           kObjectsFar));
   }
 
   // The Hand's reach is a field of the CHand, and a script can set it back.

@@ -356,6 +356,13 @@ game as it is.
 
 ### Built, and not proven or not finished
 
+- **N19. The model cull distance on a busy land.** `cull_distance` (default
+  5x) draws the map objects to 3500 units, and the fog moves out as far
+  (`backend.md`, "Models are drawn further out"). On Land 1 it costs no
+  measurable frame time, and the list of map objects stays under 1100 of
+  2999. Open: a land with large towns and forests (Land 2 to 5). It needs a
+  test save of such a land, and `make_test_save.ps1` makes saves of Land 1
+  only.
 - **P25. The glow alone and the ray over the panels.** With
   `ray_glow_only=1` the glow is the whole ray, the tether and the arc, with
   no tube under it (`hand-model.md`, "The glow ribbons"). With

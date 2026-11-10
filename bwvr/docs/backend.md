@@ -5523,14 +5523,28 @@ view (`god-view.md`, section 8) comes on top, and on the table the distance is
 8000 while the table owns the frame. The value is at most 8000, and never less than
 the game's own value.
 
-`cull_fog=1` (default) multiplies the fog start and end of the sky by the same
-factor. A hook on `fn_007FEAA0` changes the two arguments, so the range at
-`0x00E9B6DC` stays correct. The far edge of the objects is then at the same share
-of the fog as in the game, in each weather, and the far land is not in fog. A
-model that is far out goes into the fog, and the fade of the model detail (see
-above) takes the small ones out before that. `cull_fog=0` keeps the fog of the
-game. Above a gain of 3 the God view has the fog off, so the key has no effect
-there.
+`cull_fog=1` (default) moves the fog start and end of the sky out by the ratio of
+the map object distance with the cull factor to the distance without it
+(`cull_math::FogRatio`). A hook on `fn_007FEAA0` changes the two arguments, so the
+range at `0x00E9B6DC` stays correct. The far edge of the objects is then at the
+same share of the fog as without the setting, in each weather, and the far land is
+not in fog. A model that is far out goes into the fog, and the fade of the model
+detail (see above) takes the small ones out before that. Where the cap of 8000
+holds the distance with and without the factor, the ratio is 1 and the fog does
+not change. `cull_fog=0` keeps the fog of the game.
+
+| Scale (units per meter) | Gain of the view | Map objects stop, Game / 5x | Fog, Game / 5x |
+| --- | --- | --- | --- |
+| 1 (the nearest zoom) | 1 | 700 / 3500 | 400 to 900 / 2000 to 4500 |
+| 7.5 (life size) | 1 | 700 / 3500 | 400 to 900 / 2000 to 4500 |
+| 15 | 2 | 1400 / 7000 | 400 to 900 / 2000 to 4500 |
+| 22.5 and more | 3 and more | 2100 or more / up to 8000 | off / off |
+
+The God view has the fog off from a gain of 3 (`god-view.md`, section 8). So at
+the scales of a normal play (the start at 100 units per meter, the village at
+44.4) the fog is off with each value of the key, and the setting changes only the
+map object distance. From 11.4 times the life size scale (86 units per meter) the
+cap of 8000 holds the distance with and without the factor.
 
 The model detail distance still ends each model: a large model fades out between
 86.7 and 173.3 times the size cap of 5, times `detail_distance`. At 5x that is 2170
@@ -5558,8 +5572,21 @@ from frame N of the controllers on, each `cull_test_period` frames (700). The
 frames count as the steps of the script count them, also with
 `fake_controller_play_frame`.
 
-Open: the frame cost of each value on the laptop, from a view high over the land
-at the villager scale.
+Measured on Land 1, at 1 unit per meter with the head 100 m over the land near
+the Temple, at a render of 2760 by 2208: the game's value draws 957 of 2999 map
+objects, and 2x to 10x draw about 1040. The sorted list has 68 to 114 of 2048.
+The work of a frame is 2.74 to 2.96 ms with each value, and the draw calls grow by
+at most 93. At the scales of the bench (100, 44.4, 337.5 and 4000 units per meter)
+5x and the game's value give the same objects, draw calls and frame time.
+
+The default is 5x. It reaches 3500 units, which is most of a land from its middle.
+The God view already draws the map objects to 8000 units at the scales of a normal
+play, so 5x never asks for more objects than those scales do. A list that fills
+loses only the far objects.
+
+Open: a busy land (the large towns and forests of Land 2 to 5) is not measured.
+No test save of a later land exists, and `make_test_save.ps1` makes saves of Land 1
+only.
 
 ## Time, bars and the second eye pass
 
@@ -6120,7 +6147,7 @@ keys that the launcher sets.
 | `spirit_world_size` | 1 | The size of an advisor at a place of the world. See "The advisors" and `tabletop.md` |
 | `cloud_pole_pct`, `sun_glare`, `detail_distance` | 25, 0, 3 | See "Sky, clouds and detail" |
 | `cull_distance` | 3 | How far out map objects are drawn: 0 the game's 700 units, 1 2x, 2 3x, 3 5x, 4 10x. See "Models are drawn further out" |
-| `cull_fog` | 1 | 1: the fog start and end move out by the factor of `cull_distance`. 0: the fog of the game |
+| `cull_fog` | 1 | 1: the fog start and end move out as far as `cull_distance` moves the map object distance out. 0: the fog of the game |
 | `cull_test_frame`, `cull_test_period` | 0, 700 | Test keys: from frame N of the controllers on, the cull distance steps each period. The launcher removes them from `bwvr.ini` |
 | `cloud_fade_near_cm`, `cloud_fade_far_cm` | 15, 60 | In the table and the God view a sky cloud is clear when the eye is in it or within the near distance of its surface, and whole from the far distance on, in cm of the room (see "Clouds"). A far distance of 0: each sky cloud is whole |
 | `cloud_round_near` | 1000 | In the table and the God view a sky cloud nearer than this many units keeps its round shape, and the flatten of the engine comes back to its full value at 2 times the distance (see "Clouds"). 0: each sky cloud has the flatten of the engine |

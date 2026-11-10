@@ -104,6 +104,9 @@ struct PanelQuad {
 //   kCardRay           the ray of the pointing hand while it ends on a panel
 //                      in the room, over all the other quads (docs/ui-layer.md,
 //                      "The ray over the panels")
+//   kCardRayTip        the glow at the end of that ray, over the ray
+//                      (docs/hand-model.md, "The glow at the end of the menu
+//                      ray")
 const int kCardHintPointing = 0;
 const int kCardHintOther = 1;
 const int kCardSubtitles = 2;
@@ -113,7 +116,8 @@ const int kCardBubble = 5;
 const int kCardHintButton0 = 6;
 const int kHintButtonCards = 4;
 const int kCardRay = 10;
-const int kCards = 11;
+const int kCardRayTip = 11;
+const int kCards = 12;
 
 // True for a card that holds hints: the two hint cards and the cards of
 // the buttons.

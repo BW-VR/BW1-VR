@@ -320,6 +320,9 @@ void OverlayTrailChange(const char* by);
 int OverlayRayGlowValue();
 int OverlayRayGlowOnlyValue();
 void OverlayRayGlowOnlyChange(const char* by);
+// The glow at the end of the menu ray (overlay.cpp, ray_card.cpp).
+int OverlayRayTipValue();
+void OverlayRayTipChange(const char* by);
 // The ray over the panels in the room (ray_card.cpp).
 int RayCardValue();
 void RayCardChange(const char* by);
@@ -501,6 +504,8 @@ const Switch kSwitches[] = {
      L"tube|glow"},
     {kGroupPicture, L"Ray on panels", L"Ray over the panels in the room",
      "ray_over_panels", RayCardValue, RayCardChange, L"under|over"},
+    {kGroupPicture, L"Ray tip", L"Round glow at the end of the ray",
+     "ray_tip", OverlayRayTipValue, OverlayRayTipChange, L"mark|glow"},
     {kGroupPicture, L"Video view", L"16:9 view for videos in the window",
      "video_view", VideoViewValue, VideoViewChange, L"off|on"},
     {kGroupPicture, L"Video marks", L"Corner marks of the video area",
@@ -908,8 +913,12 @@ const wchar_t* const kTips[] = {
     L"Glow: with Ray glow on, the glow alone is the ray, narrower and with a "
     L"solid core. Tube: the glow is over a thin tube.",
     // Ray on panels
-    L"Over: while a panel in the room is open, the ray shows over the panel "
-    L"and has a mark at its end. Under: the panel hides the ray.",
+    L"Over: while a panel in the room is open, the ray shows over the panel. "
+    L"Under: the panel hides the ray.",
+    // Ray tip
+    L"Glow: the end of the menu ray is a round soft glow that faces you. It "
+    L"has no outline. Mark: a small cross, or a disc in a dark ring over a "
+    L"panel.",
     // Video view
     L"On: the game window on the PC shows a 16:9 part of the left eye for a "
     L"video capture, with a smoothed head. Only with the Vulkan renderer.",

@@ -1787,7 +1787,9 @@ ray leaves the aim pose and shows where it points. With `ray_glow=1` and
 middle to the edge, with a solid core and a light that runs along the ray
 from the hand. With `ray_glow_only=0` it is a thin tube (2 mm) under a glow
 of 1.2 cm, and with `ray_glow=0` the thin tube alone. It ends on the
-cursor in both eyes (see "The depth of the menu" in `controllers.md`). When the
+cursor in both eyes (see "The depth of the menu" in `controllers.md`), and
+its end is a round soft glow (`ray_tip=1`, `hand-model.md`, "The glow at the
+end of the menu ray"). When the
 box closes, the direct hand comes back on the same frame.
 
 ### Ini keys

@@ -12,23 +12,28 @@
 // quad layer kCardRay, which the runtime draws after all the panels. The
 // overlay then draws no ray in the eye pictures, so the player sees one ray.
 // The strip has the look of the ray in the eye pictures (ray_glow and
-// ray_glow_only), and a round mark at the end.
+// ray_glow_only). With ray_tip=1 (overlay.cpp) the end of the ray is a
+// round glow on the quad layer kCardRayTip, which faces the head
+// (ray_tip_math.h). With ray_tip=0 the strip has a round mark at its end.
 //
 //   ray_over_panels=1     0: the ray stays in the eye pictures, under the
 //                         panels
 //   ray_card_test_save=0  N: saves the first N pictures of the strip as
-//                         bwvr-raycard-<frame>.bmp over a checkerboard (a
-//                         test key)
+//                         bwvr-raycard-<frame>.bmp over a checkerboard, and
+//                         the picture of the glow at the end once as
+//                         bwvr-raytip-<frame>.bmp (a test key)
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <math.h>
 #include <stdint.h>
+#include <stdio.h>
 
 #include "../vr/xr_screen.h"
 #include "controllers.h"
 #include "menu_room.h"
 #include "ray_card_math.h"
+#include "ray_tip_math.h"
 
 extern void ModLog(const char* format, ...);
 
@@ -45,6 +50,13 @@ bool g_on = true;
 int g_save = 0;
 int g_saved = 0;
 uint8_t g_pixels[rc::kAcross * rc::kAlong * 4];
+// The picture of the glow at the end. It is steady, so it is drawn again
+// only for a new color of the ray, with a new serial.
+uint8_t g_tip_pixels[ray_tip_math::kPixels * ray_tip_math::kPixels * 4];
+float g_tip_rgb[3] = {-1.0f, -1.0f, -1.0f};
+uint32_t g_tip_serial = 0;
+bool g_tip_saved = false;
+bool g_said_tip_failed = false;
 // The log: the first strip, each start and end of a run of frames with the
 // strip, and each frame in which the end of the ray goes onto a panel or off
 // it (40 lines at the most), and the count in each report.
@@ -52,6 +64,7 @@ bool g_said_first = false;
 bool g_said_failed = false;
 bool g_was_on = false;
 bool g_was_on_panel = false;
+bool g_was_tip = false;
 uint64_t g_run_start = 0;
 int g_run_logs = 0;
 const int kMaxRunLogs = 40;
@@ -95,8 +108,9 @@ void RayCardEndRun(uint64_t frame) {
 // Once a frame. ray: the ray of the menu shows in this frame. True when it is
 // on its own quad layer: then the caller draws no ray in the eye pictures.
 // glow_half_m and tube_radius_m are those of the ray in the eye pictures, rgb
-// its color, and seconds the clock of the glow of this frame.
-bool RayCardFrame(bool ray, bool glow, bool only, float glow_half_m,
+// its color, and seconds the clock of the glow of this frame. tip: the end
+// of the ray is the glow of ray_tip_math.h (ray_tip=1).
+bool RayCardFrame(bool ray, bool glow, bool only, bool tip, float glow_half_m,
                   float tube_radius_m, const float rgb[3], float seconds,
                   uint64_t frame) {
   if (!ray || !g_on) {
@@ -118,12 +132,56 @@ bool RayCardFrame(bool ray, bool glow, bool only, float glow_half_m,
     RayCardEndRun(frame);
     return false;
   }
-  const rc::Look look = rc::LookOf(glow, only, glow_half_m, tube_radius_m);
+  // The glow at the end needs its own quad layer. When the runtime refuses
+  // it, the strip has the mark at its end.
+  if (tip && bwvr::XrScreen::CardFailed(bwvr::kCardRayTip)) {
+    tip = false;
+    if (!g_said_tip_failed) {
+      g_said_tip_failed = true;
+      ModLog("ray card     : the runtime refused the quad layer of the glow "
+             "at the end of the ray, so the strip has a mark at its end, "
+             "frame %llu", frame);
+    }
+  }
+  rc::Quad tip_quad = {};
+  float tip_distance = 0.0f;
+  if (tip && !ray_tip_math::Place(to, head, &tip_quad, &tip_distance)) {
+    tip = false;
+  }
+  const rc::Look look =
+      rc::LookOf(glow, only, glow_half_m, tube_radius_m, !tip);
   rc::Quad quad;
   float length = 0.0f;
   if (!rc::Place(from, to, head, look, &quad, &length)) {
     RayCardEndRun(frame);
     return false;
+  }
+  if (tip) {
+    if (g_tip_serial == 0 || g_tip_rgb[0] != rgb[0] ||
+        g_tip_rgb[1] != rgb[1] || g_tip_rgb[2] != rgb[2]) {
+      ray_tip_math::Draw(rgb, g_tip_pixels);
+      for (int k = 0; k < 3; ++k) g_tip_rgb[k] = rgb[k];
+      g_tip_serial = bwvr::XrScreen::NewCardSerial();
+    }
+    bwvr::CardLayer end = {};
+    end.visible = true;
+    end.pixels = g_tip_pixels;
+    end.texture_width = ray_tip_math::kPixels;
+    end.texture_height = ray_tip_math::kPixels;
+    end.rect[2] = ray_tip_math::kPixels;
+    end.rect[3] = ray_tip_math::kPixels;
+    for (int i = 0; i < 3; ++i) end.position[i] = tip_quad.position[i];
+    for (int i = 0; i < 4; ++i) end.orientation[i] = tip_quad.orientation[i];
+    end.width = tip_quad.width;
+    end.height = tip_quad.height;
+    end.serial = g_tip_serial;
+    bwvr::XrScreen::StageCard(bwvr::kCardRayTip, end);
+    if (g_save > 0 && !g_tip_saved) {
+      g_tip_saved = true;
+      EyeCaptureSaveUi("raytip", frame, 1, g_tip_pixels,
+                       ray_tip_math::kPixels * 4, ray_tip_math::kPixels,
+                       ray_tip_math::kPixels);
+    }
   }
   rc::Draw(look, rgb, length, seconds, g_pixels);
   bwvr::CardLayer layer = {};
@@ -149,34 +207,45 @@ bool RayCardFrame(bool ray, bool glow, bool only, float glow_half_m,
   }
   ++g_frames;
   const bool start = !g_was_on;
-  const bool moved = g_was_on && on_panel != g_was_on_panel;
+  const bool moved =
+      g_was_on && (on_panel != g_was_on_panel || tip != g_was_tip);
   if (start) {
     g_was_on = true;
     g_run_start = frame;
   }
   g_was_on_panel = on_panel;
+  g_was_tip = tip;
   if ((start || moved) && (!g_said_first || g_run_logs < kMaxRunLogs)) {
     if (g_said_first) ++g_run_logs;
     g_said_first = true;
     const rc::Facing facing = rc::FacingOf(quad, from, to, head);
+    char end_look[200];
+    if (tip) {
+      sprintf_s(end_look, "a round glow %.1f cm across at the end, %.2f m "
+                "from the head, on a quad layer of its own that faces the "
+                "head", tip_quad.width * 100.0f, tip_distance);
+    } else {
+      sprintf_s(end_look, "a mark of %.1f cm at the end",
+                look.end_radius * 200.0f);
+    }
     ModLog("ray card     : %s, frame %llu: from %.3f %.3f %.3f to %.3f %.3f "
            "%.3f m (%.2f m). %s. A strip %.1f cm across and %.2f m long at "
            "%.3f %.3f %.3f m. Its front is %.1f degrees from the best turn "
            "to the head, and the head sees it at %.1f degrees from its plane "
            "(90 is face on, a ray that points away from the head has less). "
-           "The look: %s, and a mark of %.1f cm at the end. The eye pictures "
-           "have no ray",
+           "The look: %s, and %s. The eye pictures have no ray",
            start ? "the ray goes over the panels as a quad layer"
                  : "the end of the ray over the panels moves",
            frame, from[0], from[1], from[2], to[0], to[1], to[2], length,
-           on_panel ? "It ends on the panel, and the mark is there"
+           on_panel ? (tip ? "It ends on the panel, and the glow is there"
+                           : "It ends on the panel, and the mark is there")
                     : "It meets no panel, so it is 2 m long",
            quad.width * 100.0f, quad.height, quad.position[0],
            quad.position[1], quad.position[2], facing.off_best_deg,
            facing.sight_deg,
            look.only ? "the glow alone"
                      : (look.glow ? "a tube under a glow" : "a plain tube"),
-           look.end_radius * 200.0f);
+           end_look);
   }
   return true;
 }

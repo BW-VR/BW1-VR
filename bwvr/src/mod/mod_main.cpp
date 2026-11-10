@@ -165,6 +165,7 @@ void HandGlowSetEnabled(bool on);
 void OverlaySetEnabled(bool on);
 void OverlaySetGlow(bool rays, bool trail);
 void OverlaySetRayGlowOnly(bool on);
+void OverlaySetRayTip(bool on);
 // ray_card.cpp: ray_over_panels and the test key ray_card_test_save.
 void RayCardSetOptions(bool on, int test_save);
 void PresentWatchSetEnabled(bool on);
@@ -575,9 +576,11 @@ TargetGlowSettings g_target_glow;
 bool g_overlay = false;
 // The glow of the rays (ray_glow), the glow alone (ray_glow_only) and the
 // trail of a gesture (gesture_trail), all drawn by overlay.cpp. The ray over
-// the panels in the room (ray_over_panels, ray_card.cpp).
+// the panels in the room (ray_over_panels, ray_card.cpp). The glow at the end
+// of the menu ray (ray_tip, overlay.cpp and ray_card.cpp).
 bool g_ray_glow = true;
 bool g_ray_glow_only = true;
+bool g_ray_tip = true;
 bool g_gesture_trail = true;
 bool g_ray_over_panels = true;
 int g_ray_card_test_save = 0;
@@ -1676,6 +1679,7 @@ void ReadSettings() {
     // "The glow ribbons".
     g_ray_glow = number("ray_glow", 1) != 0;
     g_ray_glow_only = number("ray_glow_only", 1) != 0;
+    g_ray_tip = number("ray_tip", 1) != 0;
     g_gesture_trail = number("gesture_trail", 1) != 0;
     // The ray over the panels in the room. See docs/ui-layer.md, "The ray
     // over the panels".
@@ -2112,6 +2116,7 @@ void StartVrStep() {
       ControllersSetGesture(g_gesture);
       OverlaySetGlow(g_ray_glow, g_gesture_trail);
       OverlaySetRayGlowOnly(g_ray_glow_only);
+      OverlaySetRayTip(g_ray_tip);
       RayCardSetOptions(g_ray_over_panels, g_ray_card_test_save);
       if (g_gesture.button != 0) GestureAirInstall();
       if (g_overlay) OverlaySetEnabled(true);

@@ -2833,8 +2833,8 @@ A frame with no scene draws no ray (20.4).
   on the keyboard, or 2 m from the hand when the ray is off the panel. It
   turns about the ray to face the middle of the head, so both eyes see a
   line at its true place in the room.
-- It is the last quad layer of the frame (`kCardRay`), after the panels and
-  the other cards, so no panel hides it.
+- It is a quad layer after the panels and the other cards (`kCardRay`), so
+  no panel hides it. Only the glow at its end comes after it.
 - The eye pictures then have no menu ray, so the player sees one ray. When
   the runtime refuses the layer, the ray goes back to the eye pictures, and
   the log says so one time.
@@ -2844,10 +2844,21 @@ A frame with no scene draws no ray (20.4).
   runs along the strip as it runs along the ribbon. The strip is 1.92 cm
   across for the glow alone, 2.4 cm for a tube under a glow and 1.2 cm for a
   plain tube.
-- A round mark is at the end of the ray: a disc 6 mm across in the color of
-  the ray, in a ring of dark ink 1 cm across. The ink shows on the bright
-  paper of a panel, and the disc shows on the land.
-- The picture is 32 by 1024 pixels. The mod draws it on the CPU in each
+- With `ray_tip=1` (the default) the strip stops at the end of the ray. The
+  end is the round soft glow of `hand-model.md` ("The glow at the end of the
+  menu ray") on a second quad layer (`kCardRayTip`), after the strip. Its
+  middle is at the end of the ray, and its front faces the middle of the
+  head. The strip holds the ray, and the head sees it at a small angle, so a
+  round mark in the strip looks narrow along the ray. The quad of the glow
+  faces the head, so each eye sees a circle at the depth of the end. The
+  quad is as wide as the glow: 1.3 percent of its distance from the head
+  from the middle to the edge, 2.6 cm across at 1 m. Its picture is 64 by 64
+  pixels. It does not change, so it goes into the swapchain of the card only
+  once.
+- With `ray_tip=0`, or when the runtime refuses the quad layer of the glow,
+  a round mark is at the end of the strip: a disc 6 mm across in the color
+  of the ray, in a ring of dark ink 1.6 cm across.
+- The picture of the strip is 32 by 1024 pixels. The mod draws it on the CPU in each
   frame, because the light moves, and it goes to the swapchain of the card
   in each frame (128 KB).
 - The view for videos draws the strip as it draws the other cards
@@ -2858,20 +2869,25 @@ A frame with no scene draws no ray (20.4).
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `ray_over_panels` | 1 | 0: the ray stays in the eye pictures, and a panel hides the part of it in front of the panel. The switch "Ray on panels" of the debug page (the group Picture) |
-| `ray_card_test_save` | 0 | Test key. N saves the first N pictures of the strip as `bwvr-raycard-FFFFF.bmp` over a checkerboard |
+| `ray_tip` | 1 | 1: the end of the ray is a round glow on a quad layer that faces the head. 0: the strip has a disc in a ring of dark ink at its end. The switch "Ray tip" of the debug page (the group Picture). See `hand-model.md`, "The glow at the end of the menu ray" |
+| `ray_card_test_save` | 0 | Test key. N saves the first N pictures of the strip as `bwvr-raycard-FFFFF.bmp` over a checkerboard, and the picture of the glow at the end once as `bwvr-raytip-FFFFF.bmp` |
 
 The log has the tag `ray card`. One line at the start, one line at the
 first frame of each run of frames with the strip, at each frame in which the
-end of the ray goes onto a panel or off it, and at the end of the run (40 at
-the most), and the count in each report:
+end of the ray goes onto a panel or off it or `ray_tip` changes, and at the
+end of the run (40 at the most), and the count in each report:
 
 ```
 ray card     : ray_over_panels=1: while a panel in the room is open, the ray of the pointing hand goes out as a quad layer over the panels
-ray card     : the ray goes over the panels as a quad layer, frame N: from X Y Z to X Y Z m (L m). It meets no panel, so it is 2 m long. A strip 1.9 cm across and L m long at X Y Z m. Its front is 0.0 degrees from the best turn to the head, and the head sees it at A degrees from its plane (90 is face on, a ray that points away from the head has less). The look: the glow alone, and a mark of 1.6 cm at the end. The eye pictures have no ray
-ray card     : the end of the ray over the panels moves, frame N: from X Y Z to X Y Z m (L m). It ends on the panel, and the mark is there. ...
+ray card     : the ray goes over the panels as a quad layer, frame N: from X Y Z to X Y Z m (L m). It meets no panel, so it is 2 m long. A strip 1.9 cm across and L m long at X Y Z m. Its front is 0.0 degrees from the best turn to the head, and the head sees it at A degrees from its plane (90 is face on, a ray that points away from the head has less). The look: the glow alone, and a round glow D cm across at the end, R m from the head, on a quad layer of its own that faces the head. The eye pictures have no ray
+ray card     : the end of the ray over the panels moves, frame N: from X Y Z to X Y Z m (L m). It ends on the panel, and the glow is there. ...
 ray card     : the ray is no longer over the panels, frame N, after M frames
 ray card     : N frames had the ray over the panels
 ```
+
+With `ray_tip=0` the look ends "and a mark of 1.6 cm at the end", and the
+line of a move says "and the mark is there". When the runtime refuses the
+quad layer of the glow, one line says so, and the strip has the mark.
 
 ### 25.4 Tests and limits
 
@@ -2882,7 +2898,8 @@ head, a ray of 5 mm), how the head sees the strip (a ray of a desktop run
 5 degrees from the line of sight, where no turn about the ray faces the head
 more, and a ray up and out from the hand), and the picture (the middle line,
 the rim, the edge, the hand, the mark and its ink, the tube, the bytes of
-the picture).
+the picture). The checks of the glow at the end and of its quad layer are in
+`ray_tip_checks.h`.
 
 The desktop run is `village_run.ps1 -Kind rayover`. It puts the fake hand
 where a player holds it, 15 cm right, 25 cm down and 35 cm in front of the
@@ -2901,13 +2918,16 @@ plane.
 - The strip is over the hand where the ray starts, because a quad layer
   has no depth. The glow alone has no light at the hand and full light from
   6 cm. A tube starts at the hand.
-- Only a headset shows how the strip looks over a panel and over the land.
+- The glow at the end is also over the hand and over anything in front of
+  the end, for the same reason.
+- Only a headset shows how the strip and the glow at its end look over a
+  panel and over the land.
 
 ## 26. The edge and the mip levels of a card
 
 Each card (the hint cards, the cards of the buttons, the subtitle card, the
-ring with the panels of `panel_kit.cpp` on it, the keyboard, the bubble and
-the ray over the panels) is a picture of the CPU on a quad layer. The
+ring with the panels of `panel_kit.cpp` on it, the keyboard, the bubble, the
+ray over the panels and the glow at its end) is a picture of the CPU on a quad layer. The
 compositor of the runtime samples the quad. The code is in `SendCard` of
 `xr_screen.cpp` and in the pure `card_send_math.h`.
 

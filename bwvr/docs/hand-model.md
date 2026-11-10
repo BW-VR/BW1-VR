@@ -2061,6 +2061,36 @@ format are those of the meshes. Two sources use it:
 - **The trail of a gesture** (`gesture_trail=1`, see `miracles.md`, "The
   trail at the fingertip").
 
+**The glow at the end of the menu ray** (`ray_tip=1`, the default,
+`ray_tip_math.h`). The end of the menu ray, in a dialog box and in a room of
+the Temple, is a round soft glow. It has no outline. Its light is full at the
+middle and falls smoothly to none at the edge, with no step. The middle has
+the warm white of the ray, and the outer part turns to a warm gold, so the
+glow also shows on the bright paper of a panel. The middle hides 55 percent
+of the picture behind it, as the core of the glow alone does. The glow is
+steady: the bands of the ray show that the ray is live, and a steady end is
+easier to hold on a small button.
+
+- The size: the radius from the middle to the edge is 1.3 percent of the
+  distance from the eye, 6 mm at the least and 8 cm at the most. So the glow
+  has the same size in the view near and far: 2.6 cm across at 1 m, and
+  5.2 cm across at 2 m. The light is half of the light of the middle at
+  0.54 of the radius.
+- The eye pictures: each eye pass builds the glow again as a disc of 180
+  triangles square to the line to its own eye, so each eye sees a circle.
+  The disc goes into the list of the glow ribbons after the ribbons, with
+  their blend. Its middle moves toward the eye by its radius on the line to
+  the eye. So each eye sees it at the end of the ray, and a wall or the land
+  at the end does not cut it.
+- Over the panels the glow is a quad layer of its own (`ui-layer.md`, "The
+  ray over the panels").
+- The ray of the cut scene window keeps its small cross, because that window
+  draws no glow.
+
+With `ray_tip=0` the end of the ray is a small cross in the eye pictures
+(`controllers.md`, "The mark at the end"), and a disc in a ring of dark ink
+over the panels.
+
 The cost is in the log: after each report window with a glow, one line gives
 the frames, the triangles in each eye and the CPU time of the two draws.
 
@@ -2075,8 +2105,11 @@ too (hand.md, "8. The two real hands and which one is the Hand"). There is no la
 plain tubes. The switch "Ray glow" of the debug page (the group Picture). The
 launcher has no row for it. `ray_glow_only` (1): with `ray_glow=1`
 the glow is the whole ray. 0 keeps the tube under the wider glow. The switch
-"Glow only" of the debug page. `gesture_trail` (1) is the trail of a
-gesture (`miracles.md`).
+"Glow only" of the debug page. `ray_tip` (1): the end of the menu ray is the
+round glow (see "The glow at the end of the menu ray"). 0 gives the cross in
+the eye pictures and the disc with ink over the panels. The switch "Ray tip"
+of the debug page (the group Picture). The launcher has no row for it.
+`gesture_trail` (1) is the trail of a gesture (`miracles.md`).
 
 **The log.** The tag is `overlay`. One line at the first draw, and one at
 each change of the owner of the pointer. Then, on the first draw, on a
@@ -2090,8 +2123,11 @@ CPU, with the build and the draws apart. Each report window counts the draws,
 the triangles, the triangles that crossed the near plane and the triangles
 off the screen.
 
-The glow has its own lines: the values of `ray_glow`, `ray_glow_only` and
-`gesture_trail` at the start, the first glow of a ray (with the look), and
+The glow has its own lines: the values of `ray_glow`, `ray_glow_only`,
+`ray_tip` and `gesture_trail` at the start, each change of `ray_tip` by the
+debug page, the first glow of a ray (with the look), the first glow at the
+end of a ray in the eye pictures (its triangles, its size and its distance
+from the eye), and
 each start and end of a trail (30 at the most). After each report window with a glow, one line gives the frames, the
 triangles in each eye and the CPU time of the two glow draws.
 
@@ -2123,7 +2159,13 @@ same count at 72, 90 and 120 Hz) and the glow of a ray (the period, the
 samples, the bands that move outward, the fade at the hand, the point along
 a polyline). The checks of the glow alone (`ray_card_checks.h`): the light
 across the ribbon, the core and the rim between two bands, and the half
-light of the two profiles.
+light of the two profiles. The checks of the glow at the end
+(`ray_tip_checks.h`): the size near and far and its limits, a light that
+falls from the middle to none at the edge with no step, the gold of the
+outer part, the alpha, a disc that is round and square to the line of each of
+two eyes, the move toward the eye and its limit, the quad layer that faces
+the head and is seen nearly face on from each eye, the picture, and a strip
+of the ray with no mark.
 
 Desktop runs with dxwrapper, `test_frame_rate=60` and `ray_glow=1` against
 `ray_glow=0` (`aim_run.ps1` with the recipe `ring1`, and `village_run.ps1

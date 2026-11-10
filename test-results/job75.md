@@ -55,7 +55,7 @@ The shots are at log frames 723, 1423, 2123, 2823, 3523 and 4223, inside the Gam
 
 ## Run 3, cullb: Game (A) against 5x (B) at the normal scales
 
-The cull lines of the normal scales: in A and in B "map objects stop at 8000 units" (scenes 1 to 3 and 6) or "4148 units" (scenes 4 and 5). In A the fog is the game's ("the game got 100 to 800"), in B it is 5 times further ("the game got 500 to 4000"). So at the normal scales the game's own cull is already past the cull of 5x, and only the fog changes. The map objects in A and B are the same in each window (1034, 1375, 1372, 1366, 1545). No "a list is full" line.
+The cull lines of the normal scales: in A "map objects stop at 8000 units", except windows 4 to 6 with "4148 units" ("god view     : map objects stop at 4148 units (the game set 700), the fog is off"). In B "map objects stop at 8000 units" in each of the 15 windows. In A the fog is the game's ("the game got 100 to 800"), in B it is 5 times further ("the game got 500 to 4000"). So at the normal scales the game's own cull is already past the cull of 5x, and only the fog changes. The map objects in A and B are the same in each window (1034, 1375, 1372, 1366, 1545). No "a list is full" line.
 
 The comparison table of bench_run (means of 2 runs):
 

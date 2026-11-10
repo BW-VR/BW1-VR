@@ -983,10 +983,11 @@ event.
     at solids" of the debug page changes the key. The solids near the head
     need `head_blinder=1` and `head_blinder_objects=1` (the defaults): with
     0 the fly does not see a house.
-  - High over the land at a small scale, the game keeps its own fog (400 to
-    900 units) and its own distance at which objects vanish (700 units),
-    because the God view changes them only above 3 times the life size
-    scale (section 2). So from a great height the far land is in the fog.
+  - High over the land at a small scale the God view keeps the fog of the
+    sky and the distance of the map objects (`cull_distance`, `cull_fog`,
+    `backend.md`), because it turns the fog off only above 3 times the life
+    size scale (section 2). So from a great height the far land can be in
+    the fog.
   - After a fly the land can be more than 2.5 m below the head. Nothing
     moves the view back by itself. The walk starts its filter again at the
     land under the head, so it keeps that height over the land and follows

@@ -301,12 +301,11 @@ keeps the mod as it is.
     (`hint_style=2`, `controller-hints.md`, 9.14). Desktop runs show the
     cards on the outer side of each hand, level in the view, with no
     crossings, with a continuous ink outline, at 0.2 to 0.6 ms a frame.
-    In a session with Virtual Desktop the model and the hand show 2 to 3 cm
-    nearer to the head than the controllers of the Quest menu. The math test
-    of the chain finds no step of the mod that moves a still grip toward the
-    head. The check of the view (`view_check=1`, `controller-hints.md`,
-    9.15) in the next session tells if the grip pose of Virtual Desktop is
-    the cause. Only a headset can show whether the cards read at 55 cm
+    The model and the hand are on the frame of the WebXR model, fitted on
+    the grip pose of Virtual Desktop, the Oculus runtime and SteamVR
+    (`grip_fit=1`, `controller-hints.md`, 9.15), and the VR Settings window
+    has a trim of 5 mm steps. Only a headset can show that they are on the
+    real controllers, and whether the cards read at 55 cm
     (`headset-checks.md`, 21).
 
 **The village, the Creature and the help**

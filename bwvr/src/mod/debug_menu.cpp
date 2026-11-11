@@ -237,6 +237,10 @@ int HandDirectTreeHintValue();
 void HandDirectTreeHintToggle(const char* by);
 int HandExactHideValue();
 void HandExactHideChange(const char* by);
+int HandExactHideAllValue();
+void HandExactHideAllChange(const char* by);
+int HandExactFlowValue();
+void HandExactFlowChange(const char* by);
 int HandFeelValue();
 void HandFeelChange(const char* by);
 int HandFeelPinchValue();
@@ -251,6 +255,9 @@ int HandModelSwapValue();
 void HandModelSwapChange(const char* by);
 int HandModelLookValue();
 void HandModelLookChange(const char* by);
+// The frame of the controller on the grip pose (grip_fit.cpp).
+int GripFitValue();
+void GripFitChange(const char* by);
 int TargetGlowValue();
 void TargetGlowChange(const char* by);
 int TakeStreamValue();
@@ -684,10 +691,16 @@ const Switch kSwitches[] = {
      L"off|on"},
     {kGroupHand, L"Game Hand", L"Mesh of the game's Hand", "hand_hide_game",
      HandExactHideValue, HandExactHideChange, L"shown|hidden"},
+    {kGroupHand, L"Hide rule", L"Where the game's Hand hides", "hand_hide_all",
+     HandExactHideAllValue, HandExactHideAllChange, L"exact|all"},
+    {kGroupHand, L"Hand flow", L"Glow of a miracle on the hand",
+     "hand_flow_glow", HandExactFlowValue, HandExactFlowChange, L"off|on"},
     {kGroupHand, L"Hand model", L"Model of the hands", "hand_model",
      HandModelSwapValue, HandModelSwapChange, L"low poly|game|file"},
     {kGroupHand, L"Hand look", L"Look of the hands", "", HandModelLookValue,
      HandModelLookChange, L"player|evil|neutral|good"},
+    {kGroupHand, L"Controller fit", L"Controller on the grip pose", "grip_fit",
+     GripFitValue, GripFitChange, L"runtime|model"},
 
     // Throw
     {kGroupThrow, L"Fast release", L"Release at once", "release_at_once",
@@ -1146,12 +1159,24 @@ const wchar_t* const kTips[] = {
     // Game Hand
     L"Hidden: the mod hides the mesh of the game Hand while a controller "
     L"places it, and draws both hands. Shown: the game draws its Hand too.",
+    // Hide rule
+    L"All: the game Hand hides in each state, also at the totem, and the "
+    L"copy with the glow of a miracle hides too. Exact: it hides only where "
+    L"it follows the real hand.",
+    // Hand flow
+    L"On: while a miracle is in the Hand, your hand has the moving glow that "
+    L"the game puts on its Hand. Off: no glow. It needs the hide rule All.",
     // Hand model
     L"The hands that the mod draws. Low poly: simple hands. Game: the hand "
     L"mesh of the game. File: the hand mesh from a file.",
     // Hand look
     L"The look of the game hand mesh: the alignment of the player, evil, "
     L"neutral or good. The low poly hands do not change.",
+    // Controller fit
+    L"Model: on Virtual Desktop, the Oculus runtime and SteamVR, the drawn "
+    L"controller, the hands and the Hand go on the frame of the model of a "
+    L"Meta Touch controller, 2.7 cm from the grip pose. Runtime: on the grip "
+    L"pose of the runtime.",
     // Fast release
     L"On: a game turn runs on the frame after a release of the Hand, or after "
     L"the grip opens in a take. Off: the mod waits up to 100 ms for the game "

@@ -60,6 +60,7 @@
 #include "debug_menu.h"
 #include "debug_window.h"
 #include "debug_window_math.h"
+#include "grip_fit.h"
 #include "haptics.h"
 #include "panel_kit.h"
 #include "places_panel.h"
@@ -221,6 +222,9 @@ void ApplyLive(int id, int v) {
     case kLeftHand: ControllersSetLeftHand(v, kBy); break;
     case kGestureTrail: OverlaySetTrail(v != 0, kBy); break;
     case kOpenStroke: ControllersSetOpenStroke(v, kBy); break;
+    case kGripAhead: GripFitSetTrim(0, v, kBy); break;
+    case kGripUp: GripFitSetTrim(1, v, kBy); break;
+    case kGripOut: GripFitSetTrim(2, v, kBy); break;
     case kHintLearn: HintCardSetLearn(v, kBy); break;
     case kCardStyle: HintCardSetStyle(v, kBy); break;
     default: break;

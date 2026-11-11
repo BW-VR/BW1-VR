@@ -356,8 +356,11 @@ from 0 to 1.
   ghost there. The value of the town does not slide: only the picture does.
 
 In state 5 the Hand of the game is on the top of the pole. The mesh of the
-game's Hand is hidden (`hand_hide_game=1`), and the mod draws its hands at the
-real hands. With `totem_take=1` the totem stays in the pick record while the
+game's Hand is hidden (`hand_hide_game=1` and `hand_hide_all=1`, hand.md,
+"The exact Hand"), and the mod draws its hands at the real hands. With
+`hand_hide_all=0` the game draws its Hand on the pole too, while the real
+hand moves the pole. The report of `hand exact` counts the hidden draws in
+the Totem state. With `totem_take=1` the totem stays in the pick record while the
 grip is closed, so the game keeps the totem while the hand goes away from it,
 and the opening of the grip ends the action (see "The mod: the totem is the
 source of a take").

@@ -23,3 +23,9 @@ bool HandExactHidesGame();
 
 // hand_tint=1: the mod's hands take the color of the player's alignment.
 bool HandExactTint();
+
+// THE FLOW ON THE HAND (hand_flow_glow, docs/hand.md, "The flow of a miracle
+// on the Hand"): the flow that the game drew on its Hand in this frame, for
+// the mod's pointing hand. False when there is none.
+struct HandFlowGlow;
+bool HandExactFlow(HandFlowGlow* out);

@@ -1804,8 +1804,9 @@ in the view, with the cards of the land prompt on both hands
 with Vulkan and `video_view=1` the pictures of the view for videos
 (`bwvr-vk-video-N.bmp`), which have the cards over the eye picture.
 
-**The fit in the hand.** The models and the drawn hand use the same grip
-pose (`OverlayHand`), so they turn together. The test program drew the low
+**The fit in the hand.** The models and the drawn hand use the same frame
+(`OverlayHand`), so they turn together. On a runtime of the table of 9.15
+that frame is the frame of the model on the grip pose (`grip_fit=1`). The test program drew the low
 poly hand of the overlay at the grip of each model, and gave the box of
 each model in the grip space. The frames agree: the fingers of the hand
 open along -y, the back of the right hand is at +x (the strap of the Index
@@ -1816,28 +1817,93 @@ the index finger. The grip button of a Touch is at x -0.6 cm, on the side
 of the finger tips. The -z axis of the grip goes through the closed
 fingers from the little finger to the thumb, so in a natural hold it points
 up and ahead. A fake controller at a pitch of 0 has the forearm straight up,
-and its controller and hand look turned on their side. Only a headset shows
-the fit with the grip pose of a real runtime.
+and its controller and hand look turned on their side.
 
 The check of the view (9.15) shows whether the mod draws the controller and
-the hand at the grip pose that the runtime gives. Only a headset can show
-whether that grip pose and the origin of each model are at the real
-controller, whether the faint body and the pulse of the gold buttons read at
-55 cm over the land, and whether the cards and their lines are easy to
-follow (`headset-checks.md`).
+the hand at the frame that it gives them. Only a headset can show whether
+the faint body and the pulse of the gold buttons read at 55 cm over the
+land, and whether the cards and their lines are easy to follow
+(`headset-checks.md`).
 
 ### 9.15 The place of the controller
 
-In a session with Virtual Desktop on a Quest 3, the controller in the hand
-and the hand show 2 to 3 cm nearer to the head than the controllers that the
-menu of the Quest draws, with the hand held still. A still offset is not a
-delay. This section gives each step from the poses of the runtime to the
-pixels of the eye pictures, and the check of the whole chain.
+The drawn controller, the drawn hand and the Hand of the game are on one
+frame of each controller. This section gives the frame (the fit and the
+trim), each step from that frame to the pixels of the eye pictures, and the
+check of the whole chain.
 
-Code: `src/mod/view_check_math.h` (the math), `src/mod/view_check.cpp` (the
-check in the game), `XrScreen::DeclaredView` in `src/vr/xr_screen.cpp` (the
-views that the projection layer declares), and `StereoDeclaredView` in
-`stereo.cpp`. The checks are in `test/controller_math/view_check_checks.h`.
+Code: `src/mod/grip_fit_math.h` (the table and the math of the fit and the
+trim), `src/mod/grip_fit.cpp` (the keys, the log and the change of the hands
+of each frame), `src/mod/view_check_math.h` and `src/mod/view_check.cpp`
+(the check), `XrScreen::DeclaredView` in `src/vr/xr_screen.cpp` (the views
+that the projection layer declares), and `StereoDeclaredView` in
+`stereo.cpp`. The checks are in `test/controller_math/grip_fit_checks.h` and
+`view_check_checks.h`. The tool `tools/grip_fit.py` makes the numbers of the
+table.
+
+**The frame of the model.** The origin of a WebXR model is the grip space
+of the browser of the Quest. The grip pose of Virtual Desktop, of the Oculus
+runtime and of SteamVR is a different frame:
+
+- Virtual Desktop copies the grip pose and the aim pose of the Oculus
+  runtime (`controllers.md`, 8.1, the constants of
+  `rebindControllerActions`).
+- SteamVR gives the component `openxr_grip` of its own model of each Quest
+  controller (`resources/rendermodels/oculus_quest*_controller_*`). Its aim
+  pose is 60 degrees down from that grip pose and 9.96 cm from it, as in
+  Virtual Desktop.
+- The SteamVR model of a controller and the WebXR model of the same
+  controller have the same shape. `tools/grip_fit.py` puts the SteamVR
+  model in its `openxr_grip` frame and fits it on the WebXR model. The
+  points of the surfaces are 1.2 to 1.8 mm apart after the fit.
+
+| WebXR model | Turn | Origin of the model in the grip frame (x right, y up, z back) | Move of the middle |
+| --- | --- | --- | --- |
+| `meta-quest-touch-plus` (Quest 3, 3S) | 18.0 degrees, down about x | 0.32, -1.09, -2.62 cm | 2.7 cm |
+| `meta-quest-touch-pro` | 16.1 degrees | 0.35, -0.94, -2.65 cm | 2.7 cm |
+| `oculus-touch-v3` (Quest 2) | 16.5 degrees | -0.04, -1.03, -2.31 cm | 2.8 cm |
+| `oculus-touch-v2` (Quest, Rift S) | 17.9 degrees | -0.02, -1.22, -2.11 cm | 2.9 cm |
+
+The values are for the right hand. The left hand has the mirror image, as
+Virtual Desktop mirrors its poses. With the WebXR model on the grip pose of
+the runtime, the middle of a Touch Plus shows 2.7 cm from the real middle:
+2.5 cm toward the bottom of the handle and 1.0 cm away from the trigger. With
+a level aim that is 2.1 cm back toward the player and 1.6 cm down
+(`grip_fit_checks.h`). The drawn hand is fitted to the models (9.14, "The
+fit in the hand"), so it shows at the same wrong place.
+
+**The fit.** With `grip_fit=1`, `GripFitFrame` changes the grip pose of each
+hand of a frame to the frame of its model: the position moves by the
+offset of the table in the frame of the grip, and the orientation turns by
+the turn of the table. It does this for a runtime whose name starts with
+`VirtualDesktopXR`, `Oculus` or `SteamVR`, and for a model of the table (the
+model of `ModelOfProfile`, from the profile and the name of the headset).
+Each other runtime and model keeps the grip pose of the runtime. The aim
+pose does not change: it is the aim pose of the runtime, and the presets of
+`controllers.md`, 8, are on it.
+
+The change is in `ControllersFrame`, before any code reads the hands. So
+the model, the hand, the cards at the wrist, the Hand of the game and its
+point of the pick, the throw and the check of the view all use the frame of
+the model. The log line of the grip to aim (`controllers.md`, 8.4) reads
+the poses of the runtime. The bridge (`xr_bridge=1`) does not send the name
+of the runtime, so it has no fit.
+
+**The trim.** For a player whose controller still does not fit, the VR
+Settings window (`ui-layer.md`, 24.1, the tab Hands) moves the controllers
+ahead, up or out in steps of 5 mm, from -30 to 30 mm: `grip_trim_ahead_mm`,
+`grip_trim_up_mm` and `grip_trim_out_mm`. The axes are the axes of the aim
+pose of the runtime: ahead is where the controller points, up is to its top
+face, and out is away from the other hand. The trim moves the grip pose and
+the aim pose of both hands by the same move, so the drawn controller, the
+hand, the Hand and the ray move together. A change acts at the next frame,
+and the window writes the key into `bwvr.ini`.
+
+**What a player can compare in the headset.** The Quest menu shows its own
+controllers only while it is open, and then the game has no input focus and
+the mod draws no controller. Two still checks need no menu: the tips of the
+two real controllers touch, and the drawn tips must touch too. And a real
+finger on the real trigger must be on the drawn trigger.
 
 **The chain.** Each step must keep a point of the room at its place:
 
@@ -1851,7 +1917,7 @@ views that the projection layer declares), and `StereoDeclaredView` in
 | The frustum | `LH3DTech::ChangeFov` gives `1 / tan(half)` across and `aspect / tan(half)` up, with the aspect of the render (square pixels) | The layer declares the same half angle, and the vertical angle of the same aspect |
 | The picture | The Vulkan target goes to the swapchain with a copy of the same size (`vkCmdCopyImage`) | No crop and no scale |
 | The pose of the layer | The eye poses that the render used (the frame before), with the frustum of the render (`DeclaredView`) | The engine built its camera from those poses |
-| The controller | The model of the WebXR profile at the grip pose: `world = position + rotation * (x, y, -z) * units` | The origin of a WebXR model is the grip space |
+| The controller | The model of the WebXR profile at the frame of the model (the grip pose with the fit): `world = position + rotation * (x, y, -z) * units` | The origin of a WebXR model is the frame of the model |
 
 **The check in the game.** In each eye pass of the God view,
 `ViewCheckEye` puts the grip point of each hand on the screen with the
@@ -1883,13 +1949,12 @@ geometry gives: a separation 6 percent too large shows the grip 2.67 cm
 nearer at 47 cm, and both eyes 2.5 cm forward show it 2.1 cm nearer along
 the line to the grip.
 
-**The cause.** The chain of the mod has no step that moves a still grip
-point toward the head. When the check in the game agrees in the session of
-the owner, the error is before the mod: the grip pose that Virtual Desktop
-gives is not the grip pose of the runtime of the Quest, for which the WebXR
-model is made. Virtual Desktop gives the aim pose 60 degrees down from the
-grip pose, at 0.0, -6.7 and -7.3 cm in the frame of the grip (the log line
-`controllers  : ... the runtime puts the aim pose`).
+**What the check shows.** The chain of the mod has no step that moves a
+still grip point. In a session with Virtual Desktop on a Quest 3 the check
+gave 0.00 cm between the place where the game draws the grip point and the
+place that the declared views give it, at 50 cm from the head. So the eyes
+see the controller at the frame that the mod gives it. The check cannot see
+an error of that frame against the real controller: the fit corrects that.
 
 **The log.**
 
@@ -1905,9 +1970,37 @@ grip pose, at 0.0, -6.7 and -7.3 cm in the frame of the grip (the log line
   the game and a pixel of the declared view is N pixels`: in each report
   window with points.
 
-Open: the check in a session of the owner. If it shows the chain exact, the
-grip pose of Virtual Desktop is the cause. A trim of the grip pose for
-Virtual Desktop then needs the size and the direction of the offset.
+- `grip fit     : grip_fit=1. On Virtual Desktop, the Oculus runtime and
+  SteamVR, the grip pose of a Meta Touch controller is the frame of its
+  model: the model, the hand and the Hand of the game go on that frame. The
+  trim of the player is N mm ahead, N mm up and N mm out`
+  once.
+- `grip fit     : the right hand, runtime "VirtualDesktopXR", model
+  meta-quest-touch-plus: the frame of the model is turned 18.0 degrees from
+  the grip pose of the runtime, at 0.3 -1.1 -2.6 cm in the frame of the grip
+  (x right, y up, z back). The middle of the controller moves 2.7 cm, frame
+  N` for each hand, and again when the runtime, the model or the switch
+  changes (16 lines at most). With no fit: `... the table has no fit for
+  them. The model and the hand are on the grip pose of the runtime`.
+- `grip fit     : the VR Settings window: the trim is N mm ahead, N mm up
+  and N mm out now ...` at each change of a trim row.
+- `grip fit     : the debug page: grip_fit is N now ...` at each change of
+  the switch.
+
+**The keys.**
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `grip_fit` | 1 | 1 the grip pose is the frame of the model of the controller, for the runtimes and the models of the table. 0 the grip pose of the runtime. The switch "Controller fit" of the debug page (group Hand) changes it live |
+| `grip_trim_ahead_mm` | 0 | The trim of the player, -30 to 30 mm: ahead along the aim of the controller. A row of the VR Settings window |
+| `grip_trim_up_mm` | 0 | The trim up, to the top face of the controller |
+| `grip_trim_out_mm` | 0 | The trim out, away from the other hand |
+| `grip_fit_test` | 0 | Test key. 1 gives the hands of the scripted controller the fit of Virtual Desktop and the Touch Plus. A desktop run has no runtime, so with 0 the scripted hands have no fit |
+
+Open: only a headset shows that the drawn controllers and hands are on the
+real ones with the fit (`headset-checks.md`). The table is made from the
+models of SteamVR and of the WebXR profiles, not from a measure of a real
+controller in Virtual Desktop.
 
 ## 10. A text that waits for a click
 

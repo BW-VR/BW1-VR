@@ -167,6 +167,7 @@ struct Built {
   bool valid = false;
   float* world = nullptr;    // 3 floats a vertex
   uint32_t* color = nullptr;
+  uint8_t* level = nullptr;  // the light of the game, 0 to 255 a vertex
   float tip[3];
   float mirror = 1.0f;       // the sign of the map from the mesh to the world
 };
@@ -519,11 +520,14 @@ bool AllocateFrameBuffers() {
   for (int h = 0; h < 2; ++h) {
     free(g_built[h].world);
     free(g_built[h].color);
+    free(g_built[h].level);
     g_built[h].world = static_cast<float*>(malloc(v3));
     g_built[h].color = static_cast<uint32_t*>(
         malloc(static_cast<size_t>(vertices) * sizeof(uint32_t)));
+    g_built[h].level =
+        static_cast<uint8_t*>(malloc(static_cast<size_t>(vertices)));
     g_built[h].valid = false;
-    ok = ok && g_built[h].world && g_built[h].color;
+    ok = ok && g_built[h].world && g_built[h].color && g_built[h].level;
   }
   // The cut at the near plane makes at most two triangles of one.
   g_vertex_room = triangles * 2 * 3 * 2;
@@ -1162,7 +1166,34 @@ bool g_water_on = false;
 float g_water_units_cm = 0.0f;
 bool g_water_shown = false;
 
+// THE FLOW ON THE HAND (HandModelSetFlow): the hand that takes it, the flow,
+// and true while FillHand fills the pass of the flow.
+int g_flow_hand = -1;
+HandFlowGlow g_flow = {};
+bool g_flow_pass = false;
+uint64_t g_flow_draws = 0;
+bool g_said_flow_draw = false;
+
+// A corner of the pass of the flow: the color of the flow times the light of
+// the game, as the game lights its mesh with the color of the flow, and the
+// texture point in the cell of the frame.
+void FlowCornerOf(const Built& built, int v, Corner* out) {
+  memcpy(out->c, g_camera + v * 3, sizeof(out->c));
+  const float level = static_cast<float>(built.level[v]) / 256.0f;
+  for (int k = 0; k < 3; ++k) {
+    out->color[k] =
+        static_cast<float>((g_flow.color >> (8 * k)) & 0xFFu) * level;
+  }
+  out->color[3] = static_cast<float>(g_flow.color >> 24) * g_fill_opacity;
+  out->uv[0] = g_mesh.uv[v * 2 + 0] * g_flow.scale + g_flow.du;
+  out->uv[1] = g_mesh.uv[v * 2 + 1] * g_flow.scale + g_flow.dv;
+}
+
 void CornerOf(const Built& built, int v, Corner* out) {
+  if (g_flow_pass) {
+    FlowCornerOf(built, v, out);
+    return;
+  }
   memcpy(out->c, g_camera + v * 3, sizeof(out->c));
   const uint32_t color = built.color[v];
   for (int k = 0; k < 4; ++k) {
@@ -1400,6 +1431,7 @@ bool HandModelBuild(int hand, const float position[3], const float rotation[9],
         hm::GameLightLevel(hx::Dot(normal, light)) * 255.0f);
     built.color[v] = alpha | ((red * level) >> 8) << 16 |
                      ((green * level) >> 8) << 8 | ((blue * level) >> 8);
+    built.level[v] = static_cast<uint8_t>(level > 255u ? 255u : level);
   }
   // The tip of the index finger: the origin of the rest mesh, on its last bone.
   memcpy(built.tip, o[hm::kFingerBones[1][hm::kChain - 1]], sizeof(built.tip));
@@ -1469,6 +1501,15 @@ void HandModelSetRoomLight(bool on) { g_room_light = on; }
 
 void HandModelSetFrontDepth(bool on) { g_front_depth = on; }
 
+void HandModelSetFlow(int hand, const HandFlowGlow* flow) {
+  if (hand < 0 || hand > 1 || flow == nullptr) {
+    g_flow_hand = -1;
+    return;
+  }
+  g_flow_hand = hand;
+  g_flow = *flow;
+}
+
 void HandModelSetOpacity(int hand, float opacity) {
   if (hand < 0 || hand > 1) return;
   g_opacity[hand] = opacity < 0.0f ? 0.0f : opacity > 1.0f ? 1.0f : opacity;
@@ -1526,6 +1567,48 @@ int HandModelDraw(IDirect3DDevice7* device, const float camera[12],
     }
     if (!write) device->SetRenderState(D3DRENDERSTATE_ZWRITEENABLE, TRUE);
   }
+  // THE FLOW ON THE HAND, over the hand that takes it: the same triangles at
+  // the same depth, with the material of the game's flow. It adds the
+  // texture times the color with the source alpha, and it writes no depth
+  // [V fn_0082ECD0]. The states go back to the ones of SetStates after it.
+  const int flow_hand = g_flow_hand;
+  g_flow_hand = -1;
+  if (SUCCEEDED(result) && flow_hand >= 0 && flow_hand <= 1 &&
+      g_built[flow_hand].valid && g_flow.texture != nullptr) {
+    const uint64_t culled = g_culled;
+    g_flow_pass = true;
+    g_fill_opacity = g_opacity[flow_hand];
+    const int count =
+        FillHand(g_built[flow_hand], camera, near_plane, half_x, half_y, 0);
+    g_fill_opacity = 1.0f;
+    g_flow_pass = false;
+    g_culled = culled;
+    if (count > 0) {
+      device->SetTexture(0, static_cast<IDirectDrawSurface7*>(g_flow.texture));
+      device->SetRenderState(D3DRENDERSTATE_DESTBLEND, D3DBLEND_ONE);
+      device->SetRenderState(D3DRENDERSTATE_ZWRITEENABLE, FALSE);
+      device->SetRenderState(D3DRENDERSTATE_ALPHATESTENABLE, FALSE);
+      for (int first = 0; first < count && SUCCEEDED(result);
+           first += kDrawVertices) {
+        const int part =
+            count - first < kDrawVertices ? count - first : kDrawVertices;
+        result = device->DrawPrimitive(D3DPT_TRIANGLELIST, kFvf,
+                                       g_vertices + first,
+                                       static_cast<DWORD>(part), 0);
+      }
+      device->SetRenderState(D3DRENDERSTATE_ALPHATESTENABLE, TRUE);
+      device->SetRenderState(D3DRENDERSTATE_ZWRITEENABLE, TRUE);
+      device->SetRenderState(D3DRENDERSTATE_DESTBLEND, D3DBLEND_INVSRCALPHA);
+      ++g_flow_draws;
+      if (!g_said_flow_draw) {
+        g_said_flow_draw = true;
+        ModLog("hand model   : the flow of a miracle is drawn on the %s hand, "
+               "frame %llu: %d triangles, the color 0x%08X, the cell at %.3f "
+               "%.3f", flow_hand == 0 ? "left" : "right", g_frame, count / 3,
+               g_flow.color, g_flow.du, g_flow.dv);
+      }
+    }
+  }
   if (have_before) {
     device->SetTexture(0, before);
     if (before != nullptr) before->Release();
@@ -1565,6 +1648,11 @@ void HandModelReport() {
          g_draws, static_cast<double>(g_triangles_drawn) / passes,
          static_cast<double>(g_culled) / passes, g_failed,
          Ms(g_draw_ticks) / passes, Ms(g_build_ticks) / passes);
+  if (g_flow_draws > 0) {
+    ModLog("hand model   : the flow of a miracle was on the pointing hand in "
+           "%llu eye passes", g_flow_draws);
+    g_flow_draws = 0;
+  }
   g_draws = g_triangles_drawn = g_culled = g_failed = 0;
   g_draw_ticks = g_build_ticks = 0;
   ++g_cost_frames;

@@ -18,6 +18,9 @@ void VkDdrawInstall(int lines, int surface_heap);
 // vk_blt_blocks of bwvr.ini (vk_ddraw.cpp): 1 a Blt makes DXT1 blocks from
 // RGB pixels and copies the blocks of a rect, 0 the old way.
 void VkDdrawSetBlocks(int on);
+// vk_dxt_fit of bwvr.ini (vk_ddraw.cpp): 1 the blocks of that Blt get the
+// fit of least squares (save_picture::FitDxt1Block), 0 EncodeDxt1Block alone.
+void VkDdrawSetBlockFit(int on);
 bool VkDdrawOn();
 
 // For the report of each 450 frames: the calls of each method that the

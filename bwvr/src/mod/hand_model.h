@@ -96,6 +96,23 @@ void HandModelSetOpacity(int hand, float opacity);
 void HandModelSetRoomLight(bool on);
 void HandModelSetFrontDepth(bool on);
 
+// THE FLOW ON THE HAND (docs/hand.md, "The flow of a miracle on the Hand"):
+// the game's own flow, which it draws on its Hand while a miracle is in it.
+// The texture is the game's surface of S_Hand_Flow.raw on its device. A
+// texture point (u, v) of the mesh draws at (u * scale + du, v * scale + dv),
+// and the lit color of each vertex is `color` (the alpha and the color of the
+// player) times the light of the game.
+struct HandFlowGlow {
+  void* texture;   // IDirectDrawSurface7
+  uint32_t color;
+  float scale;
+  float du, dv;
+};
+
+// The hand (0 the left hand, 1 the right hand) that takes the flow in the
+// next draw, or -1 for none. The flow is copied.
+void HandModelSetFlow(int hand, const HandFlowGlow* flow);
+
 // In an eye pass: draws the hands of this frame with the camera of the eye.
 // Returns the count of triangles drawn, or -1 when the draw failed.
 int HandModelDraw(IDirect3DDevice7* device, const float camera[12],

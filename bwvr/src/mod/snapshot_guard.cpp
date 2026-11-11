@@ -26,9 +26,12 @@
 // and with backend=vulkan the primary surface has no pixels of the scene.
 //
 // WHAT THIS FILE DOES (save_picture=1). While VR runs, a hook on Process gives
-// the game a primary surface of the mod for the call: kWidth by kHeight
-// pixels of 32 bits with the middle of the eye picture of the last frame
-// (save_picture_math.h), and LHScreen::width and height of that size. The
+// the game a primary surface of the mod for the call: pixels of 32 bits with
+// the middle of the eye picture of the last frame (save_picture_math.h), and
+// LHScreen::width and height of that size. With save_picture_fit=1 the size
+// is the count of points that the game reads (256 by 128, or 400 by 300 for
+// the full picture), so each point is the mean of its box. With 0 it is
+// kWidth by kHeight, and the game takes one pixel of each 2 by 3. The
 // game then makes the picture as it makes it from a screen, and the call
 // puts the primary surface and the size back. The eye picture comes from the
 // Vulkan renderer (backend=vulkan), from the wide target of one walk, or from
@@ -96,8 +99,15 @@ bool g_dump = false;      // save_picture_test_dump
 uint64_t g_skipped = 0;
 uint64_t g_made = 0;
 
-// The picture that the game reads, BGRA.
+bool g_fit = true;        // save_picture_fit
+// The picture that the game reads, BGRA, and its size for this call
+// (save_picture::ReadSize).
 uint8_t g_pixels[save_picture::kWidth * save_picture::kHeight * 4];
+int g_w = save_picture::kWidth;
+int g_h = save_picture::kHeight;
+static_assert(save_picture::kFullWidth * save_picture::kFullHeight <=
+                  save_picture::kWidth * save_picture::kHeight,
+              "each size of the read fits in the pixels");
 
 // The primary surface of the mod for one call of Process: Lock gives the
 // picture, and Unlock does nothing. The game calls no other method there.
@@ -146,7 +156,7 @@ class PictureSurface : public IDirectDrawSurface7 {
     Describe(out);
     uint8_t* bits = g_pixels;
     if (rect != nullptr) {
-      bits += rect->top * save_picture::kWidth * 4 + rect->left * 4;
+      bits += rect->top * g_w * 4 + rect->left * 4;
     }
     out->dwFlags |= DDSD_LPSURFACE;
     out->lpSurface = bits;
@@ -194,9 +204,9 @@ class PictureSurface : public IDirectDrawSurface7 {
     d->dwSize = size;
     d->dwFlags = DDSD_CAPS | DDSD_WIDTH | DDSD_HEIGHT | DDSD_PITCH |
                  DDSD_PIXELFORMAT;
-    d->dwWidth = save_picture::kWidth;
-    d->dwHeight = save_picture::kHeight;
-    d->lPitch = save_picture::kWidth * 4;
+    d->dwWidth = static_cast<DWORD>(g_w);
+    d->dwHeight = static_cast<DWORD>(g_h);
+    d->lPitch = g_w * 4;
     d->ddsCaps.dwCaps = DDSCAPS_PRIMARYSURFACE | DDSCAPS_SYSTEMMEMORY;
     Format(&d->ddpfPixelFormat);
   }
@@ -214,7 +224,7 @@ void TakeVulkan(const uint8_t* pixels, int pitch, uint32_t w, uint32_t h,
                                   static_cast<int>(h)};
   static_cast<VkRead*>(context)->ok = save_picture::Shrink(
       pixels, pitch, static_cast<int>(w), static_cast<int>(h), red_first, all,
-      g_pixels, save_picture::kWidth, save_picture::kHeight);
+      g_pixels, g_w, g_h);
 }
 
 // The middle of the eye picture of the last frame into g_pixels. `source`
@@ -246,8 +256,7 @@ bool MakePicture(const char** source, uint32_t* eye_w, uint32_t* eye_h) {
       ok = save_picture::Shrink(static_cast<const uint8_t*>(eye), pitch,
                                 static_cast<int>(*eye_w),
                                 static_cast<int>(*eye_h), false, part,
-                                g_pixels, save_picture::kWidth,
-                                save_picture::kHeight);
+                                g_pixels, g_w, g_h);
       OneWalkReadDone();
     }
     if (ok) return true;
@@ -263,7 +272,7 @@ bool MakePicture(const char** source, uint32_t* eye_w, uint32_t* eye_h) {
     ok = save_picture::Shrink(static_cast<const uint8_t*>(frame), pitch,
                               static_cast<int>(*eye_w),
                               static_cast<int>(*eye_h), false, part, g_pixels,
-                              save_picture::kWidth, save_picture::kHeight);
+                              g_w, g_h);
   }
   FrameSourceEnd();
   return ok;
@@ -290,7 +299,7 @@ void Dump(uint64_t n, const char* texture) {
   FILE* out = nullptr;
   bool bmp_ok = false;
   if (fopen_s(&out, bmp, "wb") == 0 && out != nullptr) {
-    const int w = save_picture::kWidth, h = save_picture::kHeight;
+    const int w = g_w, h = g_h;
     BITMAPFILEHEADER file = {};
     BITMAPINFOHEADER info = {};
     file.bfType = 0x4D42;
@@ -334,6 +343,7 @@ void __cdecl h_Process() {
   }
   const char* source = "no eye picture";
   uint32_t eye_w = 0, eye_h = 0;
+  save_picture::ReadSize(full, g_fit, &g_w, &g_h);
   LARGE_INTEGER t0, t1, t2, hz;
   QueryPerformanceCounter(&t0);
   if (!g_picture || !MakePicture(&source, &eye_w, &eye_h)) {
@@ -354,8 +364,8 @@ void __cdecl h_Process() {
       reinterpret_cast<IDirectDrawSurface7**>(kScreenPrimary);
   const uint16_t old_w = *width, old_h = *height;
   IDirectDrawSurface7* const old_primary = *primary;
-  *width = static_cast<uint16_t>(save_picture::kWidth);
-  *height = static_cast<uint16_t>(save_picture::kHeight);
+  *width = static_cast<uint16_t>(g_w);
+  *height = static_cast<uint16_t>(g_h);
   *primary = &g_surface;
   o_Process();
   *primary = old_primary;
@@ -366,19 +376,20 @@ void __cdecl h_Process() {
   ++g_made;
   if (g_made <= kLoggedPictures) {
     float light = 0.0f, dark = 0.0f;
-    save_picture::Measure(g_pixels, save_picture::kWidth * save_picture::kHeight,
-                          &light, &dark);
+    save_picture::Measure(g_pixels, g_w * g_h, &light, &dark);
     const double ms_eye =
         1000.0 * static_cast<double>(t1.QuadPart - t0.QuadPart) / hz.QuadPart;
     const double ms_game =
         1000.0 * static_cast<double>(t2.QuadPart - t1.QuadPart) / hz.QuadPart;
     ModLog("snapshot     : the game made a %s from %s (save_picture=1): the "
-           "middle %.0f%% of the width of %u x %u, at %d x %d. Its mean light "
-           "is %.2f, and %.1f%% of it is black. The eye picture took %.1f ms "
-           "and the call of the game %.1f ms. %s%s",
+           "middle %.0f%% of the width of %u x %u, at %d x %d (%s). Its mean "
+           "light is %.2f, and %.1f%% of it is black. The eye picture took "
+           "%.1f ms and the call of the game %.1f ms. %s%s",
            full ? "full picture" : "save picture", source,
-           save_picture::kShare * 100.0f, eye_w, eye_h, save_picture::kWidth,
-           save_picture::kHeight, light, dark * 100.0f, ms_eye, ms_game,
+           save_picture::kShare * 100.0f, eye_w, eye_h, g_w, g_h,
+           g_fit ? "the size of the read of the game, save_picture_fit=1"
+                 : "save_picture_fit=0",
+           light, dark * 100.0f, ms_eye, ms_game,
            full ? "" : "The texture is ", full ? "" : texture);
   }
   if (g_dump) Dump(g_made, full ? nullptr : texture);
@@ -392,11 +403,22 @@ void SnapshotGuardSetSkip(bool on) {
     ModLog("snapshot     : the game makes each save picture from its own "
            "screen");
   } else if (g_picture) {
-    ModLog("snapshot     : save_picture=1. The game makes each save picture "
-           "from a surface of the mod with the middle of the left eye "
-           "picture, %d x %d, because its screen in VR is not the picture "
-           "that the player sees",
-           save_picture::kWidth, save_picture::kHeight);
+    if (g_fit) {
+      ModLog("snapshot     : save_picture=1. The game makes each save picture "
+             "from a surface of the mod with the middle of the left eye "
+             "picture, because its screen in VR is not the picture that the "
+             "player sees. save_picture_fit=1: the surface has the size of "
+             "the read of the game, %d x %d for a save and %d x %d for a full "
+             "picture, so each pixel of the save is the mean of its box",
+             save_picture::kHalfWidth, save_picture::kHalfHeight,
+             save_picture::kFullWidth, save_picture::kFullHeight);
+    } else {
+      ModLog("snapshot     : save_picture=1. The game makes each save picture "
+             "from a surface of the mod with the middle of the left eye "
+             "picture, %d x %d, because its screen in VR is not the picture "
+             "that the player sees",
+             save_picture::kWidth, save_picture::kHeight);
+    }
   } else {
     ModLog("snapshot     : save_picture=0. The game makes no save picture in "
            "VR, because it reads past the end of a square window");
@@ -407,6 +429,8 @@ void SnapshotGuardSetPicture(bool on, bool dump) {
   g_picture = on;
   g_dump = dump;
 }
+
+void SnapshotGuardSetFit(bool on) { g_fit = on; }
 
 void SnapshotGuardInstall() {
   if (g_installed) return;

@@ -183,6 +183,7 @@ void HeadCameraInstall();
 void SnapshotGuardInstall();
 void SnapshotGuardSetSkip(bool on);
 void SnapshotGuardSetPicture(bool on, bool dump);
+void SnapshotGuardSetFit(bool on);
 void WaterModeSetSimple(bool on);
 void HeadCameraSetRoll(bool on);
 void StereoSetImmersive(bool on);
@@ -435,6 +436,9 @@ bool g_skip_snapshot = true;
 // mod with the eye picture (snapshot_guard.cpp). 0 no save picture in VR.
 bool g_save_picture = true;
 bool g_save_picture_dump = false;
+// save_picture_fit: 1 the surface has the size of the read of the game, so each
+// pixel of a save picture is the mean of its box. 0 a surface of 512 by 384.
+bool g_save_picture_fit = true;
 bool g_water_simple = true;
 bool g_head_roll = true;
 
@@ -1095,6 +1099,8 @@ void ReadSettings() {
       GetPrivateProfileIntA("bwvr", "save_picture", 1, path) != 0;
   g_save_picture_dump =
       GetPrivateProfileIntA("bwvr", "save_picture_test_dump", 0, path) != 0;
+  g_save_picture_fit =
+      GetPrivateProfileIntA("bwvr", "save_picture_fit", 1, path) != 0;
   // HEAD ROLL IS ON, AND IT DECIDES THE SEA.
   //
   // Without roll the world tilts with the player's head instead of staying
@@ -2162,6 +2168,7 @@ void StartVrStep() {
     // that the player sees, and the game reads past the end of a square
     // window.
     SnapshotGuardSetPicture(g_save_picture, g_save_picture_dump);
+    SnapshotGuardSetFit(g_save_picture_fit);
     SnapshotGuardSetSkip(g_skip_snapshot);
     WaterModeSetSimple(g_water_simple);
     HeadCameraSetRoll(g_head_roll);
@@ -3433,6 +3440,8 @@ BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID reserved) {
                 GetPrivateProfileIntA("bwvr", "vk_surface_heap", 1, ini)));
         VkDdrawSetBlocks(static_cast<int>(
             GetPrivateProfileIntA("bwvr", "vk_blt_blocks", 1, ini)));
+        VkDdrawSetBlockFit(static_cast<int>(
+            GetPrivateProfileIntA("bwvr", "vk_dxt_fit", 1, ini)));
         // Before the first present of the game.
         VkWindowSetOptions(static_cast<int>(
             GetPrivateProfileIntA("bwvr", "vk_window", 1, ini)));

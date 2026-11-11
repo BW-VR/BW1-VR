@@ -1673,6 +1673,7 @@ int DrawFlatEye(IDirect3DDevice7* device, int eye, float hx, float hy) {
   int mesh = 0;
   if (g_mesh_hands) {
     HandModelSetFrontDepth(true);
+    HandModelSetFlow(-1, nullptr);
     mesh = HandModelDraw(device, m, near_plane, hx, hy);
     HandModelSetFrontDepth(false);
   }
@@ -2237,6 +2238,10 @@ void OverlayDraw() {
   // is behind it must be there first.
   int mesh_drawn = 0;
   if (g_mesh_hands) {
+    // The flow of a miracle that the game drew on its Hand in this frame goes
+    // on the pointing hand, which stands for the game's Hand.
+    HandFlowGlow flow;
+    HandModelSetFlow(HandExactFlow(&flow) ? g_pointing : -1, &flow);
     mesh_drawn = HandModelDraw(device, m, near_plane, hx, hy);
     if (mesh_drawn > 0) drawn += mesh_drawn;
   }

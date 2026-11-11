@@ -156,6 +156,8 @@ int VkSceneStage1Value();
 void VkSceneStage1Toggle(const char* by);
 int VkSceneUntexturedValue();
 void VkSceneUntexturedToggle(const char* by);
+int StereoHeadPoseFrameValue();
+void StereoHeadPoseFrameToggle(const char* by);
 // The render (one_walk.cpp, frame_time.cpp, frame_send.cpp, render_thread.cpp,
 // fast_transform.cpp, d3d7_thread.cpp, thread_wait.cpp, vk_scene.cpp,
 // vk_window.cpp, mod_main.cpp, file_read_ahead.cpp).
@@ -434,6 +436,9 @@ const Switch kSwitches[] = {
     // View
     {kGroupView, L"Table", L"Table or God view", "", TabletopValue,
      TabletopChange, L"off|on"},
+    {kGroupView, L"Head pose", L"Head pose of the frame on the camera",
+     "head_pose_frame", StereoHeadPoseFrameValue, StereoHeadPoseFrameToggle,
+     L"frame before|own frame"},
     {kGroupView, L"Follow camera", L"God view follows the game camera",
      "god_spawn", TabletopGodSpawnValue,
      [](const char*) { TabletopGodSpawnToggle(); }, L"off|on"},
@@ -883,6 +888,9 @@ const wchar_t* const kTips[] = {
     // Table
     L"Turns the table, or the God view, on and off. When it comes back, it "
     L"faces the game camera again.",
+    // Head pose
+    L"Own frame: each picture uses the head pose of its own display time. "
+    L"Frame before: it uses the pose of the frame before.",
     // Follow camera
     L"On: the player goes where the game puts its camera. Off: the view moves "
     L"only at a start, a load and the end of a story.",

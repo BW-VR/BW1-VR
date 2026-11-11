@@ -78,6 +78,9 @@
 #include "vk_scene.h"
 #include "vk_ddraw.h"
 #include "address_space.h"
+#include "debug_menu.h"
+#include "head_lag.h"
+#include "head_lag_math.h"
 #include "vk_window.h"
 #include "render_thread.h"
 #include "scene_sample.h"
@@ -159,6 +162,8 @@ void HeadPoseStripRoll(const float in[4], float out[4]);
 bool HeadPoseFakeOn();
 void HeadPoseFakeEye(int eye, float position[3], float orientation[4]);
 void HeadPoseFakeCenter(float out[3]);
+// head_camera.cpp: the camera of the head that the main camera call built.
+bool HeadCameraRenderBasis(float basis_out[9], float position_out[3]);
 void PassGuardLogHand(int count);
 void UiDepthDumpNextFrame();
 void PassGuardSetEye(int eye);
@@ -392,6 +397,33 @@ const float kDefaultIpd = 0.0668f;
 float g_rendered_position[2][3] = {{0, 0, 0}, {0, 0, 0}};
 float g_rendered_orientation[2][4] = {{0, 0, 0, 1}, {0, 0, 0, 1}};
 bool g_head_camera_pose_ready = false;
+// THE HEAD POSE OF THE FRAME (head_pose_frame, docs/backend.md, "The head
+// pose of the frame"). 1: the main camera call of the game locates the views
+// for the display time that the frame it builds will get, so the picture of
+// a frame is drawn from the pose of that frame. 0: the camera takes the pose
+// that the frame before located after its xrWaitFrame, one display step
+// older than the picture.
+int g_head_pose_frame = 1;
+// The mean step of the display times, for the display time of the next
+// frame (head_lag_math.h), and the display time of the last frame.
+double g_display_step_mean = 0.0;
+int64_t g_display_last = 0;
+// The pose that HeadPoseUpdate has now: the middle of the head and the head,
+// in meters and LOCAL, and its display time (0 for the invented head).
+float g_stored_center[3] = {0, 0, 0};
+float g_stored_head[4] = {0, 0, 0, 1};
+int64_t g_stored_time = 0;
+bool g_have_stored = false;
+// The pose that the main camera call of this frame used, for the measure of
+// head_lag.cpp. Latched by the main camera call, and cleared at the head of
+// the frame.
+bool g_used_this_frame = false;
+bool g_have_used = false;
+float g_used_center[3] = {0, 0, 0};
+float g_used_head[4] = {0, 0, 0, 1};
+int64_t g_used_time = 0;
+bool g_used_located = false;  // the camera call located the pose
+int64_t g_used_guess = 0;     // the display time that it expected
 // CANTED VIEWS (eye_cant, docs/backend.md, "Canted views"). 1: the head of
 // the frame is the mean of the two views, and each eye pass turns its camera
 // by the turn of its own view from the head. 0: the head is the view of eye
@@ -1202,6 +1234,131 @@ bool SolveViews(const float view0[4], const float view1[4], bool declare_roll,
   return canted;
 }
 
+// The head pose for the camera hook (HeadPoseUpdate), and what the measure
+// of head_lag.cpp must know of it. time is its display time, 0 for none.
+void StoreHead(const float center[3], const float head[4], int64_t time) {
+  if (!HeadPoseUpdate(center, head)) return;
+  memcpy(g_stored_center, center, sizeof(g_stored_center));
+  memcpy(g_stored_head, head, sizeof(g_stored_head));
+  g_stored_time = time;
+  g_have_stored = true;
+}
+
+// THE MAIN CAMERA CALL OF A FRAME, before it reads the head pose
+// (head_camera.cpp, PlaceCamera). GGame::ProcessGraphicsEngine 0x0054D850
+// calls GCamera::Update 0x00441F80, which ends in LH3DTech::UpdateCamera
+// 0x00819920, before GGame::Process3dEngine 0x0054DA80. So this call comes
+// before xrWaitFrame of the frame (XrScreen::BeginFrame, in the scene
+// hook).
+//
+// With head_pose_frame=1 the views are located here for the display time
+// that the frame will get: the display time of the frame before and one
+// mean step. The camera, the God view and the declared pose of the layer
+// then all take that pose, and the hands of the frame (SyncInput, at the
+// display time of the frame) are of the same time. The runtime turns the
+// picture from that pose to the head at the display, as before. When the
+// locate fails, the camera takes the pose of the frame before, as with
+// head_pose_frame=0. xrWaitFrame stays where it is, so the pacing does not
+// change.
+//
+// With the invented head the pose of this moment goes on the camera, so a
+// step of the head shows in the frame in which the head took it.
+void HeadForCamera() {
+  g_used_located = false;
+  g_used_guess = 0;
+  if (g_head_pose_frame != 0 && g_enabled && g_stereo_on && g_head_tracking &&
+      !CutsceneWindowFlat()) {
+    const bool to_headset = g_screen != nullptr && g_screen->running() &&
+                            g_screen->eyes() > 1;
+    const bool declare_roll = HeadCameraRollEnabled() || !HeadCameraEnabled();
+    if (to_headset) {
+      int64_t last = 0, period = 0;
+      bwvr::EyeView views[2];
+      if (g_screen->LastDisplayTime(&last, &period) && period > 0) {
+        const int64_t guess = head_lag_math::NextDisplayTime(
+            last, g_display_step_mean, period);
+        if (g_screen->LocateViewsAt(guess, views)) {
+          float center[3];
+          for (int i = 0; i < 3; ++i) {
+            center[i] = (views[0].position[i] + views[1].position[i]) * 0.5f;
+          }
+          HeadPoseSetHead(center);
+          float head[4];
+          g_rendered_canted =
+              SolveViews(views[0].orientation, views[1].orientation,
+                         declare_roll, head, g_rendered_orientation,
+                         g_rendered_turn);
+          for (int e = 0; e < 2; ++e) {
+            for (int i = 0; i < 3; ++i) {
+              g_rendered_position[e][i] = views[e].position[i];
+            }
+          }
+          g_head_camera_pose_ready = true;
+          StoreHead(center, head, guess);
+          g_used_located = true;
+          g_used_guess = guess;
+        }
+      }
+    } else if (HeadPoseFakeOn()) {
+      float centre[3];
+      HeadPoseFakeCenter(centre);
+      HeadPoseSetHead(centre);
+      float fake_position[3];
+      float fake_view[2][4];
+      HeadPoseFakeEye(0, fake_position, fake_view[0]);
+      HeadPoseFakeEye(1, fake_position, fake_view[1]);
+      float head[4];
+      float declared[2][4];
+      float turn[2][4];
+      SolveViews(fake_view[0], fake_view[1], declare_roll, head, declared,
+                 turn);
+      StoreHead(centre, head, 0);
+      g_used_located = true;
+    }
+  }
+  g_used_this_frame = true;
+  g_have_used = g_have_stored;
+  memcpy(g_used_center, g_stored_center, sizeof(g_used_center));
+  memcpy(g_used_head, g_stored_head, sizeof(g_used_head));
+  g_used_time = g_stored_time;
+}
+
+// The measure of the frame (head_lag.cpp), after the head of the frame.
+// center and head are the newest pose of the frame.
+void HeadLagMeasure(bool to_headset, const float center[3],
+                    const float head[4]) {
+  HeadLagFrameData d;
+  memset(&d, 0, sizeof(d));
+  d.frame = ControllersFrameCount();
+  d.key = g_head_pose_frame;
+  d.headset = to_headset;
+  memcpy(d.newest_center, center, sizeof(d.newest_center));
+  memcpy(d.newest_head, head, sizeof(d.newest_head));
+  d.have_used = g_used_this_frame && g_have_used;
+  memcpy(d.used_center, g_used_center, sizeof(d.used_center));
+  memcpy(d.used_head, g_used_head, sizeof(d.used_head));
+  d.located = g_used_this_frame && g_used_located;
+  int64_t display = 0, period = 0;
+  if (to_headset && d.have_used && g_used_time > 0 &&
+      g_screen->LastDisplayTime(&display, &period)) {
+    d.have_times = true;
+    d.display_time_ns = display;
+    d.used_time_ns = g_used_time;
+    if (d.located && g_used_guess > 0) {
+      d.have_guess = true;
+      d.guess_error_ms = static_cast<double>(display - g_used_guess) / 1e6;
+    }
+  }
+  float basis[9];
+  if (HeadCameraRenderBasis(basis, d.camera)) {
+    d.have_camera = true;
+    d.camera_forward[0] = basis[2];
+    d.camera_forward[1] = basis[5];
+    d.camera_forward[2] = basis[8];
+  }
+  HeadLagFrame(d);
+}
+
 // THE HEAD TRACKING SETUP, once. The render has to cover what the headset asks for,
 // and the game renders a symmetric frustum whose vertical angle comes from
 // the render aspect. So take the widest half angle of either eye in either
@@ -1461,7 +1618,8 @@ void __fastcall Process3dEngineBody(void* self, void* unused) {
     float declared[2][4];
     g_frame_canted = SolveViews(fake_view[0], fake_view[1], declare_roll,
                                 head, declared, g_frame_turn);
-    HeadPoseUpdate(centre, head);
+    HeadLagMeasure(false, centre, head);
+    StoreHead(centre, head, 0);
     VideoViewHead(fake_position[0], fake_view[0]);
     // The subtitle card hangs in the room, so it needs the head of the frame.
     UiPanelHead(centre, head);
@@ -1478,15 +1636,24 @@ void __fastcall Process3dEngineBody(void* self, void* unused) {
         (g_screen->eye(0).position[1] + g_screen->eye(1).position[1]) * 0.5f,
         (g_screen->eye(0).position[2] + g_screen->eye(1).position[2]) * 0.5f};
     HeadPoseSetHead(center);
-    // The frame's head pose, with no eye in it, for the camera hook. It runs
-    // before this point in the next frame, so what it reads is one frame old.
-    // The runtime reprojects late head movement anyway, and the alternative is
-    // moving the whole frame begin earlier, which is a larger change than the
-    // sea is worth tonight.
+    // THE MEAN STEP OF THE DISPLAY TIMES, for the display time that the main
+    // camera call of the next frame expects (HeadForCamera).
+    {
+      int64_t display = 0, period = 0;
+      if (g_screen->LastDisplayTime(&display, &period)) {
+        if (g_display_last > 0 && display > g_display_last) {
+          g_display_step_mean = head_lag_math::NextMeanStep(
+              g_display_step_mean, display - g_display_last, period);
+        }
+        g_display_last = display;
+      }
+    }
     // Declare the pose the scene was actually drawn from. The engine's camera
-    // update runs earlier in the frame than this hook, so it used the pose
-    // worked out on the previous frame, and that is what the layer has to
-    // report.
+    // update runs earlier in the frame than this hook. With head_pose_frame=1
+    // the camera call located the pose for the display time of this frame
+    // (HeadForCamera). With head_pose_frame=0, or when that locate
+    // failed, the camera used the pose that the frame before located below.
+    // The layer reports the pose of the camera in each case.
     if (g_head_camera_pose_ready) {
       for (int e = 0; e < 2; ++e) {
         g_screen->SetRenderPose(e, g_rendered_position[e],
@@ -1511,6 +1678,10 @@ void __fastcall Process3dEngineBody(void* self, void* unused) {
     // A CANTED VIEW. The head of the frame is the mean of the two views, and
     // the turn of each declared view from it goes to the eye passes of the
     // next frame, with this pose (SolveViews).
+    //
+    // The pose of this frame, located after xrWaitFrame, is the newest pose.
+    // It stays for the rest of the frame (the hands, the interface), and it
+    // is the pose of the next frame when its camera call does not locate one.
     float head[4];
     g_rendered_canted = SolveViews(
         g_screen->eye(0).orientation, g_screen->eye(1).orientation,
@@ -1521,11 +1692,16 @@ void __fastcall Process3dEngineBody(void* self, void* unused) {
       }
     }
     g_head_camera_pose_ready = true;
-    HeadPoseUpdate(center, head);
+    HeadLagMeasure(true, center, head);
+    int64_t display = 0, period = 0;
+    if (!g_screen->LastDisplayTime(&display, &period)) display = 0;
+    StoreHead(center, head, display);
     UiPanelHead(center, head);
     MenuRoomHead(center, head);
     CutsceneWindowHead(center, head);
   }
+  // The latch of the main camera call is for one frame.
+  g_used_this_frame = false;
 
   UiDepthNewFrame();
   UiDepthHintHandDepthFrame();
@@ -2180,6 +2356,7 @@ void __fastcall Process3dEngineBody(void* self, void* unused) {
     }
     ModLog("rest of frame: %.2f ms outside the scene walk entirely",
            Ms(g_after_hook_ticks));
+    if (g_head_tracking) HeadLagReport(g_head_pose_frame, g_frame_to_headset);
     SceneSampleReport(g_timed_now, Ms(g_scene_ticks));
     // Before the report of the render thread, which changes the key of
     // ab_test for the next window.
@@ -2428,6 +2605,30 @@ void StereoSetTestKeys(bool on) { g_test_keys = on; }
 // The world around you instead of a screen in front of you.
 void StereoSetHeadFov(float degrees) { g_head_fov_deg = degrees; }
 void StereoSetEyeCant(int mode) { g_eye_cant = mode != 0 ? 1 : 0; }
+
+// For head_camera.cpp, at the main camera call. See HeadForCamera.
+void StereoHeadForCamera() { HeadForCamera(); }
+
+// head_pose_frame. See HeadForCamera.
+void StereoSetHeadPoseFrame(int mode) {
+  g_head_pose_frame = mode != 0 ? 1 : 0;
+  ModLog("head         : head_pose_frame=%d. %s", g_head_pose_frame,
+         g_head_pose_frame
+             ? "The main camera call locates the head for the display time "
+               "of its frame"
+             : "The camera takes the head that the frame before located");
+}
+
+// The switch of the debug page. Not on the page with head tracking off.
+int StereoHeadPoseFrameValue() {
+  return g_head_tracking ? g_head_pose_frame : kDebugCannot;
+}
+
+void StereoHeadPoseFrameToggle(const char* by) {
+  g_head_pose_frame = g_head_pose_frame != 0 ? 0 : 1;
+  ModLog("test key     : %s: head_pose_frame is %d from the next frame", by,
+         g_head_pose_frame);
+}
 
 // For intro_vr.cpp: the head of a frame and the turn of each view from it.
 // See SolveViews.

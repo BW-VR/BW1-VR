@@ -3747,6 +3747,7 @@ void CreatureChecks() {
 #include "panel_raster_checks.h"
 #include "card_send_checks.h"
 #include "controls_layout_checks.h"
+#include "head_lag_checks.h"
 
 int main() {
   const float eye[3] = {120.0f, 45.0f, -300.0f};
@@ -4197,6 +4198,7 @@ int main() {
   ray_card_checks::GlowAloneChecks();
   ray_card_checks::RayCardChecks();
   ray_tip_checks::RayTipChecks();
+  head_lag_checks::HeadLagChecks();
   places_checks::PlacesChecks();
   bookmark_aim_checks::BookmarkAimChecks();
   debug_window_checks::DebugWindowChecks();

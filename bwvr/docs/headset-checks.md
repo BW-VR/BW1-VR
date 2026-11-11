@@ -20,7 +20,8 @@ want.
    hurts the eyes, an advisor that is too low or moves with the head, or a
    story around you that makes you sick. Point at the screen in the window.
    Wrong: hands or a ray that are not at your real hands, or a ray that is
-   hard to see on the scene.
+   hard to see on the scene. At the Lionhead logo, turn your head fast.
+   Wrong: a second, weaker picture of the orbs that goes with the head.
 
 ### The God view
 
@@ -34,7 +35,9 @@ want.
    land pulled down to your feet, a villager must look as high as you.
    Wrong: land or villagers that flicker or look wrong there. Look across
    the island from a hill there. Wrong: far trees and houses that pop in or
-   out, or fog that hides the far land.
+   out, or fog that hides the far land. Move your head quickly from side to
+   side over the land at your waist. Wrong: the land or the hands swim or
+   come after the head.
 3. **The turn and the comfort vignette.** Set the settings row "Turn" to
    Smooth, and turn with a small push and a full push. Wrong: discomfort,
    or a speed or a curve of the push that feels wrong. Then set the
@@ -206,6 +209,10 @@ each `bwvr-old-*.log` of that day. When an item needs a key, an agent sets
 the key in `bwvr.ini` before the play. "Needs a log line" is work for the
 agents: the log does not tell the item yet.
 
+- **The age of the head pose of a picture.** Log: `head lag     :` in each
+  report window gives in how many frames the camera took the head pose of
+  its own frame, how far that pose was from the display time, and how far
+  the newest pose was from it (`backend.md`, "The head pose of the frame").
 - **A crash** (B38). Log: `address space:`, and the last lines before the
   stop.
 - **White or invisible story people with Vulkan** (B38): the Lost Brother and

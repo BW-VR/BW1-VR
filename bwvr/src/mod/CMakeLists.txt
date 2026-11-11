@@ -85,6 +85,7 @@ add_library(bwvr_mod SHARED
     hand_model_file.cpp
     hint_model.cpp
     view_check.cpp
+    head_lag.cpp
     grip_fit.cpp
     hand_feel.cpp
     hand_land.cpp

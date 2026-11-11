@@ -109,6 +109,7 @@
 
 #include "d3d7_thread.h"
 #include "debug_menu.h"
+#include "head_lag_math.h"
 #include "ui_panel.h"
 #include "one_walk.h"
 #include "one_walk_math.h"
@@ -135,6 +136,7 @@ int StereoPassEye();
 // intro_vr.cpp: the eye pass of the intro in stereo with intro_eye_trails,
 // or -1.
 int IntroPassEye();
+void IntroPassShift(float* x, float* y);
 
 namespace {
 
@@ -197,6 +199,7 @@ struct Seed {
   void* target;  // the target of the eyes, or null when it is not known
   int eye;       // the eye pass of the walk (StereoPassEye), -1 for none
   int intro_eye;  // the eye pass of the intro in stereo, -1 for none
+  float intro_shift[2];  // the move of its kept picture (IntroPassShift)
   // FOVEATED RENDERING: the fovea of the walk (inner_deg 0: none), and the
   // centre of the fovea as tangents of the eye.
   foveation_math::Params fovea;
@@ -534,6 +537,11 @@ uint64_t g_cleared_walks = 0;      // walks that cleared the whole target
 // target of its eye (target 0 the left eye, target 1 the right eye).
 bool g_walk_own = false;
 uint64_t g_own_walks = 0;          // for the report
+// THE KEPT PICTURE MOVES WITH A TURN OF THE HEAD (intro_keep_turn,
+// intro_vr.cpp). A copy of the target of the eye, and the walks of the intro
+// that moved their kept picture.
+vk::Image g_keep_scratch = {};
+uint64_t g_moved_walks = 0;
 uint64_t g_gpu_walks = 0;   // for the report: the walks with a time of the GPU
 uint64_t g_gpu_ticks = 0;
 uint64_t g_gpu_odd = 0;  // the times that are not times of a walk
@@ -1511,6 +1519,7 @@ bool MakeTarget(uint32_t width, uint32_t height) {
   vk::UnlockQueue();
   vk::FreeImage(&g_colors[0]);
   vk::FreeImage(&g_colors[1]);
+  vk::FreeImage(&g_keep_scratch);
   vk::FreeImage(&g_depth);
   vk::FreeImage(&g_panels[0]);
   vk::FreeImage(&g_panels[1]);
@@ -1542,6 +1551,73 @@ bool MakeTarget(uint32_t width, uint32_t height) {
          vk::MakeImage(width, height, 1, kDepthFormat,
                        VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
                        VK_IMAGE_ASPECT_DEPTH_BIT, &g_panel_depth);
+}
+
+// The copy of the target for the move of a kept intro picture, at the size
+// of the target. MakeTarget frees it when the size changes.
+bool MakeKeepScratch() {
+  if (g_keep_scratch.image != VK_NULL_HANDLE) return true;
+  return vk::MakeImage(g_colors[0].width, g_colors[0].height, 1,
+                       vk::Get().color_format,
+                       VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                           VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+                       VK_IMAGE_ASPECT_COLOR_BIT, &g_keep_scratch, 2);
+}
+
+// Moves the picture in the target of the eye (both layers): the pixel (u, v)
+// takes the pixel that is x half widths to the right and y half heights up
+// from it (IntroPassShift). The whole picture goes to the copy first, so the
+// strip that the move leaves keeps the picture as it was. The target is in
+// the layout of a color attachment before and after.
+void MoveKeptPicture(VkCommandBuffer cb, float x, float y) {
+  vk::Image& t = Target();
+  int px = 0, py = 0;
+  head_lag_math::ShiftPixels(x, y, t.width, t.height, &px, &py);
+  head_lag_math::CopyRect r;
+  if ((px == 0 && py == 0) ||
+      !head_lag_math::ShiftCopy(px, py, t.width, t.height, &r) ||
+      g_keep_scratch.image == VK_NULL_HANDLE ||
+      g_keep_scratch.width != t.width || g_keep_scratch.height != t.height) {
+    return;
+  }
+  vk::Barrier(cb, t.image, VK_IMAGE_ASPECT_COLOR_BIT,
+              VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+              VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, 1, 2);
+  vk::Barrier(cb, g_keep_scratch.image, VK_IMAGE_ASPECT_COLOR_BIT,
+              VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+              1, 2);
+  VkImageBlit whole = {};
+  whole.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 2};
+  whole.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 2};
+  whole.srcOffsets[1] = {static_cast<int32_t>(t.width),
+                         static_cast<int32_t>(t.height), 1};
+  whole.dstOffsets[1] = whole.srcOffsets[1];
+  f.vkCmdBlitImage(cb, t.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                   g_keep_scratch.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                   1, &whole, VK_FILTER_NEAREST);
+  vk::Barrier(cb, t.image, VK_IMAGE_ASPECT_COLOR_BIT,
+              VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+              VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, 2);
+  vk::Barrier(cb, g_keep_scratch.image, VK_IMAGE_ASPECT_COLOR_BIT,
+              VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+              VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, 1, 2);
+  VkImageBlit moved = {};
+  moved.srcSubresource = whole.srcSubresource;
+  moved.dstSubresource = whole.dstSubresource;
+  moved.srcOffsets[0] = {r.src_x, r.src_y, 0};
+  moved.srcOffsets[1] = {r.src_x + static_cast<int32_t>(r.width),
+                         r.src_y + static_cast<int32_t>(r.height), 1};
+  moved.dstOffsets[0] = {r.dst_x, r.dst_y, 0};
+  moved.dstOffsets[1] = {r.dst_x + static_cast<int32_t>(r.width),
+                         r.dst_y + static_cast<int32_t>(r.height), 1};
+  f.vkCmdBlitImage(cb, g_keep_scratch.image,
+                   VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, t.image,
+                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &moved,
+                   VK_FILTER_NEAREST);
+  vk::Barrier(cb, t.image, VK_IMAGE_ASPECT_COLOR_BIT,
+              VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+              VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, 1, 2);
+  ++g_moved_walks;
 }
 
 bool Ready() {
@@ -2804,6 +2880,10 @@ void BeginOnWorker(const void* data) {
     Fail("the target");
     return;
   }
+  const bool move_keep = seed->intro_eye >= 0 && g_keep_picture &&
+                         (seed->intro_shift[0] != 0.0f ||
+                          seed->intro_shift[1] != 0.0f) &&
+                         MakeKeepScratch();
   g_slot ^= 1;
   g_walk_both = seed->both;
   g_walk_right = !seed->both && seed->eye == 1 &&
@@ -2946,8 +3026,12 @@ void BeginOnWorker(const void* data) {
     BeginRendering(s.cb, 3u, true, g_walk_follow);
     ++g_pair_walks;
   } else if (g_walk_own) {
-    // The colors of the target stay. The depth starts at the far plane: its
-    // image has no pixels of the walk before (the barrier above).
+    // The colors of the target stay, moved with a turn of the head. The
+    // depth starts at the far plane: its image has no pixels of the walk
+    // before (the barrier above).
+    if (move_keep) {
+      MoveKeptPicture(s.cb, seed->intro_shift[0], seed->intro_shift[1]);
+    }
     BeginRendering(s.cb, 3u, true, true);
     VkClearAttachment depth = {};
     depth.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
@@ -3334,6 +3418,10 @@ void VkSceneWalkBegin(void* device7) {
   seed.target = g_follow ? OneWalkBoundTarget() : nullptr;
   seed.eye = StereoPassEye();
   seed.intro_eye = g_direct ? IntroPassEye() : -1;
+  seed.intro_shift[0] = seed.intro_shift[1] = 0.0f;
+  if (seed.intro_eye >= 0) {
+    IntroPassShift(&seed.intro_shift[0], &seed.intro_shift[1]);
+  }
   // FOVEATED RENDERING: the angles of the picture from the camera of the
   // game, and the centre of the fovea: the gaze, or straight ahead.
   // FOVEATED RESOLUTION needs the angles and the gaze too.
@@ -4590,7 +4678,13 @@ void VkSceneReport(uint64_t frames) {
            "target first. %llu walks of the intro drew over the picture of "
            "their eye",
            g_keep_picture ? 1 : 0, g_kept_walks, g_cleared_walks, g_own_walks);
+    if (g_moved_walks > 0) {
+      ModLog("vk scene     : %llu walks of the intro moved the picture of "
+             "their eye with a turn of the head (intro_keep_turn)",
+             g_moved_walks);
+    }
     g_kept_walks = g_cleared_walks = g_own_walks = 0;
+    g_moved_walks = 0;
     if (g_black_check) {
       ModLog("vk scene     : vk_black_check=1. %llu of %llu checked eye "
              "pictures were black", g_black_walks, g_probed_walks);

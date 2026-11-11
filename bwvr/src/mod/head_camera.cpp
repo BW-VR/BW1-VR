@@ -110,6 +110,8 @@ bool TabletopCamera(const float asked_position[3], const float asked_focus[3],
 // cutscene_window.cpp: this frame draws as the stereoscopic window. The game
 // camera then goes through with no head on it, as in play mode 1.
 bool CutsceneWindowFlat();
+// stereo.cpp: the head of the frame, at the main camera call.
+void StereoHeadForCamera();
 
 namespace {
 
@@ -443,6 +445,12 @@ void PlaceCamera(const float* position, const float* focus, bool intro,
   }
   float h[9];
   float lean[3];
+  // THE HEAD OF THE FRAME, before the main call reads it. stereo.cpp locates
+  // the head for the display time of this frame (head_pose_frame).
+  if (!intro && g_world_is_up && g_enabled && !g_in_scene &&
+      g_frame != g_recorded_frame) {
+    StereoHeadForCamera();
+  }
   // Not until the world is up. UpdateCamera runs during loading and in menus
   // too, and those cameras are not ours to move. The intro is the one
   // exception, and it asks by name.

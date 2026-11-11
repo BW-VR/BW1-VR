@@ -397,6 +397,49 @@ The scene has the same rule for each frame of play that keeps the picture of
 the frame before (`eye_clean`, `stereo-artifacts.md`, "The frame before of
 each eye"). It uses the same keeps. The logo frees them when it ends.
 
+### The trails and a turn of the head
+
+A kept picture is in the pixels of the view that drew it. When the head
+turns, the same pixels are a different direction in the room. So with no
+help, the trail of each orb shows as a second, weaker orb (37 percent, then
+14 percent) that goes with the head, at the turn of the head in one frame
+from the orb: about 2 degrees at a turn of 200 degrees each second. A fast
+turn of the head shows a doubled picture that lags.
+
+With `intro_keep_turn=1` (the default) the kept picture of each eye moves by
+the turn of the view of that eye since the keep, before the effect draws over
+it (`RunEye`, `head_lag_math.h`, `KeptPictureShift`). Each thing of the trail
+is then in its direction in the room again. The move is the move of the middle
+of the view, in whole pixels: the roll of the head and the edges of a large
+turn are not corrected. The strip that the move leaves keeps the picture as it
+was. With `backend=vulkan` the renderer copies the target of the eye to a
+second image and back with the move (`MoveKeptPicture` in `vk_scene.cpp`).
+With the keeps of `gpu_bridge.cpp` it is a second `StretchRect` with the move
+(`GpuBridgeKeepGiveShifted`).
+
+The frame order of the logo is not the cause: `RunPair` begins the frame of
+the headset before the head, so each pair draws with the pose of its own
+display time and declares that pose. The logo runs at the pace of the headset
+(10.1 ms for a pair in a session at 120 Hz with Virtual Desktop), and both
+eyes are of the same moment. The camera on the path of the game moves
+(`intro_motion=1`), and the runtime turns a picture only by the turn of the
+head. That gives a small judder of the path on a frame that the runtime shows
+two times, and no second picture.
+
+The log line at the end of the logo:
+
+```
+intro        : the kept picture moved with a turn of the head in 2008 eye passes, by 0.0120 of the half width or height in the mean and 0.0800 at the most (intro_keep_turn=1)
+```
+
+With the invented head of a desktop run, a step of the head (the word `look`
+of the fake controller) gives one line, and with `test_keys=1` a picture of
+each eye of that pair:
+
+```
+intro        : the invented head turned 36.0 degrees at pair 700. The kept picture of each eye is moved by -1.036 of the half width and -0.931 of the half height (intro_keep_turn=1, intro_eye_trails=1). The pictures of this pair are saved
+```
+
 ### The flat text and the boxes in stereo
 
 The effect draws its text and its boxes at a pixel, with no place in the scene
@@ -575,6 +618,7 @@ the intro" is cleared when mode 2 runs.
 | `intro_distance_cm` | 300 | The distance from the head to the plane of the logo at the rest pose, for `intro_motion` 0, 1 and 3 |
 | `intro_model_distance_cm` | 200 | The same distance for the model of `intro_motion=2` |
 | `intro_eye_trails` | 1 | 1: each eye pass draws over the last picture of the same eye. 0: each eye pass draws over the last picture in the render target, which is the picture of the other eye |
+| `intro_keep_turn` | 1 | 1: the kept picture of each eye moves by the turn of the head since that picture, so a trail stays in its direction in the room. 0: the kept picture stays in its pixels, and a fast turn of the head shows a second picture of each orb that goes with the head. See "The trails and a turn of the head" |
 | `intro_text_place` | 1 | 1: the text and the boxes of the effect are on the plane of the logo. 0: they have the same pixel in each eye |
 | `intro_push_once` | 1 | 1: only the first eye pass pushes the orbs. 0: each eye pass pushes them |
 | `intro_controller` | 1 | Run the controller frame, so the aim moves the pointer |

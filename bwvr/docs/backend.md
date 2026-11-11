@@ -46,6 +46,7 @@ Other docs: `software-tnl.md` (the CPU transform and the camera matrix),
 | `src/mod/snapshot_guard.cpp`, `save_picture_math.h` | The save picture in VR: the game reads a surface of the mod with the eye picture (`save_picture`) |
 | `src/mod/stereo.cpp` | The scene walk twice, the hotkeys, the view setup |
 | `src/mod/head_camera.cpp`, `head_pose.cpp`, `eye_camera.cpp` | The head on the camera, the per eye matrix |
+| `src/mod/head_lag.cpp`, `head_lag_math.h` | The measure of the age of the head pose of a picture, and the math of the head pose of the frame |
 | `src/mod/fov.cpp` | `LH3DTech::ChangeFov` hook |
 | `src/mod/pointer_map.cpp` | The pointer in render pixels, the head lock of the cursor |
 | `src/mod/cursor_trace.cpp` | A test aid: the log names each caller that touches the cursor of Windows or takes the front |
@@ -4548,6 +4549,65 @@ itself. The stored camera forward at `0x00EA1DD4` carries the head. It is read b
 particles, trees and the water, which draw. Its one getter, `fn_00442CE0`, has no
 caller.
 
+### The head pose of the frame
+
+The order of a frame of play with a headset:
+
+| Step | Where | The head |
+| --- | --- | --- |
+| 1 | `GGame::ProcessGraphicsEngine` `0x0054D850` calls `GCamera::Update` `0x00441F80`, which ends in `LH3DTech::UpdateCamera` `0x00819920` (the main camera call, `PlaceCamera` in `head_camera.cpp`) | The camera, the culling cone and the God view camera (`TabletopCamera`) take the head of `HeadPoseCurrent` |
+| 2 | `GGame::Process3dEngine` `0x0054DA80`, the scene hook of `stereo.cpp`: `XrScreen::BeginFrame` calls `xrWaitFrame`, `SyncInput` (the hands, at the display time of the frame), `xrBeginFrame` and `xrLocateViews` (at the display time of the frame) | The newest pose of the frame |
+| 3 | The head of the frame in `Process3dEngineBody` | The layer gets the pose of the camera of step 1 (`SetRenderPose`). The pose of step 2 goes to `HeadPoseCurrent` for the rest of the frame |
+| 4 | The eye passes, then `xrEndFrame` with the display time of the frame | The pictures have the camera of step 1 |
+
+Step 1 comes before `xrWaitFrame` of the frame. So with `head_pose_frame=0`
+the camera of a frame takes the pose that the frame before located: the pose
+for the display time of the frame before. The layer declares that pose, so the
+picture and the declared pose agree, and the runtime turns the picture to the
+head at the display. But the pose is one display step older than the display
+time of its picture: 8.3 ms at 120 Hz, or about 10 ms with the display times
+of Virtual Desktop. The hands of the frame have the display time of the frame,
+so they are one step newer than the head.
+
+With `head_pose_frame=1` (the default) the main camera call locates the views
+itself (`StereoHeadForCamera`, `XrScreen::LocateViewsAt`). The time is the
+display time that the frame will get: the display time of the frame before and
+the mean step of the display times (`head_lag_math.h`). The camera, the God
+view and the declared pose then take the pose of the display time of their
+picture, as in an OpenXR app that locates the views after `xrWaitFrame`. The
+hands are of the same time. `xrWaitFrame` stays in the scene hook, so the
+pacing does not change. When the locate fails (the bridge of Direct3D 11, or
+no valid pose), the camera takes the pose of the frame before.
+
+The runtime corrects only the turn of the head. Virtual Desktop sends the
+layer as `ovrLayerType_EyeFov` with the declared pose: the mod gives no depth,
+and the headset reprojects by rotation only (SSW is off). So a pose that is
+one step old shows as a lag of the world when the head moves: at 0.5 m/s, a
+step of 10 ms is 5 mm, which is 0.6 degrees at 50 cm (the land at the waist
+and the hands) and nothing to see on far land.
+
+With the invented head of a desktop run, a step of the head comes from the
+script of the fake controller in the frame functions, after the head of the
+frame. The next frame takes it. With `head_pose_frame=1` its main camera call
+has the step. With `head_pose_frame=0` the camera has it one frame later. The
+declared view of the invented head (`StereoDeclaredView`) is the invented head
+at the time of the eye pass, so it has the step one frame before the frame
+that takes it.
+
+The log line in each report window (`head_lag.cpp`):
+
+```
+head lag     : head_pose_frame=1, the headset. In 450 frames the camera of the game took the head pose of its own frame in 450 frames and the pose of the frame before in 0. The pose of the camera was for a time 0.84 ms before the display time of its picture in the mean, and 3.10 ms at the most. The guess of the display time was off by 0.84 ms in the mean, and 3.10 ms at the most. The newest pose of the frame was 0.40 mm and 0.030 degrees from the pose of the camera in the mean, and 2.10 mm and 0.300 degrees at the most. 450 frames had a difference
+```
+
+With the invented head the log has one line for each step of the head (at
+most 20): the move and the turn of the camera of the game in the frame of the
+step and in the 5 frames after it, and the frame in which it followed.
+
+```
+head lag     : the invented head moved 14.1 cm and turned 0.0 degrees in frame 171 (head_pose_frame=1). From frame 171 to frame 176 the camera of the game moved 0.1414 0.1414 0.1414 0.1414 0.1414 0.1414 units and turned 0.00 0.00 0.00 0.00 0.00 0.00 degrees from its place in the frame before the step. The camera followed in the frame of the step
+```
+
 ## The head on the camera
 
 ### Composition
@@ -6141,6 +6201,7 @@ keys that the launcher sets.
 | `head_roll`, `water_simple` | 1, 1 | See "Roll and the sea" |
 | `sea_depth` | 0 | 1: the land of the sea goes on down under the water and fades into the sea by its depth, and the light of the Hand on the water writes no depth. 0: the flat coast of the game. See "The sea with depth" |
 | `head_camera` | 1 | The head on the camera |
+| `head_pose_frame` | 1 | 1: the main camera call locates the head for the display time of its frame, so the picture and the declared pose have the pose of their display time. 0: the camera takes the pose that the frame before located, one display step older. The debug page switch "Head pose". See "The head pose of the frame" |
 | `eye_cant` | 1 | 1: with canted views (Pimax) the head is the mean of the two views, and each eye pass turns its camera by the turn of its view. 0: the head is the view of eye 0, and both eyes draw with its orientation. No test key. See "Canted views" |
 | `hand_anchored` | 1 | The Hand keeps its place in the room |
 | `game_camera_rebuild` | 1 | See "The game camera's own screen" |

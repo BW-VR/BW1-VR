@@ -3970,6 +3970,46 @@ bool XrScreen::LastDisplayTime(int64_t* time, int64_t* period) const {
   return true;
 }
 
+bool XrScreen::LocateViewsAt(int64_t time, EyeView views[2]) const {
+  if (remote_ || time <= 0) return false;
+  const Impl& s = *impl_;
+  if (s.session == XR_NULL_HANDLE || !s.session_running ||
+      s.space == XR_NULL_HANDLE) {
+    return false;
+  }
+  XrViewLocateInfo locate = {XR_TYPE_VIEW_LOCATE_INFO};
+  locate.viewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
+  locate.displayTime = static_cast<XrTime>(time);
+  locate.space = s.space;
+  XrViewState view_state = {XR_TYPE_VIEW_STATE};
+  XrView raw_views[2] = {{XR_TYPE_VIEW}, {XR_TYPE_VIEW}};
+  uint32_t found = 0;
+  if (XR_FAILED(xrLocateViews(s.session, &locate, &view_state, 2, &found,
+                              raw_views)) ||
+      found < 2) {
+    return false;
+  }
+  if ((view_state.viewStateFlags & XR_VIEW_STATE_POSITION_VALID_BIT) == 0 ||
+      (view_state.viewStateFlags & XR_VIEW_STATE_ORIENTATION_VALID_BIT) == 0) {
+    return false;
+  }
+  for (int i = 0; i < 2; ++i) {
+    views[i].position[0] = raw_views[i].pose.position.x;
+    views[i].position[1] = raw_views[i].pose.position.y;
+    views[i].position[2] = raw_views[i].pose.position.z;
+    views[i].orientation[0] = raw_views[i].pose.orientation.x;
+    views[i].orientation[1] = raw_views[i].pose.orientation.y;
+    views[i].orientation[2] = raw_views[i].pose.orientation.z;
+    views[i].orientation[3] = raw_views[i].pose.orientation.w;
+    views[i].fov_left = raw_views[i].fov.angleLeft;
+    views[i].fov_right = raw_views[i].fov.angleRight;
+    views[i].fov_up = raw_views[i].fov.angleUp;
+    views[i].fov_down = raw_views[i].fov.angleDown;
+    views[i].valid = true;
+  }
+  return true;
+}
+
 uint64_t XrScreen::LateWaitTicks() const {
   return impl_->send_busy ? 0 : impl_->late_gpu;
 }

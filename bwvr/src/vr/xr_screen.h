@@ -590,6 +590,13 @@ class XrScreen {
   // frame and after a failed wait.
   bool LastDisplayTime(int64_t* time, int64_t* period) const;
 
+  // Where the runtime predicts each eye at a display time in nanoseconds, in
+  // the same space as eye(). It does not change eye(). The mod calls it
+  // before xrWaitFrame of a frame, for the display time that it expects that
+  // frame to get. False with the bridge, with no session, or when the
+  // runtime gives no valid position and orientation.
+  bool LocateViewsAt(int64_t time, EyeView views[2]) const;
+
   // Mono convenience: one call does a whole frame.
   bool SubmitBgra(const void* pixels, int pitch);
   // The same for a Vulkan image of the session device: layer `layer` of

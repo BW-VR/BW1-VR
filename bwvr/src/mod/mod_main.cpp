@@ -102,6 +102,7 @@ void IntroSetHandPush(int percent, bool hand_point);
 void IntroSetHands(bool push_3d, int radius_cm, int hand_show,
                    bool hand_depth);
 void IntroSetPushRoom(bool on);
+void IntroSetKeepTurn(bool on);
 void IntroSetScreen(bwvr::XrScreen* screen);
 void IntroInstall();
 bool IntroFinishFrame();
@@ -260,6 +261,7 @@ void StereoSetHeadTracking(bool on);
 void StereoSetHeadFov(float degrees);
 void StereoSetFovMargin(int percent);
 void StereoSetEyeCant(int mode);
+void StereoSetHeadPoseFrame(int mode);
 void HeadPoseSetFakeCant(float degrees);
 void HeadPoseSetScale(float units_per_meter);
 void HeadPoseSetEnabled(bool on);
@@ -429,6 +431,9 @@ int g_fov_margin_pct = 0;
 // eye_cant: each eye of a headset with canted views draws with the turn of
 // its own view. fake_eye_cant_deg: a cant for the invented head.
 int g_eye_cant = 1;
+// head_pose_frame: the main camera call locates the head for the display
+// time of its frame (stereo.cpp, StereoHeadForCamera).
+int g_head_pose_frame = 1;
 float g_fake_eye_cant_deg = 0.0f;
 float g_fov_absolute_deg = 0.0f;
 bool g_skip_snapshot = true;
@@ -658,6 +663,8 @@ int g_intro_speed_pct = 100;
 int g_intro_distance_cm = 300;
 int g_intro_model_distance_cm = 200;
 bool g_intro_eye_trails = true;
+// intro_keep_turn: the kept picture of each eye moves with a turn of the head.
+bool g_intro_keep_turn = true;
 // The frame before of each eye in the scene (eye_clean.cpp), and its test
 // keys for desktop runs.
 int g_eye_clean = 1;
@@ -1413,6 +1420,8 @@ void ReadSettings() {
       GetPrivateProfileIntA("bwvr", "fov_margin_pct", 0, path));
   // Not in the launcher. 0 only to test the fault that it fixes.
   g_eye_cant = GetPrivateProfileIntA("bwvr", "eye_cant", 1, path) != 0 ? 1 : 0;
+  g_head_pose_frame =
+      GetPrivateProfileIntA("bwvr", "head_pose_frame", 1, path) != 0 ? 1 : 0;
   g_fake_eye_cant_deg = static_cast<float>(static_cast<int>(
       GetPrivateProfileIntA("bwvr", "fake_eye_cant_deg", 0, path)));
   // An invented head, for testing on the desktop with no headset.
@@ -1753,6 +1762,8 @@ void ReadSettings() {
       GetPrivateProfileIntA("bwvr", "intro_model_distance_cm", 200, path);
   g_intro_eye_trails =
       GetPrivateProfileIntA("bwvr", "intro_eye_trails", 1, path) != 0;
+  g_intro_keep_turn =
+      GetPrivateProfileIntA("bwvr", "intro_keep_turn", 1, path) != 0;
   g_eye_clean = GetPrivateProfileIntA("bwvr", "eye_clean", 1, path) != 0 ? 1 : 0;
   g_eye_clean_test =
       static_cast<int>(GetPrivateProfileIntA("bwvr", "eye_clean_test", 0, path));
@@ -2096,6 +2107,7 @@ void StartVrStep() {
     StereoSetHeadFov(g_head_fov_deg);
     StereoSetFovMargin(g_fov_margin_pct);
     StereoSetEyeCant(g_eye_cant);
+    StereoSetHeadPoseFrame(g_head_pose_frame);
     HeadPoseSetFake(g_fake_head, g_fake_yaw, g_fake_pitch, g_fake_roll);
     HeadPoseSetFakeCant(g_fake_head ? g_fake_eye_cant_deg : 0.0f);
     HeadPoseFakeSweep(g_fake_sweep);
@@ -2238,6 +2250,7 @@ void StartVrStep() {
     IntroSetHands(g_intro_push_3d, g_intro_push_radius_cm, g_intro_hand_show,
                   g_intro_hand_depth);
     IntroSetPushRoom(g_intro_push_room);
+    IntroSetKeepTurn(g_intro_keep_turn);
     IntroInstall();
     EyeCleanSetOptions(g_eye_clean, g_eye_clean_test, g_eye_clean_test_frame);
     EyeCleanInstall();

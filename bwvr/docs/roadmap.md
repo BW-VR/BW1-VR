@@ -310,6 +310,12 @@ keeps the mod as it is.
 
 **The village, the Creature and the help**
 
+- **F27. The hand in front of a page.** The page of the spell book and of
+  the ring has a hole for each eye where a hand is in front of it
+  (`card_hand_front=1`, `ui-layer.md` 28). Open: the first cut after a
+  move takes 1 to 3 ms on the test laptop (0.05 ms on average), and
+  where the texture of the game makes the palm almost clear, the land
+  shows in the hole beside the arm.
 - **F22. Words that the card never shows.** The card shows the game's
   "Drop" and "Throw" with the word of the grip (`controller-hints.md`,
   9.9). The second VR mod leaves those two words out

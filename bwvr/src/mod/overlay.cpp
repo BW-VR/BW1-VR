@@ -198,6 +198,8 @@ float HeadPoseScale();
 // edge of the influence near the pointing hand.
 void InfluenceEdgeFrame(float units_per_meter);
 float InfluenceEdgeOpacity(int hand, const float point[3], float dt);
+void InfluenceEdgeWallsFrame(const bool valid[2], const float points[2][3],
+                             float units_per_meter, float seconds);
 int InfluenceEdgeWall(int hand, const float point[3], float units_per_meter,
                       influence_math::WallTriangle* out, int room);
 void InfluenceEdgeColor(float rgb[3]);
@@ -247,7 +249,7 @@ bool g_flat_logged_hit = false;
 float g_flat_end[2][2] = {{0.0f, 0.0f}, {0.0f, 0.0f}};
 // THE GLOW AT THE EDGE OF THE INFLUENCE (influence_edge.cpp): a patch for each
 // hand near the edge, in the world. The glow draws it as added light.
-const int kWallMax = kHands * influence_math::kPatchTriangles;
+const int kWallMax = kHands * influence_math::kHoloMaxTriangles;
 influence_math::WallTriangle g_wall[kWallMax];
 int g_wall_count = 0;
 // The color of the influence ring of the player (InfluenceEdgeColor).
@@ -338,10 +340,12 @@ glow_math::Point g_glow_point[kGlowMaxPoints];
 GlowLine g_glow_line[kGlowMaxLines];
 int g_glow_points = 0;
 int g_glow_lines = 0;
-glow_math::Triangle g_glow_triangle[kGlowMaxTriangles];
-float g_glow_opacity[kGlowMaxTriangles];
+// The ribbons have kGlowMaxTriangles, and the wall at the edge has its own room.
+const int kGlowRoom = kGlowMaxTriangles + kWallMax;
+glow_math::Triangle g_glow_triangle[kGlowRoom];
+float g_glow_opacity[kGlowRoom];
 // The cut at the near plane makes at most two triangles of one.
-Vertex g_glow_vertices[kGlowMaxTriangles * 2 * 3];
+Vertex g_glow_vertices[kGlowRoom * 2 * 3];
 bool g_ray_glow = true;
 // ray_glow_only: the glow of a ray is the whole ray, with no tube under it.
 bool g_ray_glow_only = true;
@@ -1488,7 +1492,7 @@ int DrawGlow(IDirect3DDevice7* device, const float m[12], float near_plane,
   }
   // THE WALL at the edge of the influence: triangles of the world with their
   // own light, the same for both eyes.
-  for (int w = 0; w < g_wall_count && triangles < kGlowMaxTriangles; ++w) {
+  for (int w = 0; w < g_wall_count && triangles < kGlowRoom; ++w) {
     g_glow_opacity[triangles] = 0.0f;
     glow_math::Triangle& tri = g_glow_triangle[triangles++];
     for (int v = 0; v < 3; ++v) {
@@ -1993,6 +1997,8 @@ void OverlayFrame() {
   // (influence_wall).
   if (g_units_per_meter > 0.0f && (g_hand_valid[0] || g_hand_valid[1])) {
     InfluenceEdgeColor(g_wall_color);
+    InfluenceEdgeWallsFrame(g_hand_valid, g_index_tip, g_units_per_meter,
+                            g_seconds);
     for (int h = 0; h < kHands; ++h) {
       if (!g_hand_valid[h]) continue;
       g_wall_count += InfluenceEdgeWall(h, g_index_tip[h], g_units_per_meter,

@@ -76,6 +76,10 @@ int TabletopGodZoomSmoothValue();
 void TabletopGodZoomSmoothToggle();
 int TabletopGodZoomAboutValue();
 void TabletopGodZoomAboutCycle();
+int TabletopGodZoomFarValue();
+void TabletopGodZoomFarToggle();
+int TabletopGodMoveScaleValue();
+void TabletopGodMoveScaleToggle();
 int TabletopGodMoveStickValue();
 void TabletopGodMoveStickCycle();
 int TabletopGodMoveKindValue();
@@ -86,6 +90,8 @@ int TabletopGodFlySlideValue();
 void TabletopGodFlySlideToggle();
 int WorldGrabTestValue();
 void WorldGrabCycleTest();
+int WorldGrabBoostValue();
+void WorldGrabBoostToggle();
 // The teleport (teleport.cpp).
 int TeleportRingValue();
 void TeleportRingChange(const char* by);
@@ -140,6 +146,8 @@ int CullDistanceValue();
 void CullDistanceChange(const char* by);
 int CullFogValue();
 void CullFogChange(const char* by);
+int InfluenceEdgeLookValue();
+void InfluenceEdgeLookChange(const char* by);
 int VkSceneEyesValue();
 void VkSceneEyesToggle(const char* by);
 int VkSceneKeepPictureValue();
@@ -476,6 +484,16 @@ const Switch kSwitches[] = {
     {kGroupView, L"Script player", L"Scripts see the player",
      "script_distance", HandDirectScriptPlayerValue,
      HandDirectScriptPlayerChange, L"camera|player"},
+    {kGroupView, L"Deep zoom", L"Zoom in over far land", "god_zoom_far_level",
+     TabletopGodZoomFarValue,
+     [](const char*) { TabletopGodZoomFarToggle(); },
+     L"2.5 m level|land level"},
+    {kGroupView, L"Speed by scale", L"Stick faster when zoomed in",
+     "move_stick_scale", TabletopGodMoveScaleValue,
+     [](const char*) { TabletopGodMoveScaleToggle(); }, L"off|on"},
+    {kGroupView, L"Grab gain", L"Grab brings far land fast", "grab_boost",
+     WorldGrabBoostValue, [](const char*) { WorldGrabBoostToggle(); },
+     L"1:1|gain"},
 
     // Picture
     {kGroupPicture, L"Scene window", L"Cut scene on a screen in the room",
@@ -498,6 +516,9 @@ const Switch kSwitches[] = {
      L"game|2x|3x|5x|10x"},
     {kGroupPicture, L"Cull fog", L"Fog moves out with the models",
      "cull_fog", CullFogValue, CullFogChange, L"game|follows"},
+    {kGroupPicture, L"Edge look", L"Look of the influence edge",
+     "influence_wall_look", InfluenceEdgeLookValue, InfluenceEdgeLookChange,
+     L"patch|hologram"},
     {kGroupPicture, L"Advisor size", L"Advisor size at a world place",
      "spirit_world_size", SpiritAnchorWorldSizeValue,
      [](const char*) { SpiritAnchorWorldSizeToggle(); },
@@ -898,6 +919,18 @@ const wchar_t* const kTips[] = {
     // Script player
     L"Camera: a script that measures a distance from the camera uses the game "
     L"camera. Player: it uses the place of the player.",
+    // Deep zoom
+    L"For a land more than 2.5 m below the head. Land level: a zoom in keeps "
+    L"the land at its height in the room. 2.5 m level: a zoom in moves the "
+    L"land farther down. A zoom out brings that land up in both.",
+    // Speed by scale
+    L"On: the walk and the fly with the stick are up to 4 times faster when "
+    L"zoomed in (1 unit per meter) and 0.6 times as fast when zoomed out. "
+    L"Off: the same speed in the room at each scale.",
+    // Grab gain
+    L"Gain: a grab with one hand brings land far below the hand up faster "
+    L"than the hand, and when zoomed in moves the land across up to 4 times "
+    L"the hand. 1:1: the land moves with the hand.",
     // Scene window
     L"On: a cut scene of the God view plays on a screen in the room. Off: it "
     L"plays in the full view, with held shots.",
@@ -923,6 +956,9 @@ const wchar_t* const kTips[] = {
     // Cull fog
     L"Follows: the fog starts and ends further out, as far as the cull "
     L"distance moves the map objects out. Game: the fog of the game.",
+    // Edge look
+    L"The glow at the edge of the influence near a hand. Hologram: a red grid "
+    L"on the wall of the edge, with rings from the hand. Patch: a round glow.",
     // Advisor size
     L"An advisor at a place of the world. Near size: the size that it has for "
     L"the eye at its usual place. Game: the size of the game.",

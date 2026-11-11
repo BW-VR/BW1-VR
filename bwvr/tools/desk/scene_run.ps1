@@ -6,6 +6,7 @@
 #   scene_run.ps1 -Name sf0 -Dll <dll> -Kind forest -Set "miracle_camera_still=0"
 #   scene_run.ps1 -Name sw1 -Dll <dll> -Kind window -Set "backend=dxwrapper\ddraw.dll"
 #   scene_run.ps1 -Name se1 -Dll <dll> -Kind edge -Set "backend=dxwrapper\ddraw.dll"
+#   scene_run.ps1 -Name ss1 -Dll <dll> -Kind edgeside -Set "backend=dxwrapper\ddraw.dll"
 #
 # THE START. The run starts in the test save "temple" (README.md, "A fast
 # start"): no story, and the Creature of the profile at the door of the
@@ -34,15 +35,19 @@
 # -Kind edge: the test keys influence_test_circle_cm=25 and
 #   influence_test_circle_frame=230 make the influence of the player a circle
 #   of 25 cm of the room around the Hand's point at its first step. The hand
-#   steps forward in steps of 5 cm to 40 cm past that point, with an eye
-#   picture at each step, and back. So the Hand's point is 25, 20, 15, 10 and
-#   5 cm inside the edge, at the edge, and 5, 10 and 15 cm past it, and then
-#   5 cm inside again. The log has the lines "influence": the hand goes out
+#   steps forward in steps of 5 cm to 65 cm past that point, with an eye
+#   picture at each step, and back. So the Hand's point is 25 cm inside the
+#   edge to 40 cm past it, where the hologram goes, and then 5 cm inside
+#   again. The log has the lines "influence": the hand goes out
 #   of the influence and comes back, and the glow at the edge shows, with its
 #   distance and its strength each 60 frames, and goes. The report has the
 #   state of the stream of the game. With influence_stream_hand=1 a stream of
 #   the game ends at the Hand's point. influence_wall_test_light_pct=300
 #   makes the glow three times as bright for the eye pictures.
+# -Kind edgeside: the same circle, and then the hand stays 10 cm inside the
+#   edge and steps along it, 5 degrees of the circle a step, with an eye
+#   picture at each step. The lines "the hologram of the ... hand" give the
+#   edge point and its angle on the circle: 5 degrees more at each step.
 #
 # Give -Set "backend=dxwrapper\ddraw.dll" for eye pictures (the eye pictures
 # of a run with the Vulkan renderer are black). With the Vulkan renderer give
@@ -94,15 +99,15 @@ if ($Kind -eq 'forest') {
     # The circle starts at frame 230 of the controllers, about 60 frames
     # after the first step: its middle is the Hand's point at 20 cm in front
     # of the head. Each next step is 5 cm (5 units at the start scale), so
-    # the Hand's point is 0 to 40 units from the middle, and then 20 again.
+    # the Hand's point is 0 to 65 units from the middle, and then 20 again.
     # The grip is behind the Hand's point, so the fade (at the grip) comes
     # some steps after the edge.
     $keys = "$keys;influence_test_circle_cm=25;influence_test_circle_frame=230"
     $points = '0,-30,20 0,-30,25 0,-30,30 0,-30,35 0,-30,40 0,-30,45 0,-30,50 ' +
-              '0,-30,55 0,-30,60 0,-30,40'
+              '0,-30,55 0,-30,60 0,-30,65 0,-30,70 0,-30,75 0,-30,80 0,-30,85 0,-30,40'
     if ($Steps -eq '') {
         $w = @()
-        for ($k = 0; $k -lt 10; $k++) {
+        for ($k = 0; $k -lt 15; $k++) {
             $f = 900 + 120 * $k
             $w += "point@$f+1"
             $w += "shot@$($f + 60)+1"
@@ -110,6 +115,32 @@ if ($Kind -eq 'forest') {
         $Steps = $w -join ' '
     }
     $pattern = '^influence    :|^hooks        : .*(AddManaPath|IsInPlayerRaw)'
+} elseif ($Kind -eq 'edgeside') {
+    # The same circle of 25 cm around the first point. Then the hand stays 15
+    # cm from the middle, 10 cm inside the edge, and steps along the edge
+    # from 20 degrees left to 20 degrees right, 5 degrees a step (1.3 cm).
+    # The point of the edge on the wall must go 5 degrees a step, in equal
+    # steps. With influence_wall_look=0 the search of 24 rays gives the old
+    # patch, whose point goes in steps of 15 degrees.
+    $keys = "$keys;influence_test_circle_cm=25;influence_test_circle_frame=230"
+    $p = @('0,-30,20')
+    for ($a = -20; $a -le 20; $a += 5) {
+        $r = $a * [Math]::PI / 180.0
+        $x = [Math]::Round(15.0 * [Math]::Sin($r), 2)
+        $z = [Math]::Round(20.0 + 15.0 * [Math]::Cos($r), 2)
+        $p += "$x,-30,$z"
+    }
+    $points = $p -join ' '
+    if ($Steps -eq '') {
+        $w = @()
+        for ($k = 0; $k -lt $p.Count; $k++) {
+            $f = 900 + 120 * $k
+            $w += "point@$f+1"
+            $w += "shot@$($f + 60)+1"
+        }
+        $Steps = $w -join ' '
+    }
+    $pattern = '^influence    :|^hooks        : .*(IsInPlayerRaw)'
 } else {
     "no kind named $Kind"
     exit 7

@@ -80,6 +80,15 @@ struct TabletopSettings {
   // the head through a smooth filter (walk_math::FollowStep). 0: the view
   // keeps its height in the world.
   int move_stick_follow_land = 1;  // move_stick_follow_land: 1 follows, 0 not
+  // When the filter of the land starts again (walk_math::FollowRestart): 1
+  // after each move of the view, a place at a camera of the game and a
+  // recenter, but not after a turn. 0 after each change of the version of
+  // the view only.
+  int move_stick_follow_place = 1;  // move_stick_follow_place: 1 or 0
+  // A zoom in over a land more than 2.5 m below the head (zoom_math.h,
+  // ZoomLevelFor): 1 keeps the land at its height in the room, 0 zooms about
+  // a level 2.5 m below the head.
+  int god_zoom_far_level = 1;      // god_zoom_far_level: 1 or 0
   // How the stick moves the player: 0 walks over the land (with
   // move_stick_follow_land), 1 flies along the forward direction in 3D
   // (walk_math.h, "The fly"). docs/god-view.md, "The walk with the stick".
@@ -89,6 +98,14 @@ struct TabletopSettings {
   // largest factor, 1 to 64.
   int move_stick_ramp = 1;         // move_stick_ramp: 1 on, 0 off
   int move_stick_ramp_most = 32;   // move_stick_ramp_most: the top factor
+  // The speed by the scale (walk_math::ScaleFactor): 1 multiplies the speed
+  // of the stick by (ref / scale) ^ power, kept between low and high. 0 the
+  // speed of move_stick_speed_cm at each scale.
+  int move_stick_scale = 1;              // move_stick_scale: 1 on, 0 off
+  int move_stick_scale_ref_x10 = 160;    // the scale of factor 1, in tenths
+  int move_stick_scale_power_pct = 50;   // the power, in percent
+  int move_stick_scale_low_pct = 60;     // the least factor, in percent
+  int move_stick_scale_high_pct = 400;   // the largest factor, in percent
   // A fly at a solid (god_zoom_solid_stop=1): 1 slides past it, and only a
   // push straight at it stops. 0 stops the step short of it.
   int fly_solid_slide = 1;         // fly_solid_slide: 1 slides, 0 stops
@@ -136,6 +153,10 @@ void TabletopMove(const table_math::TablePose& pose);
 // ground limits of docs/god-view.md, "The ground height". False when the God view does
 // not own the view. cut is true when a limit held the height back.
 bool TabletopGodLimitHeight(table_math::TablePose* pose, bool* cut);
+// The God view: how far the land is below a point of the room of the table,
+// in meters, in the pose of now. False when the God view does not own the
+// view. For the gain of the grab (world_grab.cpp).
+bool TabletopGodLandBelow(const float point[3], float* below_m);
 
 // The game's switches for the turn and the zoom of a grab: each one that is
 // off sets its flag to false.
@@ -225,6 +246,20 @@ void TabletopGodSetMoveType(int type, const char* by);
 // The switch "Fly at solids" of the debug page (fly_solid_slide).
 void TabletopGodFlySlideToggle();
 int TabletopGodFlySlideValue();
+// The switch "Speed by scale" of the debug page (move_stick_scale), and the
+// factor of the speed of the stick at the scale now (1 when it is off).
+void TabletopGodMoveScaleToggle();
+int TabletopGodMoveScaleValue();
+float TabletopGodMoveScaleFactor();
+// The same curve with or without move_stick_scale, for the grab.
+float TabletopGodScaleCurve();
+// The switch "Deep zoom" of the debug page (god_zoom_far_level).
+void TabletopGodZoomFarToggle();
+int TabletopGodZoomFarValue();
+// For view_check.cpp: the version of the God view (it changes with each move
+// and each turn of the view), and true while the stick walks or flies.
+uint64_t TabletopGodViewVersion();
+bool TabletopGodWalkActive();
 // The switch "Speed ramp" of the debug page (move_stick_ramp).
 void TabletopGodMoveRampToggle();
 int TabletopGodMoveRampValue();

@@ -198,6 +198,32 @@ inline float FollowStep(LandFollow* follow, float land, float way,
   return follow->stage[1] - before;
 }
 
+// WHEN THE FILTER STARTS AGAIN (move_stick_follow_place). The filter holds
+// land heights of the place where the last walk stopped. When the view went
+// to a different place since then, those heights are not the land under the
+// head, and a filter that went on would move the view up or down by the
+// difference in the next walk. So the filter starts again at the land under
+// the head (FollowStart) when:
+//
+//   rule 1  the view moved since the last walk (moved), a camera of the game
+//           put the view at a place (placed), or the room was recentered
+//           (recentered). A turn about the head is not a move: the head
+//           stays over the same land, so the filter stays.
+//   rule 0  the version of the view changed (changed): each move and each
+//           turn. A place at a camera of the game and a recenter do not
+//           change the version.
+//
+// have is false before the first walk.
+const int kFollowPlaceVersion = 0;
+const int kFollowPlaceEach = 1;
+
+inline bool FollowRestart(int rule, bool have, bool changed, bool moved,
+                          bool placed, bool recentered) {
+  if (!have) return true;
+  if (rule == kFollowPlaceVersion) return changed;
+  return moved || placed || recentered;
+}
+
 // THE SPEED RAMP (move_stick_ramp=1). While the stick is pushed to
 // kRampShare of the top speed or more, the time of that push counts. For
 // the first kRampHoldSeconds nothing changes. Then the speed doubles each
@@ -229,6 +255,28 @@ inline float RampFactor(float held, float most) {
   const float factor =
       powf(2.0f, (held - kRampHoldSeconds) / kRampDoubleSeconds);
   return factor > most ? most : factor;
+}
+
+// THE SPEED BY THE SCALE (move_stick_scale=1). The speed of the stick in the
+// room is multiplied by a smooth function of the scale of the God view, so
+// a player at the villager scale crosses a town in some seconds, and a
+// player over a small land moves a little slower:
+//
+//     factor = (ref / scale) ^ power, kept between low and high
+//
+// With ref 16 units per meter, power 0.5, low 0.6 and high 4 the factor is
+// 4 at 1 unit per meter, 1.46 at the life size scale (7.5), 1 at 16, 0.73
+// at 30, and 0.6 from 44.4 units per meter up. The factor depends on the
+// scale only, so it never moves the view while the stick is at rest. The
+// speed ramp multiplies the result, with its own cap. 1 for a scale or a ref
+// that is not more than 0.
+inline float ScaleFactor(float scale, float ref, float power, float low,
+                         float high) {
+  if (!(scale > 0.0f) || !(ref > 0.0f)) return 1.0f;
+  float factor = powf(ref / scale, power);
+  if (factor < low) factor = low;
+  if (factor > high) factor = high;
+  return factor;
 }
 
 // THE FLY (move_type=1). The stick moves the view along the forward

@@ -357,13 +357,14 @@ const char* const kInputName[kInputCount] = {
     "aimdebug",   "aimmark",    "lstick_half"};
 
 // The fake hand positions for the word "point", in cm from the head center.
+// A value can have decimals.
 const int kMaxPoints = 16;
-int g_points[kMaxPoints][3];
+float g_points[kMaxPoints][3];
 int g_point_count = 0;
 int g_point_index = -1;  // -1 is the base pose
 int g_points_used = 0;
 // The same for the left hand and the word "lpoint".
-int g_lpoints[kMaxPoints][3];
+float g_lpoints[kMaxPoints][3];
 int g_lpoint_count = 0;
 int g_lpoint_index = -1;
 int g_lpoints_used = 0;
@@ -520,19 +521,29 @@ void ParseScript(const char* text) {
   }
 }
 
+// One number of a list: a whole number for the turns, and a number with
+// decimals for the points of the hands.
+void ReadNumber(const char* p, char** end, int* out) {
+  *out = static_cast<int>(strtol(p, end, 10));
+}
+void ReadNumber(const char* p, char** end, float* out) {
+  *out = static_cast<float>(strtod(p, end));
+}
+
 // right,up,forward in cm, separated by spaces.
-void ParsePoints(const char* text, int (*points)[3], int* count) {
+template <typename T>
+void ParsePoints(const char* text, T (*points)[3], int* count) {
   int& point_count = *count;
   point_count = 0;
   const char* p = text;
   while (*p != 0 && point_count < kMaxPoints) {
     while (*p == ' ' || *p == '\t') ++p;
     if (*p == 0) break;
-    int value[3] = {0, 0, 0};
+    T value[3] = {0, 0, 0};
     char* end = nullptr;
     bool ok = true;
     for (int i = 0; i < 3 && ok; ++i) {
-      value[i] = static_cast<int>(strtol(p, &end, 10));
+      ReadNumber(p, &end, &value[i]);
       if (end == p) ok = false;
       p = end;
       if (i < 2) {
@@ -1173,13 +1184,13 @@ void UpdateScript() {
     // After the last point the list starts again.
     if (step.input == kPoint && t == step.start && g_point_count > 0) {
       g_point_index = g_points_used++ % g_point_count;
-      ModLog("controllers  : the fake hand steps to point %d (%d %d %d cm) "
+      ModLog("controllers  : the fake hand steps to point %d (%g %g %g cm) "
              "at frame %llu", g_point_index, g_points[g_point_index][0],
              g_points[g_point_index][1], g_points[g_point_index][2], g_frame);
     }
     if (step.input == kLPoint && t == step.start && g_lpoint_count > 0) {
       g_lpoint_index = g_lpoints_used++ % g_lpoint_count;
-      ModLog("controllers  : the fake left hand steps to point %d (%d %d %d "
+      ModLog("controllers  : the fake left hand steps to point %d (%g %g %g "
              "cm) at frame %llu", g_lpoint_index,
              g_lpoints[g_lpoint_index][0], g_lpoints[g_lpoint_index][1],
              g_lpoints[g_lpoint_index][2], g_frame);

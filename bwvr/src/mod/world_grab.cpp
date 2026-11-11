@@ -47,6 +47,7 @@
 #include "controller_math.h"
 #include "controllers.h"
 #include "debug_menu.h"
+#include "grab_gain_math.h"
 #include "haptics.h"
 #include "hint_card.h"
 #include "hint_learn_math.h"
@@ -58,6 +59,7 @@ extern void ModLog(const char* format, ...);
 bool ControllersGrabInput(GrabInput* out);
 void ControllersGrabEnd(const char* why);
 void ControllersGrabPulse(int hands, float amplitude, float seconds);
+void ControllersGesturePulse(float amplitude, float seconds);
 uint64_t ControllersFrameCount();
 // head_pose.cpp
 uint64_t HeadPoseOriginSerial();
@@ -204,6 +206,21 @@ uint64_t g_steps = 0;
 
 // The ground limit held the height of the last one hand solve back.
 bool g_height_cut = false;
+
+// THE GAIN OF THE GRAB (grab_boost=1, grab_gain_math.h), for one hand in the
+// God view. The solve takes a hand point of its own: at the anchor it is the
+// hand, and in each solve it moves by the step of the hand since the solve
+// before, with the gains of that solve (GrabStep). So the gains can change
+// in a pull with no jump, and a hand at rest moves nothing. Two hands keep
+// the real hands, 1:1.
+bool g_boost_on = false;        // this anchor uses the gain
+float g_boost_point[3] = {0.0f, 0.0f, 0.0f};  // the hand point of the solve
+float g_boost_last[3] = {0.0f, 0.0f, 0.0f};   // the hand at the solve before
+float g_boost_up_least = 1000.0f, g_boost_up_most = 1.0f;  // of a grab
+float g_boost_across_least = 1000.0f, g_boost_across_most = 1.0f;
+float g_boost_hand_cm = 0.0f;   // the way of the hand in the grab
+float g_boost_now = 1.0f;       // the larger gain of the last solve
+int g_boost_logs = 0;
 
 // THE FEEL OF THE LAND (world_haptics, haptics.cpp). A faint tick for each 2
 // cm that the land moves in the room under a grip. The land moves with the
@@ -477,7 +494,23 @@ void Release(const char* why) {
            "and the hand felt %llu ticks of the land (world_haptics=%d), "
            "frame %llu", g_land_cm, g_land_ticks, HapticsWorldOn(),
            ControllersFrameCount());
+    if (g_boost_on) {
+      ModLog("grab         : the hand went %.1f cm and the land %.1f cm in the "
+             "room. The gain of the grab was %.2f to %.2f up and %.2f to %.2f "
+             "across (grab_boost=1)", g_boost_hand_cm, g_land_cm,
+             g_boost_up_least > g_boost_up_most ? g_boost_up_most
+                                                : g_boost_up_least,
+             g_boost_up_most,
+             g_boost_across_least > g_boost_across_most
+                 ? g_boost_across_most
+                 : g_boost_across_least,
+             g_boost_across_most);
+    }
   }
+  g_boost_up_least = g_boost_across_least = 1000.0f;
+  g_boost_up_most = g_boost_across_most = 1.0f;
+  g_boost_hand_cm = 0.0f;
+  g_boost_now = 1.0f;
   g_land_path[0] = g_land_path[1] = 0.0f;
   g_land_cm = 0.0f;
   g_land_ticks = 0;
@@ -617,6 +650,28 @@ bool TableAnchor(const GrabInput& in, int mask, const char* why) {
   TableHands(in, mask, a.middle, a.spread);
   g_table_anchor = a;
   g_table_serial = serial;
+  // The gain of the grab: one hand in the God view, the key on, and the
+  // test step of the grab "as set" (Shift F11 or the debug page).
+  g_boost_on = g_set.boost && g_test == 0 && a.hands == 1 &&
+               TabletopGodOwnsView();
+  Copy3(g_boost_point, a.middle);
+  Copy3(g_boost_last, a.middle);
+  g_boost_now = 1.0f;
+  if (g_boost_on && g_boost_logs < 60) {
+    ++g_boost_logs;
+    float below = 0.0f;
+    const bool have_below = TabletopGodLandBelow(a.middle, &below);
+    ModLog("grab         : the gain of the grab (grab_boost=1): %.2f up, with "
+           "the land %.2f m below the hand (reach %d cm, at most %d), and "
+           "%.2f across at %.2f units per meter, frame %llu",
+           have_below ? grab_gain_math::DistanceGain(
+                            below, g_set.boost_reach_cm * 0.01f,
+                            static_cast<float>(g_set.boost_most))
+                      : 1.0f,
+           below, g_set.boost_reach_cm, g_set.boost_most,
+           grab_gain_math::ScaleGain(TabletopGodScaleCurve()), pose.scale,
+           in.frame);
+  }
   g_theta = 0.0f;
   g_k = 1.0f;
   for (int slot = 0; slot < 2; ++slot) Copy3(g_hand_a[slot], g_smooth[slot]);
@@ -696,13 +751,47 @@ void TableSolve(const GrabInput& in, int mask, const char* why) {
   // In the God view one hand also moves the land up and down, inside the
   // ground limits. Two hands keep the height of the press.
   const bool god = TabletopGodOwnsView();
-  table_math::TableGrabSolve(g_table_anchor, g_table_room, middle, spread,
-                             turn, zoom, kMinSpreadMeters, g_table_low,
+  // THE GAIN OF THE GRAB: the step of the hand since the solve before, with
+  // the gains of the land below the hand now and of the scale now.
+  const bool boost = g_boost_on && god && mask != 3;
+  if (boost) {
+    float step[3];
+    for (int i = 0; i < 3; ++i) step[i] = middle[i] - g_boost_last[i];
+    float below = 0.0f;
+    if (!TabletopGodLandBelow(middle, &below)) below = 0.0f;
+    const float reach = g_set.boost_reach_cm * 0.01f;
+    const float most = static_cast<float>(g_set.boost_most);
+    const float across = grab_gain_math::ScaleGain(TabletopGodScaleCurve());
+    float used[3];
+    grab_gain_math::GrabStep(step, below, across, reach, most, used);
+    for (int i = 0; i < 3; ++i) g_boost_point[i] += used[i];
+    Copy3(g_boost_last, middle);
+    const float up = grab_gain_math::DistanceGain(below, reach, most);
+    if (g_new_sample) {
+      if (up < g_boost_up_least) g_boost_up_least = up;
+      if (up > g_boost_up_most) g_boost_up_most = up;
+      if (across < g_boost_across_least) g_boost_across_least = across;
+      if (across > g_boost_across_most) g_boost_across_most = across;
+      g_boost_hand_cm += controller_math::Length(step) * 100.0f;
+    }
+    g_boost_now = up > across ? up : across;
+  }
+  table_math::TableGrabSolve(g_table_anchor, g_table_room,
+                             boost ? g_boost_point : middle, spread, turn,
+                             zoom, kMinSpreadMeters, g_table_low,
                              g_table_high, &g_theta, &g_k, &pose, god);
   if (god && mask != 3) {
     const float asked = pose.center[1];
     bool cut = false;
     TabletopGodLimitHeight(&pose, &cut);
+    // A limit holds the land: the hand point of the solve goes to the
+    // height that the pose has, so a move back of the hand acts at once and
+    // the gain does not build a way that the hand must undo.
+    if (boost && cut && pose.scale > 0.0f) {
+      g_boost_point[1] = g_table_anchor.middle[1] -
+                         (pose.center[1] - g_table_anchor.pose.center[1]) /
+                             pose.scale;
+    }
     if (cut != g_height_cut && LogRoom()) {
       const float over = (asked - pose.center[1]) / pose.scale;
       if (cut) {
@@ -778,6 +867,10 @@ void WorldGrabSetOptions(const GrabSettings& settings) {
   if (g_set.limit < 100) g_set.limit = 100;
   if (g_set.min_height < 0) g_set.min_height = 0;
   if (g_set.max_speed < 0) g_set.max_speed = 0;
+  if (g_set.boost_reach_cm < 5) g_set.boost_reach_cm = 5;
+  if (g_set.boost_reach_cm > 500) g_set.boost_reach_cm = 500;
+  if (g_set.boost_most < 1) g_set.boost_most = 1;
+  if (g_set.boost_most > 200) g_set.boost_most = 200;
   if (!On()) return;
   ModLog("grab         : gain %s, %d%%, at most %d, %d%% up and down, "
          "smoothing %d ms, two hands %s, turn %s, zoom %s, wall %d units from "
@@ -1076,6 +1169,31 @@ int WorldGrabTestValue() {
   if (!g_set.on || g_set.hand <= 0) return kDebugCannot;
   return g_test;
 }
+
+// THE SWITCH "Grab gain" of the debug page: grab_boost off and on. A grab
+// that holds ends, so the next grab anchors with the new rule.
+void WorldGrabBoostToggle() {
+  g_set.boost = !g_set.boost;
+  if (g_holding) {
+    ControllersGrabEnd("the debug page changed grab_boost");
+    Release("the debug page changed grab_boost");
+  }
+  ControllersGesturePulse(0.5f, g_set.boost ? 0.40f : 0.08f);
+  ModLog("debug page   : grab_boost=%d. %s", g_set.boost ? 1 : 0,
+         g_set.boost
+             ? "A grab with one hand brings far land up faster than the "
+               "hand, and at a small scale moves the land across faster"
+             : "A grab with one hand moves the land 1:1 with the hand");
+}
+
+int WorldGrabBoostValue() {
+  if (!g_set.on || g_set.hand <= 0) return kDebugCannot;
+  return g_set.boost ? 1 : 0;
+}
+
+// For the scale check (view_check.cpp): the larger gain of the last solve,
+// 1 with no gain.
+float WorldGrabGainNow() { return g_holding && g_boost_on ? g_boost_now : 1.0f; }
 
 // Once a report window.
 void WorldGrabReport() {

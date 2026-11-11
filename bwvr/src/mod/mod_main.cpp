@@ -1049,6 +1049,14 @@ void ReadSettings() {
     // a desktop run.
     t.move_stick_follow_land = number("move_stick_follow_land", 1);
     t.move_stick_trace = number("move_stick_trace", 0);
+    // 1: the filter of the land starts again after each move of the view, a
+    // place at a camera of the game and a recenter, and a turn keeps it. 0:
+    // it starts again after each change of the version of the view only.
+    t.move_stick_follow_place = number("move_stick_follow_place", 1);
+    // 1: a zoom in over a land more than 2.5 m below the head keeps the land
+    // at its height in the room. 0: it zooms about a level 2.5 m below the
+    // head, and the land goes farther down.
+    t.god_zoom_far_level = number("god_zoom_far_level", 1);
     // How the stick moves the player: 0 walks over the land, and 1 flies
     // along the forward direction of the head or of the controller in 3D.
     t.move_type = number("move_type", 0);
@@ -1057,6 +1065,14 @@ void ReadSettings() {
     // move_stick_ramp_most times. 0 keeps the speed of the push.
     t.move_stick_ramp = number("move_stick_ramp", 1);
     t.move_stick_ramp_most = number("move_stick_ramp_most", 32);
+    // 1: the speed of the stick is times (ref / scale) ^ power, between low
+    // and high, so the walk and the fly are faster at a small scale and a
+    // little slower at a large one. 0: move_stick_speed_cm at each scale.
+    t.move_stick_scale = number("move_stick_scale", 1);
+    t.move_stick_scale_ref_x10 = number("move_stick_scale_ref_x10", 160);
+    t.move_stick_scale_power_pct = number("move_stick_scale_power_pct", 50);
+    t.move_stick_scale_low_pct = number("move_stick_scale_low_pct", 60);
+    t.move_stick_scale_high_pct = number("move_stick_scale_high_pct", 400);
     // A fly at a house, a rock or a tree trunk: 1 slides past it, 0 stops.
     t.fly_solid_slide = number("fly_solid_slide", 1);
     t.test_keys = number("test_keys", 0) != 0;
@@ -1669,6 +1685,12 @@ void ReadSettings() {
     g.vertical_pct = number("grab_vertical_pct", 100);
     g.smoothing_ms = number("grab_smoothing_ms", 35);
     g.max_speed = number("grab_max_speed", 0);
+    // The gain of a grab with one hand in the God view: land far below the
+    // hand comes up faster than the hand, and at a small scale the land
+    // moves across faster than the hand. 0 keeps the grab 1:1.
+    g.boost = number("grab_boost", 1) != 0;
+    g.boost_reach_cm = number("grab_boost_reach_cm", 50);
+    g.boost_most = number("grab_boost_most", 50);
     // The grip levels and the limits.
     g.press_pct = number("grab_press_pct", 70);
     g.release_pct = number("grab_release_pct", 50);

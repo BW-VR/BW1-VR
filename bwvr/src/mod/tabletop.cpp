@@ -101,6 +101,8 @@ bool HeadCameraEnabled();
 // sample: the head matrix and its lean from the recenter pose, in units at
 // the life size scale.
 float HeadPoseScale();
+// The count of the recenters of the room.
+uint64_t HeadPoseOriginSerial();
 bool HeadPoseCurrent(float matrix_out[9], float translation_out[3]);
 // stereo.cpp: the display time of the last frame of the headset and the
 // display period, in nanoseconds. False with no headset.
@@ -456,6 +458,10 @@ struct ZoomHold {
   float scale = 0.0f;
   float start_under[2] = {0.0f, 0.0f};
   float under[2] = {0.0f, 0.0f};
+  // The land under the head, in meters below the head, at the start of the
+  // hold and after its last frame that changed the scale.
+  float start_below = 0.0f;
+  float below = 0.0f;
   bool have_eye = false;
   float start_eye[3] = {0.0f, 0.0f, 0.0f};
   double seconds = 0.0;
@@ -604,6 +610,9 @@ struct WalkHold {
   // The speed ramp: the seconds of the full push, and the largest factor.
   float ramp_held = 0.0f;
   float ramp_top = 1.0f;
+  // The speed by the scale: the least and the largest factor of the walk.
+  float scale_least = 1.0f;
+  float scale_most = 1.0f;
   // The fly: how far its floor lifted the view, in meters of the room, on
   // how many frames, the least clearance of the head after a step, and the
   // steps that stopped short of a solid.
@@ -640,15 +649,23 @@ struct WalkHold {
 } g_walk;
 // THE LAND THAT THE VIEW FOLLOWS (move_stick_follow_land=1, walk_math.h).
 // The filter keeps its state from one walk to the next, so a climb in short
-// pushes follows the land as a long push does. version is g_god_version
-// after the last frame of the walk that moved the view. When something else
-// moved the view since then (a teleport, a grab, a zoom, a ground step, a
-// new build), the filter starts again at the land under the head.
+// pushes follows the land as a long push does. version and nonturn are
+// g_god_version and g_god_nonturn_version after the last frame of the walk
+// that moved the view, and origin is the count of the recenters then. When
+// something else moved the view since then (a teleport, a grab, a zoom, a
+// ground step, a fly, a place at a camera of the game, a recenter), the
+// filter starts again at the land under the head (walk_math::FollowRestart,
+// move_stick_follow_place). placed is set by PlaceGod.
 struct WalkFollow {
   walk_math::LandFollow land;
   bool have = false;
   uint64_t version = 0;
+  uint64_t nonturn = 0;
+  uint64_t origin = 0;
+  bool placed = false;
 } g_follow;
+// The log lines of a start of the filter after a place or a recenter.
+int g_follow_logs = 0;
 // The test move_stick_trace: the lines of the trace in this game.
 uint64_t g_walk_traces = 0;
 const uint64_t kMaxWalkTraces = 2000;
@@ -1227,6 +1244,10 @@ bool PlaceGod(const char* cause, const float position[3],
   StopTurnHold("the view went to a camera of the game", false);
   g_tele.pending = false;
   g_pan = {};
+  // The view is at a new place, and the version of the view does not change
+  // here (g_pair and the game camera need it). So the filter of the land of
+  // the walk learns it from this flag (move_stick_follow_place).
+  g_follow.placed = true;
   Derive();
   g_have_table = true;
   ++g_serial;
@@ -1528,7 +1549,11 @@ bool ZoomPointAway(const ZoomPoint& point) {
 // head. So the land of that height keeps its height in the room, and the
 // ground stays where the player put it. The level goes into the range of a
 // step of the ground first, so a hill that stands over the head goes down as
-// the view zooms out.
+// the view zooms out. With god_zoom_far_level=1 a zoom in (direction 1) over
+// a land more than 2.5 m below the head takes the land itself as the level
+// (zoom_math::ZoomLevelFor), so the zoom in does not move that land farther
+// down. A zoom out keeps the level in the range, so a deep land comes up
+// toward it.
 //
 // ITS PLACE ACROSS is the choice of god_zoom_about (zoom_math.h,
 // PointAcross). 0: under the head, so the player keeps their place in the
@@ -1540,13 +1565,13 @@ bool ZoomPointAway(const ZoomPoint& point) {
 // in a zoom, and the game camera follows it (TabletopGodGameCamera). A hill
 // at the new place of the head stays below the head (ZoomClearHead).
 void GodZoomPoint(const TablePose& pose, const float room[3],
-                  const float head[3], ZoomPoint* out) {
+                  const float head[3], int direction, ZoomPoint* out) {
   float at[3];
   PoseWorld(pose, room, head, at);
   const float land = GroundAt(at[0], at[2]);
-  const float in_room =
-      zoom_math::ZoomLevel(GroundInRoom(pose, room, land), head[1],
-                           kGroundNearest, kGroundFarthest);
+  const float in_room = zoom_math::ZoomLevelFor(
+      GroundInRoom(pose, room, land), head[1], kGroundNearest,
+      kGroundFarthest, direction, g_settings.god_zoom_far_level != 0);
   out->pivot[0] = at[0];
   out->pivot[1] = pose.center[1] + (in_room - room[1]) * pose.scale;
   out->pivot[2] = at[2];
@@ -1906,7 +1931,7 @@ void ApplyGodSteps() {
     float at[3];
     ZoomPoint point;
     PoseWorld(pose, room, head, at);
-    GodZoomPoint(pose, room, head, &point);
+    GodZoomPoint(pose, room, head, zoom > 0 ? 1 : -1, &point);
     const float step = 1.0f + g_settings.god_zoom_pct * 0.01f;
     const float wanted = zoom > 0 ? 1.0f / step : step;
     const float before = pose.scale;
@@ -2308,6 +2333,10 @@ void StopZoomHold(const char* cause, bool view_stays) {
              ? sqrtf(ux * ux + uz * uz) / g_hold.scale * 100.0f
              : 0.0f,
          drawn);
+  ModLog("god view     : in the smooth zoom the land under your head went "
+         "from %.2f m to %.2f m below your head (god_zoom_far_level=%d)",
+         g_hold.start_below, g_hold.below,
+         g_settings.god_zoom_far_level != 0 ? 1 : 0);
 }
 
 // THE SMOOTH ZOOM (god_zoom_smooth=1, docs/god-view.md, "The zoom"), once a
@@ -2388,7 +2417,9 @@ void ApplyGodZoomHold(double frame_seconds) {
   const TablePose pose = Pose();
   PoseWorld(pose, room, head, under);
   ZoomPoint point = g_hold.point;
-  if (!g_hold.active || !g_hold.kept) GodZoomPoint(pose, room, head, &point);
+  if (!g_hold.active || !g_hold.kept) {
+    GodZoomPoint(pose, room, head, direction, &point);
+  }
   const float step = 1.0f + g_settings.god_zoom_pct * 0.01f;
   if (!g_hold.active) {
     g_hold.active = true;
@@ -2401,6 +2432,8 @@ void ApplyGodZoomHold(double frame_seconds) {
     g_hold.start_scale = g_hold.scale = pose.scale;
     g_hold.start_under[0] = g_hold.under[0] = under[0];
     g_hold.start_under[1] = g_hold.under[1] = under[2];
+    g_hold.start_below = g_hold.below =
+        head[1] - GroundInRoom(pose, room, LandUnderHead(pose, room, head));
     g_hold.have_eye = HeadCameraTableEye(g_hold.start_eye);
     g_hold.seconds = 0.0;
     g_hold.frames = g_hold.moved = 0;
@@ -2458,6 +2491,8 @@ void ApplyGodZoomHold(double frame_seconds) {
   PoseWorld(Pose(), room, head, under);
   g_hold.under[0] = under[0];
   g_hold.under[1] = under[2];
+  g_hold.below = head[1] - GroundInRoom(Pose(), room,
+                                        LandUnderHead(Pose(), room, head));
   PoseRoom(Pose(), room, g_hold.point.pivot, g_hold.point_now);
   SayLowest(Pose(), room, head);
   Help(kHelpZoom, kInputWheel);
@@ -2485,6 +2520,33 @@ const char* RampText() {
             "each %.0f s, up to %d times (move_stick_ramp=1)",
             walk_math::kRampHoldSeconds, walk_math::kRampShare * 100.0f,
             walk_math::kRampDoubleSeconds, g_settings.move_stick_ramp_most);
+  return text;
+}
+
+// THE SPEED BY THE SCALE (move_stick_scale, walk_math::ScaleFactor): the
+// factor of the speed of the stick at a scale, 1 when the key is 0.
+float MoveScaleFactor(float scale) {
+  if (g_settings.move_stick_scale == 0) return 1.0f;
+  return walk_math::ScaleFactor(
+      scale, g_settings.move_stick_scale_ref_x10 * 0.1f,
+      g_settings.move_stick_scale_power_pct * 0.01f,
+      g_settings.move_stick_scale_low_pct * 0.01f,
+      g_settings.move_stick_scale_high_pct * 0.01f);
+}
+
+// The speed by the scale, for the log.
+const char* MoveScaleText(float scale) {
+  static char text[224];
+  if (g_settings.move_stick_scale == 0) {
+    return "The speed is the same at each scale (move_stick_scale=0)";
+  }
+  sprintf_s(text, "At %.2f units per meter the speed of the stick is times "
+            "%.2f (move_stick_scale=1: (%.1f / scale) ^ %.2f, from %.2f to "
+            "%.2f)", scale, MoveScaleFactor(scale),
+            g_settings.move_stick_scale_ref_x10 * 0.1f,
+            g_settings.move_stick_scale_power_pct * 0.01f,
+            g_settings.move_stick_scale_low_pct * 0.01f,
+            g_settings.move_stick_scale_high_pct * 0.01f);
   return text;
 }
 
@@ -2592,6 +2654,12 @@ void StopWalk(const char* cause, bool view_stays) {
     sprintf_s(ramped, " The speed ramp went up to %.2f times the speed of "
               "the push (move_stick_ramp=1).", g_walk.ramp_top);
   }
+  char scaled[128] = "";
+  if (g_settings.move_stick_scale != 0) {
+    sprintf_s(scaled, " The scale made the speed of the stick %.2f to %.2f "
+              "times move_stick_speed_cm (move_stick_scale=1).",
+              g_walk.scale_least, g_walk.scale_most);
+  }
   char even[160] = "";
   if (g_walk.moved != 0) {
     sprintf_s(even, " A frame took %.1f to %.1f ms, and a step was %.2f to "
@@ -2605,7 +2673,7 @@ void StopWalk(const char* cause, bool view_stays) {
          "at %.1f %.1f and is at %.1f %.1f. The stick was pushed for %.3f s, "
          "which gives %.1f cm of the room each second, and the view moved on "
          "%llu of %llu frames (move_stick=%d, %.2f to %.2f units per "
-         "meter), frame %llu.%s%s%s%s%s%s%s",
+         "meter), frame %llu.%s%s%s%s%s%s%s%s",
          g_walk.type == walk_math::kTypeFly ? "fly" : "walk", cause,
          sqrtf(dx * dx + dz * dz), room_m * 100.0f, fabsf(degrees),
          degrees < -0.05f ? "left" : "right", g_walk.start_under[0],
@@ -2613,8 +2681,8 @@ void StopWalk(const char* cause, bool view_stays) {
          g_walk.seconds,
          g_walk.seconds > 0.0 ? g_walk.path * 100.0f / g_walk.seconds : 0.0,
          g_walk.moved, g_walk.frames, g_walk.rule, g_walk.start_scale, g_scale,
-         ControllersFrameCount(), hill, blind, land, floor, ramped, even,
-         late);
+         ControllersFrameCount(), hill, blind, land, floor, ramped, scaled,
+         even, late);
 }
 
 // THE WALK WITH THE STICK (move_stick, docs/god-view.md, "The walk with the
@@ -2631,9 +2699,13 @@ void StopWalk(const char* cause, bool view_stays) {
 // then keeps the direction of the frame before, and a walk with no such
 // frame does not move.
 //
-// THE SPEED is a speed of the room (move_stick_speed_cm at a full push), so
-// the walk feels the same at each scale. The step of a frame is the speed
-// times the real time of the frame, with the cap of the smooth zoom.
+// THE SPEED is a speed of the room: move_stick_speed_cm at a full push,
+// times the factor of the scale of this frame (move_stick_scale,
+// MoveScaleFactor). So the walk is faster at a small scale and a little
+// slower at a large one. The factor depends on the scale only, and in a
+// smooth zoom during a walk it follows the scale of each frame. The step of
+// a frame is the speed times the real time of the frame, with the cap of
+// the smooth zoom.
 //
 // THE FLY (move_type=1). Forward is the forward direction of the head or of
 // the controller in 3D, so a push while the player looks or points down
@@ -2768,6 +2840,7 @@ void ApplyGodWalk(double frame_seconds) {
     g_walk.climb = 0.0f;
     g_walk.ramp_held = 0.0f;
     g_walk.ramp_top = 1.0f;
+    g_walk.scale_least = g_walk.scale_most = MoveScaleFactor(pose.scale);
     g_walk.lifted = 0.0f;
     g_walk.lift_frames = 0;
     g_walk.least_clear = 1000.0f;
@@ -2818,11 +2891,13 @@ void ApplyGodWalk(double frame_seconds) {
              "meter, with the land under your head at %.1f %.1f, %.1f cm "
              "below your head. Forward is %s (move_stick=%d), and it %s. A "
              "full push moves you %d cm of the room each second "
-             "(move_stick_speed_cm). %s. %s, frame %llu.",
+             "(move_stick_speed_cm). %s: %.0f cm of the room each second. "
+             "%s. %s, frame %llu.",
              MoveWord(), pose.scale, under[0], under[2],
              g_walk.start_below * 100.0f, WalkRuleText(rule), rule, where,
-             g_settings.move_stick_speed_cm, FollowText(), RampText(),
-             ControllersFrameCount());
+             g_settings.move_stick_speed_cm, MoveScaleText(pose.scale),
+             g_settings.move_stick_speed_cm * MoveScaleFactor(pose.scale),
+             FollowText(), RampText(), ControllersFrameCount());
     }
   }
   const float seconds = zoom_math::FrameSeconds(frame_seconds, kHoldFrameCap);
@@ -2860,7 +2935,13 @@ void ApplyGodWalk(double frame_seconds) {
   const float ramp = walk_math::RampFactor(
       g_walk.ramp_held, static_cast<float>(g_settings.move_stick_ramp_most));
   if (ramp > g_walk.ramp_top) g_walk.ramp_top = ramp;
-  const float top = g_settings.move_stick_speed_cm * 0.01f * ramp;
+  // THE SPEED BY THE SCALE of this frame. A smooth zoom of the other stick
+  // changes the scale between two frames of the walk, and the factor follows.
+  const float scale_factor = MoveScaleFactor(pose.scale);
+  if (scale_factor < g_walk.scale_least) g_walk.scale_least = scale_factor;
+  if (scale_factor > g_walk.scale_most) g_walk.scale_most = scale_factor;
+  const float top =
+      g_settings.move_stick_speed_cm * 0.01f * scale_factor * ramp;
   TablePose next;
   if (fly) {
     float speed[3], step[3];
@@ -2923,13 +3004,43 @@ void ApplyGodWalk(double frame_seconds) {
   // height under the head at the new place goes through the filter of
   // walk_math.h, and the view goes up or down by the change of its output,
   // so the filtered land keeps its height in the room. The filter starts
-  // again when something else moved the view since the last frame of a walk.
-  // The fly does not follow the land.
+  // again when something else moved the view since the last frame of a walk
+  // (walk_math::FollowRestart). The fly does not follow the land.
   if (!fly && g_settings.move_stick_follow_land != 0 && next.scale > 0.0f) {
-    if (!g_follow.have || g_follow.version != g_god_version) {
+    const uint64_t origin = HeadPoseOriginSerial();
+    const bool changed = g_follow.version != g_god_version;
+    const bool moved = g_follow.nonturn != g_god_nonturn_version;
+    const bool recentered = g_follow.origin != origin;
+    const bool placed = g_follow.placed;
+    const int follow_rule = g_settings.move_stick_follow_place != 0
+                                ? walk_math::kFollowPlaceEach
+                                : walk_math::kFollowPlaceVersion;
+    const bool again = walk_math::FollowRestart(
+        follow_rule, g_follow.have, changed, moved, placed, recentered);
+    // A log line when a place or a recenter is the only cause, so the log
+    // shows the case of both rules.
+    if (g_follow.have && (placed || recentered) && !moved && !changed &&
+        g_follow_logs < 20 && WalkLog()) {
+      ++g_follow_logs;
+      const float old_land = g_follow.land.stage[1];
+      const float land_now = LandUnderHead(pose, room, head);
+      ModLog("god view     : %s since the last walk. The filter of the land "
+             "holds %.2f, and the land under your head is at %.2f: %.1f cm "
+             "of the room apart. %s (move_stick_follow_place=%d)",
+             placed ? "the view went to a camera of the game"
+                    : "the room was recentered",
+             old_land, land_now,
+             (land_now - old_land) / pose.scale * 100.0f,
+             again ? "The filter starts again at the land under your head"
+                   : "The filter goes on from the land of the last walk",
+             g_settings.move_stick_follow_place != 0 ? 1 : 0);
+    }
+    if (again) {
       walk_math::FollowStart(LandUnderHead(pose, room, head), &g_follow.land);
       g_follow.have = true;
     }
+    g_follow.placed = false;
+    g_follow.origin = origin;
     const float rise =
         walk_math::FollowStep(&g_follow.land, LandUnderHead(next, room, head),
                               way, walk_math::kFollowLength);
@@ -2954,6 +3065,7 @@ void ApplyGodWalk(double frame_seconds) {
   // A walk is no snap turn: the game camera goes over the land under the
   // head, and does not turn about its focus (TabletopGodTurnedOnly).
   g_god_nonturn_version = g_god_version;
+  if (!fly) g_follow.nonturn = g_god_nonturn_version;
   ++g_walk.moved;
   ++g_walk_moves;
   // THE FRAMES OF THE HEADSET. The step of a frame is the speed times the
@@ -3337,6 +3449,21 @@ void TabletopSetOptions(const TabletopSettings& settings) {
   }
   if (g_settings.move_stick_trace < 0) g_settings.move_stick_trace = 0;
   if (g_settings.move_stick_trace > 2000) g_settings.move_stick_trace = 2000;
+  // The speed by the scale: ref 1 to 4000 units per meter, the power 0 to
+  // 1, the least factor 10 to 100 percent, the largest 100 to 1000.
+  g_settings.move_stick_scale = g_settings.move_stick_scale != 0 ? 1 : 0;
+  int& ref = g_settings.move_stick_scale_ref_x10;
+  if (ref < 10) ref = 10;
+  if (ref > 40000) ref = 40000;
+  int& power = g_settings.move_stick_scale_power_pct;
+  if (power < 0) power = 0;
+  if (power > 100) power = 100;
+  int& low = g_settings.move_stick_scale_low_pct;
+  if (low < 10) low = 10;
+  if (low > 100) low = 100;
+  int& high = g_settings.move_stick_scale_high_pct;
+  if (high < 100) high = 100;
+  if (high > 1000) high = 1000;
 }
 
 // Only when play_mode picks the table. With any other play mode, nothing in
@@ -3852,6 +3979,22 @@ bool TabletopGodLimitHeight(TablePose* pose, bool* cut) {
                       FloorHeadY(head), kGroundNearest, kGroundFarthest);
   pose->center[1] = limited;
   if (cut != nullptr) *cut = limited != wanted;
+  return true;
+}
+
+// For the gain of the grab (world_grab.cpp): how far the land is below a
+// point of the room (meters, in the room of the table), in the pose of now.
+// False when the God view does not own the view.
+bool TabletopGodLandBelow(const float point[3], float* below_m) {
+  if (!g_installed || !g_have_table || !g_settings.god) return false;
+  float room[3];
+  TableRoom(room);
+  const TablePose pose = Pose();
+  if (!(pose.scale > 0.0f)) return false;
+  float at[3];
+  PoseWorld(pose, room, point, at);
+  *below_m = point[1] - GroundInRoom(pose, room,
+                                     GroundAt(ClampMap(at[0]), ClampMap(at[2])));
   return true;
 }
 
@@ -4549,6 +4692,71 @@ void TabletopGodFlySlideToggle() {
              ? "A fly slides past a house, a rock or a tree trunk"
              : "A fly stops short of a house, a rock or a tree trunk");
 }
+
+// THE SWITCH "Deep zoom" of the debug page: god_zoom_far_level, the level of
+// a zoom in over a land more than 2.5 m below the head. A hold of the smooth
+// zoom that runs stops, so the next hold takes its point by the new rule.
+void TabletopGodZoomFarToggle() {
+  if (!g_installed || !g_settings.god || !TestSwitchesOn()) return;
+  g_settings.god_zoom_far_level = g_settings.god_zoom_far_level != 0 ? 0 : 1;
+  StopZoomHold("the debug page changed god_zoom_far_level", true);
+  ControllersGesturePulse(0.5f, g_settings.god_zoom_far_level != 0 ? 0.40f
+                                                                   : 0.08f);
+  ModLog("debug page   : god_zoom_far_level=%d. %s",
+         g_settings.god_zoom_far_level,
+         g_settings.god_zoom_far_level != 0
+             ? "A zoom in over a land more than 2.5 m below your head keeps "
+               "the land at its height in the room"
+             : "A zoom in over a land more than 2.5 m below your head zooms "
+               "about a level 2.5 m below your head, and the land goes "
+               "farther down");
+}
+
+int TabletopGodZoomFarValue() {
+  if (!g_installed || !g_settings.god || !TestSwitchesOn()) {
+    return kDebugCannot;
+  }
+  return g_settings.god_zoom_far_level != 0 ? 1 : 0;
+}
+
+// THE SWITCH "Speed by scale" of the debug page: move_stick_scale off and
+// on. A walk or a fly that runs stops, and a stick that is still pushed
+// starts again with the new speed.
+void TabletopGodMoveScaleToggle() {
+  if (!g_installed || !g_settings.god || !TestSwitchesOn()) return;
+  g_settings.move_stick_scale = g_settings.move_stick_scale != 0 ? 0 : 1;
+  StopWalk("the debug page changed move_stick_scale", true);
+  ControllersGesturePulse(0.5f, g_settings.move_stick_scale != 0 ? 0.40f
+                                                                 : 0.08f);
+  ModLog("debug page   : %s", MoveScaleText(g_scale));
+}
+
+int TabletopGodMoveScaleValue() {
+  if (!g_installed || !g_settings.god || !TestSwitchesOn()) {
+    return kDebugCannot;
+  }
+  return g_settings.move_stick_scale != 0 ? 1 : 0;
+}
+
+float TabletopGodMoveScaleFactor() {
+  return g_installed && g_settings.god ? MoveScaleFactor(g_scale) : 1.0f;
+}
+
+// The curve of the speed by the scale at the scale now, with the numbers of
+// move_stick_scale_* and with or without move_stick_scale, for the scale
+// part of the gain of the grab (grab_gain_math.h).
+float TabletopGodScaleCurve() {
+  if (!g_installed || !g_settings.god) return 1.0f;
+  return walk_math::ScaleFactor(
+      g_scale, g_settings.move_stick_scale_ref_x10 * 0.1f,
+      g_settings.move_stick_scale_power_pct * 0.01f,
+      g_settings.move_stick_scale_low_pct * 0.01f,
+      g_settings.move_stick_scale_high_pct * 0.01f);
+}
+
+uint64_t TabletopGodViewVersion() { return g_god_version; }
+
+bool TabletopGodWalkActive() { return g_walk.active; }
 
 int TabletopGodFlySlideValue() {
   if (!g_installed || !g_settings.god || !TestSwitchesOn()) {

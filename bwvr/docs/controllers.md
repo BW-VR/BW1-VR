@@ -1077,7 +1077,7 @@ default. Each control has one job, and one button opens the game menu.
 | `teleport` | 1 | 1: A makes the teleport. 0: A makes a jump |
 | `teleport_switch` | 1 | The switch of the game that the press of A keeps to. 1: the drag of the land, as the walk with the stick. 0: the double click jump (`god-view.md`, section 14.1). Not in the launcher |
 | `button_layout` | 1 | The layout of the buttons of the hand that does not point (5.1). 1: the menu button of the left controller opens the game menu, the second face button opens the ring, the first face button opens the spell book (`spell_book`), and the stick does not drive the ring. 0: the second face button opens the game menu, the first face button opens the ring, and the stick can drive the ring. The test key Ctrl and the Menu key goes between the two (`test_keys=1`). Not in the launcher |
-| `move_stick`, `move_stick_speed_cm` | 1, 150 | The walk or the fly with the stick of the hand that does not point, in the God view: 1 along the direction of the head, 2 along the direction of the controller, 0 off (bwvr.ini only), and the speed of a full push in cm of the room for each second (`god-view.md`, section 5.7). The launcher row "Movement direction" |
+| `move_stick`, `move_stick_speed_cm` | 1, 150 | The walk or the fly with the stick of the hand that does not point, in the God view: 1 along the direction of the head, 2 along the direction of the controller, 0 off (bwvr.ini only), and the speed of a full push in cm of the room for each second, before the factor of the scale (`move_stick_scale`, `god-view.md`, section 5.7). The launcher row "Movement direction" |
 | `move_stick_ramp`, `move_stick_ramp_most` | 1, 32 | 1: a push of 90 percent or more of the stick of the hand that does not point gets faster with its time, up to 32 times, in the walk and in the fly. 0: the speed of the push only (`god-view.md`, section 5.7). The switch "Speed ramp" of the debug page. Not in the launcher |
 | `move_type` | 0 | 0: the stick walks over the land. 1: the stick flies along the forward direction of the head or of the controller in 3D, and the view does not follow the land (`god-view.md`, section 5.7). The launcher row "Movement type" |
 | `move_stick_follow_land` | 1 | In the walk with the stick, 1: the height of the view follows the land under the head through a smooth filter. 0: the view keeps its height (`god-view.md`, section 5.7). Not in the launcher: a save of the launcher removes it. The switch "Move kind" of the debug page |
@@ -1101,7 +1101,10 @@ default. Each control has one job, and one button opens the game menu.
 
 The other keys of the Hand (the reach, the size, the throw, the Creature) are
 in `hand.md`, `throw.md` and `creature.md`. The keys of the grab of the world
-are in `god-view.md`, section 5.6.
+are in `god-view.md`, section 5.6. A grab with one hand has a gain
+(`grab_boost`, `god-view.md`, 5.1): land far below the hand comes up faster
+than the hand, and at a small scale the land moves across faster. Land near
+the hand at a scale of 16 units per meter or more moves 1:1.
 
 ### 5.3 Files and functions
 

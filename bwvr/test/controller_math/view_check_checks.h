@@ -85,6 +85,12 @@ struct Outcome {
   bool ok;
   view_check::Result result;
   float walk_gap;  // pixels: one walk against a pass of its own for eye 1
+  // The scale check: the cameras of the two eye passes from their matrices,
+  // in the world, and the eyes apart that one walk draws with, in units.
+  bool have_cam;
+  float cam[2][3];
+  float walk_apart;
+  float grip_world[3];
 };
 
 // The chain of the mod for one case.
@@ -192,6 +198,7 @@ inline Outcome Run(const Case& k) {
   const float separation =
       controller_math::Distance(eye_local[0], eye_local[1]) * k.scale * (1.0f + k.separation_error);
   float pixel[2][2], depth[2];
+  float left_m[12] = {};
   for (int e = 0; e < 2; ++e) {
     const float d = (e == 0 ? -0.5f : 0.5f) * separation;
     const float c = cosf(roll), s = sinf(roll);
@@ -216,10 +223,16 @@ inline Outcome Run(const Case& k) {
     if (!view_check::GamePixel(m, hx, hy, world_grip, pixel[e], &depth[e])) {
       return out;
     }
+    out.have_cam = view_check::CameraPosition(m, out.cam[e]) &&
+                   (e == 0 || out.have_cam);
+    if (e == 0) memcpy(left_m, m, sizeof(left_m));
   }
+  for (int i = 0; i < 3; ++i) out.grip_world[i] = world_grip[i];
   // ONE WALK: the right eye from the left eye.
   const float per_rhw =
       one_walk_math::ShiftPerRhw(inv_x, separation, hx, near_plane);
+  out.walk_apart =
+      view_check::OneWalkSeparation(left_m, per_rhw, near_plane, hx);
   const float walk_x = pixel[0][0] + per_rhw * near_plane / depth[0];
   out.walk_gap = fabsf(walk_x - pixel[1][0]) + fabsf(pixel[0][1] - pixel[1][1]);
 
@@ -382,6 +395,45 @@ inline void ViewCheckChecks() {
          o.result.along * 100.0f, -2.5 * cos(atan(25.0 / 40.0)), 0.15);
     Check(o.result.pixel_error[0] > 5.0f && o.result.pixel_error[1] > 5.0f,
           "and its pixels move in both eyes", o.result.pixel_error[0], 5.0);
+  }
+
+  // THE SCALE CHECK (view_check.cpp): the units per meter of the eyes, of a
+  // move of the head and of a move of the grip, from the matrices of the
+  // eye passes, at 1, 7.5 and 100 units per meter, and a planted error.
+  {
+    const float scales[] = {1.0f, 7.5f, 100.0f};
+    for (float scale : scales) {
+      Case k = Base();
+      k.scale = scale;
+      const Outcome o = Run(k);
+      Check(o.ok && o.have_cam, "the case of the scale check runs", o.ok, 1.0);
+      const float apart = view_check::Distance3(o.cam[0], o.cam[1]);
+      Near("the cameras of the eye passes give the scale, units per meter",
+           apart / k.ipd, scale, scale * 1e-3);
+      Near("the shift of one walk gives it too", o.walk_apart / k.ipd, scale,
+           scale * 1e-3);
+      // A head 10 cm to the right and 10 cm down, with the same turn.
+      Case moved = k;
+      moved.head[0] += 0.10f;
+      moved.head[1] -= 0.10f;
+      for (int i = 0; i < 3; ++i) moved.grip[i] = k.grip[i];
+      moved.grip[0] += 0.10f;
+      moved.grip[1] -= 0.10f;
+      const Outcome m = Run(moved);
+      Near("a move of the head of 14 cm moves the eye camera by the scale",
+           view_check::Distance3(m.cam[0], o.cam[0]) / sqrtf(0.02f), scale,
+           scale * 2e-3);
+      Near("a move of the grip of 14 cm moves the drawn grip by the scale",
+           view_check::Distance3(m.grip_world, o.grip_world) / sqrtf(0.02f),
+           scale, scale * 2e-3);
+    }
+    Case k = Base();
+    k.scale = 7.5f;
+    k.separation_error = 0.06f;
+    const Outcome o = Run(k);
+    Near("a render separation 6 percent too large shows in the scale of the "
+         "eyes", view_check::Distance3(o.cam[0], o.cam[1]) / k.ipd,
+         7.5 * 1.06, 1e-2);
   }
 }
 

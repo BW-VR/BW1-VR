@@ -43,7 +43,12 @@ want.
    in the way. Then set "Movement type" to Fly and fly down to the land and
    up, with the head and with the controller, and hold a full push. Wrong:
    discomfort, a fly that does not go where you look or point, or a speed
-   ramp that is too slow or too fast.
+   ramp that is too slow or too fast. Walk at the villager scale and zoomed
+   out. Wrong: a walk that is still too slow zoomed in, or too fast zoomed
+   out (the speed by the scale, `move_stick_scale`). Fly up high, set Walk,
+   and pull the land up with one grip. Wrong: more than three or four pulls
+   to the waist, a jump, or land that does not stop at your hand
+   (`grab_boost`).
 4. **The teleport.** Aim the arc at near and far land, and go to the village
    of Land 1. Wrong: an arc or a ring that is hard to see or to aim, or a way
    to the village that you cannot find.
@@ -56,9 +61,10 @@ want.
    palm (name the object). Touch the tips of the two real controllers.
    Wrong: drawn tips that do not touch (the fit of `controller-hints.md`,
    9.15). Reach slowly to the edge of your influence and
-   past it, with each hand. Wrong: a red glow at the edge that comes too
-   late or too early, that is hard to see or too strong, or a fade of the
-   hand that is too strong.
+   past it, with each hand. Wrong: a red hologram at the edge that comes too
+   late or too early, that is hard to see or too strong, that shakes or
+   turns with the hand, rings that are too fast, or a fade of the hand that
+   is too strong.
 6. **The grip.** Take things, set them down and let them go. Wrong: a take
    from a loose hand, a grip that lets go late or not at all, a drop by
    accident, or a job that needs the other button.
@@ -308,6 +314,12 @@ agents: the log does not tell the item yet.
   two eyes see the drawn grip, in cm and in pixels. `grip fit     : the
   right hand, runtime ...` names the fit of each hand, and `the trim is`
   gives the trim.
+- **The scale that the eyes see** (`controller-hints.md`, 9.16). Log: `scale
+  check  :` gives the units per meter of the eyes, the head, the hand, and
+  the room speed of a walk and of a grab, beside the scale of the God view.
+- **The land under the head after a place or a zoom.** Log: `god view     :
+  the view went to a camera of the game since the last walk` with "The filter
+  starts again", and `in the smooth zoom the land under your head went from`.
 - **The hints follow the ToolTips option of the game.** Log: `hint card    :
   the ToolTips option of the game is N` after a change of the option in the
   game, with "each line always shows" for All ToolTips.

@@ -202,6 +202,23 @@ high. A pan can bring one over the head. So the level is first kept between
 nearer to that height. After 14 steps out at the life size scale, a hill top
 12.73 m over the head is 5.6 cm under it.
 
+**A land far below the head.** A zoom scales the heights about the level, so
+a zoom in about a level over the land moves that land farther down. With
+`god_zoom_far_level=1` (the default) a zoom in over a land more than 2.5 m
+below the head takes that land as the level (`ZoomLevelFor` in
+`zoom_math.h`), and the land keeps its height in the room. A zoom out keeps
+the level at 2.5 m below the head, so a deep land comes up toward it: from
+4.01 m below the head at 4.41 units per meter, a zoom out to 17.64 puts it
+2.88 m below. With 0 a zoom in also takes the level at 2.5 m, and the same
+land goes to 9.15 m below the head at 1 unit per meter. The switch "Deep
+zoom" of the debug page changes the key while the game runs, with a short
+pulse for 0 and a long pulse for 1. The log has one line at the end of each
+smooth zoom:
+
+```
+god view     : in the smooth zoom the land under your head went from 4.01 m to 4.01 m below your head (god_zoom_far_level=1)
+```
+
 **The limits.** The lowest scale is 1 unit per meter
 (`god_near_units_per_meter_x10`, 10). A villager is about 1.6 units high: the
 body that the hand pick finds has a half height of 0.70 to 0.85 units, and
@@ -218,7 +235,8 @@ steps, and 5 steps out from 1 go past the life size scale, to 7.6.
 
 **Below the life size scale.** Each distance of the room stays the same as at
 the other scales: the Hand is 19 cm long (size 0.06), the near plane is 5 cm
-(0.05 units, section 8), the walk goes 150 cm a second (1.5 units), the reach
+(0.05 units, section 8), the walk goes 150 cm a second times the factor of
+the scale (6 m and 6 units at 1 unit per meter, section 5.7), the reach
 of the teleport arc is 10 units. The distance factor of the ears is 0.25,
 so a sound with the maximum 300 carries 75 m of the room (`audio.md`, 6.3). The values of section 8 that follow the scale stay the
 game's own below a gain of 1. The land under the head keeps the height that
@@ -542,11 +560,13 @@ the table by the grips") is the same as on the table, with the vertical grab
 and the ground limits added.
 
 - One hand (the other hand's grip, the left grip by default): the land moves
-  one to one with the hand, across and up and down. A hand that moves up
-  raises the land by the same distance, and a hand that moves down lowers it
-  (`TableGrabSolve` with `vertical`, then `GodGroundHeight` for the limits of
-  section 3). At a limit the land stops and does not jump. The height of the
-  waist point is the height of the press plus the rise of the hand.
+  with the hand, across and up and down. A hand that moves up raises the
+  land, and a hand that moves down lowers it (`TableGrabSolve` with
+  `vertical`, then `GodGroundHeight` for the limits of section 3). At a
+  limit the land stops and does not jump. With the land at the hand and a
+  scale of 16 units per meter or more the move is one to one. The gain of
+  the grab below changes that for land far below the hand and for a small
+  scale.
 - Both grips: the land turns about up with the hands and scales with their
   spread, about the land point under the middle of the hands. The height of
   the press stays, so two hands move the land only across.
@@ -564,6 +584,53 @@ and the ground limits added.
   0x308 for a pan, 0x300 and the direction for a turn, and 0x304 for a zoom.
 
 The sticks are refused while a grip holds the world.
+
+**The gain of the grab** (`grab_boost`, 1, `grab_gain_math.h`). A player at
+the villager scale can find the land 20 m below the head, and a grab of 60
+cm at a time then takes 33 pulls. So a grab with one hand has two gains, each
+on its own axis:
+
+| Part | Axis | Gain | With the defaults |
+| --- | --- | --- | --- |
+| The distance | Up | `d / reach`, at least 1 and at most `grab_boost_most` (50). `d` is the land below the hand, `reach` is `grab_boost_reach_cm` (50) | 1 for land within 50 cm of the hand, 4 for land 2 m below, 40 for land 20 m below |
+| The scale | Across | The factor of the speed of the stick (section 5.7, the curve of `move_stick_scale_*`), at least 1 | 4 at 1 unit per meter, 1.46 at 7.5, 1 from 16 up |
+
+- The solve takes a hand point of its own. At the press it is the hand. In
+  each solve it moves by the step of the hand since the solve before, with
+  the gains of that solve. So a gain that changes in a pull makes no jump,
+  and a hand at rest moves nothing at each gain.
+- Up, the gain falls with the distance during the pull. `LandUp` takes the
+  exact answer for each step, so the land comes up to `reach` below the
+  hand by the gain, and never nearer: there is no overshoot. Then the land
+  is 1:1 with the hand. Land 20 m below the hand comes to 1.03 m below it in
+  three pulls of 60 cm (0.5 + 19.5 e^-3.6), and to 0.66 m in four.
+- A move down of the hand is 1:1, so the land never drops away fast. The
+  limits of section 3 stay: a pull that takes the land farther than 2.5 m
+  below the head stops at the limit, and a pull that brings far land nearer
+  acts from each depth. At a limit the hand point of the solve goes to the
+  height of the pose, so a move back acts at once.
+- The distance part acts up only. With the land 20 m below the hand its
+  gain is 40, and a small move of the hand to the side would throw the view
+  meters to the side in each pull. The scale part acts across only: in
+  height the hand holds the ground at the waist, and a gain there would
+  move the land away from the hand with each small move up or down.
+- Two hands (the turn and the zoom) keep the real hands, 1:1. The test step
+  of the grab "one to one" (Shift F11, "Grab test" of the debug page) turns
+  the gain off too.
+- With `grab_boost=0` the grab is 1:1 at each distance and scale. The switch
+  "Grab gain" of the debug page changes the key while the game runs, with a
+  short pulse for 1:1 and a long pulse for the gain. A grab that holds
+  ends.
+- The comfort vignette counts the move of the view in the room, so a pull
+  with a large gain darkens the edges as a fast walk does (section 5.8).
+
+The log has a line for each press with the gain (at most 60 in a game), and
+a line at the release with the way of the hand and of the land:
+
+```
+grab         : the gain of the grab (grab_boost=1): 40.00 up, with the land 20.00 m below the hand (reach 50 cm, at most 50), and 1.00 across at 100.00 units per meter, frame 1450
+grab         : the hand went 60.0 cm and the land 1423.0 cm in the room. The gain of the grab was 12.74 to 40.00 up and 1.00 to 1.00 across (grab_boost=1)
+```
 
 The code is in `world_grab.cpp` (the state machine, `TableAnchor`,
 `TableSolve`) and `controllers.cpp` (the grip points and the buttons).
@@ -782,6 +849,9 @@ All in `[bwvr]`.
 | `grab_smoothing_ms` | 35 | The ease of the grip points. 0 is no smoothing |
 | `grab_press_pct` | 70 | The squeeze that starts a grab |
 | `grab_release_pct` | 50 | The squeeze that ends it |
+| `grab_boost` | 1 | The gain of a grab with one hand in the God view (5.1). 1: land far below the hand comes up faster than the hand, and at a small scale the land moves across faster. 0: 1:1. The switch "Grab gain" of the debug page. Not in the launcher |
+| `grab_boost_reach_cm` | 50 | Land within this distance below the hand is held 1:1 up, in cm of the room |
+| `grab_boost_most` | 50 | The largest gain of the distance part |
 | `grab_gain_mode` | 1 | Game camera grab only. 1 the land looks glued to the hand, 0 one to one |
 | `grab_gain_pct` | 100 | Game camera grab only. Multiplies `g` |
 | `grab_gain_max` | 60 | Game camera grab only. The most `g` can be |
@@ -849,11 +919,43 @@ event.
   move below 30 percent, the top speed from 95 percent, and a straight line
   between the two. A diagonal is not faster than a straight push.
 - **The speed** is a speed of the room: `move_stick_speed_cm` (150) cm of the
-  room for each second at a full push. So the walk feels the same at each
-  scale. At 100 units for each meter that is 150 units a second over the
-  land, and at the life size scale it is 11 units a second. The step of a
-  frame is the speed times the real time of the frame, and a frame counts at
-  most 50 ms.
+  room for each second at a full push, times the factor of the scale
+  (`move_stick_scale`, 1). The step of a frame is the speed times the real
+  time of the frame, and a frame counts at most 50 ms.
+- **The speed by the scale** (`ScaleFactor` in `walk_math.h`). A walk at one
+  speed of the room is slow at the villager scale: the land is as large as
+  for a villager, and a town is many seconds away. So the speed of the
+  stick is multiplied by a smooth function of the scale, with no steps:
+
+  ```
+  factor = (ref / scale) ^ power, kept between low and high
+  ```
+
+  With the defaults (ref 16 units per meter, power 0.5, low 0.6, high 4):
+
+  | Scale (units per meter) | 1 | 4 | 7.5 | 16 | 30 | 44.4 and up |
+  | --- | --- | --- | --- | --- | --- | --- |
+  | Factor | 4 | 2 | 1.46 | 1 | 0.73 | 0.6 |
+  | Room speed with 150 cm | 6.0 m/s | 3.0 | 2.2 | 1.5 | 1.1 | 0.9 |
+  | Room speed with 250 cm | 10.0 m/s | 5.0 | 3.7 | 2.5 | 1.8 | 1.5 |
+
+  At 1 unit per meter a villager is as high as the player, so 6 to 10 m/s
+  of the room is the run of a villager, and a town of 100 units takes 10 to
+  17 s before the speed ramp. From 21 to 43 units per meter the factor is
+  0.87 to 0.61, so a walk there is a little slower than the key. The power
+  of 0.5 is half way between one speed of the room (0) and one speed over
+  the land (1). The factor depends on the scale only: in a smooth zoom
+  during a walk it follows the scale of each frame, and with the stick at
+  rest nothing moves. The speed ramp multiplies the result and keeps its
+  cap, so the top speed at a large scale is 0.6 times the top speed of the
+  key, and at 1 unit per meter it is 4 times. The comfort vignette counts
+  the move in the room (section 5.8), so at a large factor it stays at its
+  full darkness. With `move_stick_scale=0` the speed is the speed of the key
+  at each scale. The grab of the world has a gain of its own with the same
+  curve across (section 5.1, "The gain of the grab"). The switch "Speed by
+  scale" of the debug page changes the key while
+  the game runs, with a short pulse for 0 and a long pulse for 1. A walk or
+  a fly that runs stops.
 - **The speed ramp** (`move_stick_ramp`, 1). While the stick is pushed to 90
   percent of the top speed or more, the time of that push counts. After 1 s
   the speed doubles each 2 s, up to `move_stick_ramp_most` (32) times
@@ -866,10 +968,13 @@ event.
   A push under 90 percent sets the time to 0, so the speed goes back to the
   speed of the push in the same frame. A release stops the walk in the same
   frame, as before. The ramp acts in the walk and in the fly. At the scale
-  of a villager (1 unit for each meter) a full push is 1.5 units each
-  second, and 48 units each second after 11 s: 1000 units of the land take
-  about 29 s from rest. At 100 units for each meter the top is 4800 units
-  each second, so a player at that scale lets go before it. The comfort
+  of a villager (1 unit for each meter), with the speed by the scale and
+  `move_stick_speed_cm=150`, a full push is 6 units each second, and 192
+  units each second after 11 s: 1000 units of the land take about 13 s from
+  rest. With `move_stick_scale=0` it is 1.5 and 48 units each second, and
+  about 29 s. At 100 units for each meter the top is 2880 units each second
+  (4800 with `move_stick_scale=0`), so a player at that scale lets go
+  before it. The comfort
   vignette is at its full darkness from a move of 150 cm of the room each
   second (section 5.8), so a faster move keeps it full. With
   `move_stick_ramp=0` the speed is the speed of the push only.
@@ -909,9 +1014,24 @@ event.
     the height above the land. The filter keeps its state from one walk to
     the next, so a climb in short pushes follows the land as a long push
     does. When something else moved the view since the last frame of a walk
-    (a teleport, a grab, a zoom, a ground step, a new build), the filter
-    starts again at the land under the head, and the land keeps the height
-    below the head that it has then.
+    (a teleport, a jump to a place of the Places sheet, a grab, a zoom, a
+    ground step, a fly, a new build, a place at a camera of the game, a
+    recenter), the filter starts again at the land under the head, and the
+    land keeps the height below the head that it has then
+    (`move_stick_follow_place=1`, `FollowRestart` in `walk_math.h`). A place
+    at a camera of the game is a load, the end of a story or of a cut scene,
+    and each new place of the game camera (section 15). A snap turn and the
+    smooth turn turn about the head, so the head stays over the same land,
+    and the filter goes on. With `move_stick_follow_place=0` the filter
+    starts again only when the version of the view changed: after each move
+    and each turn, but not after a place at a camera of the game or a
+    recenter. Then the next walk moves the view up or down by the difference
+    of the land of the two places: 2.99 m for land of 18.0 and 31.2 units
+    at 4.41 units per meter. The log has one line when a place or a recenter
+    is the only cause (at most 20 in a game).
+  - A walk after a fly starts the filter at the land under the head with
+    each value of the key, so it keeps the height that the fly left, and it
+    does not chase the land of a place before the fly.
   - The teleport puts the land under the head at the same height in the room
     as before the teleport (section 14.4), with each value of the key. So
     after a teleport the land is at the height below the hands that the
@@ -995,8 +1115,15 @@ event.
     range of 10 cm to 2.5 m only for a move that goes farther out of it
     (`GodGroundHeight`): a grab or a step that lowers the view acts, a move
     up is stopped. A teleport and a move of the game camera to a new place
-    (a story, a load) put the land in the range again, as they do in each
-    view.
+    (a story, a load) keep the land under the head at its height in the
+    room, at most 2.5 m below the head.
+  - The way back to the land at the waist is a grab of one hand that pulls
+    the land up. With the gain of the grab (5.1) land 20 m below the hand
+    comes to about 1 m below it in three pulls of 60 cm. With
+    `grab_boost=0` the pull is 1:1, so 2.5 m takes about four pulls. A
+    ground step up of the keyboard also brings the land up. A zoom out
+    brings a deep land up toward 2.5 m below the head, and with
+    `god_zoom_far_level=1` the next zoom in keeps it there.
   - The fly stops in the frame in which the stick comes back, as the walk
     does. There is no glide and no ease.
   - The comfort vignette counts the move up and down too (section 5.8).
@@ -1034,9 +1161,15 @@ event.
 | `move_stick_speed_cm` | 150 | The speed of a full push, in cm of the room for each second, 10 to 500 |
 | `god_display_time` | 1 | 1: the walk, the smooth zoom and the smoothing of the grips take the time of a frame from the display times of the headset. 0: from the time of the CPU |
 | `move_stick_follow_land` | 1 | 1: while the player walks, the height of the view follows the land under the head through the filter. 0: the view keeps its height. Not in the launcher: a save of the launcher removes it |
+| `move_stick_follow_place` | 1 | 1: the filter of the land starts again after each move of the view, a place at a camera of the game and a recenter, and a turn keeps it. 0: it starts again after each change of the version of the view only, so a walk after a place at a camera of the game chases the land of the place before. Not in the launcher and not on the debug page |
 | `move_stick_trace` | 0 | A test for a desktop run: the log has one line for each of the first N frames of each walk or fly (at most 2000 lines in a game) |
 | `move_stick_ramp` | 1 | 1: a push of 90 percent or more gets faster with its time, in the walk and in the fly. 0: the speed of the push only. The switch "Speed ramp" of the debug page. Not in the launcher |
 | `move_stick_ramp_most` | 32 | The largest factor of the speed ramp, 1 to 64 |
+| `move_stick_scale` | 1 | 1: the speed of the stick is times the factor of the scale (the speed by the scale). 0: the same speed of the room at each scale. The switch "Speed by scale" of the debug page. Not in the launcher |
+| `move_stick_scale_ref_x10` | 160 | The scale where the factor is 1, in tenths of a unit for each meter, 10 to 40000 |
+| `move_stick_scale_power_pct` | 50 | The power of the factor, in percent, 0 to 100 |
+| `move_stick_scale_low_pct` | 60 | The least factor, in percent, 10 to 100 |
+| `move_stick_scale_high_pct` | 400 | The largest factor, in percent, 100 to 1000 |
 | `fly_solid_slide` | 1 | With `god_zoom_solid_stop=1`, 1: a fly slides past a house, a rock or a tree trunk, and only a push straight at it stops. 0: a fly stops short of it. The switch "Fly at solids" of the debug page |
 
 The switch "Move kind" of the debug page goes from the walk that follows the
@@ -1063,6 +1196,15 @@ god view     : walk check, 30 frames after the stop the waist point is at 2625.1
 controllers  : the stick of the other hand does not move you: a grip holds the world, frame 1081
 ```
 
+The lines above are from a run with `move_stick_scale=0`. With 1 the line of
+the start also gives the factor of the scale and the speed with it, and the
+line of the end gives the least and the largest factor of the walk:
+
+```
+At 100.00 units per meter the speed of the stick is times 0.60 (move_stick_scale=1: (16.0 / scale) ^ 0.50, from 0.60 to 4.00): 90 cm of the room each second.
+The scale made the speed of the stick 0.60 to 0.60 times move_stick_speed_cm (move_stick_scale=1).
+```
+
 The line of the end also says how far the land went down for a hill, and on
 how many frames the controller had no direction. The shortest and the
 longest frame and step show whether the walk was even: at a steady push each
@@ -1073,6 +1215,16 @@ frame before (see "An even walk" below):
 ```
 Of N frames of the headset, M came more than one refresh of 8.3 ms after the frame before, and the headset showed the frame before again for them.
 ```
+
+The first walk after a place at a camera of the game, or after a recenter,
+has one line for the filter of the land:
+
+```
+god view     : the view went to a camera of the game since the last walk. The filter of the land holds 18.00, and the land under your head is at 31.20: 299.3 cm of the room apart. The filter starts again at the land under your head (move_stick_follow_place=1)
+```
+
+With `move_stick_follow_place=0` the end of the line is "The filter goes on
+from the land of the last walk".
 
 With `move_stick_trace=N` the log also has one line for each of the first N
 frames of each walk:
@@ -1813,6 +1965,7 @@ section 5.8.
 | `god_zoom_about` | 1 | The point that a zoom keeps at its place in the room (section 2). 1: the land point that the head looks at. 0: the land point under the head. 2: the Hand's point. The launcher row "Center of the zoom". Ctrl, Shift and Delete change it with `test_keys=1` |
 | `god_zoom_about_far_cm` | 300 | With `god_zoom_about=1`, the point is at most this far from the head, 50 to 1000 |
 | `god_zoom_about_test` | 0 | A test with no key press: at this frame of the controllers the test key of `god_zoom_about` acts. 0 is never |
+| `god_zoom_far_level` | 1 | A zoom in over a land more than 2.5 m below the head (section 2, "A land far below the head"). 1: the land keeps its height in the room. 0: the zoom takes a level 2.5 m below the head, and the land goes farther down. The switch "Deep zoom" of the debug page. Not in the launcher |
 | `god_ground_step_cm` | 5 | One ground step, 1 to 50 |
 | `god_far_units_per_meter` | 4000 | The farthest zoom, 10 to 8000 |
 | `god_zoom_solid_stop` | 1 | 1: a zoom step stops `god_zoom_solid_cm` before the head goes into a house, a rock or a tree trunk, or it is refused (section 2, "Houses at a small scale"). 0: a zoom step can put the head into a house |
@@ -1870,7 +2023,7 @@ The launcher removes these keys from `bwvr.ini` when it saves.
 | File | What it holds |
 | --- | --- |
 | `src/mod/table_math.h` | `GodRoom`, `PoseWorld`, `PoseRoom`, `GroundInRoom`, `ScaleAbout`, `GodZoomAbout`, `GodZoom`, `GodRaise`, `GodTurn`, `GameCameraOver`, `RayLevel`, `RayLand`, `GodSpawn`, `CameraLookPoint` and `HeadYaw`, as pure functions |
-| `src/mod/zoom_math.h` | The smooth zoom: the share of the top rate for a push (`StickShare`), the time of a frame (`FrameSeconds`) and the ratio of a frame (`FrameRatio`). The point of a zoom: its place across the room for each value of `god_zoom_about` (`PointAcross`), the level (`ZoomLevel`), the point in the world (`PivotAt`) and the rule for a hill at the new place of the head (`ClearHead`). All are pure functions |
+| `src/mod/zoom_math.h` | The smooth zoom: the share of the top rate for a push (`StickShare`), the time of a frame (`FrameSeconds`) and the ratio of a frame (`FrameRatio`). The point of a zoom: its place across the room for each value of `god_zoom_about` (`PointAcross`), the level (`ZoomLevel`, and `ZoomLevelFor` over a deep land), the point in the world (`PivotAt`) and the rule for a hill at the new place of the head (`ClearHead`). All are pure functions |
 | `src/mod/walk_math.h` | The walk with the stick: the push (`Push`), the forward direction of the head and of the controller (`HeadForward`, `AimForward`), the speed in the room (`Speed`), the step of a frame (`Step`), the view after a step (`Walk`), the filter of the land that the view follows (`FollowStart`, `FollowStep`), and the fly: the key (`Type`), the kinds of the debug switch (`Kind`, `NextKind`), the level right (`FlyRight`), the speed and the step in 3D (`FlySpeed`, `FlyStep`) and the view after a step (`Fly`). All are pure functions |
 | `src/mod/tabletop.cpp`, `tabletop.h` | The God view in the table state: the place at a game camera (`PlaceGod`, `ApplyGodSpawn`), the steps (`ApplyGodSteps`), the point of a zoom (`GodZoomPoint`, `ZoomClearHead`), the smooth zoom (`TabletopGodZoomHold`, `ApplyGodZoomHold`), the walk with the stick (`TabletopGodWalk`, `ApplyGodWalk`), the mouse pan (`MousePan`), the camera switches and events, the hook on `GGame::ClearMap`, the values that follow the scale, the Hand's size, the ears and the game camera it wants |
 | `src/mod/camera_zone.cpp`, `camera_zone.h`, `camera_zone_math.h` | The camera zone of a script (section 17): the read of the zone of the game, the limit of a move (`LimitMove`), the game camera in the zone (`KeepCamera`, `PointInside`), the bump for the sound (`BumpPoint`), and the hook on the shake of the push |
@@ -2163,6 +2316,49 @@ render size, because the recipes depend on it.
   has "The floor of the fly lifted the view 37.3 cm on 18 frames, and the
   least clearance of your head after a step was 10.0 cm", and 150.0 cm of
   the room each second.
+- The filter of the land after a place [R]: `spawn_run.ps1 -Save temple`
+  with `test_frame_rate=60`, `card_send_test_save=0`,
+  `fake_controller_play_frame=800`, `move_stick_ramp=0`,
+  `move_stick_speed_cm=150`, `god_zoom_about=0`, `god_units_per_meter=10`,
+  `spawn_test_temple=1000`, `spawn_test_flag=0` and the steps
+  `lstick_up@900+300 lstick_right@1300+40 lstick_right@1400+40
+  lstick_right@1500+40 lstick_right@1800+40 lstick_right@1900+40
+  lstick_right@2000+40`, once with `move_stick_follow_place=1` and once with
+  0. The test calls the zoom of the game to the Temple between two walks, and
+  the view goes to the pen (the waist point from 1968.0 29.7 2470.6 to
+  2235.4 16.3 3156.7). The line of the filter gives 29.59 against the land
+  at 16.08, 135.1 cm of the room apart. With 1 the filter starts again, and
+  the next walk keeps the land 62.1 cm below the head with "0.0 cm up and
+  0.0 cm down". With 0 the filter goes on, and the walks after the place go
+  122.8, 12.2 and 14.1 cm down, to the floor of 10 cm in the first walk.
+- The zoom over deep land [R]: `spawn_run.ps1 -Save temple` with
+  `test_frame_rate=60`, `card_send_test_save=0`,
+  `fake_controller_play_frame=800`, `move_type=1`, `move_stick=1`,
+  `fake_head_pitch=-45`, `god_zoom_about=0`, `god_zoom_smooth=1` and the
+  steps `lstick_down@900+400 stick_up@1400+60 stick_down@1550+60`, once with
+  `god_zoom_far_level=1` and once with 0. The fly puts the land 21 m below
+  the head. With 1 the zoom in from 100 to 44.44 units per meter keeps it at
+  21.05 m, and the zoom out brings it to 10.75 m (2.5 + 18.55 / 2.25). With 0
+  the zoom in puts it at 43.74 m (2.5 + 18.33 * 2.25), and the zoom out
+  brings it back to 20.83 m.
+- The scale check [R] (`controller-hints.md`, 9.16): `spawn_run.ps1 -Save
+  temple` with `test_frame_rate=60`, `card_send_test_save=0`,
+  `move_stick_scale=0`, `fake_controller_play_frame=800`, `move_stick_ramp=0`,
+  `move_stick_speed_cm=150`, `god_zoom_about=0`, `god_zoom_smooth=0`,
+  `fake_head_right_cm=10`, `fake_head_up_cm=-10`, six left points
+  (`fake_controller_left_points=-16,-30,50 -16,-30,30 -16,-30,10 -16,-30,50
+  -16,-30,30 -16,-30,10`) and the steps `lean@900+100 lpoint@1050+1
+  lpoint@1100+1 lpoint@1150+1 lstick_up@1250+120 lpoint@1400+1
+  lgrip@1450+150 lpoint@1500+1 lpoint@1550+1`, at `god_units_per_meter=1`,
+  at 100, and at 15 with `god_zoom_step_pct=100` and a first step
+  `stick_up@850+10` (7.5). At each scale the eyes and the drawn grip give
+  the scale of the God view exactly, the walk gives 150.0 cm of the room
+  each second, and the grab moves the land 40.0 cm for 40.0 cm of the grip.
+  At 100 units per meter the walk goes over a slope: the follow of the land
+  adds 29.3 cm up and 34.6 cm down, and the camera of the game goes 157.1
+  cm each second in all. The same run with `move_stick_scale=1` has no
+  result yet: the walk must give 150 cm times the factor across the land
+  (600 at 1, 219 at 7.5 and 90 at 100 units per meter).
 
 **The mouse pan and the tutorial events** need a run with the test mouse. Use
 `play_mode=0` (it must log the God view), `-NEWGAME` on Land 1,

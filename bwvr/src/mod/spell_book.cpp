@@ -762,6 +762,8 @@ uint8_t g_staged_right[kTexture * kTexture * 4];
 bool g_point_valid = false;
 float g_point_at[3] = {0.0f, 0.0f, 0.0f};
 bool g_staged_marked = false;
+// The mark in the staged picture: its middle in pixels and its strength.
+int g_mark_drawn[3] = {0, 0, 0};
 int g_width_px = 0, g_height_px = 0;
 Look g_drawn;
 bool g_have_drawn = false;
@@ -1668,7 +1670,19 @@ void DrawMark() {
 void StagePicture(uint64_t frame) {
   const bool holed = g_hole_frame == frame && g_hole_frame != 0;
   const bool marked = MarkShows();
-  if (g_staged_new || holed || g_staged_holed || marked || g_staged_marked) {
+  // A new place or strength of the mark, in whole pixels and steps of 1/16.
+  int mark[3] = {0, 0, 0};
+  if (marked) {
+    mark[0] = static_cast<int>(floorf(g_point_at[0] * kPixelsPerMeter + 0.5f));
+    mark[1] = static_cast<int>(floorf(g_point_at[1] * kPixelsPerMeter + 0.5f));
+    mark[2] = static_cast<int>(fabsf(g_point_at[2]) / kKeepDepthM * 16.0f);
+  }
+  const bool mark_moved = marked != g_staged_marked ||
+                          (marked && (mark[0] != g_mark_drawn[0] ||
+                                      mark[1] != g_mark_drawn[1] ||
+                                      mark[2] != g_mark_drawn[2]));
+  const bool recopy = g_staged_new || holed || g_staged_holed || mark_moved;
+  if (recopy) {
     g_staged_new = false;
     g_staged_serial = bwvr::XrScreen::NewCardSerial();
     for (int y = 0; y < g_height_px; ++y) {
@@ -1679,7 +1693,8 @@ void StagePicture(uint64_t frame) {
   }
   g_staged_holed = holed;
   g_staged_marked = marked;
-  if (marked) DrawMark();
+  for (int k = 0; k < 3; ++k) g_mark_drawn[k] = mark[k];
+  if (recopy && marked) DrawMark();
   if (!holed) return;
   const float cx = 0.5f * g_width_px + g_hole.x * kPixelsPerMeter;
   const float cy = 0.5f * g_height_px - g_hole.y * kPixelsPerMeter;
@@ -1911,6 +1926,9 @@ void SpellBookFrame() {
     }
   } else if (event != kNothing) {
     ++g_closes;
+    // The words of the book go with the book. Only a take keeps its notice:
+    // the refusal of the game comes after the book closed.
+    if (event != kClosedPluck) g_notice_until = 0.0;
     if (closed_by_palm) ++g_palm_closes;
     g_open_by_palm = false;
     if (event == kClosedButton) HapticsPulseHands(1, haptics_math::kTick);

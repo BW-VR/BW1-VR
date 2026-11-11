@@ -23,9 +23,17 @@ void HandCutOffer(const bwvr::CardLayer& layer, uint8_t* right,
 // the eye passes, with the eye views of this frame in place.
 void HandCutFrame();
 
-// The switch of the debug page (debug_menu.cpp): card_hand_front.
+// overlay.cpp: true when the hand (0 left, 1 right) made a hole in the page
+// in the last cut, with card_hand_solid=1. Then the hand has its full
+// opacity, and not the faint opacity of a hint.
+bool HandCutSolid(int hand);
+
+// The switches of the debug page (debug_menu.cpp): card_hand_front and
+// card_hand_solid.
 int HandCutValue();
 void HandCutChange(const char* by);
+int HandCutSolidValue();
+void HandCutSolidChange(const char* by);
 
 // Once a report window.
 void HandCutReport();

@@ -346,6 +346,8 @@ void SpellBookPointChange(const char* by);
 // A hand in front of the page of the book and of the ring (hand_cut.cpp).
 int HandCutValue();
 void HandCutChange(const char* by);
+int HandCutSolidValue();
+void HandCutSolidChange(const char* by);
 // The draw of a gesture (controllers.cpp, overlay.cpp).
 int ControllersGesturePointValue();
 void ControllersGesturePointChange(const char* by);
@@ -667,6 +669,9 @@ const Switch kSwitches[] = {
      "text_click", TextClickValue, TextClickChange, L"off|on"},
     {kGroupInterface, L"Hand in front", L"A hand in front of the book or ring",
      "card_hand_front", HandCutValue, HandCutChange, L"under page|in front"},
+    {kGroupInterface, L"Hand solid", L"A hand over the book is solid",
+     "card_hand_solid", HandCutSolidValue, HandCutSolidChange,
+     L"hint look|solid"},
 
     // Hand
     {kGroupHand, L"Catch moving", L"Reach for an object that moves",
@@ -1153,6 +1158,9 @@ const wchar_t* const kTips[] = {
     L"In front: a hand that is nearer to the eye than the page of the spell "
     L"book or of the ring shows in front of it, in each eye. Under page: the "
     L"page is over the hands.",
+    // Hand solid
+    L"Solid: a hand in front of the page of the spell book or of the ring has "
+    L"its full opacity. Hint look: it stays faint while a hint shows in it.",
     // Catch moving
     L"Extra reach for an object that moves. Pick: on the pick reach only. "
     L"Rest: on all of the reach at rest. Open: as Rest, the guard ends at an "

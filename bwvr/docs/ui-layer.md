@@ -3220,28 +3220,42 @@ built and before the eye passes, for each eye:
 
 1. Each triangle of the mesh of each hand (`HandModelWorldMesh`, skinned on
    the CPU in the world) goes into the LOCAL space of OpenXR, and is cut to
-   its part in front of the plane of the page (`ClipFront`). A triangle with
-   a vertex below 60 percent of opacity (the alpha of the texture of the
-   game at the vertex, times the opacity of the hand) makes no hole. The
-   texture fades the wrist and the forearm, so the eye picture shows the
-   land through them. There the page stays, behind the clear part of the
-   hand.
+   its part in front of the plane of the page (`ClipFront`). Only the
+   triangles that face the eye count: the side of the triangle nearest to
+   the eye is the side that faces it. A triangle with a vertex below 50
+   percent of opacity makes no hole. The opacity is what the draw has: the
+   alpha of the texture of the game at the vertex, times the opacity of the
+   hand. The texture fades the wrist and the forearm, so there the page
+   stays, behind the clear part of the hand.
 2. That part goes onto the page along the lines from the eye
    (`OntoPage`). The eye is the view that the projection layer of that eye
    declares (`StereoDeclaredView`), so the hole is where that eye picture
    has the hand.
-3. The parts fill a mask of the page, with 2 by 2 samples in each pixel
-   (`FillConvex`). Each row of samples takes the span of the part on its
-   line, so the cost goes with the pixels of the hand on the page. The mask
-   grows by 1 pixel, for the time between the draw and the display.
+3. The parts fill a mask of the page with half of its pixels each way,
+   with 2 by 2 samples in each pixel (`FillConvex`). Each row of samples
+   takes the span of the part on its line. The mask grows by 1 of its
+   pixels (2 pixels of the card), for the time between the draw and the
+   display. The cut scales it up to the pixels of the card with a soft
+   edge: each pixel takes 3 quarters of its own pixel of the mask and 1
+   quarter of the next, each way.
+
+**A solid hand** (`card_hand_solid=1`). A hand goes faint while the
+controller of a hint shows in it (`hint_hand_opacity_pct`). While a hand is
+in front of the page, it has its full opacity, so the player sees a solid
+hand and fingertip over the page. The texture still fades the wrist and the
+forearm. The rule takes the hands of the cut of the frame before.
 
 **The cost.** Only the box of the holes of the last frame is cleared. The
 picture of the owner (the book or the ring) keeps its pixels: the cut keeps
 a copy of the box that it cut and puts it back in the next frame, while the
 owner gives the same pixels with the same serial. The picture of the right
 eye is copied whole only for a new picture of the owner, and else only in
-the box of its last holes. The report line has the mean and the longest time
-of the cut, with no save of a test picture in it.
+the box of its last holes. When the eyes, the page and the hands moved 0.3
+mm or less, the cut of the frame before stays, with no work. The spell book
+draws its picture again for the mark of the pick only when the mark moves a
+pixel. The holes scale each pixel with two 32 bit products. The report line
+has the mean and the longest time of the cut, with no save of a test
+picture in it, and the mean of each part.
 
 The page gets a hole where the mask is, and the eye sees its eye picture,
 with the hand, through it. A part of the hand behind the page makes no
@@ -3278,12 +3292,13 @@ the hand.
 ```
 hand cut     : frame N, a hand is in front of the page of the spell book: 4210 px of holes for the left eye and 3986 px for the right eye. The card goes out as one quad for each eye
 hand cut     : frame N, no hand is in front of the page of the spell book now. The card goes out as one quad for both eyes
-hand cut     : this window the cut ran in 450 frames, 0.120 ms on average and 0.400 ms at the most (with no save of a test picture). A hand was in front of a page in 120 frames: the card went out as one quad for each eye. The largest hole of an eye had 5120 px
+hand cut     : this window the cut ran in 450 frames, 0.120 ms on average and 0.400 ms at the most (with no save of a test picture). On average: the hands into the room 0.010 ms, the masks 0.040 ms, the copies 0.030 ms, the holes 0.040 ms. In 300 frames nothing moved and the cut of the frame before stayed. A hand was in front of a page in 120 frames: the card went out as one quad for each eye. The largest hole of an eye had 5120 px
 ```
 
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `card_hand_front` | 1 | 0: the page of the spell book and of the ring is over the hands, also where a hand is in front of it. The switch "Hand in front" of the debug page (group Interface) |
+| `card_hand_solid` | 1 | 0: a hand in front of the page keeps the faint opacity of a hint. The switch "Hand solid" of the debug page (group Interface) |
 | `hand_cut_test_save` | 0 | Test key. N: saves the pictures of both eyes of the first N frames with a cut, at most one each 30 frames, as `bwvr-handcut-left-<frame>.bmp` and `bwvr-handcut-right-<frame>.bmp` |
 
 The math checks are in `test/controller_math/hand_cut_checks.h`: the cut of

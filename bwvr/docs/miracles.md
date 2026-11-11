@@ -896,7 +896,8 @@ the Miracle in the Hand, as for the gestures. The take gives the pulse
 When the game refuses a miracle at the snap, the bubble springs back. The
 book stays open, the
 pointing hand gets the pulse `refused`, and the card and the title of the
-book give the reason for 4 s. The game itself shows nothing for a request
+book give the reason for 4 s, or until the book closes. A close by a take
+keeps the reason, because the game refuses a take after the book closed. The game itself shows nothing for a request
 that it refuses.
 
 **The card of the other hand.** On the land with an empty Hand the card of the

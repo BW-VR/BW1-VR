@@ -138,6 +138,7 @@
 #include "controllers.h"
 #include "creature_command.h"
 #include "cutscene_hands_math.h"
+#include "hand_cut.h"
 #include "cutscene_window.h"
 #include "bookmark_aim.h"
 #include "far_grab.h"
@@ -983,11 +984,13 @@ bool BuildFrame() {
     const bool left = h == 0;
     // Outside the influence of the player a hand fades (influence_fade). A
     // hand goes faint while the controller of a hint shows in it
-    // (hint_model.cpp).
+    // (hint_model.cpp), but not while it is in front of the page of the
+    // spell book or of the ring (hand_cut.cpp, card_hand_solid).
     HandModelSetOpacity(h, g_intro ? g_intro_opacity[h]
                            : game_world
                                ? InfluenceEdgeOpacity(h, hand.position, dt) *
-                                     HintModelHandOpacity(h)
+                                     (HandCutSolid(h) ? 1.0f
+                                                      : HintModelHandOpacity(h))
                                : 1.0f);
     float mesh_curls[overlay_math::kFingers];
     memcpy(mesh_curls, curls, sizeof(mesh_curls));

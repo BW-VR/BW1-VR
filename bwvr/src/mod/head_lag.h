@@ -4,9 +4,7 @@
 #include <stdint.h>
 
 struct HeadLagFrameData {
-  uint64_t frame;  // the frame of the controllers
-  int key;         // head_pose_frame
-  bool headset;    // false for the invented head
+  bool headset;  // false for the invented head
   // The newest head pose of the frame: the pose of BeginFrame in a headset,
   // the invented head now on the desktop. Meters and a quaternion, LOCAL.
   float newest_center[3];
@@ -25,13 +23,7 @@ struct HeadLagFrameData {
   // expected, in milliseconds.
   bool have_guess;
   double guess_error_ms;
-  // The camera that the game built in this frame, in world units, with its
-  // forward.
-  bool have_camera;
-  float camera[3];
-  float camera_forward[3];
 };
 
 void HeadLagFrame(const HeadLagFrameData& data);
-void HeadLagCut();
 void HeadLagReport(int key, bool headset);

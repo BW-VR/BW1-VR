@@ -162,8 +162,6 @@ void HeadPoseStripRoll(const float in[4], float out[4]);
 bool HeadPoseFakeOn();
 void HeadPoseFakeEye(int eye, float position[3], float orientation[4]);
 void HeadPoseFakeCenter(float out[3]);
-// head_camera.cpp: the camera of the head that the main camera call built.
-bool HeadCameraRenderBasis(float basis_out[9], float position_out[3]);
 void PassGuardLogHand(int count);
 void UiDepthDumpNextFrame();
 void PassGuardSetEye(int eye);
@@ -1329,8 +1327,6 @@ void HeadLagMeasure(bool to_headset, const float center[3],
                     const float head[4]) {
   HeadLagFrameData d;
   memset(&d, 0, sizeof(d));
-  d.frame = ControllersFrameCount();
-  d.key = g_head_pose_frame;
   d.headset = to_headset;
   memcpy(d.newest_center, center, sizeof(d.newest_center));
   memcpy(d.newest_head, head, sizeof(d.newest_head));
@@ -1348,13 +1344,6 @@ void HeadLagMeasure(bool to_headset, const float center[3],
       d.have_guess = true;
       d.guess_error_ms = static_cast<double>(display - g_used_guess) / 1e6;
     }
-  }
-  float basis[9];
-  if (HeadCameraRenderBasis(basis, d.camera)) {
-    d.have_camera = true;
-    d.camera_forward[0] = basis[2];
-    d.camera_forward[1] = basis[5];
-    d.camera_forward[2] = basis[8];
   }
   HeadLagFrame(d);
 }

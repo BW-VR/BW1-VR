@@ -51,32 +51,6 @@ inline void HeadLagChecks() {
   Check(NextDisplayTime(1000, 9950000.0, period) == 1000 + 9950000,
         "with a mean the next display time is one mean step later", 0, 0);
 
-  // A STEP OF THE INVENTED HEAD.
-  Check(IsStep(0.1414f, 0.0f), "a lean of 14 cm is a step", 0, 0);
-  Check(IsStep(0.0f, 30.0f), "a look of 30 degrees is a step", 0, 0);
-  Check(!IsStep(0.004f, 0.5f), "4 mm and 0.5 degrees in a frame is no step",
-        0, 0);
-
-  // THE FRAME IN WHICH THE CAMERA FOLLOWED.
-  const float same_moves[kTraceFrames] = {0.14f, 0.14f, 0.14f,
-                                          0.14f, 0.14f, 0.14f};
-  const float no_turns[kTraceFrames] = {0, 0, 0, 0, 0, 0};
-  Check(FollowFrame(same_moves, no_turns, 1e-4f, 0.05f) == 0,
-        "a camera that moved in the frame of the step followed in frame 0",
-        0, 0);
-  const float late_moves[kTraceFrames] = {0.0f, 0.0f, 0.14f,
-                                          0.14f, 0.14f, 0.14f};
-  Check(FollowFrame(late_moves, no_turns, 1e-4f, 0.05f) == 2,
-        "a camera that moved two frames after the step followed in frame 2",
-        0, 0);
-  const float turns[kTraceFrames] = {0.0f, 30.0f, 30.0f, 30.0f, 30.0f, 30.0f};
-  const float no_moves[kTraceFrames] = {0, 0, 0, 0, 0, 0};
-  Check(FollowFrame(no_moves, turns, 1e-4f, 0.05f) == 1,
-        "a camera that turned one frame after the step followed in frame 1",
-        0, 0);
-  Check(FollowFrame(no_moves, no_turns, 1e-4f, 0.05f) == -1,
-        "a camera that did not move and did not turn did not follow", 0, 0);
-
   // THE MOVE OF A KEPT PICTURE.
   float x = 0.0f, y = 0.0f;
   float left[4];

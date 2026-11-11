@@ -2019,23 +2019,22 @@ the God view in it, and puts the two side by side. It runs with
 | The walk | The camera that the game gets (`0x00EA1DB8`) in the frames of a walk, in units for each second, over the units per meter of the eyes | The speed in the room that the player sees, in all, across the land, and up and down. On a slope the follow of the land adds the move up and down, so the speed in all is more than the speed of the stick |
 | The grab | The same camera in the frames of a grab of the world, over the units per meter of the eyes, beside the way of the grips | The move of the land in the room for the move of the hand |
 
-**The frame of the head pose.** With the head on the camera of the game,
-the main camera call of the game builds the camera of a frame before the
-mod reads the head pose of that frame. So each eye picture is drawn from the
-head pose of the frame before. The projection layer declares that same pose,
-so the picture and the declared pose agree, and the runtime turns the
-picture to the head at the display. The head measure with the declared eye
-of the same frame is the one for a session.
+**The frame of the head pose.** The main camera call of the game builds the
+camera of a frame before `xrWaitFrame` of that frame. With
+`head_pose_frame=1` (the default) that call locates the head for the display
+time of its frame. With `head_pose_frame=0` it takes the pose that the frame
+before located. In each case the projection layer declares the pose of the
+camera, so the picture and the declared pose agree (`backend.md`, "The head
+pose of the frame"). The head measure with the declared eye of the same
+frame is the one for a session.
 
-On the desktop the picture comes two frames after the declared eye of the
-invented head. The word `lean` of the scripted controller acts in the frame
-function of the controllers, after `HeadPoseUpdate` of that frame. The
-declared view of the invented head (`HeadPoseFakeEye`) has the lean in that
-frame. `HeadPoseUpdate` stores it in the next frame, and the main camera
-call of the frame after that uses it. The first frame of that lag is in the
-invented head only. The second is the frame of the main camera call, which
-the headset path has too, and there the layer declares the pose of the
-picture.
+On the desktop the word `lean` of the scripted controller acts in the frame
+function of the controllers, after the head of that frame. The declared view
+of the invented head (`HeadPoseFakeEye`) has the lean in that frame. The
+main camera call of the next frame has it with `head_pose_frame=1`, so the
+picture comes 1 frame after the declared eye. With `head_pose_frame=0` the
+camera has it one frame later, 2 frames after the declared eye. The first of
+these frames is in the invented head only.
 
 **The step watch.** A move of the declared left eye of 5 cm or more from one
 frame to the next is a step: a lean of the invented head or a recenter. For
@@ -2044,7 +2043,8 @@ camera of the left eye pass is from its place in the frame before the step.
 The first frame with 90 percent of the move at the scale of the eyes is the
 lag, and the move in that frame over the step is the scale of the head. A
 real head in a headset does not step 5 cm in one frame, so the watch acts
-only on the desktop and at a recenter.
+only on the desktop and at a recenter. The line below has
+`head_pose_frame=0`.
 
 ```
 scale check  : a step of the head of 14.14 cm at frame 171. The camera of the left eye pass from its place in the frame before: 0.0000 0.0000 0.1414 0.1414 0.1414 0.1414 units in that frame and the 5 after (the full move is 0.1414 units at 1.000 units per meter of the eyes). So the camera has the full move 2 frames after the declared eye, and with the declared eye of 2 frames before the head gives 1.000 units per meter

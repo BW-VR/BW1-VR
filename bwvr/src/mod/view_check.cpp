@@ -367,9 +367,10 @@ void ScaleTake(const ScaleFrame& f) {
   }
   // THE HEAD, with two pairings. With the head on the camera of the game
   // (head_camera.cpp), the camera of an eye pass comes from the main camera
-  // call of the game. That call runs before the head pose of its frame is
-  // read, so it has the head pose of the frame before (stereo.cpp). In a
-  // session the projection layer declares that same pose
+  // call of the game. That call runs before xrWaitFrame of its frame, and it
+  // takes the head for the display time of its frame (head_pose_frame=1) or
+  // the head of the frame before (0, stereo.cpp). In a session the
+  // projection layer declares that same pose
   // (g_rendered_position), so the declared eye of the same frame pairs with
   // the camera. On the desktop the declared view of the invented head is the
   // lean of this frame, and the step watch below measures how many frames

@@ -46,7 +46,7 @@ Other docs: `software-tnl.md` (the CPU transform and the camera matrix),
 | `src/mod/snapshot_guard.cpp`, `save_picture_math.h` | The save picture in VR: the game reads a surface of the mod with the eye picture (`save_picture`) |
 | `src/mod/stereo.cpp` | The scene walk twice, the hotkeys, the view setup |
 | `src/mod/head_camera.cpp`, `head_pose.cpp`, `eye_camera.cpp` | The head on the camera, the per eye matrix |
-| `src/mod/head_lag.cpp`, `head_lag_math.h` | The measure of the age of the head pose of a picture, and the math of the head pose of the frame |
+| `src/mod/head_lag.cpp`, `head_lag_math.h` | The measure of the age of the head pose of a picture, the math of the head pose of the frame, and the move of a kept intro picture |
 | `src/mod/fov.cpp` | `LH3DTech::ChangeFov` hook |
 | `src/mod/pointer_map.cpp` | The pointer in render pixels, the head lock of the cursor |
 | `src/mod/cursor_trace.cpp` | A test aid: the log names each caller that touches the cursor of Windows or takes the front |
@@ -4588,24 +4588,18 @@ and the hands) and nothing to see on far land.
 
 With the invented head of a desktop run, a step of the head comes from the
 script of the fake controller in the frame functions, after the head of the
-frame. The next frame takes it. With `head_pose_frame=1` its main camera call
-has the step. With `head_pose_frame=0` the camera has it one frame later. The
-declared view of the invented head (`StereoDeclaredView`) is the invented head
-at the time of the eye pass, so it has the step one frame before the frame
-that takes it.
+frame. The declared view of the invented head (`StereoDeclaredView`) is the
+invented head at the time of the eye pass, so it has the step in that frame.
+With `head_pose_frame=1` the main camera call of the next frame has the step:
+the eye camera follows 1 frame after the declared eye. With
+`head_pose_frame=0` the camera has it one frame later: 2 frames after the
+declared eye. The first of these frames is in the invented head only. The
+step watch of the scale check gives the number (`controller-hints.md`, 9.16).
 
 The log line in each report window (`head_lag.cpp`):
 
 ```
 head lag     : head_pose_frame=1, the headset. In 450 frames the camera of the game took the head pose of its own frame in 450 frames and the pose of the frame before in 0. The pose of the camera was for a time 0.84 ms before the display time of its picture in the mean, and 3.10 ms at the most. The guess of the display time was off by 0.84 ms in the mean, and 3.10 ms at the most. The newest pose of the frame was 0.40 mm and 0.030 degrees from the pose of the camera in the mean, and 2.10 mm and 0.300 degrees at the most. 450 frames had a difference
-```
-
-With the invented head the log has one line for each step of the head (at
-most 20): the move and the turn of the camera of the game in the frame of the
-step and in the 5 frames after it, and the frame in which it followed.
-
-```
-head lag     : the invented head moved 14.1 cm and turned 0.0 degrees in frame 171 (head_pose_frame=1). From frame 171 to frame 176 the camera of the game moved 0.1414 0.1414 0.1414 0.1414 0.1414 0.1414 units and turned 0.00 0.00 0.00 0.00 0.00 0.00 degrees from its place in the frame before the step. The camera followed in the frame of the step
 ```
 
 ## The head on the camera
@@ -4698,8 +4692,8 @@ With `eye_cant=1` (default):
   The rendered half angle is the widest angle of either view about its own
   orientation, so the outer edge of a canted view has a picture.
 - The turn of a frame comes from the same pose as the camera of the engine
-  of that frame: the pose of the frame before (`g_rendered_turn`,
-  `g_frame_turn` in `stereo.cpp`). The intro in stereo draws from the pose
+  of that frame (`g_rendered_turn`, `g_frame_turn` in `stereo.cpp`, "The
+  head pose of the frame"). The intro in stereo draws from the pose
   of its own frame, and it takes the turn of that pose.
 - A frame with a canted view has a walk for each eye, because one walk
   moves the vertices of the right eye sideways only ("One walk for both

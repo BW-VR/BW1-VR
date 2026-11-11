@@ -54,38 +54,10 @@ inline int64_t NextDisplayTime(int64_t last_ns, double mean_ns,
   return last_ns + static_cast<int64_t>(step + 0.5);
 }
 
-// A STEP OF THE INVENTED HEAD: a move of 2 cm or more, or a turn of 2
-// degrees or more, from one frame to the next. A desktop run steps the head
-// by 14 cm or by 30 degrees in one frame.
-const float kStepM = 0.02f;
+// A TURN STEP OF THE INVENTED HEAD: a turn of 2 degrees or more from one
+// frame to the next. A desktop run turns the head by 36 degrees in one frame
+// (the word "look"). intro_vr.cpp logs it.
 const float kStepDeg = 2.0f;
-inline bool IsStep(float moved_m, float turned_deg) {
-  return moved_m >= kStepM || turned_deg >= kStepDeg;
-}
-
-// The frames that the trace of a step keeps.
-const int kTraceFrames = 6;
-
-// THE FRAME IN WHICH THE CAMERA FOLLOWED A STEP. moves and turns are the
-// move and the turn of the camera from the frame before the step, in the
-// frame of the step and in the frames after it. The camera followed in the
-// first frame that has half or more of the move and of the turn of the last
-// frame. -1 when the last frame has no move and no turn.
-inline int FollowFrame(const float moves[kTraceFrames],
-                       const float turns[kTraceFrames], float least_move,
-                       float least_turn_deg) {
-  const float move_end = moves[kTraceFrames - 1];
-  const float turn_end = turns[kTraceFrames - 1];
-  const bool moved = move_end >= least_move;
-  const bool turned = turn_end >= least_turn_deg;
-  if (!moved && !turned) return -1;
-  for (int i = 0; i < kTraceFrames; ++i) {
-    const bool move_ok = !moved || moves[i] >= 0.5f * move_end;
-    const bool turn_ok = !turned || turns[i] >= 0.5f * turn_end;
-    if (move_ok && turn_ok) return i;
-  }
-  return kTraceFrames - 1;
-}
 
 // Turns v by the quaternion q.
 inline void Rotate(const float q[4], const float v[3], float out[3]) {

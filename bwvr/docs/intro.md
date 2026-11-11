@@ -426,19 +426,30 @@ eyes are of the same moment. The camera on the path of the game moves
 head. That gives a small judder of the path on a frame that the runtime shows
 two times, and no second picture.
 
-The log line at the end of the logo:
+A known limit: the moved picture has faint straight seams in the background
+at the edges of the copied blocks (the edge of the strip, and some lines
+across the picture). They are of low contrast, and they go in a few frames
+with the trails.
+
+The log line at the end of the logo. The count is of each eye pass with a
+change of the view, not of the turns of the head:
 
 ```
-intro        : the kept picture moved with a turn of the head in 2008 eye passes, by 0.0120 of the half width or height in the mean and 0.0800 at the most (intro_keep_turn=1)
+intro        : the kept picture moved with a turn of the head in 683 eye passes, by 0.0016 of the half width or height in the mean and 0.5466 at the most (intro_keep_turn=1)
 ```
 
-With the invented head of a desktop run, a step of the head (the word `look`
+With the invented head of a desktop run, a turn of the head (the word `look`
 of the fake controller) gives one line, and with `test_keys=1` a picture of
 each eye of that pair:
 
 ```
-intro        : the invented head turned 36.0 degrees at pair 700. The kept picture of each eye is moved by -1.036 of the half width and -0.931 of the half height (intro_keep_turn=1, intro_eye_trails=1). The pictures of this pair are saved
+intro        : the invented head turned 35.9 degrees at pair 702. The kept picture of each eye is moved by -0.404 of the half width and -0.368 of the half height (intro_keep_turn=1, intro_eye_trails=1). The pictures of this pair are saved
 ```
+
+In that pair, with `intro_keep_turn=0`, each eye picture has a second cloud
+of orbs at 25 to 35 percent of the contrast of the orbs, 20 percent of the
+width to the left and lower. With `intro_keep_turn=1` it has one cloud. The
+logo of a desktop run ends after about 1044 pairs.
 
 ### The flat text and the boxes in stereo
 

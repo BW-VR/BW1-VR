@@ -21,7 +21,8 @@ want.
    story around you that makes you sick. Point at the screen in the window.
    Wrong: hands or a ray that are not at your real hands, or a ray that is
    hard to see on the scene. At the Lionhead logo, turn your head fast.
-   Wrong: a second, weaker picture of the orbs that goes with the head.
+   Wrong: a second, weaker picture of the orbs that goes with the head, or
+   straight seams in the background after the turn.
 
 ### The God view
 

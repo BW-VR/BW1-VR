@@ -4596,11 +4596,19 @@ the eye camera follows 1 frame after the declared eye. With
 declared eye. The first of these frames is in the invented head only. The
 step watch of the scale check gives the number (`controller-hints.md`, 9.16).
 
-The log line in each report window (`head_lag.cpp`):
+The log line in each report window (`head_lag.cpp`), here of the invented
+head in a desktop run:
 
 ```
-head lag     : head_pose_frame=1, the headset. In 450 frames the camera of the game took the head pose of its own frame in 450 frames and the pose of the frame before in 0. The pose of the camera was for a time 0.84 ms before the display time of its picture in the mean, and 3.10 ms at the most. The guess of the display time was off by 0.84 ms in the mean, and 3.10 ms at the most. The newest pose of the frame was 0.40 mm and 0.030 degrees from the pose of the camera in the mean, and 2.10 mm and 0.300 degrees at the most. 450 frames had a difference
+head lag     : head_pose_frame=1, the invented head. In 450 frames the camera of the game took the head pose of its own frame in 450 frames and the pose of the frame before in 0. The newest pose of the frame was 0.00 mm and 0.000 degrees from the pose of the camera in the mean, and 0.00 mm and 0.000 degrees at the most. 0 frames had a difference
 ```
+
+With `head_pose_frame=0` the same window has "in 0 frames and the pose of
+the frame before in 450", and a step of 14.14 cm of the invented head gives
+"141.42 mm ... at the most". In a headset the line also gives the time of the
+pose of the camera before the display time of its picture, and the error of
+the guess of the display time. The frame cost of a desktop run is the same
+with each value of the key.
 
 ## The head on the camera
 

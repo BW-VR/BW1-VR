@@ -222,6 +222,7 @@ const int kMaxCircles = 48;
 uint64_t g_holo_by_circles = 0;
 uint64_t g_holo_by_search = 0;
 uint64_t g_holo_disagree = 0;
+uint64_t g_holo_shared = 0;
 // The lines each 60 frames while the hologram shows.
 int g_holo_logs = 0;
 const int kMaxHoloLogs = 80;
@@ -596,20 +597,50 @@ bool SearchEdge(const float point[3], float range, float at[2],
                                                   kWallRays, at, distance);
 }
 
-// THE HOLOGRAM (influence_wall_look=1) of one hand.
-int HologramWall(int hand, const float point[3], float units_per_meter,
-                 float seconds, influence_math::WallTriangle* out, int room) {
+// THE PLAN of the hologram of one hand for this frame: where its wall is and
+// how it looks. InfluenceEdgeWallsFrame makes the plans of both hands before
+// the build of either, so the build of one hand knows the other.
+struct HoloPlan {
+  bool on;       // the hand has a hologram this frame
+  bool here;     // the hand is inside the influence
+  int how;       // 1 the circles of the game, 2 the search, 0 or -1 none
+  int circle;    // with how 1: the circle of the wall
+  int rays;      // with how 2: the rays that found the edge
+  float distance;
+  float strength;
+  float point[2];  // the land point of the hand
+  influence_math::HoloWall wall;
+  influence_math::HoloLook look;
+};
+HoloPlan g_plan[2];
+influence_math::Circle g_circles[kMaxCircles];
+int g_circle_count = 0;
+
+void PlanHologram(int hand, const float point[3], float units_per_meter,
+                  float seconds) {
   using namespace influence_math;
+  HoloPlan& plan = g_plan[hand];
+  plan.on = false;
+  plan.how = 0;
+  plan.circle = -1;
+  plan.rays = 0;
+  plan.distance = 0.0f;
+  plan.strength = 0.0f;
+  plan.point[0] = point[0];
+  plan.point[1] = point[2];
   const float u = units_per_meter;
   bool here = true;
-  if (!Inside(point[0], point[2], &here)) return 0;
-  Circle circles[kMaxCircles];
-  const int count = GameCircles(circles, kMaxCircles);
+  if (!Inside(point[0], point[2], &here)) {
+    plan.how = -1;
+    return;
+  }
+  plan.here = here;
+  const Circle* circles = g_circles;
+  const int count = g_circle_count;
   const float margin = kHoloMarginM * u;
   const float range = (here ? kHoloInsideM : kHoloOutsideM) * u;
   HoloWall wall = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
   EdgePoint e = {-1, {0.0f, 0.0f}, 0.0f, true};
-  // 1 the circles of the game, 2 the search.
   int how = 0;
   float distance = 0.0f;
   if (count > 0 &&
@@ -638,16 +669,16 @@ int HologramWall(int hand, const float point[3], float units_per_meter,
           wall.qz = e.at[1];
           distance = e.distance;
           how = 1;
+          plan.circle = e.circle;
         } else {
           ++g_holo_disagree;
         }
       }
     }
   }
-  int rays = 0;
   if (how == 0) {
     float at[2] = {0.0f, 0.0f};
-    if (SearchEdge(point, range, at, &distance, &rays)) {
+    if (SearchEdge(point, range, at, &distance, &plan.rays)) {
       float tx = -(at[1] - point[2]), tz = at[0] - point[0];
       float length = sqrtf(tx * tx + tz * tz);
       if (!(length > 1e-6f)) {
@@ -662,40 +693,86 @@ int HologramWall(int hand, const float point[3], float units_per_meter,
       how = 2;
     }
   }
-  const float strength =
+  plan.how = how;
+  plan.wall = wall;
+  plan.distance = distance;
+  plan.strength =
       how > 0 ? HologramStrength(here, distance, kHoloInsideM * u,
                                  kHoloOutsideM * u)
               : 0.0f;
-  int n = 0;
+  if (!(plan.strength > 0.0f)) return;
+  // The middle is at the height of the hand, and never under the land at the
+  // edge.
   float y = point[1];
-  if (strength > 0.0f) {
-    // The middle is at the height of the hand, and never under the land at
-    // the edge.
-    const float land = LandHeight(wall.qx, wall.qz);
-    if (y < land) y = land;
-    HoloLook look;
-    look.y = y;
-    look.radius = (kHoloSmallM + (kHoloLargeM - kHoloSmallM) * strength) * u;
-    look.light = kHoloLight * g_wall_light * strength;
-    look.grid = kHoloGridM * u;
-    look.ring_gap = kHoloRingGapM * u;
-    float phase = 0.5f;
-    if (g_ripple && seconds >= 0.0f) {
-      const float turns = seconds * kHoloRingSpeedMps / kHoloRingGapM;
-      phase = turns - floorf(turns);
-    }
-    look.ring_phase = phase;
-    look.line_half = kHoloLineHalfM * u;
-    const int own = e.circle;
+  const float land = LandHeight(wall.qx, wall.qz);
+  if (y < land) y = land;
+  HoloLook& look = plan.look;
+  look.y = y;
+  look.radius = (kHoloSmallM + (kHoloLargeM - kHoloSmallM) * plan.strength) * u;
+  look.light = kHoloLight * g_wall_light * plan.strength;
+  look.grid = kHoloGridM * u;
+  look.ring_gap = kHoloRingGapM * u;
+  float phase = 0.5f;
+  if (g_ripple && seconds >= 0.0f) {
+    const float turns = seconds * kHoloRingSpeedMps / kHoloRingGapM;
+    phase = turns - floorf(turns);
+  }
+  look.ring_phase = phase;
+  look.line_half = kHoloLineHalfM * u;
+  plan.on = true;
+}
+
+// The light of the hologram of a plan at the point p of the world, by its
+// falloff from its middle. 0 off its disc.
+float PlanLight(const HoloPlan& plan, const float p[3]) {
+  if (!plan.on || !(plan.look.radius > 0.0f)) return 0.0f;
+  const float dx = p[0] - plan.wall.qx, dy = p[1] - plan.look.y,
+              dz = p[2] - plan.wall.qz;
+  return plan.look.light *
+         influence_math::HoloFalloff(sqrtf(dx * dx + dy * dy + dz * dz) /
+                                     plan.look.radius);
+}
+
+// True when the two plans lie on the same wall: the same circle of the game.
+bool SameWall(const HoloPlan& a, const HoloPlan& b) {
+  return a.on && b.on && a.how == 1 && b.how == 1 && a.circle == b.circle;
+}
+
+// THE HOLOGRAM (influence_wall_look=1) of one hand, from its plan. Where the
+// discs of the two hands overlap on one wall, each point of the wall shows
+// only the disc that is brighter there (the left hand where they are equal).
+// So the two discs make one hologram: one grid, one fill, and no doubled
+// light.
+int HologramWall(int hand, float units_per_meter,
+                 influence_math::WallTriangle* out, int room) {
+  using namespace influence_math;
+  const float u = units_per_meter;
+  const HoloPlan& plan = g_plan[hand];
+  const HoloPlan& other = g_plan[1 - hand];
+  const bool shared = SameWall(plan, other);
+  int n = 0;
+  if (plan.on) {
+    const float margin = kHoloMarginM * u;
+    const int own = plan.circle;
     const auto show = [&](float x, float z) {
-      return how != 1 || !InOther(circles, count, own, x, z, margin);
+      if (plan.how == 1 &&
+          InOther(g_circles, g_circle_count, own, x, z, margin)) {
+        return false;
+      }
+      if (!shared) return true;
+      // The height of the point is not known here: the test takes the
+      // height of the middle of this disc.
+      const float p[3] = {x, plan.look.y, z};
+      const float mine = PlanLight(plan, p), theirs = PlanLight(other, p);
+      return hand == 0 ? mine >= theirs : mine > theirs;
     };
-    n = BuildHologram(wall, look, show, out, room);
-    if (how == 1) {
+    n = BuildHologram(plan.wall, plan.look, show, out, room);
+    if (plan.how == 1) {
       ++g_holo_by_circles;
     } else {
       ++g_holo_by_search;
     }
+    if (shared) ++g_holo_shared;
   }
   const bool shows = n > 0;
   if (shows != g_wall_was[hand] && g_wall_logs < kMaxWallLogs) {
@@ -703,12 +780,13 @@ int HologramWall(int hand, const float point[3], float units_per_meter,
     ModLog("influence    : the hologram at the edge %s for the %s hand at "
            "%.1f %.1f, %s the influence, %.1f cm of the room from the edge, "
            "strength %.2f, %s, %d triangles, frame %llu",
-           shows ? "shows" : "goes", hand == 0 ? "left" : "right", point[0],
-           point[2], here ? "inside" : "outside", distance / u * 100.0f,
-           strength,
-           how == 1   ? "on the wall of a circle of the game"
-           : how == 2 ? "by the search of the rays"
-                      : "no edge near",
+           shows ? "shows" : "goes", hand == 0 ? "left" : "right",
+           plan.point[0], plan.point[1],
+           plan.here ? "inside" : "outside", plan.distance / u * 100.0f,
+           plan.strength,
+           plan.how == 1   ? "on the wall of a circle of the game"
+           : plan.how == 2 ? "by the search of the rays"
+                           : "no edge near",
            n, ControllersFrameCount());
   }
   // A line each 60 frames while it shows: the edge point, the wall and the
@@ -718,25 +796,27 @@ int HologramWall(int hand, const float point[3], float units_per_meter,
       ControllersFrameCount() >= said_frame[hand] + 60) {
     said_frame[hand] = ControllersFrameCount();
     ++g_holo_logs;
-    if (how == 1) {
+    const HoloWall& wall = plan.wall;
+    if (plan.how == 1) {
       const float angle =
           atan2f(wall.qz - wall.cz, wall.qx - wall.cx) * 57.29578f;
       ModLog("influence    : the hologram of the %s hand: %.1f cm of the "
              "room %s the edge, strength %.2f, radius %.1f cm, edge point "
              "%.2f %.1f %.2f on the circle at %.1f %.1f of radius %.1f, at "
-             "%.2f degrees on it, %d triangles, frame %llu",
-             hand == 0 ? "left" : "right", distance / u * 100.0f,
-             here ? "inside" : "past", strength,
-             (kHoloSmallM + (kHoloLargeM - kHoloSmallM) * strength) * 100.0f,
-             wall.qx, y, wall.qz, wall.cx, wall.cz, wall.r, angle, n,
+             "%.2f degrees on it, %d triangles%s, frame %llu",
+             hand == 0 ? "left" : "right", plan.distance / u * 100.0f,
+             plan.here ? "inside" : "past", plan.strength,
+             plan.look.radius / u * 100.0f, wall.qx, plan.look.y, wall.qz,
+             wall.cx, wall.cz, wall.r, angle, n,
+             shared ? ", one hologram with the other hand" : "",
              ControllersFrameCount());
     } else {
       ModLog("influence    : the hologram of the %s hand: %.1f cm of the "
              "room %s the edge, strength %.2f, edge point %.2f %.1f %.2f by "
              "the search (%d rays), %d triangles, frame %llu",
-             hand == 0 ? "left" : "right", distance / u * 100.0f,
-             here ? "inside" : "past", strength, wall.qx, y, wall.qz, rays,
-             n, ControllersFrameCount());
+             hand == 0 ? "left" : "right", plan.distance / u * 100.0f,
+             plan.here ? "inside" : "past", plan.strength, wall.qx,
+             plan.look.y, wall.qz, plan.rays, n, ControllersFrameCount());
     }
   }
   g_wall_was[hand] = shows;
@@ -749,19 +829,33 @@ int HologramWall(int hand, const float point[3], float units_per_meter,
 
 }  // namespace
 
+// overlay.cpp, once a frame before InfluenceEdgeWall: the plans of the
+// hologram of both hands, at the points of the hands in the world (valid[h]
+// false for a hand that is not drawn), at `seconds` of the clock of the glow.
+void InfluenceEdgeWallsFrame(const bool valid[2], const float points[2][3],
+                             float units_per_meter, float seconds) {
+  ReadKeys();
+  for (int h = 0; h < 2; ++h) {
+    g_plan[h].on = false;
+    g_plan[h].how = -1;
+  }
+  if (!g_wall || !g_look || !(units_per_meter > 0.0f)) return;
+  if (!valid[0] && !valid[1]) return;
+  g_circle_count = GameCircles(g_circles, kMaxCircles);
+  for (int h = 0; h < 2; ++h) {
+    if (valid[h]) PlanHologram(h, points[h], units_per_meter, seconds);
+  }
+}
+
 // overlay.cpp, once a frame for each hand (0 the left hand, 1 the right
-// hand): the glow at the edge near the point of that hand in the world, at
-// `seconds` of the clock of the glow. Returns the count of triangles in
-// `out`, at most `room`.
+// hand): the glow at the edge near the point of that hand in the world.
+// Returns the count of triangles in `out`, at most `room`.
 int InfluenceEdgeWall(int hand, const float point[3], float units_per_meter,
-                      float seconds, influence_math::WallTriangle* out,
-                      int room) {
+                      influence_math::WallTriangle* out, int room) {
   ReadKeys();
   if (hand < 0 || hand > 1) return 0;
   if (!g_wall || !(units_per_meter > 0.0f)) return 0;
-  if (g_look) {
-    return HologramWall(hand, point, units_per_meter, seconds, out, room);
-  }
+  if (g_look) return HologramWall(hand, units_per_meter, out, room);
   bool here = true;
   if (!Inside(point[0], point[2], &here)) return 0;
   const float range =
@@ -912,8 +1006,11 @@ void InfluenceEdgeReport() {
            "of the game, %llu frames by the search of the rays, %llu tests "
            "where the circles and the test of the game did not agree",
            g_holo_by_circles, g_holo_by_search, g_holo_disagree);
+    ModLog("influence    : %llu frames of a hand whose hologram is one with "
+           "the hologram of the other hand on the same wall", g_holo_shared);
   }
   g_holo_by_circles = g_holo_by_search = g_holo_disagree = 0;
+  g_holo_shared = 0;
   g_fade_frames = g_wall_frames = g_wall_triangles = 0;
   g_stream_calls = g_stream_lifted = g_raw_tests = 0;
 }

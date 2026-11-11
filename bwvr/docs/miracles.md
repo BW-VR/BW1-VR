@@ -1159,9 +1159,14 @@ over the land, so three things change, each with a key:
     wide, with its light in the middle. The hologram starts 45 cm of the
     room inside the edge and goes 40 cm past it. Its strength rises as
     `t * t * (3 - 2 t)` from 0 to 1 at the edge, and falls the same way past
-    the edge. Its disc grows with the strength, from 14 cm to 30 cm from the
+    the edge: 0.42 at 25 cm inside, 0.87 at 10 cm inside, 0.96 at 5 cm past,
+    0.68 at 15 cm past and 0 at 40 cm past. So it shows well before the hand
+    gets to the edge. Its disc grows with the strength, from 14 cm to 30 cm from the
     middle to the rim. A part of the wall inside another disc of the union
-    is not an edge, and has no light. A hologram has at most 900 triangles.
+    is not an edge, and has no light. Where the discs of the two hands overlap
+    on one wall, each point of the wall shows only the disc that is brighter
+    there. So the two hands make one hologram with one grid, and the light
+    does not double. A hologram has at most 900 triangles.
   - Where the discs and the test of the game do not agree (an influence ring
     of a script, the influence of a friend), the point comes from the search
     of 24 rays below, and the hologram is level and faces the hand.

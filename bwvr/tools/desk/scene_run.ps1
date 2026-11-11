@@ -35,10 +35,10 @@
 # -Kind edge: the test keys influence_test_circle_cm=25 and
 #   influence_test_circle_frame=230 make the influence of the player a circle
 #   of 25 cm of the room around the Hand's point at its first step. The hand
-#   steps forward in steps of 5 cm to 40 cm past that point, with an eye
-#   picture at each step, and back. So the Hand's point is 25, 20, 15, 10 and
-#   5 cm inside the edge, at the edge, and 5, 10 and 15 cm past it, and then
-#   5 cm inside again. The log has the lines "influence": the hand goes out
+#   steps forward in steps of 5 cm to 65 cm past that point, with an eye
+#   picture at each step, and back. So the Hand's point is 25 cm inside the
+#   edge to 40 cm past it, where the hologram goes, and then 5 cm inside
+#   again. The log has the lines "influence": the hand goes out
 #   of the influence and comes back, and the glow at the edge shows, with its
 #   distance and its strength each 60 frames, and goes. The report has the
 #   state of the stream of the game. With influence_stream_hand=1 a stream of
@@ -99,15 +99,15 @@ if ($Kind -eq 'forest') {
     # The circle starts at frame 230 of the controllers, about 60 frames
     # after the first step: its middle is the Hand's point at 20 cm in front
     # of the head. Each next step is 5 cm (5 units at the start scale), so
-    # the Hand's point is 0 to 40 units from the middle, and then 20 again.
+    # the Hand's point is 0 to 65 units from the middle, and then 20 again.
     # The grip is behind the Hand's point, so the fade (at the grip) comes
     # some steps after the edge.
     $keys = "$keys;influence_test_circle_cm=25;influence_test_circle_frame=230"
     $points = '0,-30,20 0,-30,25 0,-30,30 0,-30,35 0,-30,40 0,-30,45 0,-30,50 ' +
-              '0,-30,55 0,-30,60 0,-30,40'
+              '0,-30,55 0,-30,60 0,-30,65 0,-30,70 0,-30,75 0,-30,80 0,-30,85 0,-30,40'
     if ($Steps -eq '') {
         $w = @()
-        for ($k = 0; $k -lt 10; $k++) {
+        for ($k = 0; $k -lt 15; $k++) {
             $f = 900 + 120 * $k
             $w += "point@$f+1"
             $w += "shot@$($f + 60)+1"

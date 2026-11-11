@@ -351,7 +351,7 @@ struct HoloLook {
 
 // The shares of `light` of each part: the soft fill of the disc, the bright
 // spot at the edge point, the lines of the grid and the rings.
-const float kHoloFill = 0.12f;
+const float kHoloFill = 0.07f;
 const float kHoloSpot = 0.55f;
 const float kHoloGridLight = 0.45f;
 const float kHoloRingLight = 1.0f;

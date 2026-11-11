@@ -385,9 +385,14 @@ inline void SceneChecks() {
   {
     Near("none 45 cm inside", HologramStrength(true, 45.0f, 45.0f, 40.0f), 0.0,
          1e-6);
-    Check(HologramStrength(true, 30.0f, 45.0f, 40.0f) > 0.2f,
-          "it shows 30 cm inside", HologramStrength(true, 30.0f, 45.0f, 40.0f),
-          0.2);
+    Near("0.42 at 25 cm inside", HologramStrength(true, 25.0f, 45.0f, 40.0f),
+         0.4170, 1e-3);
+    Near("0.87 at 10 cm inside", HologramStrength(true, 10.0f, 45.0f, 40.0f),
+         0.8738, 1e-3);
+    Near("0.96 at 5 cm past", HologramStrength(false, 5.0f, 45.0f, 40.0f),
+         0.9570, 1e-3);
+    Near("0.68 at 15 cm past", HologramStrength(false, 15.0f, 45.0f, 40.0f),
+         0.6836, 1e-3);
     Near("full at the edge", HologramStrength(true, 0.0f, 45.0f, 40.0f), 1.0,
          1e-6);
     Near("full just past the edge",

@@ -198,9 +198,10 @@ float HeadPoseScale();
 // edge of the influence near the pointing hand.
 void InfluenceEdgeFrame(float units_per_meter);
 float InfluenceEdgeOpacity(int hand, const float point[3], float dt);
+void InfluenceEdgeWallsFrame(const bool valid[2], const float points[2][3],
+                             float units_per_meter, float seconds);
 int InfluenceEdgeWall(int hand, const float point[3], float units_per_meter,
-                      float seconds, influence_math::WallTriangle* out,
-                      int room);
+                      influence_math::WallTriangle* out, int room);
 void InfluenceEdgeColor(float rgb[3]);
 
 namespace {
@@ -1996,10 +1997,12 @@ void OverlayFrame() {
   // (influence_wall).
   if (g_units_per_meter > 0.0f && (g_hand_valid[0] || g_hand_valid[1])) {
     InfluenceEdgeColor(g_wall_color);
+    InfluenceEdgeWallsFrame(g_hand_valid, g_index_tip, g_units_per_meter,
+                            g_seconds);
     for (int h = 0; h < kHands; ++h) {
       if (!g_hand_valid[h]) continue;
       g_wall_count += InfluenceEdgeWall(h, g_index_tip[h], g_units_per_meter,
-                                        g_seconds, &g_wall[g_wall_count],
+                                        &g_wall[g_wall_count],
                                         kWallMax - g_wall_count);
     }
   }

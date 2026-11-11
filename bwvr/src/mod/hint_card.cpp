@@ -167,8 +167,10 @@ void ControllersGesturePulse(float amplitude, float seconds);
 // controllers.cpp: the grip of the pointing hand is closed, as the pump last
 // saw it.
 bool ControllersGripClosed();
-// The press of the open hand on the Creature (creature_stroke_open).
+// The press of the open hand on the Creature (creature_stroke_open), and
+// whether the open hand slaps too (creature_open_slap).
 bool ControllersOpenStrokeOn();
+bool ControllersOpenSlap();
 // controllers.cpp: a push of the stick of the other hand moves the player now.
 bool ControllersWalkPossible();
 // hand_direct.cpp: the Hand's point and what a press does there.
@@ -1040,15 +1042,26 @@ void AddPrompts(Content cards[kHands], int context, bool first_show) {
     }
     case kCtxCreature:
       // THE STROKE WITH THE OPEN HAND (creature_stroke_open): the mod holds
-      // the press, so the open hand strokes with no button, and a slap needs
-      // the grip.
+      // the press, so the open hand strokes with no button. With
+      // creature_open_slap=1 a fast hit of the open hand slaps. With 0 a slap
+      // needs the grip.
       if (ControllersOpenStrokeOn()) {
         Content* out = &cards[kPointing];
+        const bool open_slap = ControllersOpenSlap();
         if (out->count < kMaxLines) {
           SetLine(&out->line[out->count++], nullptr,
-                  L"Move the hand to stroke", kToneNone, 0);
+                  open_slap ? L"Move slowly to stroke"
+                            : L"Move the hand to stroke",
+                  kToneNone, 0);
         }
-        AddPrompt(cards, kWordGrab, L"Close and swing to slap", kToneGrab);
+        if (open_slap) {
+          if (out->count < kMaxLines) {
+            SetLine(&out->line[out->count++], nullptr, L"Hit fast to slap",
+                    kToneNone, 0);
+          }
+        } else {
+          AddPrompt(cards, kWordGrab, L"Close and swing to slap", kToneGrab);
+        }
         break;
       }
       // The touch of the Creature is the game's right press, so it is the

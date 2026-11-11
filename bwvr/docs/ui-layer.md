@@ -692,6 +692,7 @@ desktop run can prove are in `roadmap.md`, R12.
 | `ui_help_rect` | 0 | the help rect in render pixels. 0 takes the default of 4.1. |
 | `creature_panel` | 2 | the Creature panel with `ui_panel=1`: 0 off, 1 fixed in the room, 2 near the Creature (section 13) |
 | `creature_panel_linger` | 1 | 1 the Creature panel shows while the Hand is at the player's Creature with no press, and for 3 s after the Hand left. 0 only while a press holds the Creature (section 13.2) |
+| `creature_panel_over` | 1 | 1 the Creature panel shows over the head of the Creature, turned to the eyes: with `ui_panel=0` on a card of its own. 0 on the subtitle card with `ui_panel=0`, and beside the Creature with `ui_panel=1` (section 13.3) |
 | `menu_room`, `menu_room_test` | 1, 0 | the menus in the room with `ui_panel=0` (section 20) |
 | `vr_keyboard` | 1 | the keyboard in the headset (section 21) |
 | `screen_distance_cm`, `screen_width_cm` | 200, 260 | the screen quad of 1.4 |
@@ -881,7 +882,7 @@ The camera part is in `creature.md` (the Creature by touch).
 | --- | --- |
 | 0 | No quad. The panel does not show in the headset. |
 | 1 | Fixed in the room: 0.9 m out, 35 degrees to the left of the recenter yaw and 15 degrees down, facing the head. A recenter moves it. |
-| 2 (default) | Near the Creature. When the panel shows, it goes 30 cm over the Creature's head and 15 cm to its left as the eyes see it, then 0.5 to 1.5 m from the eyes, facing them (`CreaturePanelPoint`, `FacePose`). It stays there while it shows and until it was hidden for 1 s, so it does not follow a Creature that walks. With no head (layout 0, or no head pose) it goes to the place of 1. |
+| 2 (default) | Near the Creature. With `creature_panel_over=1` it goes over the Creature (13.3). With 0, when the panel shows, it goes 30 cm over the Creature's head and 15 cm to its left as the eyes see it, then 0.5 to 1.5 m from the eyes, facing them (`CreaturePanelPoint`, `FacePose`). It stays there while it shows and until it was hidden for 1 s, so it does not follow a Creature that walks. With no head (layout 0, or no head pose) it goes to the place of 1. |
 
 The log, once each time the panel shows, and for the panel with no press
 one line when the mod arms it, one when the Hand leaves and one when it goes:
@@ -890,21 +891,84 @@ one line when the mod arms it, one when the Hand leaves and one when it goes:
 ui panel     : the Creature panel shows (layout 1, values 0.62 0.80 0.45 0.10), near the Creature at 0.31 1.18 -0.74 m, 0.84 m from the eyes, 0.35 by 0.45 m, rect 64 712 736 976
 ui panel     : the Hand is at your Creature 2925A6F0 with no press: the mod shows the Creature panel (creature_panel_linger=1), frame 931
 ui panel     : the Hand left your Creature: the Creature panel stays for 3.0 s, frame 1800
-ui panel     : the Creature panel goes, 3.00 s after the Hand left your Creature, frame 1980
+ui panel     : the Creature panel goes, 3.00 s after the Hand left your Creature or the press ended, frame 1980
 ```
 
 The report window adds how many frames it drew, on how many of them the mod
 armed it, and how many times it went to the room. `XrScreen` counts its quad layers.
 
-### 13.3 Tests
+### 13.3 The panel over the Creature (`creature_panel_over`)
+
+With `creature_panel_over=1` (the default) the panel shows over the head of
+the Creature, turned to the eyes, with each value of `ui_panel`:
+
+- **With `ui_panel=0`** the help text goes to the subtitle card (section 17),
+  and the Creature panel is in the same HelpText scope. The hook on
+  `fn_005178D0` marks the batches of its call (`UiPanelCreatureScope`), so
+  `draw_hooks.cpp` keeps their bounds apart from the bounds of the help text.
+  `SubtitleEndPasses` makes one copy at half the size that holds both rects.
+  The box of the Creature panel goes with no fade to a card of its own
+  (`kCardCreature`, `CreatureCardStage`), and the subtitle card shows only
+  the help text. With no head of the Creature in the frame (layout 0, or no
+  head pose), or in the cut scene window, the box stays on the subtitle card,
+  left of the middle.
+- **With `ui_panel=1` and `creature_panel=2`** the quad of the panel
+  (`kPanelCreature`) takes the same place.
+
+**The place** (`OverPose`, `controller_math::CreatureOverPoint`):
+
+- The panel is 11 degrees wide as the eyes see it, at each distance, so the
+  player reads it from where he stands.
+- As the eyes see it, it is right over the top of the body (1.1 S, the top
+  of the touch), with 2 degrees between the top and its lower edge.
+- It is 10 cm nearer than the top, and 0.6 to 1.5 m from the eyes. It goes up
+  to 25 degrees over eye level at most, and never lower than the top. A quad
+  layer is over the eye pictures, so a hill or the body does not hide it.
+- It takes its place when it shows. It stays there while the Creature
+  breathes, turns and takes a step. It takes a new place only when the place
+  that it would take now stays more than 12 degrees from it, or 1.4 times
+  nearer or farther, for 0.5 s (`creature_touch_math::OverMoves`). So a
+  Creature that walks away or a teleport of the player moves it, and a
+  Creature that moves a little does not. After 1 s with no panel, the next
+  show takes a new place.
+
+`creature_panel_over=0` keeps the old places: the subtitle card with
+`ui_panel=0`, and 30 cm over the head and 15 cm to the left with
+`ui_panel=1`. The debug page has the switch "Panel place" (group Creature).
+
+The log:
+
+```
+ui panel     : creature_panel_over=1. The Creature panel shows over the head of the Creature, turned to the eyes, and it stays there while you touch the Creature
+ui panel     : the Creature panel goes over the Creature at 0.21 0.95 -0.70 m, 0.98 m from the eyes. The top of the Creature is 1.08 m from the eyes. The panel is 11 degrees wide (creature_panel_over=1), frame 931
+ui panel     : the Creature panel was over the Creature on 450 frames, 450 of them on the Creature card, and it went to a new place 0 times. 0 frames had the box and no copy of it yet (the read ahead gives the copy of a frame before), so the box showed on no card (creature_panel_over=1)
+```
+
+With Direct3D 9 and `subtitle_read_ahead=1` the copy of a frame is the copy
+of one or two frames before. In the first frames of a show that copy does not
+hold the box yet. Then the box shows on no card: the subtitle card shows only
+the rect of the help text. So the panel comes one or two frames late, and it
+never shows first on the subtitle card. The Vulkan renderer has no read
+ahead.
+
+On a capture frame the Creature card saves `bwvr-creature-card-N.bmp` and
+`bwvr-creature-card-over-N.bmp`, with a line of its box and its place.
+
+### 13.4 Tests
 
 The math test checks the face of the quad (its front points at the eyes, with
 no roll), the place near the Creature (to the left, over the head, 0.5 to
-1.5 m from the eyes), and the room to LOCAL against `head_pose.cpp`.
+1.5 m from the eyes), the place over the Creature (the same yaw, 2 degrees
+of gap, 10 cm nearer, 0.6 and 1.5 m, a top over eye level), and the room to
+LOCAL against `head_pose.cpp`.
 
 The math test (`creature_touch_checks.h`) checks the panel that stays: it
 shows at the Hand, it stays 2.9 s and goes at 3 s after the Hand left, and
-not for a different Creature. `creature_recipe.ps1 -Kind open` is the run of
+not for a different Creature. It checks the stay of the panel over the
+Creature (`OverMoves`). `creature_recipe.ps1 -Kind touch` with
+`subtitle_card_test=1` is the run of the Creature card: the log line of its
+place, and the picture `bwvr-creature-card-N.bmp` at frame 1700.
+`creature_recipe.ps1 -Kind open` is the run of
 the panel with no press: a picture at frame 1840 must have the box, and a
 picture at frame 2060 must not. On the test laptop (2760 by 2208, Direct3D
 9) the run shows the panel at the first touch of the open hand, the stay of
@@ -1267,8 +1331,9 @@ it as a FinishFrame callback.
 
 A picture of the camera help code inside the subtitle rows goes to the card
 with its line, when it draws in the HelpText scope. The Creature panel is
-drawn in the HelpText scope too, so it shows on the same screen, left of the
-middle and near eye level.
+drawn in the HelpText scope too. With `creature_panel_over=1` it goes to a
+card of its own over the Creature (13.3). With 0 it shows on the same screen
+as the subtitles, left of the middle and near eye level.
 
 ### 17.3 The place
 

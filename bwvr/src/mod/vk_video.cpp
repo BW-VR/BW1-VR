@@ -46,8 +46,9 @@ bool g_white_ready = false;
 // THE PIXELS OF THE CPU: an image for each card, and a buffer for each
 // slot. Each image keeps what its last copy came from: the pixels, the
 // number of the picture and the part. A draw of the same picture uses the
-// image with no copy. One for each card of xr_screen.h (bwvr::kCards).
-const int kCards = 13;
+// image with no copy.
+// The number of the cards of XrScreen (xr_screen.h, kCards).
+const int kCards = 14;
 vk::Image g_cards[kCards] = {};
 bool g_card_written[kCards] = {};
 const uint8_t* g_card_pixels[kCards] = {};

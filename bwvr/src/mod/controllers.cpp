@@ -3254,10 +3254,30 @@ void PollPressHoldKey() {
 // player's Creature, the mod holds that button down for the player
 // (creature_touch_math.h). The grip and the trigger must be open. A grip that
 // closes in the press takes the press, and then a slap counts as before.
-// hand_direct.cpp keeps the open hand under the speed of a slap and sends no
-// leash click for such a press. 0 keeps the old way: only the grip presses.
+// hand_direct.cpp sends no leash click for such a press. 0 keeps the old way:
+// only the grip presses.
+//
+// creature_open_slap=1: the open hand slaps too. The real speed of the hand
+// decides, as the speed of the mouse decides in the plain game: a slow motion
+// on the body strokes, and a fast hit slaps (creature_slap_mps). 0: the open
+// hand never slaps, because hand_direct.cpp keeps it under the speed of a
+// slap.
+//
+// creature_touch_easy=1: the press starts with the Hand's point 8 cm from the
+// body for 0.1 s, and it ends 15 cm from the body after 0.3 s
+// (creature_touch_math::EasyRule). 0: in the body for 0.2 s, and out past
+// creature_touch_cm at once.
 int g_open_stroke = -1;           // creature_stroke_open
+int g_open_slap = -1;             // creature_open_slap
+int g_touch_easy = -1;            // creature_touch_easy
 creature_touch_math::Press g_open_press;
+
+bool OpenSlapOn() {
+  if (g_open_slap < 0) {
+    g_open_slap = IniInt("creature_open_slap", 1) != 0 ? 1 : 0;
+  }
+  return g_open_slap != 0;
+}
 void* g_open_creature = nullptr;  // the Creature of the press
 uint64_t g_open_starts = 0;
 uint64_t g_open_frames = 0;
@@ -3269,14 +3289,39 @@ bool OpenStrokeStep(ULONGLONG now_ms, bool usable, bool far_claim) {
   using namespace creature_touch_math;
   if (g_open_stroke < 0) {
     g_open_stroke = IniInt("creature_stroke_open", 1) != 0 ? 1 : 0;
+    OpenSlapOn();
     ModLog("controllers  : creature_stroke_open=%d. %s", g_open_stroke,
            g_open_stroke != 0
-               ? "An open hand that stays in the body of your Creature for "
-                 "0.2 s strokes it: the mod holds the Action button of the "
-                 "game until the hand is out of the body. The open hand "
-                 "never slaps. A slap needs the grip"
+               ? "An open hand at the body of your Creature strokes it: the "
+                 "mod holds the Action button of the game until the hand "
+                 "is away from the body"
                : "Only the grip strokes the Creature");
+    ModLog("controllers  : creature_open_slap=%d. %s", g_open_slap,
+           g_open_slap != 0
+               ? "The open hand slaps too: a slow motion on the body strokes "
+                 "the Creature, and a fast hit slaps it"
+               : "The open hand never slaps. A slap needs the grip");
   }
+  if (g_touch_easy < 0) {
+    g_touch_easy = IniInt("creature_touch_easy", 1) != 0 ? 1 : 0;
+    const creature_touch_math::Rule rule =
+        g_touch_easy != 0
+            ? creature_touch_math::EasyRule(
+                  static_cast<float>(g_direct.creature_touch_cm))
+            : creature_touch_math::OldRule(
+                  static_cast<float>(g_direct.creature_touch_cm));
+    ModLog("controllers  : creature_touch_easy=%d. The press of the open hand "
+           "starts with the Hand's point %.0f cm or less from the body for "
+           "%.0f ms, and it ends when the point is more than %.0f cm from "
+           "the body for %.0f ms", g_touch_easy, rule.near_cm,
+           rule.dwell * 1000.0, rule.out_cm, rule.out_seconds * 1000.0);
+  }
+  const creature_touch_math::Rule rule =
+      g_touch_easy != 0
+          ? creature_touch_math::EasyRule(
+                static_cast<float>(g_direct.creature_touch_cm))
+          : creature_touch_math::OldRule(
+                static_cast<float>(g_direct.creature_touch_cm));
   const double now = static_cast<double>(now_ms) / 1000.0;
   // The controls of the game's two buttons.
   const bool right_control = g_swap_buttons ? g_trigger_down : g_grip_down;
@@ -3294,9 +3339,8 @@ bool OpenStrokeStep(ULONGLONG now_ms, bool usable, bool far_claim) {
                          !CreatureStayHolds() && !g_button[kRight].need_up &&
                          InView();
   const double age = now - g_open_press.started;
-  const int event =
-      Step(&g_open_press, now, can_start, hand_ok, have_gap, gap_cm,
-           static_cast<float>(g_direct.creature_touch_cm), right_control);
+  const int event = Step(&g_open_press, now, can_start, hand_ok, have_gap,
+                         gap_cm, rule, right_control);
   if (event == kStart) {
     g_open_creature = creature;
     ++g_open_starts;
@@ -3305,16 +3349,19 @@ bool OpenStrokeStep(ULONGLONG now_ms, bool usable, bool far_claim) {
   if (event != kNothing && g_open_logs < kMaxOpenLogs) {
     ++g_open_logs;
     if (event == kStart) {
-      ModLog("controllers  : the open hand is in the body of your Creature "
+      ModLog("controllers  : the open hand is at the body of your Creature "
              "%p for %.0f ms: the mod holds the Action button of the game "
-             "for a stroke. The Hand's point is %.1f cm in the body "
-             "(creature_stroke_open=1), frame %llu",
-             creature, kDwellSeconds * 1000.0, -gap_cm, g_frame);
+             "for a stroke or a slap. The Hand's point is %.1f cm %s the "
+             "body (creature_stroke_open=1, creature_touch_easy=%d), frame "
+             "%llu",
+             creature, rule.dwell * 1000.0, fabsf(gap_cm),
+             gap_cm <= 0.0f ? "in" : "from", g_touch_easy, g_frame);
     } else if (event == kEndOut && have_gap) {
       ModLog("controllers  : the press of the open hand ends after %.0f ms: "
-             "the Hand's point is %.1f cm out of the body, past %d cm "
-             "(creature_touch_cm), frame %llu", age * 1000.0, gap_cm,
-             g_direct.creature_touch_cm, g_frame);
+             "the Hand's point is %.1f cm out of the body, past %.0f cm for "
+             "%.0f ms (creature_touch_easy=%d), frame %llu", age * 1000.0,
+             gap_cm, rule.out_cm, rule.out_seconds * 1000.0, g_touch_easy,
+             g_frame);
     } else {
       ModLog("controllers  : the press of the open hand ends after %.0f ms: "
              "%s, frame %llu", age * 1000.0,
@@ -5887,6 +5934,30 @@ void ControllersOpenStrokeChange(const char* by) {
   ControllersGesturePulse(0.5f, g_open_stroke != 0 ? 0.30f : 0.08f);
   ModLog("controllers  : %s: creature_stroke_open is %d now, frame %llu", by,
          g_open_stroke, g_frame);
+}
+// The open hand slaps too (creature_open_slap), and its switch on the debug
+// page. The next frame of a press reads the new value.
+bool ControllersOpenSlap() { return OpenSlapOn(); }
+int ControllersOpenSlapValue() {
+  return g_on ? (OpenSlapOn() ? 1 : 0) : kDebugCannot;
+}
+void ControllersOpenSlapChange(const char* by) {
+  g_open_slap = OpenSlapOn() ? 0 : 1;
+  ControllersGesturePulse(0.5f, g_open_slap != 0 ? 0.30f : 0.08f);
+  ModLog("controllers  : %s: creature_open_slap is %d now, frame %llu", by,
+         g_open_slap, g_frame);
+}
+// The switch of the debug page for creature_touch_easy. A press that runs
+// takes the new zone at the next pump.
+int ControllersTouchEasyValue() {
+  return g_on && g_touch_easy >= 0 ? g_touch_easy : kDebugCannot;
+}
+void ControllersTouchEasyChange(const char* by) {
+  if (g_touch_easy < 0) return;
+  g_touch_easy = g_touch_easy != 0 ? 0 : 1;
+  ControllersGesturePulse(0.5f, g_touch_easy != 0 ? 0.30f : 0.08f);
+  ModLog("controllers  : %s: creature_touch_easy is %d now, frame %llu", by,
+         g_touch_easy, g_frame);
 }
 
 // A controller button changed since the owner rule last asked.

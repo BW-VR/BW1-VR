@@ -136,7 +136,7 @@ const char* const kCardNames[bwvr::kCards] = {
     "the first card of a button", "the second card of a button",
     "the third card of a button", "the fourth card of a button",
     "the ray over the panels", "the glow at the end of the ray",
-    "the ring of the right eye"};
+    "the Creature card", "the ring of the right eye"};
 
 // For the log and the report.
 bool g_said_size = false;

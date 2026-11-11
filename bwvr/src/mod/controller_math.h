@@ -1444,9 +1444,11 @@ inline float SegmentPointDistance(const float a[3], const float b[3],
 
 // The least distance between the segment p0 to p1 and the segment q0 to q1.
 // The closest points of two segments, after Ericson, "Real-Time Collision
-// Detection", 5.1.9.
+// Detection", 5.1.9. s_out and t_out get the place of the closest points on
+// the two segments, 0 to 1, when they are not null.
 inline float SegmentSegmentDistance(const float p0[3], const float p1[3],
-                                    const float q0[3], const float q1[3]) {
+                                    const float q0[3], const float q1[3],
+                                    float* s_out, float* t_out) {
   const float d1[3] = {p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2]};
   const float d2[3] = {q1[0] - q0[0], q1[1] - q0[1], q1[2] - q0[2]};
   const float r[3] = {p0[0] - q0[0], p0[1] - q0[1], p0[2] - q0[2]};
@@ -1485,7 +1487,14 @@ inline float SegmentSegmentDistance(const float p0[3], const float p1[3],
     const float g = (p0[i] + d1[i] * s) - (q0[i] + d2[i] * t);
     sum += g * g;
   }
+  if (s_out != nullptr) *s_out = s;
+  if (t_out != nullptr) *t_out = t;
   return sqrtf(sum);
+}
+
+inline float SegmentSegmentDistance(const float p0[3], const float p1[3],
+                                    const float q0[3], const float q1[3]) {
+  return SegmentSegmentDistance(p0, p1, q0, q1, nullptr, nullptr);
 }
 
 // How far the point p is outside the capsule. Below zero it is inside.
@@ -1503,6 +1512,29 @@ inline bool CapsuleEntered(const Capsule& c, const float from[3],
   if (!(CapsuleGap(c, from) > 0.0f)) return false;
   const float top[3] = {c.base[0], c.base[1] + c.height, c.base[2]};
   return SegmentSegmentDistance(from, to, c.base, top) <= c.radius;
+}
+
+// THE HEIGHT OF A SLAP (creature_slap_height). The slap test of the game
+// (0x005B1C15) needs the height of the Hand over the land, 0 to 1.1 S. It
+// reads the Hand as it is at the start of the Update. A slap that the swept
+// test found went through the body between two frames, so that place can be
+// over the head (a slap down from above) or at the land. The height of the
+// hit is the height of the point of the path that is nearest to the axis of
+// the body, as a part of S: 0.05 to 1.0. The test of the game is 0 to 1.1,
+// so a slap at the head counts with a margin of 0.1 S.
+inline float SlapPathHeight(const Capsule& c, const float from[3],
+                            const float to[3]) {
+  const float top[3] = {c.base[0], c.base[1] + c.height, c.base[2]};
+  float s = 0.0f;
+  SegmentSegmentDistance(from, to, c.base, top, &s, nullptr);
+  const float y = from[1] + (to[1] - from[1]) * s;
+  // The capsule is 1.1 S high.
+  const float S = c.height > 0.0f ? c.height / 1.1f : 0.0f;
+  if (!(S > 0.0f)) return 0.5f;
+  float h = (y - c.base[1]) / S;
+  if (!(h >= 0.05f)) h = 0.05f;
+  if (h > 1.0f) h = 1.0f;
+  return h;
 }
 
 // THE SPEED OF A SLAP. The game reads the speed of the Hand from two points
@@ -1624,6 +1656,58 @@ inline bool CreaturePanelPoint(const float eyes[3], const float head[3],
   if (want < near_m) want = near_m;
   if (want > far_m) want = far_m;
   for (int i = 0; i < 3; ++i) out[i] = eyes[i] + d[i] / span * want;
+  return true;
+}
+
+// THE PANEL OVER THE CREATURE (creature_panel_over). The center of a panel
+// that is half_deg high in half, in LOCAL meters. As the eyes see it, the
+// panel is right over the top of the Creature's head, with gap_deg between
+// the two: the line from the eyes to the top goes up by gap_deg + half_deg.
+// It goes up to most_deg above eye level at most, and never lower than the
+// top itself. The panel is ahead_m nearer than the top, and near_m to far_m
+// from the eyes. False when the top is right above or below the eyes, or at
+// the eyes.
+inline bool CreatureOverPoint(const float eyes[3], const float top[3],
+                              float half_deg, float gap_deg, float ahead_m,
+                              float near_m, float far_m, float most_deg,
+                              float out[3]) {
+  const float dx = top[0] - eyes[0];
+  const float dy = top[1] - eyes[1];
+  const float dz = top[2] - eyes[2];
+  const float flat = sqrtf(dx * dx + dz * dz);
+  const float span = sqrtf(flat * flat + dy * dy);
+  if (!(flat > 1e-4f) || !(span > 1e-4f)) return false;
+  const float kDeg = 0.01745329f;
+  const float at = atan2f(dy, flat);
+  float up = at + (gap_deg + half_deg) * kDeg;
+  float most = most_deg * kDeg;
+  if (most < at) most = at;
+  if (up > most) up = most;
+  float want = span - ahead_m;
+  if (want < near_m) want = near_m;
+  if (want > far_m) want = far_m;
+  const float c = cosf(up), s = sinf(up);
+  out[0] = eyes[0] + dx / flat * c * want;
+  out[1] = eyes[1] + s * want;
+  out[2] = eyes[2] + dz / flat * c * want;
+  return true;
+}
+
+// The angle in degrees between the lines from eye to a and from eye to b,
+// and the ratio of their lengths, |b - eye| / |a - eye|. False when a or b
+// is at the eye.
+inline bool AngleAndRatio(const float eye[3], const float a[3],
+                          const float b[3], float* angle_deg, float* ratio) {
+  const float u[3] = {a[0] - eye[0], a[1] - eye[1], a[2] - eye[2]};
+  const float v[3] = {b[0] - eye[0], b[1] - eye[1], b[2] - eye[2]};
+  const float lu = sqrtf(u[0] * u[0] + u[1] * u[1] + u[2] * u[2]);
+  const float lv = sqrtf(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+  if (!(lu > 1e-6f) || !(lv > 1e-6f)) return false;
+  float c = (u[0] * v[0] + u[1] * v[1] + u[2] * v[2]) / (lu * lv);
+  if (c > 1.0f) c = 1.0f;
+  if (c < -1.0f) c = -1.0f;
+  *angle_deg = acosf(c) / 0.01745329f;
+  *ratio = lv / lu;
   return true;
 }
 

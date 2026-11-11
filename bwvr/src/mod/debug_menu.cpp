@@ -308,8 +308,20 @@ void CreatureStayModeChange(const char* by);
 // The Creature with no press (controllers.cpp, ui_panel.cpp).
 int ControllersOpenStrokeValue();
 void ControllersOpenStrokeChange(const char* by);
+int ControllersOpenSlapValue();
+void ControllersOpenSlapChange(const char* by);
+int ControllersTouchEasyValue();
+void ControllersTouchEasyChange(const char* by);
+int HandDirectStrokeWaitValue();
+void HandDirectStrokeWaitChange(const char* by);
+int HandDirectSwingValue();
+void HandDirectSwingChange(const char* by);
+int HandDirectSlapHeightValue();
+void HandDirectSlapHeightChange(const char* by);
 int UiPanelLingerValue();
 void UiPanelLingerChange(const char* by);
+int UiPanelOverValue();
+void UiPanelOverChange(const char* by);
 int MiracleHandValue();
 void MiracleHandChange(const char* by);
 int VillageTotemValue();
@@ -766,9 +778,27 @@ const Switch kSwitches[] = {
     {kGroupCreature, L"Open stroke", L"Open hand strokes the Creature",
      "creature_stroke_open", ControllersOpenStrokeValue,
      ControllersOpenStrokeChange, L"grip only|open hand"},
+    {kGroupCreature, L"Open slap", L"Open hand slaps the Creature",
+     "creature_open_slap", ControllersOpenSlapValue,
+     ControllersOpenSlapChange, L"grip only|open hand"},
+    {kGroupCreature, L"Touch zone", L"Zone of the open hand touch",
+     "creature_touch_easy", ControllersTouchEasyValue,
+     ControllersTouchEasyChange, L"body|near"},
+    {kGroupCreature, L"Stroke wait", L"Wait before the first stroke",
+     "creature_stroke_wait", HandDirectStrokeWaitValue,
+     HandDirectStrokeWaitChange, L"none|game"},
+    {kGroupCreature, L"Swing test", L"Speed of a stroke or a slap",
+     "creature_swing", HandDirectSwingValue, HandDirectSwingChange,
+     L"one step|100 ms"},
+    {kGroupCreature, L"Slap height", L"Height of a fast slap",
+     "creature_slap_height", HandDirectSlapHeightValue,
+     HandDirectSlapHeightChange, L"hand|hit"},
     {kGroupCreature, L"Panel stays", L"Creature panel with no press",
      "creature_panel_linger", UiPanelLingerValue, UiPanelLingerChange,
      L"press only|stays"},
+    {kGroupCreature, L"Panel place", L"Place of the Creature panel",
+     "creature_panel_over", UiPanelOverValue, UiPanelOverChange,
+     L"old|over"},
     {kGroupCreature, L"Stroke hand", L"Hand of a stroke",
      "creature_stroke_hand", HandDirectStrokeHandValue,
      HandDirectStrokeHandChange, L"by size|flat|finger|fist"},
@@ -1262,11 +1292,30 @@ const wchar_t* const kTips[] = {
     L"On: a long grip on the far Creature makes it stay. Off: the leash click "
     L"goes out when the grip closes, and no grip makes it stay.",
     // Open stroke
-    L"On: an open hand that stays 0.2 s in the body of your Creature strokes "
-    L"it with no grip. The open hand never slaps. Off: only the grip strokes.",
+    L"On: an open hand at the body of your Creature strokes it with no grip. "
+    L"Off: only the grip strokes.",
+    // Open slap
+    L"On: a fast hit of the open hand slaps the Creature, and a slow motion "
+    L"strokes it. Off: the open hand never slaps, and a slap needs the grip.",
+    // Touch zone
+    L"Near: the touch of the open hand starts 8 cm from the body and stays to "
+    L"15 cm. Body: it starts in the body and ends 5 cm out.",
+    // Stroke wait
+    L"None: the first stroke comes with the first motion on the body. Game: "
+    L"the game waits 2 s before the first stroke.",
+    // Swing test
+    L"100 ms: the speed is the distance of the hand over 100 ms, and a slow "
+    L"stroke never slaps. One step: the speed over 50 ms, as it is.",
+    // Slap height
+    L"Hit:a fast slap through the body counts at the height of the hit. "
+    L"Hand: the game reads the height of the Hand, over the head or at the "
+    L"land.",
     // Panel stays
     L"On: the Creature panel shows while the Hand is at your Creature with no "
     L"press, and for 3 s after the Hand goes. Off: only a press shows it.",
+    // Panel place
+    L"Over: the Creature panel shows over the head of the Creature, turned to "
+    L"you. Old: on the card of the subtitles, or beside the Creature.",
     // Stroke hand
     L"By size: the size of the Creature chooses the hand of a stroke. Flat: "
     L"the flat hand always. Finger: the index finger always. Fist: the fist.",

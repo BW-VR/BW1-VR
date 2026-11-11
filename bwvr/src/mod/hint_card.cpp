@@ -2936,13 +2936,16 @@ void HintCardEndFrame() {
     // so the hints of the game for a button go, and one line of its text
     // stays (the name of the miracle). Then the three lines of the mod fit.
     // The click prompt stays in the place of that line: the trigger is the
-    // click while a text waits.
+    // click while a text waits. The open spell book has its own words for
+    // the item under the hand, so no text of the game stays: a name of the
+    // game that the card holds for a few frames (kHoldFrames) would join
+    // the words of the book.
     Content& game = content[kPointing];
     int kept = 0;
     for (int i = 0; i < game.count && kept < 1; ++i) {
       if (game.line[i].click) game.line[kept++] = game.line[i];
     }
-    for (int i = 0; i < game.count && kept < 1; ++i) {
+    for (int i = 0; i < game.count && kept < 1 && shown != kCtxBook; ++i) {
       if (game.line[i].button[0] != 0) continue;
       game.line[kept++] = game.line[i];
     }

@@ -1487,12 +1487,30 @@ bool HandModelIndexTip(int hand, float out[3]) {
 bool HandModelBuilt() { return g_built[0].valid || g_built[1].valid; }
 
 int HandModelWorldMesh(int hand, const float** points, const uint32_t** index,
-                       int* vertices) {
-  if (hand < 0 || hand > 1 || !g_built[hand].valid || g_mesh.index == nullptr) {
+                       const uint8_t** alpha, int* vertices) {
+  if (hand < 0 || hand > 1 || !g_built[hand].valid || g_mesh.index == nullptr ||
+      g_mesh.uv == nullptr || g_texture_now == nullptr ||
+      g_mesh.vertices > kMaxVertices) {
     return 0;
+  }
+  // The texture of the game fades the wrist with its alpha. Each vertex
+  // takes the alpha of its texel, times the opacity of the hand.
+  static uint8_t opacity[2][kMaxVertices];
+  const float hand_opacity = g_opacity[hand];
+  for (int v = 0; v < g_mesh.vertices; ++v) {
+    float u = g_mesh.uv[v * 2 + 0], t = g_mesh.uv[v * 2 + 1];
+    u -= floorf(u);
+    t -= floorf(t);
+    int x = static_cast<int>(u * 256.0f), y = static_cast<int>(t * 256.0f);
+    if (x > 255) x = 255;
+    if (y > 255) y = 255;
+    const uint32_t texel = g_texture_now[y * 256 + x];
+    opacity[hand][v] =
+        static_cast<uint8_t>(static_cast<float>(texel >> 24) * hand_opacity);
   }
   *points = g_built[hand].world;
   *index = g_mesh.index;
+  *alpha = opacity[hand];
   *vertices = g_mesh.vertices;
   return g_mesh.triangles;
 }

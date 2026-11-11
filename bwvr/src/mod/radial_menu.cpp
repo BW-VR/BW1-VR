@@ -1353,9 +1353,8 @@ bool g_raster_failed = false;
 uint8_t g_base[kSize * kSize * 4];
 uint8_t g_staged[kSize * kSize * 4];
 // The staged picture for the right eye while a hand is in front of the ring
-// (hand_cut.cpp), and whether the cut changed g_staged in this frame.
+// (hand_cut.cpp).
 uint8_t g_staged_right[kSize * kSize * 4];
-bool g_hand_dirtied = false;
 Look g_drawn;
 bool g_have_drawn = false;
 float g_staged_fade = -1.0f;
@@ -3373,11 +3372,6 @@ void RadialMenuFrame() {
       bwvr::XrScreen::CardFailed(bwvr::kCardRing)) {
     return;
   }
-  // A cut of a hand changed the staged picture: make it again.
-  if (g_hand_dirtied) {
-    g_hand_dirtied = false;
-    g_staged_fade = -1.0f;
-  }
   Stage(g_fade);
   const float size = kSize / kPixelsPerMeter * (g_size_pct * 0.01f);
   bwvr::CardLayer layer = {};
@@ -3400,7 +3394,7 @@ void RadialMenuFrame() {
   layer.height = size;
   layer.serial = g_staged_serial;
   bwvr::XrScreen::StageCard(bwvr::kCardRing, layer);
-  HandCutOffer(layer, g_staged_right, &g_hand_dirtied, "ring");
+  HandCutOffer(layer, g_staged_right, "ring");
 }
 
 void RadialMenuReport() {

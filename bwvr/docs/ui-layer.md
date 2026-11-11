@@ -3155,14 +3155,28 @@ built and before the eye passes, for each eye:
 
 1. Each triangle of the mesh of each hand (`HandModelWorldMesh`, skinned on
    the CPU in the world) goes into the LOCAL space of OpenXR, and is cut to
-   its part in front of the plane of the page (`ClipFront`).
+   its part in front of the plane of the page (`ClipFront`). A triangle with
+   a vertex below 60 percent of opacity (the alpha of the texture of the
+   game at the vertex, times the opacity of the hand) makes no hole. The
+   texture fades the wrist and the forearm, so the eye picture shows the
+   land through them. There the page stays, behind the clear part of the
+   hand.
 2. That part goes onto the page along the lines from the eye
    (`OntoPage`). The eye is the view that the projection layer of that eye
    declares (`StereoDeclaredView`), so the hole is where that eye picture
    has the hand.
 3. The parts fill a mask of the page, with 2 by 2 samples in each pixel
-   (`FillConvex`). The mask grows by 1 pixel, for the time between the draw
-   and the display.
+   (`FillConvex`). Each row of samples takes the span of the part on its
+   line, so the cost goes with the pixels of the hand on the page. The mask
+   grows by 1 pixel, for the time between the draw and the display.
+
+**The cost.** Only the box of the holes of the last frame is cleared. The
+picture of the owner (the book or the ring) keeps its pixels: the cut keeps
+a copy of the box that it cut and puts it back in the next frame, while the
+owner gives the same pixels with the same serial. The picture of the right
+eye is copied whole only for a new picture of the owner, and else only in
+the box of its last holes. The report line has the mean and the longest time
+of the cut, with no save of a test picture in it.
 
 The page gets a hole where the mask is, and the eye sees its eye picture,
 with the hand, through it. A part of the hand behind the page makes no
@@ -3190,8 +3204,7 @@ and the leashes) are the quad of the ring, so they get the same cut. The
 hints and the subtitles take no touch.
 
 **Limits.** The low poly hands (`hand_model=0`) have no mesh here, so they
-make no hole. The hole is the whole mesh: the part of the wrist that the
-texture of the game fades also makes a hole. A head that moves fast between
+make no hole. A head that moves fast between
 the draw and the display can show the page 1 or 2 pixels into the edge of
 the hand.
 
@@ -3200,7 +3213,7 @@ the hand.
 ```
 hand cut     : frame N, a hand is in front of the page of the spell book: 4210 px of holes for the left eye and 3986 px for the right eye. The card goes out as one quad for each eye
 hand cut     : frame N, no hand is in front of the page of the spell book now. The card goes out as one quad for both eyes
-hand cut     : this window a hand was in front of a page in 120 frames: the card went out as one quad for each eye. The largest hole of an eye had 5120 px, and the longest cut took 0.40 ms
+hand cut     : this window the cut ran in 450 frames, 0.120 ms on average and 0.400 ms at the most (with no save of a test picture). A hand was in front of a page in 120 frames: the card went out as one quad for each eye. The largest hole of an eye had 5120 px
 ```
 
 | Key | Default | Meaning |
@@ -3213,4 +3226,7 @@ a triangle at the plane, the place on the page from each eye (4 mm apart
 for a point 5 cm in front of a page 45 cm away), no hole for a point behind
 the page or for an eye behind it, the fill of a polygon and its box, and
 the cover of a half pixel. The recipe `village_run.ps1 -Kind bookhand`
-puts the hand on the page, 5 cm in front of it and 5 cm behind it.
+puts the hand on the page, 5 cm in front of it and 8 cm behind it. Its
+picture `bwvr-book-N` is the page before the cut and the mark of the pick,
+and `bwvr-handcut-left-N` and `bwvr-handcut-right-N` are the page that each
+eye gets.

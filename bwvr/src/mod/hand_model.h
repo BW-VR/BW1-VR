@@ -78,11 +78,12 @@ bool HandModelIndexTip(int hand, float out[3]);
 bool HandModelBuilt();
 
 // The mesh of one hand (0 the left hand, 1 the right hand) as it was built
-// in this frame, in the world: *points has 3 floats a vertex, and *index 3
-// vertices a triangle. Returns the count of triangles, 0 when the hand was
-// not built (hand_cut.cpp).
+// in this frame, in the world: *points has 3 floats a vertex, *index 3
+// vertices a triangle, and *alpha the opacity of each vertex, 0 to 255: the
+// alpha of the texture at the vertex times the opacity of the hand. Returns
+// the count of triangles, 0 when the hand was not built (hand_cut.cpp).
 int HandModelWorldMesh(int hand, const float** points, const uint32_t** index,
-                       int* vertices);
+                       const uint8_t** alpha, int* vertices);
 
 // The opacity of one hand (0 the left hand, 1 the right hand), 0 to 1. It
 // multiplies the alpha of the texture. It stays until the next call.

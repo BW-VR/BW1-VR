@@ -755,9 +755,8 @@ bool g_page = false;  // the book is a page of parchment (hint_card_style=1)
 uint8_t g_base[kTexture * kTexture * 4];
 uint8_t g_staged[kTexture * kTexture * 4];
 // The staged picture for the right eye while a hand is in front of the page
-// (hand_cut.cpp), and whether the cut changed g_staged in this frame.
+// (hand_cut.cpp).
 uint8_t g_staged_right[kTexture * kTexture * 4];
-bool g_hand_dirtied = false;
 // The foot of the grip point of the pointing hand on the page this frame:
 // meters to the right and up, and its distance in front of the page.
 bool g_point_valid = false;
@@ -1669,10 +1668,8 @@ void DrawMark() {
 void StagePicture(uint64_t frame) {
   const bool holed = g_hole_frame == frame && g_hole_frame != 0;
   const bool marked = MarkShows();
-  if (g_staged_new || holed || g_staged_holed || g_hand_dirtied || marked ||
-      g_staged_marked) {
+  if (g_staged_new || holed || g_staged_holed || marked || g_staged_marked) {
     g_staged_new = false;
-    g_hand_dirtied = false;
     g_staged_serial = bwvr::XrScreen::NewCardSerial();
     for (int y = 0; y < g_height_px; ++y) {
       memcpy(g_staged + static_cast<size_t>(y) * kTexture * 4,
@@ -2046,7 +2043,7 @@ void SpellBookFrame() {
   layer.height = g_height_px / kPixelsPerMeter;
   layer.serial = g_staged_serial;
   bwvr::XrScreen::StageCard(bwvr::kCardRing, layer);
-  HandCutOffer(layer, g_staged_right, &g_hand_dirtied, "spell book");
+  HandCutOffer(layer, g_staged_right, "spell book");
 }
 
 bool SpellBookHidesGlow() { return g_open && g_point; }

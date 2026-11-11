@@ -41,6 +41,12 @@
 // texture of the ball steps as OneOffSpellSeed::UpdateFrame 0x0072A570 does:
 // 18 frames a second, of 16.
 //
+// THE TURN. The mesh of the ball has its dome along its y. In each eye pass
+// the ball turns to the eye of that pass, as OneOffSpellSeed::FaceCamera
+// turns it on the land [V]: y to the eye, z to the up of the world across
+// the line of view (FaceEye). So the ball is round from each eye, and its
+// middle is at the point of the bubble, with the graphic of the miracle.
+//
 // THE SIZE. The ball has the radius kBubbleRadiusM in the room at the scale
 // now. The mesh of the ball has a radius of 2.19 units at the scale 1. The
 // graphic has 0.6 of the scale of the ball, as on the land
@@ -312,12 +318,48 @@ void DrawGraphic(void* graphic, const float world[3], float s, int alpha) {
                                                           0, alpha);
 }
 
-// The glass ball with its middle at the world point: no turn, the scale s.
-void DrawBall(const float world[3], float s, int alpha) {
+// The turn of the ball to the eye, as OneOffSpellSeed::FaceCamera
+// (0x0072A4D0 in the order of the draw) turns it on the land [V]: the mesh
+// O_Bibble_up has its dome along its y, and y goes to the eye, z goes to the
+// up of the world across the line of view, and x is z cross the line. So
+// the ball is round from each eye. rows gets the 3 rows of the matrix, each
+// times s. False when the eye is at the ball.
+bool FaceEye(const float world[3], const float eye[3], float s,
+             float rows[9]) {
+  float dir[3] = {world[0] - eye[0], world[1] - eye[1], world[2] - eye[2]};
+  float length = sqrtf(dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2]);
+  if (!(length > 1e-4f)) return false;
+  for (int i = 0; i < 3; ++i) dir[i] /= length;
+  // Straight down or up: the game keeps a small x in the line of view.
+  if (fabsf(dir[0]) < 1e-3f && fabsf(dir[2]) < 1e-3f) dir[0] = 1e-3f;
+  float side[3] = {-dir[1] * dir[0], 1.0f - dir[1] * dir[1], -dir[1] * dir[2]};
+  length = sqrtf(side[0] * side[0] + side[1] * side[1] + side[2] * side[2]);
+  if (!(length > 1e-6f)) return false;
+  for (int i = 0; i < 3; ++i) side[i] /= length;
+  const float cross[3] = {side[1] * dir[2] - side[2] * dir[1],
+                          side[2] * dir[0] - side[0] * dir[2],
+                          side[0] * dir[1] - side[1] * dir[0]};
+  for (int i = 0; i < 3; ++i) {
+    rows[0 + i] = cross[i] * s;
+    rows[3 + i] = -dir[i] * s;
+    rows[6 + i] = side[i] * s;
+  }
+  return true;
+}
+
+// The glass ball with its middle at the world point, turned to the eye, at
+// the scale s.
+void DrawBall(const float world[3], const float eye[3], float s, int alpha) {
   StepBall();
   const int f = static_cast<int>(g_ball_frame);
   float ball[12] = {s, 0.0f, 0.0f, 0.0f, s, 0.0f, 0.0f, 0.0f, s};
-  for (int i = 0; i < 3; ++i) ball[9 + i] = world[i] - g_ball_middle[i] * s;
+  if (eye != nullptr) FaceEye(world, eye, s, ball);
+  // The middle of the mesh goes to the world point.
+  for (int i = 0; i < 3; ++i) {
+    ball[9 + i] = world[i] - (g_ball_middle[0] * ball[0 + i] +
+                              g_ball_middle[1] * ball[3 + i] +
+                              g_ball_middle[2] * ball[6 + i]);
+  }
   uint8_t* object = static_cast<uint8_t*>(g_ball);
   memcpy(object + kObjectMatrix, ball, sizeof(ball));
   memcpy(object + kObjectScale, &s, sizeof(s));
@@ -375,6 +417,11 @@ void BookBubbleDraw() {
          reinterpret_cast<const void*>(bw::tech::kCameraToWorldInverse),
          bytes);
   StereoReapplyEye();
+  // The place of the eye of this pass: the place of the inverse of the
+  // camera of the eye.
+  const float* to_world =
+      reinterpret_cast<const float*>(bw::tech::kCameraToWorldInverse);
+  const float eye[3] = {to_world[9], to_world[10], to_world[11]};
 
   bool pull = false;
   int orbs = 0;
@@ -385,7 +432,7 @@ void BookBubbleDraw() {
     const float s = show.radius / kBallUnits;
     // The miracle first, then the glass over it.
     DrawGraphic(graphic, show.world, s, 0xFF);
-    DrawBall(show.world, s, 0xFF);
+    DrawBall(show.world, eye, s, 0xFF);
     if (show.orb) {
       ++orbs;
     } else {
@@ -421,7 +468,7 @@ void BookBubbleDrawPart(int seed, const float world[3], float radius_units,
   if (g_failed || !(radius_units > 0.0f) || !Check()) return;
   const float s = radius_units / kBallUnits;
   if (seed < 0) {
-    if (MakeBall()) DrawBall(world, s, alpha);
+    if (MakeBall()) DrawBall(world, nullptr, s, alpha);
     return;
   }
   void* graphic = Graphic(seed);

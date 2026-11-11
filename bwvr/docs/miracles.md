@@ -852,9 +852,13 @@ the fill and the two gestures, facing the head.
 has the orb of the game in its bubble, made and drawn as the bubble of the
 pull (`BookBubbleShowOrb`). The orb has the radius of the bubble of the cell
 (2.1 cm in a cell of 6.5 cm, 1.3 cm in a cell of 4 cm), and its middle is
-the middle of the bubble on the plane of the book (`OrbCenter`). The icon
-turns and the particles play as on the land: that is the game's own
-animation of the orb. The orb moves with the book, so with the hand, one to
+the middle of the bubble on the plane of the book (`OrbCenter`). The mesh of
+the ball has its dome along its y, so in each eye pass the ball turns to the
+eye of that pass, as `OneOffSpellSeed::FaceCamera` turns it on the land
+[V]: y to the eye, z to the up of the world across the line of view. So the
+ball is round from each eye, and the middle of its mesh is at the middle of
+the bubble, with the icon of the miracle. The icon turns and the particles
+play as on the land: that is the game's own animation of the orb. The orb moves with the book, so with the hand, one to
 one. The page has a round hole for each orb, in the base picture of the
 book, with a soft edge over 1 pixel. The orb is on the plane of the page, so
 the hole is the same for both eyes. The ring round the bubble and the gold

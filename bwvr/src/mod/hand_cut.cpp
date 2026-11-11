@@ -20,6 +20,19 @@
 // sharp: it is still a quad layer. When no hand is in front of the page, the
 // card goes out as one quad for both eyes, as before.
 //
+// ONLY WHERE THE HAND IS OPAQUE. The texture of the game fades the wrist
+// and the forearm with its alpha, so the eye picture shows the land through
+// them. A triangle with a vertex below kOpaque makes no hole: there the page
+// stays, behind the clear part of the hand.
+//
+// THE COST. Each triangle fills its rows of samples by spans, so the cost
+// goes with the pixels of the hand on the page. Only the box of the holes of
+// the last frame is cleared and put back. The picture of the owner keeps its
+// pixels: this file keeps a copy of the box that it cut, and puts it back in
+// the next frame while the owner gives the same picture (the same pixels and
+// the same serial). The right picture is copied whole only when the owner
+// gives a new picture.
+//
 // The hole is 1 pixel larger than the hand, for the time between the draw
 // and the display. The hands of the low poly model (hand_model=0) have no
 // mesh here, so they make no hole.
@@ -61,6 +74,9 @@ namespace {
 
 namespace hc = hand_cut_math;
 
+// A vertex below this opacity (of 255) makes its triangles clear.
+const uint8_t kOpaque = 153;
+
 bool g_read = false;
 bool g_on = true;
 int g_save = 0;
@@ -71,15 +87,30 @@ struct Offer {
   uint64_t frame;
   bwvr::CardLayer layer;
   uint8_t* right;
-  bool* dirtied;
   const char* who;
 };
 Offer g_offer = {};
 
-// The masks of the two eyes, one byte a pixel of the texture of the card.
+// The masks of the two eyes, one byte a pixel of the texture of the card,
+// and the box of the holes of each eye in this frame. The mask is 0 outside
+// that box.
 const int kMostSide = 1024;
 uint8_t g_mask[2][kMostSide * kMostSide];
-int g_box[2][4];
+uint8_t g_grown[kMostSide * kMostSide];
+int g_box[2][4] = {};
+int g_mask_pitch = 0;
+
+// The picture of the owner that this file cut: its pixels and serial, the
+// box of the cut, and the clean pixels of that box (at their own place in a
+// picture of the size of the texture). The right picture differs from the
+// clean picture of the owner only in g_right_box.
+const uint8_t* g_last_pixels = nullptr;
+uint32_t g_last_serial = 0;
+bool g_left_cut = false;
+int g_left_box[4] = {};
+uint8_t g_clean[kMostSide * kMostSide * 4];
+const uint8_t* g_right_for = nullptr;
+int g_right_box[4] = {};
 
 // The log and the report.
 bool g_split_before = false;
@@ -87,6 +118,8 @@ int g_logs = 0;
 const int kMostLogs = 60;
 uint64_t g_split_frames = 0;
 uint64_t g_most_pixels = 0;
+uint64_t g_timed = 0;
+double g_sum_ms = 0.0;
 double g_most_ms = 0.0;
 bool g_said_no_view = false;
 bool g_said_no_mesh = false;
@@ -106,7 +139,8 @@ void ReadSettings() {
   }
   ModLog("hand cut     : card_hand_front=%d: %s", g_on ? 1 : 0,
          g_on ? "a hand in front of the page of the spell book or of the "
-                "ring shows in front of it, in each eye"
+                "ring shows in front of it, in each eye, where the hand is "
+                "opaque"
               : "the page of the spell book and of the ring is over the "
                 "hands");
 }
@@ -151,24 +185,39 @@ bool WorldToLocalMap(float base[3], float inverse[9]) {
   return true;
 }
 
-void ToLocal(const float base[3], const float inverse[9], const float w[3],
-             float out[3]) {
-  const float d[3] = {w[0] - base[0], w[1] - base[1], w[2] - base[2]};
-  for (int r = 0; r < 3; ++r) {
-    out[r] = inverse[r * 3 + 0] * d[0] + inverse[r * 3 + 1] * d[1] +
-             inverse[r * 3 + 2] * d[2];
+// The vertices of both hands in the LOCAL space, once a frame.
+const int kMostVertices = 4096;
+float g_local[2][kMostVertices][3];
+
+// Copies the rows of a box from one picture to another of the same pitch.
+void CopyBox(uint8_t* to, const uint8_t* from, int pitch_px, const int b[4]) {
+  if (b[0] >= b[2] || b[1] >= b[3]) return;
+  for (int y = b[1]; y < b[3]; ++y) {
+    const size_t at = (static_cast<size_t>(y) * pitch_px + b[0]) * 4;
+    memcpy(to + at, from + at, static_cast<size_t>(b[2] - b[0]) * 4);
   }
 }
 
-// The mask of one eye: the parts of both hands in front of the page, on the
-// page as the eye sees them, 1 pixel larger. Returns the count of pixels.
+// The mask of one eye: the opaque parts of both hands in front of the page,
+// on the page as the eye sees them, 1 pixel larger. Returns the count of
+// pixels.
 uint64_t EyeMask(int eye, const float eye_at[3], const hc::Page& page,
-                 const bwvr::CardLayer& layer, const float base[3],
-                 const float inverse[9]) {
+                 const bwvr::CardLayer& layer, const int* triangles,
+                 const uint32_t* const* index, const uint8_t* const* alpha,
+                 const int* vertices) {
   const int w = static_cast<int>(layer.texture_width);
   const int h = static_cast<int>(layer.texture_height);
   uint8_t* mask = g_mask[eye];
   int* box = g_box[eye];
+  // Clear the box of the last frame.
+  if (g_mask_pitch == w) {
+    for (int y = box[1]; y < box[3]; ++y) {
+      memset(mask + static_cast<size_t>(y) * w + box[0], 0,
+             static_cast<size_t>(box[2] - box[0]));
+    }
+  } else {
+    memset(mask, 0, sizeof(g_mask[eye]));
+  }
   box[0] = w;
   box[1] = h;
   box[2] = 0;
@@ -177,27 +226,16 @@ uint64_t EyeMask(int eye, const float eye_at[3], const hc::Page& page,
   const float ppm_y = layer.rect[3] / layer.height;
   const float mid_x = layer.rect[0] + 0.5f * layer.rect[2];
   const float mid_y = layer.rect[1] + 0.5f * layer.rect[3];
-  // A box of the mask that is clear before the fill: the rect of the card.
-  for (int y = layer.rect[1]; y < layer.rect[1] + layer.rect[3]; ++y) {
-    memset(mask + static_cast<size_t>(y) * w + layer.rect[0], 0,
-           static_cast<size_t>(layer.rect[2]));
-  }
   for (int hand = 0; hand < 2; ++hand) {
-    const float* points = nullptr;
-    const uint32_t* index = nullptr;
-    int vertices = 0;
-    const int triangles =
-        HandModelWorldMesh(hand, &points, &index, &vertices);
-    for (int t = 0; t < triangles; ++t) {
-      float tri[3][3];
+    for (int t = 0; t < triangles[hand]; ++t) {
+      const uint32_t* tri_index = index[hand] + t * 3;
       bool ok = true;
+      float tri[3][3];
       for (int k = 0; k < 3 && ok; ++k) {
-        const uint32_t v = index[t * 3 + k];
-        if (v >= static_cast<uint32_t>(vertices)) {
-          ok = false;
-          break;
-        }
-        ToLocal(base, inverse, points + v * 3, tri[k]);
+        const uint32_t v = tri_index[k];
+        ok = v < static_cast<uint32_t>(vertices[hand]) &&
+             alpha[hand][v] >= kOpaque;
+        if (ok) memcpy(tri[k], g_local[hand][v], sizeof(tri[k]));
       }
       if (!ok) continue;
       float front[4][3];
@@ -214,47 +252,68 @@ uint64_t EyeMask(int eye, const float eye_at[3], const hc::Page& page,
       if (on) hc::FillConvex(px, n, mask, w, h, box);
     }
   }
-  if (box[0] >= box[2] || box[1] >= box[3]) return 0;
-  // Keep the mask inside the rect of the card, then make it 1 pixel larger.
-  if (box[0] < layer.rect[0]) box[0] = layer.rect[0];
-  if (box[1] < layer.rect[1]) box[1] = layer.rect[1];
-  if (box[2] > layer.rect[0] + layer.rect[2]) box[2] = layer.rect[0] + layer.rect[2];
-  if (box[3] > layer.rect[1] + layer.rect[3]) box[3] = layer.rect[1] + layer.rect[3];
-  if (box[0] >= box[2] || box[1] >= box[3]) return 0;
-  uint64_t pixels = 0;
-  const int gx0 = box[0] > layer.rect[0] ? box[0] - 1 : box[0];
-  const int gy0 = box[1] > layer.rect[1] ? box[1] - 1 : box[1];
-  const int gx1 = box[2] < layer.rect[0] + layer.rect[2] ? box[2] + 1 : box[2];
-  const int gy1 = box[3] < layer.rect[1] + layer.rect[3] ? box[3] + 1 : box[3];
-  // The larger mask: each pixel takes the largest value of its 8 neighbors,
-  // into a second mask, which then goes back into the mask.
-  static uint8_t grown[kMostSide * kMostSide];
-  for (int y = gy0; y < gy1; ++y) {
-    for (int x = gx0; x < gx1; ++x) {
-      uint8_t most = 0;
-      for (int dy = -1; dy <= 1; ++dy) {
-        const int yy = y + dy;
-        if (yy < box[1] || yy >= box[3]) continue;
-        for (int dx = -1; dx <= 1; ++dx) {
-          const int xx = x + dx;
-          if (xx < box[0] || xx >= box[2]) continue;
-          const uint8_t v = mask[static_cast<size_t>(yy) * w + xx];
-          if (v > most) most = v;
-        }
-      }
-      grown[static_cast<size_t>(y) * w + x] = most;
-      if (most > 0) ++pixels;
+  if (box[0] >= box[2] || box[1] >= box[3]) {
+    box[0] = box[1] = box[2] = box[3] = 0;
+    return 0;
+  }
+  // The mask 1 pixel larger: the largest value of each row of 3, then of
+  // each column of 3, inside the rect of the card.
+  const int rx0 = layer.rect[0], ry0 = layer.rect[1];
+  const int rx1 = layer.rect[0] + layer.rect[2];
+  const int ry1 = layer.rect[1] + layer.rect[3];
+  int g[4] = {box[0] - 1, box[1] - 1, box[2] + 1, box[3] + 1};
+  if (g[0] < rx0) g[0] = rx0;
+  if (g[1] < ry0) g[1] = ry0;
+  if (g[2] > rx1) g[2] = rx1;
+  if (g[3] > ry1) g[3] = ry1;
+  if (g[0] >= g[2] || g[1] >= g[3]) {
+    for (int y = box[1]; y < box[3]; ++y) {
+      memset(mask + static_cast<size_t>(y) * w + box[0], 0,
+             static_cast<size_t>(box[2] - box[0]));
+    }
+    box[0] = box[1] = box[2] = box[3] = 0;
+    return 0;
+  }
+  for (int y = g[1]; y < g[3]; ++y) {
+    const uint8_t* in = mask + static_cast<size_t>(y) * w;
+    uint8_t* out = g_grown + static_cast<size_t>(y) * w;
+    for (int x = g[0]; x < g[2]; ++x) {
+      uint8_t m = in[x];
+      if (x > 0 && in[x - 1] > m) m = in[x - 1];
+      if (x + 1 < w && in[x + 1] > m) m = in[x + 1];
+      out[x] = m;
     }
   }
-  for (int y = gy0; y < gy1; ++y) {
-    memcpy(mask + static_cast<size_t>(y) * w + gx0,
-           grown + static_cast<size_t>(y) * w + gx0,
-           static_cast<size_t>(gx1 - gx0));
+  uint64_t pixels = 0;
+  for (int y = g[1]; y < g[3]; ++y) {
+    uint8_t* out = mask + static_cast<size_t>(y) * w;
+    const uint8_t* up = y > g[1] ? g_grown + static_cast<size_t>(y - 1) * w
+                                 : nullptr;
+    const uint8_t* mid = g_grown + static_cast<size_t>(y) * w;
+    const uint8_t* down = y + 1 < g[3]
+                              ? g_grown + static_cast<size_t>(y + 1) * w
+                              : nullptr;
+    for (int x = g[0]; x < g[2]; ++x) {
+      uint8_t m = mid[x];
+      if (up != nullptr && up[x] > m) m = up[x];
+      if (down != nullptr && down[x] > m) m = down[x];
+      out[x] = m;
+      if (m > 0) ++pixels;
+    }
   }
-  box[0] = gx0;
-  box[1] = gy0;
-  box[2] = gx1;
-  box[3] = gy1;
+  // The mask outside the rect of the card stays 0: the box was clipped.
+  for (int y = box[1]; y < box[3]; ++y) {
+    if (y >= g[1] && y < g[3]) {
+      uint8_t* row = mask + static_cast<size_t>(y) * w;
+      for (int x = box[0]; x < box[2]; ++x) {
+        if (x < g[0] || x >= g[2]) row[x] = 0;
+      }
+    } else {
+      memset(mask + static_cast<size_t>(y) * w + box[0], 0,
+             static_cast<size_t>(box[2] - box[0]));
+    }
+  }
+  for (int k = 0; k < 4; ++k) box[k] = g[k];
   return pixels;
 }
 
@@ -277,14 +336,13 @@ void Cut(uint8_t* pixels, int eye, int w) {
 
 }  // namespace
 
-void HandCutOffer(const bwvr::CardLayer& layer, uint8_t* right, bool* dirtied,
+void HandCutOffer(const bwvr::CardLayer& layer, uint8_t* right,
                   const char* who) {
   ReadSettings();
   if (!g_on || right == nullptr || layer.pixels == nullptr) return;
   g_offer.frame = ControllersFrameCount();
   g_offer.layer = layer;
   g_offer.right = right;
-  g_offer.dirtied = dirtied;
   g_offer.who = who;
 }
 
@@ -300,6 +358,18 @@ void HandCutFrame() {
       !(layer.width > 0.0f) || !(layer.height > 0.0f)) {
     return;
   }
+  const double start = NowMs();
+  uint8_t* left = const_cast<uint8_t*>(layer.pixels);
+  const int w = static_cast<int>(layer.texture_width);
+  // The same picture of the owner as in the last frame: put back the clean
+  // pixels of the box that the last frame cut. A new picture is clean.
+  const bool same = layer.pixels == g_last_pixels &&
+                    layer.serial == g_last_serial;
+  if (same && g_left_cut) CopyBox(left, g_clean, w, g_left_box);
+  g_left_cut = false;
+  g_last_pixels = layer.pixels;
+  g_last_serial = layer.serial;
+
   if (!HandModelBuilt()) {
     if (!g_said_no_mesh) {
       g_said_no_mesh = true;
@@ -308,7 +378,6 @@ void HandCutFrame() {
     }
     return;
   }
-  const double start = NowMs();
   float eyes[2][3];
   for (int e = 0; e < 2; ++e) {
     float orientation[4], fov[4], size[2];
@@ -332,10 +401,31 @@ void HandCutFrame() {
   controller_math::QuatRotate(layer.orientation, y, page.up);
   controller_math::QuatRotate(layer.orientation, z, page.normal);
 
+  // Both hands into the LOCAL space, one time for both eyes.
+  int triangles[2] = {0, 0}, vertices[2] = {0, 0};
+  const uint32_t* index[2] = {nullptr, nullptr};
+  const uint8_t* alpha[2] = {nullptr, nullptr};
+  for (int hand = 0; hand < 2; ++hand) {
+    const float* points = nullptr;
+    triangles[hand] = HandModelWorldMesh(hand, &points, &index[hand],
+                                         &alpha[hand], &vertices[hand]);
+    if (vertices[hand] > kMostVertices) triangles[hand] = 0;
+    for (int v = 0; v < vertices[hand] && triangles[hand] > 0; ++v) {
+      const float* p = points + v * 3;
+      const float d[3] = {p[0] - base[0], p[1] - base[1], p[2] - base[2]};
+      for (int r = 0; r < 3; ++r) {
+        g_local[hand][v][r] = inverse[r * 3 + 0] * d[0] +
+                              inverse[r * 3 + 1] * d[1] +
+                              inverse[r * 3 + 2] * d[2];
+      }
+    }
+  }
   uint64_t count[2];
   for (int e = 0; e < 2; ++e) {
-    count[e] = EyeMask(e, eyes[e], page, layer, base, inverse);
+    count[e] = EyeMask(e, eyes[e], page, layer, triangles, index, alpha,
+                       vertices);
   }
+  g_mask_pitch = w;
   const bool split = count[0] + count[1] > 0;
   if (split != g_split_before && g_logs < kMostLogs) {
     ++g_logs;
@@ -351,20 +441,35 @@ void HandCutFrame() {
     }
   }
   g_split_before = split;
-  if (!split) return;
-
-  // The right eye starts from the picture of the layer, then each eye gets
-  // its own holes.
-  uint8_t* left = const_cast<uint8_t*>(layer.pixels);
-  const int w = static_cast<int>(layer.texture_width);
-  for (int row = layer.rect[1]; row < layer.rect[1] + layer.rect[3]; ++row) {
-    memcpy(g_offer.right + (static_cast<size_t>(row) * w + layer.rect[0]) * 4,
-           left + (static_cast<size_t>(row) * w + layer.rect[0]) * 4,
-           static_cast<size_t>(layer.rect[2]) * 4);
+  if (!split) {
+    ++g_timed;
+    const double ms = NowMs() - start;
+    g_sum_ms += ms;
+    if (ms > g_most_ms) g_most_ms = ms;
+    return;
   }
-  if (count[0] > 0) Cut(left, 0, w);
+
+  // The right picture: the clean picture of the owner with the holes of the
+  // right eye. Copied whole for a new picture, and else only where the
+  // holes of the last frame were.
+  if (!same || g_right_for != g_offer.right) {
+    const int all[4] = {layer.rect[0], layer.rect[1],
+                        layer.rect[0] + layer.rect[2],
+                        layer.rect[1] + layer.rect[3]};
+    CopyBox(g_offer.right, left, w, all);
+    g_right_for = g_offer.right;
+  } else {
+    CopyBox(g_offer.right, left, w, g_right_box);
+  }
+  // Keep the clean pixels of the box of the left holes, then cut both.
+  for (int k = 0; k < 4; ++k) g_left_box[k] = g_box[0][k];
+  CopyBox(g_clean, left, w, g_left_box);
+  if (count[0] > 0) {
+    Cut(left, 0, w);
+    g_left_cut = true;
+  }
+  for (int k = 0; k < 4; ++k) g_right_box[k] = g_box[1][k];
   if (count[1] > 0) Cut(g_offer.right, 1, w);
-  if (g_offer.dirtied != nullptr) *g_offer.dirtied = true;
   bwvr::CardLayer l = layer;
   l.eye = 1;
   l.serial = bwvr::XrScreen::NewCardSerial();
@@ -374,10 +479,19 @@ void HandCutFrame() {
   r.eye = 2;
   r.serial = bwvr::XrScreen::NewCardSerial();
   bwvr::XrScreen::StageCard(bwvr::kCardRingRight, r);
+  ++g_split_frames;
+  ++g_timed;
+  const double ms = NowMs() - start;
+  g_sum_ms += ms;
+  if (ms > g_most_ms) g_most_ms = ms;
+  if (count[0] > g_most_pixels) g_most_pixels = count[0];
+  if (count[1] > g_most_pixels) g_most_pixels = count[1];
+  // The test pictures, after the time of the cut.
   if (g_saved < g_save && (g_saved == 0 || frame >= g_saved_frame + 30)) {
     ++g_saved;
     g_saved_frame = frame;
-    const size_t at = (static_cast<size_t>(layer.rect[1]) * w + layer.rect[0]) * 4;
+    const size_t at =
+        (static_cast<size_t>(layer.rect[1]) * w + layer.rect[0]) * 4;
     EyeCaptureSaveUi("handcut-left", frame, 1, left + at, w * 4,
                      static_cast<uint32_t>(layer.rect[2]),
                      static_cast<uint32_t>(layer.rect[3]));
@@ -388,11 +502,6 @@ void HandCutFrame() {
            "of the hand are saved: %llu px for the left eye and %llu px for "
            "the right eye", frame, g_offer.who, count[0], count[1]);
   }
-  ++g_split_frames;
-  if (count[0] > g_most_pixels) g_most_pixels = count[0];
-  if (count[1] > g_most_pixels) g_most_pixels = count[1];
-  const double ms = NowMs() - start;
-  if (ms > g_most_ms) g_most_ms = ms;
 }
 
 int HandCutValue() {
@@ -412,12 +521,16 @@ void HandCutChange(const char* by) {
 }
 
 void HandCutReport() {
-  if (g_split_frames == 0) return;
-  ModLog("hand cut     : this window a hand was in front of a page in %llu "
-         "frames: the card went out as one quad for each eye. The largest "
-         "hole of an eye had %llu px, and the longest cut took %.2f ms",
-         g_split_frames, g_most_pixels, g_most_ms);
+  if (g_timed == 0) return;
+  ModLog("hand cut     : this window the cut ran in %llu frames, %.3f ms on "
+         "average and %.3f ms at the most (with no save of a test picture). "
+         "A hand was in front of a page in %llu frames: the card went out as "
+         "one quad for each eye. The largest hole of an eye had %llu px",
+         g_timed, g_sum_ms / static_cast<double>(g_timed), g_most_ms,
+         g_split_frames, g_most_pixels);
+  g_timed = 0;
+  g_sum_ms = 0.0;
+  g_most_ms = 0.0;
   g_split_frames = 0;
   g_most_pixels = 0;
-  g_most_ms = 0.0;
 }

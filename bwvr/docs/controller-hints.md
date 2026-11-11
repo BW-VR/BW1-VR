@@ -2023,11 +2023,30 @@ mod reads the head pose of that frame. So each eye picture is drawn from the
 head pose of the frame before. The projection layer declares that same pose,
 so the picture and the declared pose agree, and the runtime turns the
 picture to the head at the display. The head measure with the declared eye
-of the same frame is the one for a session. On the desktop the invented head
-declares the pose of its own frame, one frame ahead of the picture. Then a
-step of the head of 14 cm gives a move of 0 in its own frame and of 14 cm
-one frame later, and only the measure with the declared eye of the frame
-before gives the scale.
+of the same frame is the one for a session.
+
+On the desktop the picture comes two frames after the declared eye of the
+invented head. The word `lean` of the scripted controller acts in the frame
+function of the controllers, after `HeadPoseUpdate` of that frame. The
+declared view of the invented head (`HeadPoseFakeEye`) has the lean in that
+frame. `HeadPoseUpdate` stores it in the next frame, and the main camera
+call of the frame after that uses it. The first frame of that lag is in the
+invented head only. The second is the frame of the main camera call, which
+the headset path has too, and there the layer declares the pose of the
+picture.
+
+**The step watch.** A move of the declared left eye of 5 cm or more from one
+frame to the next is a step: a lean of the invented head or a recenter. For
+the frame of the step and the 5 frames after it, the watch takes how far the
+camera of the left eye pass is from its place in the frame before the step.
+The first frame with 90 percent of the move at the scale of the eyes is the
+lag, and the move in that frame over the step is the scale of the head. A
+real head in a headset does not step 5 cm in one frame, so the watch acts
+only on the desktop and at a recenter.
+
+```
+scale check  : a step of the head of 14.14 cm at frame 171. The camera of the left eye pass from its place in the frame before: 0.0000 0.0000 0.1414 0.1414 0.1414 0.1414 units in that frame and the 5 after (the full move is 0.1414 units at 1.000 units per meter of the eyes). So the camera has the full move 2 frames after the declared eye, and with the declared eye of 2 frames before the head gives 1.000 units per meter
+```
 
 The math test runs the chain at 1, 7.5 and 100 units per meter: the cameras
 of the eye passes, the shift of one walk, a move of the head of 14 cm and a

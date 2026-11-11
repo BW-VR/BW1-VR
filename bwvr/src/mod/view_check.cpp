@@ -153,6 +153,9 @@ struct ScaleTotals {
   uint64_t head_n;
   double head_late_sum;  // with the declared eye of the frame before
   uint64_t head_late_n;
+  double step_sum;       // the step watch: the scale at the lag
+  uint64_t step_n, step_lost;
+  int step_lag_most;
   double drawn_sum;
   uint64_t drawn_n;
   double hand_sum;
@@ -228,6 +231,59 @@ void HeadMoveLine(const Move& m, const char* pairing) {
 
 double Mean(double sum, uint64_t n) { return n > 0 ? sum / n : 0.0; }
 
+// THE STEP WATCH (ScaleTake): the frame of a step of the declared left eye
+// and the 5 frames after it.
+const uint64_t kStepFrames = 6;
+struct StepWatch {
+  bool on;
+  uint64_t frame;     // the frame of the step
+  uint64_t version;   // of the God view
+  float base[3];      // the camera of the left eye pass in the frame before
+  float step_m;       // the step of the declared eye
+  float upm;          // the units per meter of the eyes
+  float moved[kStepFrames];  // the camera from base, in each frame
+};
+StepWatch g_step_watch = {};
+int g_step_lines = 0;
+
+// The end of a watch: the lag and the scale at the lag go into the sums,
+// and one line (at most 40 in a game).
+void StepLine(const StepWatch& w, ScaleTotals* t) {
+  const float full = w.step_m * w.upm;
+  int lag = -1;
+  for (uint64_t k = 0; k < kStepFrames; ++k) {
+    if (w.moved[k] >= 0.9f * full) {
+      lag = static_cast<int>(k);
+      break;
+    }
+  }
+  if (lag >= 0) {
+    t->step_sum += w.moved[lag] / w.step_m;
+    ++t->step_n;
+    if (lag > t->step_lag_most) t->step_lag_most = lag;
+  } else {
+    ++t->step_lost;
+  }
+  if (g_step_lines >= 40) return;
+  ++g_step_lines;
+  char lagged[160];
+  if (lag >= 0) {
+    sprintf_s(lagged, "the camera has the full move %d frames after the "
+              "declared eye, and with the declared eye of %d frames before "
+              "the head gives %.3f units per meter", lag, lag,
+              w.moved[lag] / w.step_m);
+  } else {
+    sprintf_s(lagged, "the camera does not have the full move in 6 frames");
+  }
+  ModLog("scale check  : a step of the head of %.2f cm at frame %llu. The "
+         "camera of the left eye pass from its place in the frame before: "
+         "%.4f %.4f %.4f %.4f %.4f %.4f units in that frame and the 5 after "
+         "(the full move is %.4f units at %.3f units per meter of the eyes). "
+         "So %s", w.step_m * 100.0f, w.frame, w.moved[0], w.moved[1],
+         w.moved[2], w.moved[3], w.moved[4], w.moved[5], full, w.upm,
+         lagged);
+}
+
 // The line of a scale. why is the end of the sums: a report window or a new
 // scale.
 void ScaleLine(const char* why) {
@@ -265,12 +321,16 @@ void ScaleLine(const char* why) {
          "eye cameras of the game give %.3f units per meter (%.3f to %.3f, "
          "%llu frames), a move of the head %.3f with the declared eye of the "
          "frame before (%llu moves of 5 cm) and %.3f with the declared eye of "
-         "the same frame (%llu), a move of the drawn grip %.3f (%llu), and a "
-         "move of the Hand of the game %.3f (%llu).%s%s", why, t.scale, eyes,
-         t.eyes_least, t.eyes_most, t.eyes_n,
+         "the same frame (%llu), a step of the head %.3f at the lag (%llu "
+         "steps, the camera at most %d frames after the declared eye, %llu "
+         "steps with no full move in 6 frames), a move of the drawn grip "
+         "%.3f (%llu), and a move of the Hand of the game %.3f (%llu).%s%s",
+         why, t.scale, eyes, t.eyes_least, t.eyes_most, t.eyes_n,
          Mean(t.head_late_sum, t.head_late_n), t.head_late_n,
-         Mean(t.head_sum, t.head_n), t.head_n, Mean(t.drawn_sum, t.drawn_n),
-         t.drawn_n, Mean(t.hand_sum, t.hand_n), t.hand_n, walk, grab);
+         Mean(t.head_sum, t.head_n), t.head_n, Mean(t.step_sum, t.step_n),
+         t.step_n, t.step_lag_most, t.step_lost,
+         Mean(t.drawn_sum, t.drawn_n), t.drawn_n, Mean(t.hand_sum, t.hand_n),
+         t.hand_n, walk, grab);
 }
 
 // The numbers of the frame that ended go into the sums.
@@ -312,11 +372,44 @@ void ScaleTake(const ScaleFrame& f) {
   // session the projection layer declares that same pose
   // (g_rendered_position), so the declared eye of the same frame pairs with
   // the camera. On the desktop the declared view of the invented head is the
-  // pose of this frame, one frame ahead of the camera, so the declared eye
-  // of the frame before pairs with it. The line gives both.
+  // lean of this frame, and the step watch below measures how many frames
+  // the camera comes after it. The line gives both pairings.
   Move move = {};
   const ScaleFrame& b = g_scale_last;
   const bool after = g_have_scale_last && b.frame + 1 == f.frame;
+  // THE STEP WATCH. A move of the declared left eye of 5 cm or more from one
+  // frame to the next is a step (a lean of the invented head, or a
+  // recenter). For that frame and the 5 after it the watch takes how far the
+  // camera of the left eye pass is from its place in the frame before the
+  // step. The first frame with 90 percent of the move at the scale of the
+  // eyes gives the lag. A change of the version of the view ends the watch.
+  StepWatch& w = g_step_watch;
+  if (w.on) {
+    const uint64_t k = f.frame - w.frame;
+    if (f.version != w.version || k >= kStepFrames) {
+      w.on = false;
+    } else {
+      w.moved[k] = view_check::Distance3(f.cam[0], w.base);
+      if (k + 1 == kStepFrames) {
+        StepLine(w, &t);
+        w.on = false;
+      }
+    }
+  }
+  if (!w.on && after && b.have_cam[0] && b.have_view[0] &&
+      f.version == b.version && ipd > 0.03f && apart > 0.0f) {
+    const float step = view_check::Distance3(f.declared[0], b.declared[0]);
+    if (step >= kScaleMoveM) {
+      w = {};
+      w.on = true;
+      w.frame = f.frame;
+      w.version = f.version;
+      w.step_m = step;
+      w.upm = apart / ipd;
+      for (int i = 0; i < 3; ++i) w.base[i] = b.cam[0][i];
+      w.moved[0] = view_check::Distance3(f.cam[0], w.base);
+    }
+  }
   if (AnchorMove(&g_head_anchor, f.version, f.frame, f.declared[0], f.cam[0],
                  &move)) {
     t.head_sum += move.units / move.room_m;

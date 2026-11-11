@@ -690,8 +690,9 @@ k * v * dt`.
 - `u` is level, at right angles to the line from the eye to the target, and to
   the right as the eye sees it (`SlapAcross`).
 - `s` is the sign of the hand's velocity along `u`.
-- `v` is the real speed of the part that hits, in m/s over the last 50 ms, in
-  three dimensions, so a slap down or forward counts too (see below).
+- `v` is the speed of the part that hits, in m/s over the last 100 ms, in
+  three dimensions, so a slap down or forward counts too (see below), after
+  the hysteresis of a swing (`creature_swing`, below).
 - `dt` is the game's step.
 - `k = 5 S / creature_slap_mps` (`SlapUnitsPerMps`).
 
@@ -703,7 +704,7 @@ itself, and speed zero. The second Update of a frame gets the target too, so
 it reads zero, as with the mouse.
 
 **The part that hits** (`near_math::SlapSpeed`): the larger of the speed of
-the grip and the speed of the Hand's point, each over 50 ms. A slap with the
+the grip and the speed of the Hand's point, each over 100 ms. A slap with the
 arm moves the grip. A slap with the wrist, as a backhand is, turns the hand
 about the wrist, so the tip moves fast and the grip moves slowly (a backhand
 of 420 degrees a second gives 1.25 m/s at the tip and 0.5 m/s at the grip).
@@ -733,11 +734,33 @@ Hand can be over the head (a slap down from above) or at the land, and the
 game refuses the height. In such an Update the mod gives the Hand
 (`+0x7C`) the height of the hit for the Update: the point of the path from
 the last frame to this frame that is nearest to the axis of the body, 0.05
-to 1.05 S over the land under the Hand (`controller_math::SlapPathHeight`).
+to 1.0 S over the land under the Hand (`controller_math::SlapPathHeight`).
+The game takes the land under the same point, so it reads that value
+exactly, and a slap at the head has a margin of 0.1 S to the limit of 1.1 S.
 The state puts the Hand at its place at the end of the Update, and the mod
 puts the old height back when the state did not. The height of the hit also
 chooses the low, the middle or the high slap of the game. With
 `creature_slap_height=0` the game reads the height of the Hand as it is.
+
+**The speed of a stroke and of a slap (`creature_swing`).** The step of one
+frame is no good measure of the speed of a real hand: it changes with the
+frame time (60, 77 or 120 Hz), and the jitter of the tracking is a large
+part of a short step. With `creature_swing=1` the speed is the distance of
+the hand over 100 ms of real time (from the oldest pose in the window to the
+newest), for the grip and for the Hand's point. A hysteresis decides
+(`creature_touch_math::SwingSpeed`):
+
+- A swing starts when that speed is `creature_slap_mps` or more, and ends
+  when it is under 0.6 times `creature_slap_mps`.
+- In a swing the game reads the speed, and `creature_slap_mps` at least, so a
+  hand that slows down at the hit still slaps.
+- Out of a swing the game reads 0.8 times `creature_slap_mps` at most, so a
+  stroke stays a stroke.
+
+A stroke of a real hand is under about 0.5 m/s, and a slap is over about 1.5
+m/s at the hit. `creature_swing=0` gives the speed over 50 ms with no
+hysteresis. The log lines of a stroke and of a slap give the speed of the
+hand and the speed that the game read.
 
 ### 2.5 The open hand
 
@@ -837,6 +860,7 @@ Value 3 of `creature_stroke_hand` gives the fist stroke:
 | `creature_open_slap` | 1 | 1: a fast hit of the open hand slaps the Creature too. 0: the open hand never slaps, and a slap needs the grip |
 | `creature_touch_easy` | 1 | 1: the press of the open hand starts 8 cm from the body after 0.1 s, and ends 15 cm from the body after 0.3 s. 0: in the body after 0.2 s, and past `creature_touch_cm` at once |
 | `creature_stroke_wait` | 0 | 1 keeps the game's wait of 2 s before the first stroke of a state |
+| `creature_swing` | 1 | 1: the speed of a stroke or a slap is the distance of the hand over 100 ms, with a hysteresis (section 2.4). 0: the speed over 50 ms, as it is |
 | `creature_slap_height` | 1 | 1: a slap that went through the body between two frames counts at the height of the hit. 0: the game reads the height of the Hand as it is |
 
 **Test keys** (with `test_keys=1`):
@@ -2000,6 +2024,10 @@ The math tests are in `bwvr/test/controller_math/` and run with
   the Creature: it takes its place at the show, a Creature that breathes
   moves no panel, a place 20 degrees away moves it after 0.5 s, a place that
   comes and goes moves nothing, and a Creature that walks far off moves it.
+  The swing, at 60, 77 and 120 Hz with a frame time that changes by 40
+  percent and 2 mm of jitter: a stroke of 0.47 m/s and a step of 2 cm in one
+  frame never read as a slap, a slap of 3 m/s and of 1.6 m/s read as a slap,
+  and the hysteresis (a swing that slows to 0.7 m/s, the end under 0.6 m/s).
 - The near target is in `far_checks.h` (see `grab.md`).
 - A fight (`fight_checks.h`): the ray of a press from a Hand at the side of
   the body, at the legs, over the head, in the body and on the axis, a body
@@ -2053,19 +2081,22 @@ The kind `touch` is the stroke and the slap with the open hand (section
    The mod holds the press of the open hand.
 2. 17 steps of 2 cm (`nudge`), 15 frames apart: strokes. The first stroke
    comes with the first step in the Creature state.
-3. Three steps to 12 cm on the other side (`slap`), 40 and 80 frames apart.
-   Each one goes through the body: a slap of the open hand. Between them the
-   hand waits about 9 cm out of the body, and the press stays.
-4. The Hand's point on the body, 12 cm up, and 12 cm down in one frame
+3. Four steps to 12 cm on the other side (`slap`), 40 frames apart. The
+   first one goes from the body out (the wind up). The next three go through
+   the body: three slaps of the open hand. Between them the hand waits about
+   9 cm out of the body, and the press stays.
+4. The Hand's point onto the body from 12 cm out (a slap), 12 cm up, and 12
+   cm down in one frame
    (`seek_plan=up,down`, `seek_step_cm=12`): a slap from over the head, at
    the height of the hit.
 5. The hand goes away at frame 1650. The panel stays for 3 s over the
    Creature: a picture at frame 1700 has it (and `bwvr-creature-card-N.bmp`
    with `subtitle_card_test=1`), and a picture at frame 1950 does not.
 
-With `-Set "creature_open_slap=0;creature_touch_easy=0;creature_stroke_wait=1;
-creature_slap_height=0;creature_panel_over=0"` the same steps give the old
-way.
+With `-Set "creature_stroke_wait=1"` the first stroke waits 2 s. With
+`-Set "creature_open_slap=0;creature_touch_easy=0;creature_stroke_wait=1;
+creature_slap_height=0;creature_panel_over=0;creature_swing=0"` the same steps
+give the old way, with no stroke of the game (section 8).
 
 The kind `state` (the default) does these steps:
 
@@ -2223,9 +2254,14 @@ desktop run can prove are in `roadmap.md`, R12.
   -Name temple`). The tools never change a profile, so this needs the owner.
 
 - **A `OneOffSpellSeed`** gets a tap and no leash, as in the game.
-- **A stroke at 44 units a meter** with the fake hand gives the `stroke` ticks
-  of the mod in some runs and no stroke of the game. The speed of a step
-  depends on the time of its frame. The headset decides.
+- **A stroke at 44 units a meter** with the fake hand and the timers of the
+  game (`creature_stroke_wait=1`) gives the `stroke` ticks of the mod and no
+  stroke of the game. In such a state the line of 30 frames has the Hand
+  0.89 units from the target, and with the timers of the mod 0.0005 units.
+  Why the Hand is off the target with the timers of the game was not traced.
+  With the timers of the mod the first stroke comes 1 to 2 s after the start
+  of the state: the game also waits while the body action of the Creature
+  runs (section 1.1).
 - **The size of the Creature** in the capsule changes in the game over a
   session (radius 1.02 to 1.44 for the same object). The mod reads the size
   of the game on each frame. Why the game changes it was not looked at.

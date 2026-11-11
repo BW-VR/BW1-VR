@@ -3632,8 +3632,9 @@ void CreatureChecks() {
          "0.15 S", SlapPathHeight(slap_body, down_from, down_to), 0.15, 1e-3);
     const float top_from[3] = {-1.0f, 2.2f, 0.0f};
     const float top_to[3] = {1.0f, 0.4f, 0.0f};
-    Near("a slap from over the head counts at 1.05 S at most",
-         SlapPathHeight(slap_body, top_from, top_to), 1.05, 1e-4);
+    Near("a slap from over the head counts at 1.0 S at most, 0.1 S under "
+         "the limit of the game",
+         SlapPathHeight(slap_body, top_from, top_to), 1.0, 1e-4);
     const float low_from[3] = {-1.0f, 0.0f, 0.0f};
     const float low_to[3] = {1.0f, -0.5f, 0.0f};
     Near("a slap at the land counts at 0.05 S at least",

@@ -191,6 +191,36 @@ inline bool LingerStep(Linger* l, const void* own, bool at_hand,
   return l->creature == own && l->seen >= 0.0 && now - l->seen < seconds;
 }
 
+// THE SPEED OF A STROKE AND OF A SLAP (creature_swing=1). The game decides
+// between a stroke and a slap by the speed that the mod gives it. One step of
+// one frame is no good measure: the step of a frame changes with the frame
+// time, and the jitter of the tracking is a large part of a short step. So
+// the speed is the distance over kSwingWindow of real time (the oldest pose
+// in the window to the newest, controller_math::MeanVelocity), and a
+// hysteresis decides:
+//   - A swing starts when that speed is creature_slap_mps or more.
+//   - A swing ends when it is under kSwingEndShare of creature_slap_mps.
+//   - In a swing the game reads the speed, and creature_slap_mps at least, so
+//     a hand that slows down at the hit still slaps.
+//   - Out of a swing the game reads kStrokeShare of creature_slap_mps at
+//     most, so a stroke stays a stroke.
+// A stroke of a real hand is under about 0.5 m/s, and a slap is over about
+// 1.5 m/s at the hit.
+const double kSwingWindow = 0.100;
+const float kSwingEndShare = 0.6f;
+const float kStrokeShare = 0.8f;
+struct Swing {
+  bool on = false;
+};
+// One step a frame. The speed that the game reads, in m/s.
+inline float SwingSpeed(Swing* s, float window_mps, float slap_mps) {
+  if (!s->on && window_mps >= slap_mps) s->on = true;
+  if (s->on && window_mps < kSwingEndShare * slap_mps) s->on = false;
+  if (s->on) return window_mps > slap_mps ? window_mps : slap_mps;
+  const float most = kStrokeShare * slap_mps;
+  return window_mps < most ? window_mps : most;
+}
+
 // THE FIRST STROKE (creature_stroke_wait=0). HandStateCreature::Enter sets
 // the timers of the state to 0, and the stroke test (0x005B2154 to
 // 0x005B2193) needs all of these: the contact time +0xD4 above 1000 ms, the

@@ -378,11 +378,13 @@ const void* LingerFrame(bool game_armed) {
     } else if (!arm && g_linger_arming && !game_armed) {
       ++g_linger_logs;
       ModLog("ui panel     : the Creature panel goes, %.2f s after the Hand "
-             "left your Creature, frame %llu",
+             "left your Creature or the press ended, frame %llu",
              g_linger_at ? 0.0 : now - g_linger_left, g_frame);
     }
   }
-  if (arm && g_linger_at && !at) g_linger_left = now;
+  // The last time at which the Hand was at the Creature or a press of the
+  // game held it. The stay of LingerStep counts from the same time.
+  if (at || game_armed) g_linger_left = now;
   g_linger_arming = arm;
   g_linger_at = at;
   return arm ? own : nullptr;
@@ -1331,12 +1333,13 @@ void SubtitleEndPasses() {
                           subtitle_math::kDegrees
                     : 0.0f;
     ModLog("subtitles    : frame %llu, the subtitle card: the rect %d %d %d %d "
-           "of the %u by %u render, %u by %u px on the card, at %.3f %.3f "
+           "of the %u by %u render, %d by %d px on the card, at %.3f %.3f "
            "%.3f m, turn %.4f %.4f %.4f %.4f, %.2f by %.2f m, %.2f m from "
            "the head and %.0f degrees below eye level. The head has a yaw of "
            "%.0f degrees and the card of %.0f. Fade %.2f, the copy took %.2f "
-           "ms", g_frame, used[0], used[1], used[2], used[3], render_w,
-           render_h, w, h, quad.position[0], quad.position[1],
+           "ms", g_frame, part[0], part[1], part[2], part[3], render_w,
+           render_h, layer.rect[2], layer.rect[3], quad.position[0],
+           quad.position[1],
            quad.position[2], quad.orientation[0], quad.orientation[1],
            quad.orientation[2], quad.orientation[3], quad.width, quad.height,
            away, below, head_yaw / subtitle_math::kDegrees,
@@ -1733,8 +1736,10 @@ void CreaturePanelReport() {
            g_settings.creature_panel, g_settings.creature_panel_linger);
     ModLog("ui panel     : the Creature panel was over the Creature on %llu "
            "frames, %llu of them on the Creature card, and it went to a new "
-           "place %llu times. %llu frames had the box and no Creature card "
-           "(creature_panel_over=%d)", g_over_frames, g_over_card.frames,
+           "place %llu times. %llu frames had the box and no copy of it yet "
+           "(the read ahead gives the copy of a frame before), so the box "
+           "showed on no card (creature_panel_over=%d)", g_over_frames,
+           g_over_card.frames,
            g_over_moves, g_over_card.lost, g_settings.creature_panel_over);
     g_creature_draws = 0;
     g_creature_shows = 0;

@@ -1520,7 +1520,8 @@ inline bool CapsuleEntered(const Capsule& c, const float from[3],
 // test found went through the body between two frames, so that place can be
 // over the head (a slap down from above) or at the land. The height of the
 // hit is the height of the point of the path that is nearest to the axis of
-// the body, as a part of S: 0.05 to 1.05, inside the test of the game.
+// the body, as a part of S: 0.05 to 1.0. The test of the game is 0 to 1.1,
+// so a slap at the head counts with a margin of 0.1 S.
 inline float SlapPathHeight(const Capsule& c, const float from[3],
                             const float to[3]) {
   const float top[3] = {c.base[0], c.base[1] + c.height, c.base[2]};
@@ -1532,7 +1533,7 @@ inline float SlapPathHeight(const Capsule& c, const float from[3],
   if (!(S > 0.0f)) return 0.5f;
   float h = (y - c.base[1]) / S;
   if (!(h >= 0.05f)) h = 0.05f;
-  if (h > 1.05f) h = 1.05f;
+  if (h > 1.0f) h = 1.0f;
   return h;
 }
 

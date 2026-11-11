@@ -165,19 +165,23 @@
 #   goes to the body of the Creature with the grip open, and the mod holds the
 #   Action button of the game. Then 17 steps of 2 cm (the word "nudge"), 15
 #   frames apart: strokes, the first one with the first step in the Creature
-#   state. Then three steps to 12 cm on the other side (the word "slap"), 40
-#   and 80 frames apart: each one goes through the body (a slap), and between
-#   them the hand waits about 9 cm out of the body, as in the wind up of a
-#   slap (the press stays). Then the Hand's point goes onto the body, 12 cm
-#   up, and 12 cm down in one frame: a slap from over the head. The hand goes away at frame
-#   1650, and the Creature panel over the Creature stays for 3 s: a picture
+#   state. Then four steps to 12 cm on the other side (the word "slap"), 40
+#   frames apart. The first one goes from the body out to 12 cm (the wind
+#   up, no slap), and the next three go through the body (three slaps).
+#   Between them the hand waits about 9 cm out of the body, and the press
+#   stays. Then the Hand's point goes onto the body (a slap from 12 cm out),
+#   12 cm up, and 12 cm down in one frame: a slap from over the head. The
+#   hand goes away at frame 1650, and the Creature panel over the Creature
+#   stays for 3 s: a picture
 #   at frame 1700 has it, with the picture of the Creature card when the
 #   subtitle card runs (subtitle_card_test=1), and a picture at frame 1950
-#   does not. With -Set "creature_open_slap=0;creature_touch_easy=0;
-#   creature_stroke_wait=1;creature_slap_height=0;creature_panel_over=0" the
-#   same steps give the old way: the first stroke 2 s after the start of the
-#   state, a press that ends at the wind up, no slap with the open hand, and
-#   the panel on the subtitle card.
+#   does not. With -Set "creature_stroke_wait=1" the first stroke comes 2 s
+#   or more after the start of the state. With -Set "creature_open_slap=0;
+#   creature_touch_easy=0;creature_stroke_wait=1;creature_slap_height=0;
+#   creature_panel_over=0;creature_swing=0" the same steps give the old way:
+#   a press that ends at the wind up, no slap with the open hand, and the
+#   panel on the subtitle card. With the old timers the fake hand gives no
+#   stroke of the game in this recipe (creature.md, section 8).
 # -Kind wide:
 #   The grip on the Creature in the wide reach (hand_wide_creature,
 #   bwvr/docs/grab.md, "The Creature has the wide reach too"). After two zoom
@@ -352,9 +356,11 @@ if ($Kind -eq 'stay') {
 } elseif ($Kind -eq 'touch') {
     # The seek comes four times, 15 frames apart, because the Creature walks
     # until the press stops it. Each "nudge" steps 2 cm to the other side:
-    # about 0.4 m/s over the 50 ms of the speed, a stroke. Each "slap" steps
-    # to 12 cm on the other side of the middle, so each one goes through the
-    # body. The fifth seek puts the point on the body again,
+    # about 0.2 m/s over the 100 ms of the speed, a stroke. Each "slap" steps
+    # to 12 cm on the other side of the middle. The 17 nudges leave the hand
+    # 2 cm to one side, in the body, so the first "slap" goes out of the body
+    # (the wind up), and the next three go through it. The fifth seek puts
+    # the point on the body again (from 12 cm out: a slap too),
     # the sixth 12 cm up and the seventh 12 cm down (seek_step_cm=12). No
     # picture comes in the press: the frame of a picture can take 250 ms, and
     # the controller then lets go of its buttons.
@@ -365,7 +371,7 @@ if ($Kind -eq 'stay') {
     $nudges = (0..16 | ForEach-Object { "nudge@$(1000 + 15 * $_)+1" }) -join ' '
     $steps = 'stick_up@800+10 stick_up@830+10 look@860+1200 point@900+1 ' +
              "seek@930+1 seek@945+1 seek@960+1 seek@975+1 $nudges " +
-             'slap@1330+1 slap@1370+1 slap@1450+1 ' +
+             'slap@1330+1 slap@1370+1 slap@1450+1 slap@1490+1 ' +
              'seek@1530+1 seek@1545+1 seek@1560+1 ' +
              'point@1650+1 shot@1700+1 shot@1950+1'
 } elseif ($Kind -eq 'tie') {
@@ -459,7 +465,7 @@ if ($Kind -eq 'gift' -or $Kind -eq 'giftfree') {
 }
 if ($Kind -eq 'touch') {
     $pattern = '^hand creature: (a press|the Creature state|a stroke|a slap|a hard slap|the press ends|the hand went into|' +
-               'creature_stroke_wait|creature_slap_height|\d+ presses with no camera)|' +
+               'creature_stroke_wait|creature_swing|creature_slap_height|\d+ presses with no camera)|' +
                '^controllers  : (creature_stroke_open|creature_open_slap|creature_touch_easy|the open hand|the press of the open hand)|' +
                '^ui panel     : (creature_panel_over|the Hand is at|the Hand left|the Creature panel (goes|drew|was over))|' +
                '^ui panel     : frame \d+, the Creature card|^subtitles    : frame \d+, the subtitle card:|' +

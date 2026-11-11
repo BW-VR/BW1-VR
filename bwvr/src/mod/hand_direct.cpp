@@ -1156,7 +1156,12 @@ bool g_in_creature = false;     // inside HandStateCreature::Update, ours
 bool g_prev_valid = false;
 float g_prev_point[3] = {0.0f, 0.0f, 0.0f};
 float g_creature_speed = 0.0f;  // what the game reads, units per second
-float g_creature_real = 0.0f;   // the real hand, meters per second
+float g_creature_real = 0.0f;   // the speed the game reads, meters per second
+float g_creature_measured = 0.0f;  // the real hand, meters per second
+// creature_swing=1: the speed over 100 ms with a hysteresis
+// (creature_touch_math::SwingSpeed). 0: the speed over 50 ms as it is.
+bool g_swing_on = true;
+creature_touch_math::Swing g_swing;
 float g_creature_k = 0.0f;      // units per second for 1 m/s
 float g_creature_total = 0.0f;
 int g_creature_logs = 0;
@@ -2021,14 +2026,14 @@ void PushTip(const float world[3]) {
   ++g_tip_count;
 }
 
-float TipSpeedMps() {
+float TipSpeedMps(double window) {
   if (g_tip_count < 2 ||
       NowSeconds() - g_tip_history[g_tip_count - 1].time > kStaleSeconds) {
     return 0.0f;
   }
   float v[3];
   if (!controller_math::MeanVelocity(g_tip_history, g_tip_count,
-                                     kCreatureWindow, v)) {
+                                     window, v)) {
     return 0.0f;
   }
   const float units = RoomUnits();
@@ -2725,10 +2730,14 @@ void TouchFrame(uint8_t* state, uint8_t* hand, float dt) {
 
   // THE SPEED. The last point goes across the line of sight by k times the
   // real speed times the game's dt, on the side the hand comes from.
+  // With creature_swing=1 the speed is the distance over 100 ms, and a
+  // hysteresis decides between a stroke and a slap (creature_touch_math::
+  // SwingSpeed). With 0 it is the distance over 50 ms, with no hysteresis.
   float v_room[3], v_grip[3], real = 0.0f;
   const bool step = dt > 0.0f && dt < 0.5f;
-  const bool moving =
-      step && HandVelocity(kCreatureWindow, v_room, v_grip, &real);
+  const double window =
+      g_swing_on ? creature_touch_math::kSwingWindow : kCreatureWindow;
+  const bool moving = step && HandVelocity(window, v_room, v_grip, &real);
   float v_world[3] = {0.0f, 0.0f, 0.0f};
   if (moving) controller_math::Apply(g_room, false, v_room, v_world);
   // A line of sight straight down keeps the axis of the last frame.
@@ -2741,12 +2750,19 @@ void TouchFrame(uint8_t* state, uint8_t* hand, float dt) {
   // backhand is, keeps the grip almost still and moves the finger tips. So the
   // speed is the larger of the grip's and the tip's.
   g_creature_grip = moving ? real : 0.0f;
-  g_creature_tip = moving ? TipSpeedMps() : 0.0f;
+  g_creature_tip = moving ? TipSpeedMps(window) : 0.0f;
   for (int i = 0; i < 3; ++i) g_creature_way[i] = moving ? v_room[i] : 0.0f;
   g_creature_k = controller_math::SlapUnitsPerMps(size, SlapMps());
-  g_creature_real = g_stroke_mode == kStrokeBefore
-                        ? g_creature_grip
-                        : near_math::SlapSpeed(g_creature_grip, g_creature_tip);
+  g_creature_measured =
+      g_stroke_mode == kStrokeBefore
+          ? g_creature_grip
+          : near_math::SlapSpeed(g_creature_grip, g_creature_tip);
+  if (fresh) g_swing.on = false;
+  g_creature_real =
+      g_swing_on ? creature_touch_math::SwingSpeed(&g_swing,
+                                                   g_creature_measured,
+                                                   SlapMps())
+                 : g_creature_measured;
   // THE OPEN HAND AND THE SLAP. With creature_open_slap=1 the game reads the
   // real speed of the open hand, as it reads the speed of the mouse: a slow
   // motion strokes, and a fast hit slaps. With 0, in a press that the mod
@@ -2761,7 +2777,7 @@ void TouchFrame(uint8_t* state, uint8_t* hand, float dt) {
   g_creature_speed = g_creature_k * g_creature_real;
   // The game starts its slap effect inside the Update that follows. The
   // pulse of that effect takes its strength from this speed (haptics.cpp).
-  HapticsSlapSpeed(g_creature_real, SlapMps());
+  HapticsSlapSpeed(g_creature_measured, SlapMps());
   controller_math::SlapPreviousPoint(g_target, g_touch_across, sign,
                                      g_creature_k, g_creature_real,
                                      step ? dt : 0.0f, g_prev_point);
@@ -2889,11 +2905,12 @@ void __fastcall h_CreatureUpdate(void* self, void* unused, float dt,
     const bool height_ok = read_h > 0.0f && read_h < 1.1f;
     ModLog("hand creature: the hand went into the body at %.2f m/s (the grip "
            "%.2f, the Hand's point %.2f), and that was no slap. A slap needs "
-           "%.2f m/s. %s. The game read the height of the Hand as %.2f S, "
-           "and a slap needs 0 to 1.1 S (creature_slap_height=%d). The "
-           "motion in the room: %.2f right, %.2f up, %.2f forward. The hand "
-           "is %s, frame %llu", g_creature_real,
-           g_creature_grip, g_creature_tip, slap_mps,
+           "%.2f m/s, and the game read %.2f m/s (creature_swing=%d). %s. "
+           "The game read the height of the Hand as %.2f S, and a slap needs "
+           "0 to 1.1 S (creature_slap_height=%d). The motion in the room: "
+           "%.2f right, %.2f up, %.2f forward. The hand is %s, frame %llu",
+           g_creature_measured, g_creature_grip, g_creature_tip, slap_mps,
+           g_creature_real, g_swing_on ? 1 : 0,
            g_creature_real < slap_mps
                ? "The hand was too slow"
                : waited < 1000 ? "The game waits 1 s after a stroke"
@@ -2916,8 +2933,9 @@ void __fastcall h_CreatureUpdate(void* self, void* unused, float dt,
               "game read the height %.2f S)", read_h);
   }
   ModLog("hand creature: a %s with %s, %s as the eye sees it. The hand moved "
-         "at %.2f m/s (the grip %.2f, the Hand's point %.2f), which the game "
-         "read as %.1f units/s. A slap needs %.2f m/s (%.1f units/s) and a "
+         "at %.2f m/s (the grip %.2f, the Hand's point %.2f), and the game "
+         "read %.2f m/s, %.1f units/s (creature_swing=%d). A slap needs %.2f "
+         "m/s (%.1f units/s) and a "
          "hard slap %.2f m/s (%.1f). The motion in the room: %.2f right, "
          "%.2f up, %.2f forward. The contact point is %.2f units %s the "
          "body%s. Total %.2f to %.2f, dt %.4f. The state after it: contact "
@@ -2926,8 +2944,9 @@ void __fastcall h_CreatureUpdate(void* self, void* unused, float dt,
          slap ? (g_creature_speed >= 9.0f * s ? "hard slap" : "slap")
               : "stroke",
          g_stroke_finger ? "the index finger" : "the flat hand",
-         g_touch_step_x > 0 ? "to the right" : "to the left", g_creature_real,
-         g_creature_grip, g_creature_tip, g_creature_speed, slap_mps,
+         g_touch_step_x > 0 ? "to the right" : "to the left",
+         g_creature_measured, g_creature_grip, g_creature_tip, g_creature_real,
+         g_creature_speed, g_swing_on ? 1 : 0, slap_mps,
          5.0f * s, 1.8f * slap_mps, 9.0f * s, way[0], way[1], way[2],
          fabsf(g_touch_gap), g_touch_inside ? "inside" : "outside", went,
          before, after, dt,
@@ -3883,6 +3902,16 @@ void HandDirectStrokeWaitChange(const char* by) {
   ControllersGesturePulse(0.5f, g_stroke_wait ? 0.08f : 0.30f);
   ModLog("hand creature: %s: creature_stroke_wait is %d, frame %llu", by,
          g_stroke_wait ? 1 : 0, g_frame);
+}
+int HandDirectSwingValue() {
+  return g_installed ? (g_swing_on ? 1 : 0) : kDebugCannot;
+}
+void HandDirectSwingChange(const char* by) {
+  g_swing_on = !g_swing_on;
+  g_swing.on = false;
+  ControllersGesturePulse(0.5f, g_swing_on ? 0.30f : 0.08f);
+  ModLog("hand creature: %s: creature_swing is %d, frame %llu", by,
+         g_swing_on ? 1 : 0, g_frame);
 }
 int HandDirectSlapHeightValue() {
   return g_installed ? (g_slap_height ? 1 : 0) : kDebugCannot;
@@ -7818,6 +7847,15 @@ void InstallNear() {
              : "The first stroke of a Creature state comes with the first "
                "motion of the hand on the body. After a stroke the game waits "
                "1 s");
+  g_swing_on = IniKey("creature_swing", 1) != 0;
+  ModLog("hand creature: creature_swing=%d. %s", g_swing_on ? 1 : 0,
+         g_swing_on
+             ? "The speed of a stroke or a slap is the distance of the hand "
+               "over 100 ms. A swing starts at the speed of a slap and ends "
+               "under 0.6 of it. Out of a swing the game reads 0.8 of the "
+               "speed of a slap at most"
+             : "The speed of a stroke or a slap is the distance of the hand "
+               "over 50 ms, as it is");
   g_slap_height = IniKey("creature_slap_height", 1) != 0;
   ModLog("hand creature: creature_slap_height=%d. %s", g_slap_height ? 1 : 0,
          g_slap_height

@@ -314,6 +314,8 @@ int ControllersTouchEasyValue();
 void ControllersTouchEasyChange(const char* by);
 int HandDirectStrokeWaitValue();
 void HandDirectStrokeWaitChange(const char* by);
+int HandDirectSwingValue();
+void HandDirectSwingChange(const char* by);
 int HandDirectSlapHeightValue();
 void HandDirectSlapHeightChange(const char* by);
 int UiPanelLingerValue();
@@ -775,6 +777,9 @@ const Switch kSwitches[] = {
     {kGroupCreature, L"Stroke wait", L"Wait before the first stroke",
      "creature_stroke_wait", HandDirectStrokeWaitValue,
      HandDirectStrokeWaitChange, L"none|game"},
+    {kGroupCreature, L"Swing test", L"Speed of a stroke or a slap",
+     "creature_swing", HandDirectSwingValue, HandDirectSwingChange,
+     L"one step|100 ms"},
     {kGroupCreature, L"Slap height", L"Height of a fast slap",
      "creature_slap_height", HandDirectSlapHeightValue,
      HandDirectSlapHeightChange, L"hand|hit"},
@@ -1275,8 +1280,11 @@ const wchar_t* const kTips[] = {
     // Stroke wait
     L"None: the first stroke comes with the first motion on the body. Game: "
     L"the game waits 2 s before the first stroke.",
+    // Swing test
+    L"100 ms: the speed is the distance of the hand over 100 ms, and a slow "
+    L"stroke never slaps. One step: the speed over 50 ms, as it is.",
     // Slap height
-    L"Hit: a fast slap through the body counts at the height of the hit. "
+    L"Hit:a fast slap through the body counts at the height of the hit. "
     L"Hand: the game reads the height of the Hand, over the head or at the "
     L"land.",
     // Panel stays

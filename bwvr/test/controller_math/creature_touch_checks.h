@@ -217,6 +217,106 @@ inline void CreatureTouchChecks() {
           old_far.end, 1.0);
   }
 
+  // THE SWING (creature_swing=1). A path of the hand in meters along one
+  // axis, sampled at the frame times of 60, 77 and 120 Hz, with a frame time
+  // that changes by up to 40 percent and a tracking jitter of 2 mm on each
+  // sample. The speed over 100 ms goes through SwingSpeed with a slap limit
+  // of 1 m/s. The answer is the largest speed that the game read, and
+  // whether it read the slap limit or more.
+  {
+    struct Read {
+      float most = 0.0f;
+      bool slap = false;
+    };
+    const auto run = [](double hz, double seconds, double (*path)(double),
+                        unsigned seed) {
+      Read out;
+      Swing swing;
+      controller_math::MotionSample samples[64];
+      int count = 0;
+      unsigned r = seed;
+      const auto random = [&r]() {
+        r = r * 1103515245u + 12345u;
+        return static_cast<double>((r >> 8) & 0xFFFF) / 65535.0;
+      };
+      double t = 0.0;
+      while (t < seconds) {
+        t += (1.0 / hz) * (0.8 + 0.4 * random());
+        if (count == 64) {
+          for (int i = 1; i < 64; ++i) samples[i - 1] = samples[i];
+          --count;
+        }
+        samples[count].time = t;
+        samples[count].point[0] =
+            static_cast<float>(path(t) + 0.002 * (2.0 * random() - 1.0));
+        samples[count].point[1] = samples[count].point[2] = 0.0f;
+        ++count;
+        float v[3];
+        float speed = 0.0f;
+        if (controller_math::MeanVelocity(samples, count, kSwingWindow, v)) {
+          speed = controller_math::Length(v);
+        }
+        const float read = SwingSpeed(&swing, speed, 1.0f);
+        if (read > out.most) out.most = read;
+        if (read >= 1.0f) out.slap = true;
+      }
+      return out;
+    };
+    const double rates[3] = {60.0, 77.0, 120.0};
+    bool stroke_ok = true, nudge_ok = true, swing_ok = true, slow_hit = true;
+    float stroke_most = 0.0f, nudge_most = 0.0f;
+    for (int i = 0; i < 3; ++i) {
+      for (unsigned seed = 1; seed <= 20; ++seed) {
+        // A stroke: 5 cm each way at 1.5 Hz, 0.47 m/s at the most.
+        const Read stroke = run(rates[i], 4.0, [](double t) {
+          return 0.05 * sin(2.0 * 3.14159265 * 1.5 * t);
+        }, seed);
+        if (stroke.slap) stroke_ok = false;
+        if (stroke.most > stroke_most) stroke_most = stroke.most;
+        // The nudge of the fake hand: 2 cm in one frame, each 0.25 s.
+        const Read nudge = run(rates[i], 4.0, [](double t) {
+          return (static_cast<int>(t * 4.0) % 2) * 0.02;
+        }, seed);
+        if (nudge.slap) nudge_ok = false;
+        if (nudge.most > nudge_most) nudge_most = nudge.most;
+        // A slap: 30 cm in 150 ms, 3 m/s at the most, after 1 s of rest.
+        const Read slap = run(rates[i], 2.0, [](double t) {
+          if (t < 1.0) return 0.0;
+          if (t > 1.15) return 0.30;
+          const double u = (t - 1.0) / 0.15;
+          return 0.30 * (u - sin(2.0 * 3.14159265 * u) / (2.0 * 3.14159265));
+        }, seed);
+        if (!slap.slap) swing_ok = false;
+        // A soft slap: 12 cm in 150 ms, 1.6 m/s at its fastest.
+        const Read soft = run(rates[i], 2.0, [](double t) {
+          if (t < 1.0) return 0.0;
+          if (t > 1.15) return 0.12;
+          const double u = (t - 1.0) / 0.15;
+          return 0.12 * (u - sin(2.0 * 3.14159265 * u) / (2.0 * 3.14159265));
+        }, seed);
+        if (!soft.slap) slow_hit = false;
+      }
+    }
+    Check(stroke_ok, "a stroke of 0.47 m/s with jitter never reads as a slap "
+          "at 60, 77 and 120 Hz", stroke_most, 0.8);
+    Check(nudge_ok, "a step of 2 cm in one frame never reads as a slap at 60, "
+          "77 and 120 Hz", nudge_most, 0.8);
+    Check(swing_ok, "a slap of 3 m/s reads as a slap at 60, 77 and 120 Hz",
+          swing_ok, 1);
+    Check(slow_hit, "a slap of 1.6 m/s at its fastest reads as a slap at 60, "
+          "77 and 120 Hz", slow_hit, 1);
+    // The hysteresis: a swing that slows to 0.7 m/s still reads the limit,
+    // and ends under 0.6 m/s.
+    Swing s;
+    SwingSpeed(&s, 1.5f, 1.0f);
+    Near("a swing that slows to 0.7 m/s at the hit reads 1 m/s",
+         SwingSpeed(&s, 0.7f, 1.0f), 1.0, 1e-6);
+    Near("a swing ends under 0.6 m/s, and then the game reads the hand",
+         SwingSpeed(&s, 0.5f, 1.0f), 0.5, 1e-6);
+    Near("out of a swing the game reads 0.8 m/s at the most",
+         SwingSpeed(&s, 0.95f, 1.0f), 0.8, 1e-6);
+  }
+
   // THE FIRST STROKE (creature_stroke_wait=0). The timers of the game at the
   // start of the state are 0, and the bone of the last stroke is 3. With the
   // game's own timers the first stroke on bone 3 needs a break of the contact

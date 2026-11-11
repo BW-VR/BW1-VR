@@ -891,7 +891,7 @@ one line when the mod arms it, one when the Hand leaves and one when it goes:
 ui panel     : the Creature panel shows (layout 1, values 0.62 0.80 0.45 0.10), near the Creature at 0.31 1.18 -0.74 m, 0.84 m from the eyes, 0.35 by 0.45 m, rect 64 712 736 976
 ui panel     : the Hand is at your Creature 2925A6F0 with no press: the mod shows the Creature panel (creature_panel_linger=1), frame 931
 ui panel     : the Hand left your Creature: the Creature panel stays for 3.0 s, frame 1800
-ui panel     : the Creature panel goes, 3.00 s after the Hand left your Creature, frame 1980
+ui panel     : the Creature panel goes, 3.00 s after the Hand left your Creature or the press ended, frame 1980
 ```
 
 The report window adds how many frames it drew, on how many of them the mod
@@ -941,8 +941,15 @@ The log:
 ```
 ui panel     : creature_panel_over=1. The Creature panel shows over the head of the Creature, turned to the eyes, and it stays there while you touch the Creature
 ui panel     : the Creature panel goes over the Creature at 0.21 0.95 -0.70 m, 0.98 m from the eyes. The top of the Creature is 1.08 m from the eyes. The panel is 11 degrees wide (creature_panel_over=1), frame 931
-ui panel     : the Creature panel was over the Creature on 450 frames, 450 of them on the Creature card, and it went to a new place 0 times. 0 frames had the box and no Creature card (creature_panel_over=1)
+ui panel     : the Creature panel was over the Creature on 450 frames, 450 of them on the Creature card, and it went to a new place 0 times. 0 frames had the box and no copy of it yet (the read ahead gives the copy of a frame before), so the box showed on no card (creature_panel_over=1)
 ```
+
+With Direct3D 9 and `subtitle_read_ahead=1` the copy of a frame is the copy
+of one or two frames before. In the first frames of a show that copy does not
+hold the box yet. Then the box shows on no card: the subtitle card shows only
+the rect of the help text. So the panel comes one or two frames late, and it
+never shows first on the subtitle card. The Vulkan renderer has no read
+ahead.
 
 On a capture frame the Creature card saves `bwvr-creature-card-N.bmp` and
 `bwvr-creature-card-over-N.bmp`, with a line of its box and its place.

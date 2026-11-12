@@ -406,9 +406,9 @@ effects in the world are not proven yet.
 
 **Which miracles you have.** The towns of each land give their miracles.
 The debug switch "Unlock all" (debug page, the group Miracles) gives each
-town all miracles with no cost. But a Worship Site shows only the first 6 that get a
-slot, for example Storm, Forest, Fireball, Food and the two shields. Then
-Water and Heal do not show.
+town all miracles with no cost, and the spell book then shows all 34
+miracles and power levels. The row "Spawn all miracle orbs" puts one orb of
+each miracle on the land in front of you.
 
 ### Water ("Shower of Life")
 

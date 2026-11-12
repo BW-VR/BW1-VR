@@ -20,7 +20,40 @@
 
 namespace spell_book_math {
 
-const int kMaxItems = 32;
+// The most items: the 34 miracles of the book of all miracles fit in 6 rows
+// of 6 cells.
+const int kMaxItems = 36;
+
+// THE BOOK OF ALL MIRACLES (debug_all_miracles=1 and debug_all_book=1). An
+// item is a seed type at a power level: the key is the seed type plus
+// kKeyTypes times the level (0 the plain miracle, 1 the "Increase" and 2 the
+// "Extreme" of the game). The game has 30 seed types and 3 levels.
+const int kKeyTypes = 30;
+const int kKeyLevels = 3;
+
+inline int KeyOf(int type, int level) { return type + kKeyTypes * level; }
+inline int TypeOfKey(int key) { return key < 0 ? -1 : key % kKeyTypes; }
+inline int LevelOfKey(int key) { return key < 0 ? 0 : key / kKeyTypes; }
+
+// The items of the book of all miracles, in the order of the seed types of
+// the game, each one followed by its power levels. on[t] is the flag of the
+// game for seed type t (GSpellSeedInfo+0x17C), and levels[t] is the count of
+// its magic types (GSpellSeedInfo+0x124, 1 to 3). A type that the game has
+// off is not in the book. The count of the keys.
+inline int AllKeys(const bool on[kKeyTypes], const int levels[kKeyTypes],
+                   int out[], int most) {
+  int count = 0;
+  for (int t = 0; t < kKeyTypes; ++t) {
+    if (!on[t]) continue;
+    int n = levels[t];
+    if (n < 1) n = 1;
+    if (n > kKeyLevels) n = kKeyLevels;
+    for (int level = 0; level < n && count < most; ++level) {
+      out[count++] = KeyOf(t, level);
+    }
+  }
+  return count;
+}
 
 // The picture: 32 pixels for each cm, as the ring. The ring and the book
 // share one quad layer, and the swapchain of that layer is 1024 by 1024.

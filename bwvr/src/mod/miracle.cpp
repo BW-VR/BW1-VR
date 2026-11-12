@@ -42,8 +42,10 @@
 
 #include "MinHook.h"
 #include "controller_hints.h"
+#include "controller_math.h"
 #include "controllers.h"
 #include "creature_command_math.h"
+#include "debug_menu.h"
 #include "far_grab.h"
 #include "haptics.h"
 #include "miracle.h"
@@ -62,6 +64,10 @@ void ControllersGesturePulse(float amplitude, float seconds);
 uint64_t ControllersFrameCount();
 uint64_t ControllersTestFrame(uint64_t key_frame, uint64_t frame);
 bool ControllersSecondButton();
+bool ControllersCardPose(int which, float grip_position[3],
+                         float grip_orientation[4], float head[3], bool* left);
+bool ControllersHeadTurn(float out[4]);
+void ControllersGrabPulse(int hands, float amplitude, float seconds);
 // head_pose.cpp: game units in a real meter.
 float HeadPoseScale();
 // hand_direct.cpp
@@ -291,6 +297,9 @@ int g_test_seed_count = 0;
 // asks for a cancel, as a shake does.
 uint64_t g_test_cancels[kMaxTestSeeds];
 int g_test_cancel_count = 0;
+// The test key miracle_test_orbs: the frame at which the orbs of all
+// miracles go onto the land, as the debug row "Spawn orbs" puts them.
+uint64_t g_test_orbs = 0;
 
 bool IniPath(char path[MAX_PATH]) {
   const DWORD length = GetModuleFileNameA(nullptr, path, MAX_PATH);
@@ -849,6 +858,11 @@ void Init() {
     g_test_cancels[g_test_cancel_count++] = static_cast<uint64_t>(frame);
     p += used;
   }
+  g_test_orbs = static_cast<uint64_t>(IniInt("miracle_test_orbs", 0));
+  if (g_test_orbs > 0) {
+    ModLog("miracle      : test key miracle_test_orbs: the orbs of all "
+           "miracles go onto the land at frame %llu", g_test_orbs);
+  }
   if (g_test_seed_count > 0) {
     ModLog("miracle      : test key miracle_test_seeds: %d one-off seeds, the "
            "first of type %d (%s) at frame %llu", g_test_seed_count,
@@ -976,6 +990,108 @@ void TestSeeds() {
            seed, g_test_seeds[i].type, SeedName(g_test_seeds[i].type), at[0],
            at[2], g_frame);
   }
+}
+
+// --- the orbs on the land ---------------------------------------------------
+
+// THE ORBS OF ALL MIRACLES (the debug row "Spawn orbs", or the test key
+// miracle_test_orbs). One one-off seed of each seed type that the game has on
+// (GSpellSeedInfo+0x17C) lies on the land in front of the head, on two arcs
+// within the reach of the hand (miracle_math::OrbPlace). The game makes each
+// one with OneOffSpellSeed::Create, as a script (SCRIPT_OBJECT_TYPE_ONE_SHOT_
+// SPELL) or a spell dispenser makes a seed. So each orb is an object of the
+// running game: the grip carries it, a short press or the trigger makes it
+// active, the Creature can eat it, and a save of the game keeps it
+// (OneOffSpellSeed::Save). A press makes only the orbs that are gone: an orb
+// that the Hand used, or that the game deleted, has no vtable of
+// OneOffSpellSeed any more.
+const int kInfoOn = 0x17C;
+void* g_orbs[kSeedTypes] = {};
+int g_orb_logs = 0;
+
+bool OrbLives(int type) {
+  const uint8_t* orb = static_cast<const uint8_t*>(g_orbs[type]);
+  return orb != nullptr && !IsBadReadPtr(orb, kOneOffType + 4) &&
+         *reinterpret_cast<const uintptr_t*>(orb) == kOneOffTable &&
+         *reinterpret_cast<const int32_t*>(orb + kOneOffType) == type;
+}
+
+bool SeedTypeOn(int type) {
+  const uint8_t* info =
+      reinterpret_cast<const uint8_t*>(kSeedInfoTable + type * kSeedInfoSize);
+  return *reinterpret_cast<const int32_t*>(info + kInfoOn) != 0;
+}
+
+void SpawnOrbs(const char* by) {
+  if (!SameBytes(kCreateOneOff, kCreateOneOffBytes,
+                 sizeof(kCreateOneOffBytes))) {
+    ModLog("miracle      : %s: OneOffSpellSeed::Create does not have the "
+           "bytes of the disassembly, so no orb is made, frame %llu", by,
+           g_frame);
+    return;
+  }
+  float grip[3], turn[4], head[3], view[4];
+  bool left = false;
+  if (!ControllersCardPose(0, grip, turn, head, &left) ||
+      !ControllersHeadTurn(view)) {
+    ModLog("miracle      : %s: the head has no pose, so no orb is made, frame "
+           "%llu", by, g_frame);
+    return;
+  }
+  // The view of the head, flat on the land of the room.
+  const float ahead[3] = {0.0f, 0.0f, -1.0f};
+  float forward[3];
+  controller_math::QuatRotate(view, ahead, forward);
+  int types[kSeedTypes];
+  int count = 0;
+  for (int t = 0; t < kSeedTypes; ++t) {
+    if (SeedTypeOn(t)) types[count++] = t;
+  }
+  int made = 0, kept = 0, sea = 0;
+  float units = 0.0f;
+  for (int i = 0; i < count; ++i) {
+    const int type = types[i];
+    if (OrbLives(type)) {
+      ++kept;
+      continue;
+    }
+    float flat[2];
+    if (!miracle_math::OrbPlace(i, count, head[0], head[2], forward[0],
+                                forward[2], flat)) {
+      continue;
+    }
+    // A point of the room at the height of the waist. The game puts the
+    // seed on the land under it.
+    const float local[3] = {flat[0], head[1] - 0.5f, flat[1]};
+    float world[3];
+    if (!ControllersLocalToWorld(local, world, &units)) break;
+    const MapCoords coords = {static_cast<int32_t>(world[0] * kMapScale),
+                              static_cast<int32_t>(world[2] * kMapScale),
+                              0.0f};
+    if (reinterpret_cast<CoordsFn>(kInBounds)(&coords, nullptr) == 0 ||
+        reinterpret_cast<CoordsFn>(kIsLand)(&coords, nullptr) == 0) {
+      ++sea;
+      continue;
+    }
+    g_orbs[type] = reinterpret_cast<CreateOneOffFn>(kCreateOneOff)(
+        &coords, type, 0, 1.0f);
+    if (g_orbs[type] != nullptr) ++made;
+    if (g_orb_logs < 60) {
+      ++g_orb_logs;
+      ModLog("miracle      : the game made the orb %p of %s (seed type %d) on "
+             "the land at %.1f %.1f, %.0f cm of the room from the head, frame "
+             "%llu", g_orbs[type], SeedName(type), type, world[0], world[2],
+             sqrtf((flat[0] - head[0]) * (flat[0] - head[0]) +
+                   (flat[1] - head[2]) * (flat[1] - head[2])) * 100.0f,
+             g_frame);
+    }
+  }
+  ControllersGrabPulse(1, 0.5f, made > 0 ? 0.40f : 0.08f);
+  ModLog("miracle      : %s: the orbs of all miracles: %d seed types are on in "
+         "the game, the game made %d orbs with OneOffSpellSeed::Create, %d "
+         "orbs were still on the land, and %d places were not land. %.1f "
+         "units a meter of the room. A save of the game keeps the orbs, "
+         "frame %llu", by, count, made, kept, sea, units, g_frame);
 }
 
 // --- the cancel -------------------------------------------------------------
@@ -1204,11 +1320,38 @@ bool MiraclePlacesHand() {
   return g_settings.on;
 }
 
+// The debug row "Spawn orbs" (debug_menu.cpp), a toggle: the value is 1
+// while the orb of each seed type that the game has on is on the land, and
+// 0 while one is gone. A press makes the orbs that are gone. The debug
+// window and the ring run in the frame of the controllers, on the thread of
+// the frame of the mod, where the test seeds come too.
+int MiracleOrbsValue() {
+  Init();
+  if (!SameBytes(kCreateOneOff, kCreateOneOffBytes,
+                 sizeof(kCreateOneOffBytes))) {
+    return kDebugCannot;
+  }
+  for (int t = 0; t < kSeedTypes; ++t) {
+    if (SeedTypeOn(t) && !OrbLives(t)) return 0;
+  }
+  return 1;
+}
+
+void MiracleOrbsChange(const char* by) {
+  Init();
+  SpawnOrbs(by);
+}
+
 void MiracleFrame() {
   Init();
   g_frame = ControllersFrameCount();
   PollKey();
   TestSeeds();
+  // The orbs of all miracles of the test key, as the debug row makes them.
+  if (g_test_orbs > 0 &&
+      ControllersTestFrame(g_test_orbs, g_frame) == g_test_orbs) {
+    SpawnOrbs("test key miracle_test_orbs");
+  }
   Facts f;
   // The log of each change also with the key off, so a log shows the fault.
   const bool any = ReadFacts(&f);

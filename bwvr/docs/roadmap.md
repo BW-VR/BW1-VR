@@ -62,11 +62,14 @@ These items come before the other work.
     player of release 1.2.0, which has no book and no row of gestures, does
     not find how to ask for a miracle with a gesture. The tap of the grip on
     an icon of a Worship Site works there.
-  - `debug_all_miracles=1` gives only 6 miracles: the Village Centre has 6
-    slots for icons, and the Worship Site copies them (`miracles.md`, "The
-    limit of 6 icons"). Every miracle needs icons of the site that do not
-    come from the Village Centre (`WorshipSite::AddSpellIconIfNecessary`
-    `0x0077C9E0`).
+  - The book of all miracles (`debug_all_miracles=1`, `debug_all_book=1`,
+    34 items) and the debug row "Spawn all miracle orbs" (`miracles.md`,
+    "The magic types of the game") have no desktop run yet: the recipe
+    `village_run.ps1 -Kind allmiracles` waits for the test laptop. No run
+    has cast a power level (Increase, Extreme), or the Creature miracles
+    Weak, Compassion, Angry and Itchy, in the mod.
+  - Only a headset shows if the 4 cm cells of the book of 34 items are easy
+    to pick, and if the orbs on the land are easy to reach.
   - The orbs in the cells: only a headset shows how they look in their
     holes of the page, with the land behind the glass.
   - The leash gestures and the scribble are not in the book.

@@ -31,10 +31,13 @@ Related docs: `grab.md` (the grip), `throw.md` (the throw), `creature.md`
   book. It shows the miracles that the player can ask for now, with the
   pictures of their gestures. The grip of the pointing hand holds one, and a
   pull of 10 cm takes it out of the book, with the game's own request. A
-  grip that opens before that puts the miracle back. The debug switch "All
-  miracles" gives up to 6 miracles with no cost in prayer power, for tests.
-  The palm of that hand that turns up and stays up for 0.4 s also opens the
-  book.
+  grip that opens before that puts the miracle back. The palm of that hand
+  that turns up and stays up for 0.4 s also opens the book.
+- For tests, the debug switch "Unlock all miracles" gives the book each
+  miracle and power level of the game: 34 items, with no cost in prayer
+  power. The debug row "Spawn all miracle orbs" puts one one-off seed of each
+  of the 23 miracles on the land in front of the player. See "The magic
+  types of the game" for what the game allows.
 - While that palm is up, the gesture pictures of the game show in a row over
   it: what the player can draw now. While B is down, or while a chain or a
   power up goes on, the palm shows the row and not the book.
@@ -426,6 +429,131 @@ miracle crackles, 14 a one-off seed pops, 18 to 20 a fireball, 21 lightning,
 23 a miracle is cast, 24 a shield, 25 water, 26 and 27 a flock, 28 a
 Creature miracle. `DoPostCastThings` `0x00729260` starts the effect of the
 magic info (`+0x14`) when the spell starts.
+
+## The magic types of the game [V unless marked]
+
+The facts come from the enums `MAGIC_TYPE` and `SPELL_SEED_TYPE` (`Enum.h`
+of the decompilation), `load_variables` (`Balance.cpp`), the block
+`DETAIL_SPELL_SEEDS` of `Scripts\info.dat`, the tooltips of
+`Scripts\InfoScript2.txt`, the land files and the disassembly.
+
+### Two tables
+
+- **The magic types.** `GMagicInfo::Infos` holds one `GMagicInfo` for each
+  magic type, 1 to 41. `load_variables` fills them from 12 blocks of
+  `info.dat`: the general block (none, the three Fireballs, the three
+  Lightnings and the three Mega-Blasts), Heal (2), Teleport, Forest, Food
+  (2), Storm and Tornado (3), the shields (2), Wood, Water (2), the two
+  flocks and the 16 Creature spells. So each of the 41 magic types has an
+  info, and `GMagicInfo::Cast` can cast each one at a place or on an object.
+- **The seed types.** `GSpellSeedInfo` has 30 seed types (see "The seed
+  info"). A seed type holds up to 3 magic types at `+0x124`: the plain
+  miracle and its two power levels (`POWER_UP_TYPE` 1 and 2). The game's
+  tooltips call the levels "Increase" and "Extreme". The flag at `+0x17C`
+  says if the game has the seed type on. 7 seed types are off.
+  `SpellSeed::GetMagicInfo` (`0x007290F0`) takes the magic type of the
+  power level of the seed (`+0x6C`), so the level of a seed is the miracle
+  that it casts.
+
+The log line of "Unlock all" counts 24 magic types: the first magic type of
+each of the 30 seed types, with no copies.
+
+| Magic type | Name (tooltip of the game) | Seed type, level | The Hand casts it | Note |
+| --- | --- | --- | --- | --- |
+| 1 | Fireball | 2, 0 | Yes | |
+| 2 | Fireball Increase | 2, 1 | Yes, as a power level | |
+| 3 | Fireball Extreme | 2, 2 | Yes, as a power level | A dispenser of Land 5 gives it (`FIRE_PU2`) |
+| 4 | Lightning Bolt | 6, 0 | Yes | |
+| 5 | Lightning Bolt Increase | 6, 1 | Yes, as a power level | |
+| 6 | Lightning Bolt Extreme | 6, 2 | Yes, as a power level | |
+| 7 | Mega-Blast | 29, 0 | Yes | The mod calls it Explosion |
+| 8 | Mega-Blast Increase | 29, 1 | Yes, as a power level | |
+| 9 | Mega-Blast Extreme | 29, 2 | Yes, as a power level | The game has no tooltip for it |
+| 10 | Heal | 7, 0 | Yes | |
+| 11 | Heal Increase | 7, 1 | Yes, as a power level | |
+| 12 | Teleport | 28, 0 | Yes | |
+| 13 | Forest | 1, 0 | Yes | |
+| 14 | Food | 3, 0 | Yes | |
+| 15 | Poisoned Food | 3, 1 | Yes, as a power level | |
+| 16 | Storm | 0, 0 | Yes | |
+| 17 | Storm Increase | 0, 1 | Yes, as a power level | The enum name has lightning in the storm |
+| 18 | Storm Extreme | 0, 2 | Yes, as a power level | The enum name is Tornado |
+| 19 | Spiritual Shield | 4, 0 | Yes | |
+| 20 | Physical Shield | 5, 0 | Yes | |
+| 21 | Wood | 8, 0 | Yes | |
+| 22 | Water | 9, 0 | Yes | |
+| 23 | Water Increase | 9, 1 | Yes, as a power level | |
+| 24 | Winged Creatures | 10, 0 | Yes | |
+| 25 | Wolves | 11, 0 | Yes | A pack of wolves |
+| 26 | Freeze Creature | 12, 0 | Yes, on a Creature | |
+| 27 | Shrink Creature | 13, 0 | Yes, on a Creature | |
+| 28 | Enlarge Creature | 14, 0 | Yes, on a Creature | |
+| 29 | Weakness Creature | 15, 0 | Yes, on a Creature | |
+| 30 | Strength Creature | 16, 0 | Yes, on a Creature | |
+| 31 | Fat | none | No | Seed type 17 is off, and its magic type is 26, not 31 |
+| 32 | Thin | none | No | Seed type 18 is off, with magic type 26 |
+| 33 | Invisibility Creature | 19, 0 | Yes, on a Creature | |
+| 34 | Loving Creature | 20, 0 | Yes, on a Creature | |
+| 35 | Aggressive Creature | 21, 0 | Yes, on a Creature | |
+| 36 | Hungry | 22, 0 | No | Seed type 22 is off: no gesture, no tooltip |
+| 37 | Frightened | none | No | Seed type 23 is off, with magic type 26 |
+| 38 | Tired | none | No | Seed type 24 is off, with magic type 26 |
+| 39 | Ill | none | No | Seed type 25 is off, with magic type 26 |
+| 40 | Thirsty | none | No | Seed type 26 is off, with magic type 26 |
+| 41 | Holy Flies Creature | 27, 0 | Yes, on a Creature | The enum name is Itchy |
+
+The names of the Creature miracles are the tooltips that fit them by their
+meaning [I]. The book of the mod uses its own short names (the column Seed
+of "The seed info").
+
+So the Hand casts 34 miracles: 23 seed types and 11 power levels. The 7
+Creature spells with no seed (31, 32 and 36 to 40) never worked as a miracle
+of the Hand in the shipped game. The tooltips of the game also name magic
+types that the enum of the shipped game does not have: fireworks, a priest,
+"Food Miracle Extreme", a storm of wind only and a larger Spiritual Shield.
+
+**A script and the Creature.** A script casts each magic type, 1 to 41, with
+no seed: `GScript::SpellAtPos` and `GScript::SpellOnThing` call
+`GMagicInfo::Cast`. The Creature learns magic types (the learn list of its
+mind goes over each magic type, `Creature::CheatLearnEverything`) and casts
+them itself [I: which ones a Creature casts in play was not traced].
+
+### The ways that the game gives the Hand a miracle
+
+| Way | Functions | Packet | What the game tests |
+| --- | --- | --- | --- |
+| A chain of gestures, or a tap on a miracle icon of a Worship Site | `fn_005CFAE0`, the tap of the icon (`village.md`), then `fn_005DABA0` | `0x25` with the seed type | `GPlayer::ValidForRequestSpell` (`0x0064BEC0`): a Worship Site of the player has an icon of that seed type, the icon works, and `WorshipSpellIcon::ValidForRequestSpell` passes (a free Hand, prayer power). Then `GPlayer::RequestSpell` (`0x0064BDB0`) charges the icon of the site with the most chants. A seed type with no icon gets nothing |
+| A power level of a seed from a Worship Site | `fn_005D0000`, `SpellSeed::SetPowerUp` (`0x00729B30`) | `0x6A` | The gesture of the level, and the chants of the site (`fn_0077FBF0`) |
+| A one-off seed on the land (a reward, a script, a dispenser) | `OneOffSpellSeed::Create` (`0x0072A2F0`), then a tap: `fn_005D38A0`, `OneOffSpellSeed::InterfaceTap` (`0x0072A640`) | `0x20` with the object | `InterfaceValidToTap`, and the land point of the pick record inside the influence. `Create` takes a seed type and a power level |
+| A spell dispenser | `SpellDispenser::CreateOneOffSpellSeed` (`0x00722B80`), which makes a one-off seed | As a one-off seed | As a one-off seed |
+| The script command for a one-off spell in the Hand (`SCRIPT_OBJECT_TYPE_ONE_SHOT_SPELL_IN_HAND`) | `OneOffSpellSeed::CreateSpellIntoHand` (`0x0072A730`), the same function that the tap calls | None | Only `IsHandReadyForObject`. No prayer power, no influence and no icon |
+
+The icons of a Worship Site come from the Village Centre of its town, which
+has 6 slots (`TownCentre::AddSpell` `0x00744050`, see "The limit of 6
+icons"). The town gets its magic types from the setup of a land and from
+rewards (`Town::AddMagicTypesHeld` `0x0073D380`).
+
+`CreateSpellIntoHand` (cdecl: the `GInterfaceStatus`, the seed type, the
+power level and a float of 1, the caller cleans `0x10` bytes) needs a free
+Hand. It looks for the best icon of that seed type
+(`GPlayer::FindBestSpellIconForSpellSeed` `0x0064BF40`). With an icon it
+makes a seed that belongs to that icon (`fn_007282A0`), and with no icon a
+plain seed (`fn_00728300`). Then it fills the store of chants of the seed
+(`SpellSeed::AddToChantStore`), puts the seed in the Hand
+(`GInterfaceStatus::PlaceObjectInMagicHand`) and makes it ready. It takes no
+chants from a site.
+
+### What the mod can call for each type
+
+- Packet `0x25`: only for a seed type with an icon at a Worship Site of the
+  player. With 6 slots, at most 6 seed types.
+- `OneOffSpellSeed::CreateSpellIntoHand`: each of the 23 seed types that the
+  game has on, at each of its power levels, with a free Hand. A seed type
+  that the game has off makes a seed that casts the magic type of its info
+  (26, Freeze, for the most of them), so the mod does not offer them.
+- `OneOffSpellSeed::Create`: one object of each of the 23 seed types on the
+  land. The game's own tap makes it active, and the game saves it with the
+  game (`OneOffSpellSeed::Save`, `GAME_THING_TYPE_ONE_OFF_SPELL_SEED`).
 
 ## What the mod does (`miracle_hand=1`)
 
@@ -958,22 +1086,93 @@ once a second:
 **The limit of 6 icons.** The Village Centre has 6 slots for miracle icons
 (`TownCentre::AddSpell` `0x00744050` at `+0xD0`, which gives a seventh miracle
 no icon). The Worship Site copies the icons of the Village Centre. So the
-switch gives each town all the magic types, but the book shows only the
-miracles that got a slot first. In the test save `temple`, with the switch
-on from the first frame, a new Worship Site gets Storm, Forest, Fireball,
-Food, Spiritual Shield and Physical Shield. Water and Heal do not show,
-although the town knows them. Every miracle in the book needs icons that do
-not come from the Village Centre (an open item of P20).
+switch gives each town all the magic types, but a site has icons only for
+the miracles that got a slot first. In the test save `temple`, with the
+switch on from the first frame, a new Worship Site gets Storm, Forest,
+Fireball, Food, Spiritual Shield and Physical Shield. The book of all
+miracles below does not need the icons.
 
-A take costs no prayer power: with 0 chants in the pool, the game puts the
-Miracle in the Hand. The take does not take chants from the pool, but a
-cancel gives the chants of the miracle back to it (13000 chants for Forest).
-So the pool gets larger with each cancel while the switch is on. The switch
-needs a Worship Site of the player. With no site the log says so, and the
-book stays empty. The switch at 0 puts the flags of the sites back. The
-miracles that the towns know stay. A save of the game made while the switch
-is on keeps the miracles of the towns, the icons and the flags of the sites.
-The switch itself writes nothing to a saved game.
+A take of a miracle with an icon costs no prayer power: with 0 chants in
+the pool, the game puts the Miracle in the Hand. The take does not take
+chants from the pool, but a cancel gives the chants of the miracle back to
+it (13000 chants for Forest). So the pool gets larger with each cancel
+while the switch is on. The switch at 0 puts the flags of the sites back.
+The miracles that the towns know stay. A save of the game made while the
+switch is on keeps the miracles of the towns, the icons and the flags of
+the sites. The switch itself writes nothing to a saved game.
+
+### The book of all miracles (`debug_all_book=1`)
+
+With the switch "Unlock all" on, the book shows each miracle that the Hand
+can cast (see "The magic types of the game"): the 23 seed types that the
+game has on, each one followed by its power levels, 34 items in all. The
+order is fixed, so an item keeps its cell. The cells are 4 cm, in 6 rows of
+6, and the book is 24 by 27 cm. The name of a level is the word of the
+game's tooltip: "Fireball Increase", "Fireball Extreme", "Poisoned Food".
+Its badge under the orb has a plus for each level ("Fireball++"). The orb of
+a level is the orb of its seed type. An item needs only a free Hand: with an
+object in the Hand each item is dim, with "The Hand must be empty". The book
+needs no Worship Site.
+
+The take of a plain miracle with an icon that the game lets the player ask
+for is packet `0x25`, as without the switch. Each other take calls
+`OneOffSpellSeed::CreateSpellIntoHand` with the seed type and the level,
+before the next interface step, where the mod sends packet `0x25`. That is
+the function of the script command for a one-off spell in the Hand, and of
+the tap of a one-off seed. The miracle is in the Hand in the same step,
+with a full store of chants, and the seed belongs to an icon of a site when
+one fits. The cast, the cancel and the power ups are then the game's own.
+The log line `... goes into the Hand with
+OneOffSpellSeed::CreateSpellIntoHand` gives the seed type, the level and
+the seed.
+
+With `debug_all_book=0`, or when `CreateSpellIntoHand` does not have the
+bytes of v1.42, the switch gives the book the icons of the sites only. The
+debug page has the row "Book: all" for the key.
+
+How the mod casts each miracle of the book (see "The grip casts"):
+
+| Miracles | The cast of the mod | Known to work |
+| --- | --- | --- |
+| Fireball and its levels, Flock of birds, Flock of animals | The throw: close the grip, swing, open | The plain Fireball and the two flocks in desktop runs. The levels are not run |
+| Lightning and its levels, Food, Poisoned Food, Wood, Water, Water Increase | The pour: keep the grip closed over the land | The plain ones in desktop runs. The levels are not run |
+| Storm and its levels, Spiritual Shield, Physical Shield | The grip and a circle drawn with the hand | Storm and Spiritual Shield in desktop runs. The levels of Storm are not run |
+| Heal, Heal Increase, Forest, Teleport, Explosion (the Mega-Blast of the game) and its levels | A press of the grip over the place | Heal, Forest, Teleport and Explosion in desktop runs. The levels are not run |
+| The 9 Creature miracles | A press of the grip with the halo on a Creature | Strong, Freeze, Shrink, Enlarge and Invisibility in desktop runs. Weak, Compassion, Angry and Itchy are not run |
+
+### The orbs of all miracles (the debug row "Spawn orbs")
+
+The debug row "Spawn all miracle orbs" (the group Miracles, the second row)
+puts one one-off seed of each of the 23 seed types that the game has on on
+the land in front of the head. The game makes each one with
+`OneOffSpellSeed::Create`, as a script or a spell dispenser makes a seed.
+The code is `SpawnOrbs` in `miracle.cpp`, with the places in
+`miracle_math::OrbPlace`:
+
+- The orbs lie on two arcs around the head, in the view of the head with
+  no pitch: 11 at 35 cm of the room, 12 at 55 cm, each arc from 80 degrees
+  left to 80 degrees right. Two orbs are 8.9 cm of the room apart or more.
+  The game puts each orb on the land under its point. A point over the sea
+  or off the map gets no orb.
+- The orbs are in the order of the seed types: the near arc from the left
+  has Storm, Forest, Fireball and so on.
+- Each orb is an object of the running game. The grip carries it, a short
+  press or the trigger makes it active ("A seed that the Hand carries"), and
+  the Creature can eat it. A save of the game keeps the orbs that are on the
+  land, so the note of the row says so.
+- A press makes only the orbs that are gone. An orb that the Hand used, or
+  that the game deleted, has no vtable of `OneOffSpellSeed` any more. The
+  row is a toggle: "all out" while each orb of the mod is on the land, and
+  "not all" while one is gone. A press anywhere on the row makes the orbs.
+- The debug window and the ring run in the frame of the controllers, on the
+  thread of the frame of the mod, where the test seeds come too. The log line `the orbs of
+  all miracles` gives the count that the game made, the orbs that were still
+  there and the points that were not land. One line for each orb gives its
+  place and its distance from the head.
+
+The row needs no switch "Unlock all", no Worship Site and no influence. A
+one-off seed makes its miracle active only inside the influence of the
+player (the tap of the game).
 
 ### The trail at the fingertip (`gesture_trail=1`)
 
@@ -1437,7 +1636,8 @@ so the plain game has no flat band.
 | `spell_book_point` | 1 | 1: the page shows the point of the pick, and the glow at the Hand's point does not show while the book is open. 0: no mark, and the glow as always |
 | `card_hand_front` | 1 | 0: the page of the book is over the hands, also where a hand is in front of it (`ui-layer.md`, "A hand in front of a card") |
 | `hint_card_style` | 1 | 1: the book is a page of parchment with dark ink, as the hint cards. 0: the dark panel with white letters. The key of the hint cards (`controller-hints.md`, 9.5) |
-| `debug_all_miracles` | 0 | 1: each town of the player knows every miracle of the game, its Worship Site shows up to 6 of them, and each site has no limit of prayer power. For tests |
+| `debug_all_miracles` | 0 | 1: each town of the player knows every miracle of the game, its Worship Site shows up to 6 of them, each site has no limit of prayer power, and the book shows each miracle and power level (`debug_all_book`). For tests |
+| `debug_all_book` | 1 | 1: with `debug_all_miracles=1` the book shows the 34 miracles and power levels of the game, and a take of one with no icon puts it in the Hand with `CreateSpellIntoHand`. 0: the book shows the icons of the Worship Sites only |
 | `gesture_point` | 1 | 1: the tip of the index finger draws a gesture. 0: the grip point draws it. Not in the launcher |
 | `gesture_trail` | 1 | 1: a ribbon follows the point of the draw (see "The trail at the fingertip"). 0: no trail. Not in the launcher: each player has the trail, and a save of the launcher removes the key (`launcher.md`, "Retired keys") |
 
@@ -1448,7 +1648,9 @@ changes `miracle_hand`. The pointing controller gives a long pulse for 1 and
 a short pulse for 0.
 
 **The debug page** (`debug_menu=1`, the group Miracles): "Unlock all"
-changes `debug_all_miracles`, "Spell book" changes `spell_book`, "Book orbs"
+changes `debug_all_miracles`, "Spawn orbs" puts the orbs of all miracles on
+the land (it has no key, and its value is "all out" while each of these
+orbs is on the land), "Book: all" changes `debug_all_book`, "Spell book" changes `spell_book`, "Book orbs"
 changes `spell_book_orbs`, "Book point" changes `spell_book_point`, "Book
 pull" changes `spell_book_pull_cm` between
 0 and its value in `bwvr.ini` (10 when that is 0), "Book bubble" changes
@@ -1466,6 +1668,10 @@ Test keys for the desktop runs only (the launcher removes them):
   Hand (`OneOffSpellSeed::Create`).
 - `miracle_test_cancel`: a list of frames. At each one the mod asks for a
   cancel.
+- `miracle_test_orbs`: a frame. At that frame the orbs of all miracles go
+  onto the land, as the row "Spawn orbs" puts them.
+- `spell_book_test_items`: for each word `book` in turn, the item that the
+  word steps the hand to, for example `11 15`.
 - `influence_stream_test_log=1`: a log line for each stream of light of the
   game (see "The bolt of Lightning").
 - `spell_book_test_save`: the mod saves the first N pictures of the book as
@@ -1517,6 +1723,9 @@ stream.
 The tag `miracle` has one line for each change:
 
 - The keys at the start, and each press of the A/B key.
+- "the orbs of all miracles: N seed types are on in the game, the game made
+  N orbs ...", and "the game made the orb ... of Storm (seed type 0) on the
+  land at x z, N cm of the room from the head".
 - "the Hand holds the one-off seed ... as an object".
 - "... is active in the Hand", with the seed, the power up, where it comes
   from, how it is cast, and the Hand state.
@@ -1559,7 +1768,9 @@ The tag `spell book` has the book:
 - "the request of Water goes to the game: packet 0x25 ...", and "the Miracle
   Water is in the Hand, N frames after the request".
 - With `debug_all_miracles=1`: what each town now knows, the icons of its
-  Worship Site, and each site that has no limit of prayer power now.
+  Worship Site, and each site that has no limit of prayer power now. With
+  the book of all miracles: "Lightning (seed type 6, power level 0) goes
+  into the Hand with OneOffSpellSeed::CreateSpellIntoHand", with the seed.
 - One line each report window: the opens, the closes, the pulls (the snaps
   and the bubbles that went back), the takes, the
   requests, the Miracles in the Hand, the refusals and the draws of the
@@ -1678,8 +1889,39 @@ and of the bubble. What the recipe shows, with Vulkan and with dxwrapper
   size. The log has the parts of the first 12 pictures (`spell book : a new
   picture of the book`).
 - With `spell_book=0`, X makes the log line of no job, and no book opens.
-- With `debug_all_miracles=1` the book has 6 miracles, and a take with 0
-  chants puts the Miracle in the Hand (see "The limit of 6 icons").
+- With `debug_all_miracles=1` and `debug_all_book=0` the book has 6
+  miracles, and a take with 0 chants puts the Miracle in the Hand (see "The
+  limit of 6 icons").
+
+The math test (`spell_book_checks.h`) also covers the book of all miracles:
+the 34 keys from the flags and the levels of `info.dat`, each miracle before
+its levels, no seed type that the game has off, the key of each item back to
+its seed type and its level, and the layout of 6 by 6 cells.
+`miracle_checks.h` covers the places of the 23 orbs: in front of the head,
+35 to 55 cm from it, and 8 cm apart or more.
+
+The book of all miracles and the orbs have a recipe: `village_run.ps1 -Kind
+allmiracles` (the test save `temple`, a Worship Site with Water, Food and
+Heal). The debug window presses "Unlock all miracles" and "Spawn all
+miracle orbs". X opens the book, the hand takes Lightning (item 11, no
+icon) and pours it, a tap of B cancels it, the hand takes Heal Increase
+(item 15, a power level) and casts it, and then the hand carries the
+nearest orb and the trigger makes it active. What a run must show:
+
+- `the orbs of all miracles: 23 seed types are on in the game, the game
+  made 23 orbs` (or fewer, with the rest "not land").
+- `the book opens ... 34 miracles: Storm, Storm Increase, Storm Extreme,
+  Forest, Fireball, ...`.
+- `the pointing hand takes Lightning from the book`, then `Lightning (seed
+  type 6, power level 0) goes into the Hand with
+  OneOffSpellSeed::CreateSpellIntoHand`, then `the Miracle Lightning is in
+  the Hand`.
+- The `miracle` lines of the pour of Lightning, and of the cast of Heal at
+  the land with power up 1.
+- `the Hand holds the one-off seed ... as an object`, `the Hand is empty, so
+  the mod taps the seed`, and `... is active in the Hand`.
+
+No run of the recipe has shown it yet.
 
 The math test (`glow_checks.h`) covers the trail and the glow ribbons: the
 light by age, the points that go in and out, the keep time, the release, a

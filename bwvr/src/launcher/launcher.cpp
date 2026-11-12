@@ -1573,6 +1573,7 @@ const char* const kRetiredKeys[] = {
     "fake_controller_gesture_cm", "fake_controller_front",
     "fake_controller_stick_pct", "hint_profile",
     "hint_selftest",   "miracle_test_seeds", "miracle_test_cancel",
+    "miracle_test_orbs", "spell_book_test_items",
     "fake_mouse_script", "fake_mouse_step_px", "fake_mouse_x_pct",
     "fake_mouse_y_pct", "fake_mouse_x2_pct", "fake_mouse_y2_pct",
     "radial_test_save", "spell_book_test_save", "gesture_panel_test_frame",

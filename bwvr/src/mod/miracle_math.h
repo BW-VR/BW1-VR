@@ -258,4 +258,41 @@ inline bool CircleOfPath(const float (*path)[3], int count, float middle[3],
   return true;
 }
 
+// THE ORBS ON THE LAND (the debug row "Spawn orbs"). The one-off seeds lie on
+// two arcs in front of the head, on the land of the room: the first half on
+// an arc of kOrbNearM, the rest on an arc of kOrbFarM. Each arc goes from
+// kOrbArcDeg to the left of the view to kOrbArcDeg to the right, so the hand
+// reaches each orb, and two orbs are 8 cm of the room apart or more.
+const float kOrbNearM = 0.35f;
+const float kOrbFarM = 0.55f;
+const float kOrbArcDeg = 80.0f;
+
+// The place of orb i of count: x and z of the room in meters, from the head
+// at head_x, head_z, with the view along fwd_x, fwd_z (the length does not
+// count). The room has x to the right and z to the back, as the LOCAL space
+// of OpenXR. False for an index out of the count or a view with no
+// direction.
+inline bool OrbPlace(int i, int count, float head_x, float head_z, float fwd_x,
+                     float fwd_z, float out[2]) {
+  out[0] = head_x;
+  out[1] = head_z;
+  const float length = sqrtf(fwd_x * fwd_x + fwd_z * fwd_z);
+  if (i < 0 || i >= count || !(length > 1e-6f)) return false;
+  const float fx = fwd_x / length, fz = fwd_z / length;
+  // The right of the view: the view turned a quarter clockwise from above.
+  const float rx = -fz, rz = fx;
+  const int inner_count = count / 2;
+  const bool inner = i < inner_count;
+  const int n = inner ? inner_count : count - inner_count;
+  const int j = inner ? i : i - inner_count;
+  const float radius = inner ? kOrbNearM : kOrbFarM;
+  const float arc = kOrbArcDeg * 3.14159265f / 180.0f;
+  const float angle =
+      -arc + 2.0f * arc * (static_cast<float>(j) + 0.5f) / static_cast<float>(n);
+  const float c = cosf(angle), s = sinf(angle);
+  out[0] = head_x + radius * (fx * c + rx * s);
+  out[1] = head_z + radius * (fz * c + rz * s);
+  return true;
+}
+
 }  // namespace miracle_math

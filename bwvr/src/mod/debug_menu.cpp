@@ -341,6 +341,10 @@ int SpellBookBubbleValue();
 void SpellBookBubbleChange(const char* by);
 int SpellBookAllValue();
 void SpellBookAllChange(const char* by);
+int SpellBookAllBookValue();
+void SpellBookAllBookChange(const char* by);
+int MiracleOrbsValue();
+void MiracleOrbsChange(const char* by);
 int SpellBookOrbsValue();
 void SpellBookOrbsChange(const char* by);
 int SpellBookPointValue();
@@ -833,6 +837,13 @@ const Switch kSwitches[] = {
     {kGroupMiracles, L"Unlock all", L"Unlock all miracles, no cost (test)",
      "debug_all_miracles", SpellBookAllValue, SpellBookAllChange, L"off|on",
      nullptr, true, L"Unlock all miracles"},
+    {kGroupMiracles, L"Spawn orbs", L"One orb of each miracle on the land",
+     "", MiracleOrbsValue, MiracleOrbsChange, L"not all|all out", nullptr,
+     true,
+     L"Spawn all miracle orbs"},
+    {kGroupMiracles, L"Book: all", L"All miracles and levels in the book",
+     "debug_all_book", SpellBookAllBookValue, SpellBookAllBookChange,
+     L"icons|all"},
     {kGroupMiracles, L"Spell book", L"X opens the spell book", "spell_book",
      SpellBookValue, SpellBookChange, L"off|on"},
     {kGroupMiracles, L"Book orbs", L"The game's orbs in the spell book",
@@ -1355,8 +1366,14 @@ const wchar_t* const kTips[] = {
     L"one to one, and the building does not turn by itself. Off: the "
     L"building turns by itself, as in the game.",
     // Unlock all
-    L"For a test only. Each town knows each miracle, the spell book shows up "
-    L"to 6, and the miracles cost no prayer power.",
+    L"For a test only. Each town knows each miracle, the spell book shows "
+    L"each miracle, and the miracles cost no prayer power.",
+    // Spawn orbs
+    L"For a test only. One orb of each miracle lies on the land in front of "
+    L"you. A press makes the orbs that are gone. A save keeps the orbs.",
+    // Book: all
+    L"All: with Unlock all on, the spell book shows each miracle and power "
+    L"level. Icons: only the 6 icons of the Worship Site.",
     // Spell book
     L"On: the first face button of the hand that does not point opens the "
     L"spell book. Off: that button has no job.",

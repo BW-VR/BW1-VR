@@ -28,6 +28,22 @@
 // the game keeps the miracles that the towns know and the flag of the sites.
 // The switch at 0 puts the flags back. The miracles stay.
 //
+// THE BOOK OF ALL MIRACLES (debug_all_book=1, with the switch "All
+// miracles"). A Worship Site has at most 6 icons, and packet 0x25 asks only
+// for a miracle with an icon (fn_005DABA0 tests GPlayer::ValidForRequestSpell,
+// then GPlayer::RequestSpell charges the best icon). So with the switch on,
+// the book shows each seed type that the game has on (GSpellSeedInfo+0x17C)
+// and each of its power levels (the magic types at +0x124): 23 miracles and
+// 11 levels. A take of a plain miracle with an icon that the game lets the
+// player ask for is packet 0x25, as above. Each other take calls
+// OneOffSpellSeed::CreateSpellIntoHand (0x0072A730) with the seed type and
+// the level: the function of the script command that makes a one-off spell
+// in the Hand (SCRIPT_OBJECT_TYPE_ONE_SHOT_SPELL_IN_HAND), and of the tap of
+// a one-off seed. It needs only a free Hand: it makes the SpellSeed with a
+// full store of chants and puts it in the Hand. The seed takes the icon of a
+// site when one fits (GPlayer::FindBestSpellIconForSpellSeed), so a cancel
+// gives its chants to that site, as for a request.
+//
 // THE PICTURE shares the quad layer of the ring (kCardRing): the book does
 // not open while the ring shows, and the ring closes the book. A hand in
 // front of the page shows in front of it (hand_cut.cpp, card_hand_front=1).
@@ -67,7 +83,15 @@
 //   debug_all_miracles=0     1: each Worship Site of the player has every
 //                            miracle of the game, with no limit of prayer
 //                            power. For tests
-//   spell_book_orbs=1        each cell shows the orb of the game. 0: a flat
+//   debug_all_book=1         with debug_all_miracles=1, the book shows each
+//                            miracle and power level of the game, and the
+//                            take of one with no icon puts it in the Hand
+//                            with the function of the script. 0: the book
+//                            shows the icons of the Worship Sites only
+//   spell_book_test_items    a test key: for each word "book" of the
+//                            scripted controller in turn, the item that the
+//                            hand steps to, for example "11 33"
+//   spell_book_orbs=1       each cell shows the orb of the game. 0: a flat
 //                            picture with the two gestures of the miracle
 //   spell_book_point=1       the mark of the point of the pick on the page,
 //                            and no glow at the Hand's point while the book
@@ -176,7 +200,9 @@ const uintptr_t kSeedInfoTable = 0x00D9D678;
 const int kSeedInfoSize = 0x190;
 const int kSeedTypes = 30;
 const int kInfoGestures = 0x100;          // 3 gesture types of the chain
-const int kInfoMagic = 0x124;             // the magic type of the miracle
+const int kInfoMagic = 0x124;             // the magic type of the miracle, and
+                                          // of its 2 power levels after it
+const int kInfoOn = 0x17C;                // not 0: the game has the seed on
 const int kMagicTypes = 0x2A;
 // The gesture templates: the list at +0x08, the count at +0x0C. A template
 // is 0x65C bytes: from +0x08 up to 80 corners of 5 floats (x, a pad, y, the
@@ -214,6 +240,12 @@ const uint8_t kTownAddMagicBytes[9] = {0x55, 0x57, 0x8B, 0x7C, 0x24,
 const uintptr_t kSiteAddTownSpells = 0x0077C910;
 const uint8_t kSiteAddTownSpellsBytes[9] = {0x53, 0x8B, 0x5C, 0x24, 0x08,
                                             0x56, 0x57, 0x8B, 0xF9};
+// OneOffSpellSeed::CreateSpellIntoHand, cdecl (GInterfaceStatus*, seed type,
+// POWER_UP_TYPE, float), the caller cleans 0x10 bytes (0x0072A663): the
+// SpellSeed in the Hand, or 0 when the Hand is not free.
+const uintptr_t kIntoHand = 0x0072A730;
+const uint8_t kIntoHandBytes[10] = {0x83, 0xEC, 0x0C, 0x56, 0x8B,
+                                    0x74, 0x24, 0x14, 0x8B, 0xCE};
 
 typedef void*(__fastcall* MyInterfaceFn)(void* game, void* unused);
 typedef void*(__fastcall* VirtualPtrFn)(void* self, void* unused);
@@ -224,6 +256,8 @@ typedef void(__fastcall* SendPacketFn)(void* game, void* unused, int packet,
                                        int a, int b);
 typedef int(__fastcall* IntArgFn)(void* self, void* unused, int value);
 typedef void(__fastcall* PtrArgFn)(void* self, void* unused, void* value);
+typedef void*(__cdecl* IntoHandFn)(void* status, int32_t type, int32_t level,
+                                   float size);
 
 // The names of the seed types (miracle.cpp).
 const wchar_t* const kSeedName[kSeedTypes] = {
@@ -238,11 +272,34 @@ const wchar_t* const kSeedName[kSeedTypes] = {
     L"Creature Tired",     L"Creature Ill",       L"Creature Thirsty",
     L"Creature Itchy",     L"Teleport",           L"Explosion"};
 
-const char* NarrowName(int type) {
-  static char buffer[40];
-  if (type < 0 || type >= kSeedTypes) return "a miracle";
+// AN ITEM of the book is a key (spell_book_math::KeyOf): the seed type, and
+// the power level for the book of all miracles. The names of the levels are
+// the words of the game's tooltips ("Fireball Miracle Increase", "Poisoned
+// Food Miracle").
+const int kLevels = kKeyLevels;
+static_assert(kKeyTypes == kSeedTypes, "a key holds each seed type");
+
+bool KeyOk(int key) {
+  return key >= 0 && key < kSeedTypes * kLevels;
+}
+
+// The name of an item: the miracle, and the word of its level.
+const wchar_t* ItemName(int key) {
+  static wchar_t buffer[48];
+  if (!KeyOk(key)) return L"a miracle";
+  const int type = TypeOfKey(key), level = LevelOfKey(key);
+  if (level == 0) return kSeedName[type];
+  if (type == 3 && level == 1) return L"Poisoned Food";
+  swprintf_s(buffer, L"%s %s", kSeedName[type],
+             level == 1 ? L"Increase" : L"Extreme");
+  return buffer;
+}
+
+const char* NarrowName(int key) {
+  static char buffer[48];
+  if (!KeyOk(key)) return "a miracle";
   size_t n = 0;
-  for (const wchar_t* w = kSeedName[type]; *w != 0 && n + 1 < sizeof(buffer);
+  for (const wchar_t* w = ItemName(key); *w != 0 && n + 1 < sizeof(buffer);
        ++w) {
     buffer[n++] = static_cast<char>(*w);
   }
@@ -250,12 +307,18 @@ const char* NarrowName(int type) {
   return buffer;
 }
 
-// The word on the badge: a Creature miracle without the word "Creature".
-const wchar_t* BadgeName(int type) {
-  if (type < 0 || type >= kSeedTypes) return L"";
+// The word on the badge: a Creature miracle without the word "Creature", and
+// a power level as a plus for each level ("Fireball++").
+const wchar_t* BadgeName(int key) {
+  static wchar_t buffer[48];
+  if (!KeyOk(key)) return L"";
+  const int type = TypeOfKey(key), level = LevelOfKey(key);
   const wchar_t* name = kSeedName[type];
   if (wcsncmp(name, L"Creature ", 9) == 0) return name + 9;
-  return name;
+  if (level == 0) return name;
+  if (type == 3 && level == 1) return L"Poisoned Food";
+  swprintf_s(buffer, L"%s%s", name, level == 1 ? L"+" : L"++");
+  return buffer;
 }
 
 void** VTable(void* object) { return *static_cast<void***>(object); }
@@ -361,6 +424,8 @@ float SiteChants(const uint8_t* site) {
 bool g_read = false;
 bool g_on = true;
 bool g_all = false;
+bool g_all_book = true;   // debug_all_book: the book of all miracles
+bool g_into_ok = false;   // CreateSpellIntoHand has its bytes
 int g_save = 0;
 int g_saved = 0;
 bool g_test_keys = false;
@@ -395,6 +460,8 @@ void ReadSettings() {
   g_read = true;
   g_on = IniKey("spell_book", 1) != 0;
   g_all = IniKey("debug_all_miracles", 0) != 0;
+  g_all_book = IniKey("debug_all_book", 1) != 0;
+  g_into_ok = SameBytes(kIntoHand, kIntoHandBytes, sizeof(kIntoHandBytes));
   g_save = IniKey("spell_book_test_save", 0);
   g_test_keys = IniKey("test_keys", 0) != 0;
   g_pull_cm = IniKey("spell_book_pull_cm", 10);
@@ -421,6 +488,16 @@ void ReadSettings() {
          g_all ? ": each Worship Site of the player gets every miracle of the "
                  "game and no limit of prayer power (a test)"
                : "");
+  ModLog("spell book   : debug_all_book=%d: %s%s", g_all_book ? 1 : 0,
+         g_all_book ? "with debug_all_miracles=1 the book shows each miracle "
+                      "and power level of the game, and a take of one with no "
+                      "icon puts it in the Hand with "
+                      "OneOffSpellSeed::CreateSpellIntoHand"
+                    : "the book shows the icons of the Worship Sites only",
+         g_all_book && !g_into_ok
+             ? ". CreateSpellIntoHand does not have the bytes of v1.42, so "
+               "the book shows the icons only"
+             : "");
   if (g_pull_cm > 0) {
     ModLog("spell book   : spell_book_pull_cm=%d: the hand pulls a miracle %d "
            "cm out of the book, and then it snaps into the hand", g_pull_cm,
@@ -460,8 +537,12 @@ void ReadSettings() {
 
 // --- the frame state -------------------------------------------------------------
 
+// The book of all miracles is on: the switch "All miracles", the key
+// debug_all_book, and the function of the game with its bytes.
+bool AllBook() { return g_all && g_all_book && g_into_ok; }
+
 struct Item {
-  int type;
+  int type;          // the key: the seed type and the power level
   bool can;          // the game lets the player ask for it now
   const wchar_t* why;  // why not, for a dim item
   bool last;         // the last miracle, which the gesture "again" asks for
@@ -587,12 +668,51 @@ bool CanRequest(const GameNow& g, int type) {
                                                      g.status, type) == 1;
 }
 
+// The keys of the book of all miracles: each seed type that the game has on,
+// with its power levels, in a fixed order, so an item keeps its cell.
+int AllBookKeys(int keys[kMaxItems]) {
+  bool on[kSeedTypes];
+  int levels[kSeedTypes];
+  for (int t = 0; t < kSeedTypes; ++t) {
+    const uint8_t* info = SeedInfo(t);
+    on[t] = *reinterpret_cast<const int32_t*>(info + kInfoOn) != 0;
+    levels[t] = 0;
+    for (int k = 0; k < kLevels; ++k) {
+      const int32_t magic =
+          *reinterpret_cast<const int32_t*>(info + kInfoMagic + 4 * k);
+      if (magic <= 0 || magic >= kMagicTypes) break;
+      levels[t] = k + 1;
+    }
+    if (levels[t] == 0) on[t] = false;
+  }
+  return AllKeys(on, levels, keys, kMaxItems);
+}
+
+// The list of the book of all miracles. Each item needs only a free Hand.
+void BuildAllList(const GameNow& g) {
+  int keys[kMaxItems];
+  const int count = AllBookKeys(keys);
+  const int last = *reinterpret_cast<const int32_t*>(g.status + kStatusLast);
+  for (int i = 0; i < count; ++i) {
+    Item& item = g_items[g_count++];
+    item.type = keys[i];
+    item.last = keys[i] == last;
+    item.creature = IsCreatureType(TypeOfKey(keys[i]));
+    item.can = g.hand_ready;
+    item.why = item.can ? L"" : L"The Hand must be empty";
+  }
+}
+
 // The list of this frame: each miracle of an icon of a Worship Site of the
 // player whose magic type is on, one item for each seed type. The last
 // miracle comes first.
 void BuildList(const GameNow& g) {
   g_count = 0;
   g_empty_why = L"";
+  if (AllBook()) {
+    BuildAllList(g);
+    return;
+  }
   uint8_t* sites[kSites];
   const int site_count = Sites(g.player, sites);
   if (site_count == 0) {
@@ -986,7 +1106,7 @@ void Raster(const Look& look) {
     // in the book: they go with the bubble. With the orbs, the cell has the
     // orb of the game in place of the gestures.
     if (i != look.pulled && !look.orbs) {
-      DrawBubbleShapes(look.type[i], bx, by, br);
+      DrawBubbleShapes(TypeOfKey(look.type[i]), bx, by, br);
     }
     RECT name;
     NameBox(l, i, &name);
@@ -1032,9 +1152,9 @@ void Raster(const Look& look) {
     float cx = 0.0f, cy = 0.0f;
     CellPixel(l, i, &cx, &cy);
     const bool lit = i == look.hover;
-    const Rgb& fill = !look.can[i] ? kDimFill
-                      : IsCreatureType(look.type[i]) ? kCreatureFill
-                                                     : kGod;
+    const Rgb& fill = !look.can[i]                           ? kDimFill
+                      : IsCreatureType(TypeOfKey(look.type[i])) ? kCreatureFill
+                                                                : kGod;
     const int x0 = static_cast<int>(cx - 0.5f * cell);
     const int y0 = static_cast<int>(cy - 0.5f * cell);
     // The ring stays inside its cell (spell_book_math::BubbleRing).
@@ -1161,7 +1281,8 @@ int g_bubble_px = 0;
 // draw, so the view for videos copies the bubble card only after a change.
 uint32_t g_bubble_serial = 0;
 
-bool RasterBubble(int type, const Layout& l) {
+bool RasterBubble(int key, const Layout& l) {
+  const int type = TypeOfKey(key);
   if (!RasterStart() || type < 0 || type >= kSeedTypes || l.count <= 0) {
     return false;
   }
@@ -1258,7 +1379,7 @@ void BuildLook(Look* look) {
   }
   if (g_hover >= 0 && g_hover < g_count) {
     const Item& item = g_items[g_hover];
-    swprintf_s(look->title, L"%s%s", kSeedName[item.type],
+    swprintf_s(look->title, L"%s%s", ItemName(item.type),
                item.last ? L" (again)" : L"");
     if (!item.can) wcsncpy_s(look->note, item.why, _TRUNCATE);
   } else {
@@ -1400,7 +1521,7 @@ void Pluck(const GameNow& g, uint64_t frame, bool* plucked) {
   }
   if (index < 0) return;
   const Item& item = g_items[index];
-  if (item.can && g.hand_ready && CanRequest(g, type)) {
+  if (item.can && g.hand_ready && (AllBook() || CanRequest(g, type))) {
     g_request_type = type;
     g_request_frame = frame;
     ++g_plucks;
@@ -1611,7 +1732,7 @@ void PlaceBubble(int type, const float at[3], const float head[3],
   float world[3], units = 0.0f;
   if (g_game_bubble && !BookBubbleFailed() &&
       ControllersLocalToWorld(at, world, &units)) {
-    BookBubbleShow(type, world, units, frame);
+    BookBubbleShow(TypeOfKey(type), world, units, frame);
     if (g_have_plane && BubbleHole(g_plane, head, at, kBubbleRadiusM,
                                    &g_hole)) {
       g_hole_frame = frame;
@@ -1785,7 +1906,7 @@ void ShowOrbs(const Look& look, uint64_t frame) {
     float at[3], world[3], units = 0.0f;
     PointOn(g_plane, x, y, at);
     if (!ControllersLocalToWorld(at, world, &units)) return;
-    BookBubbleShowOrb(look.type[i], world,
+    BookBubbleShowOrb(TypeOfKey(look.type[i]), world,
                       kBubbleShare * l.cell_m * units, frame);
     ++shown;
   }
@@ -1965,7 +2086,7 @@ void SpellBookFrame() {
   PlaneAt(center, head, &g_plane);
   g_have_plane = true;
   if (event == kOpened && LogRoom()) {
-    char words[400] = "";
+    char words[1024] = "";
     for (int i = 0; i < g_count; ++i) {
       char one[64];
       sprintf_s(one, "%s%s%s", i > 0 ? ", " : "", NarrowName(g_items[i].type),
@@ -2085,6 +2206,33 @@ void SpellBookInterfaceStep(void* face_in) {
   GameNow g;
   if (!ReadGame(&g) || g.face != face_in) return;
   const uint64_t frame = ControllersFrameCount();
+  // THE BOOK OF ALL MIRACLES: a power level, or a miracle with no icon that
+  // the player can ask for now, comes into the Hand with the function of the
+  // script. A plain miracle with such an icon goes to the game as a request.
+  const int type_of = TypeOfKey(type), level = LevelOfKey(type);
+  if (AllBook() && g.hand_ready && (level > 0 || !CanRequest(g, type_of))) {
+    void* seed = reinterpret_cast<IntoHandFn>(kIntoHand)(g.status, type_of,
+                                                         level, 1.0f);
+    if (seed == nullptr) {
+      ++g_refusals;
+      HapticsPulseHands(2, haptics_math::kRefused);
+      SetNotice(L"The game refuses it now");
+    } else {
+      ++g_requests;
+      g_watch_type = type;
+      g_watch_frame = frame;
+    }
+    if (LogRoom()) {
+      ModLog("spell book   : %s (seed type %d, power level %d) %s with "
+             "OneOffSpellSeed::CreateSpellIntoHand, as the script command "
+             "for a one-off spell in the Hand: the seed %p, %llu frames "
+             "after the take, frame %llu", NarrowName(type), type_of, level,
+             seed != nullptr ? "goes into the Hand"
+                             : "does not go into the Hand",
+             seed, frame - g_request_frame, frame);
+    }
+    return;
+  }
   // The same tests as the end of a chain of gestures: the Hand is free, and
   // a Worship Site has an icon of the miracle that the player can ask for.
   if (!g.hand_ready || !CanRequest(g, type)) {
@@ -2133,10 +2281,10 @@ int SpellBookHint(MiracleLine lines[kMiracleLines]) {
     const Item& item = g_items[g_hover];
     if (item.can) {
       swprintf_s(take, g_pull_cm > 0 ? L"Hold and pull out %s" : L"Take %s",
-                 kSeedName[item.type]);
+                 ItemName(item.type));
       lines[count++] = {kWordGrab, take};
     } else {
-      swprintf_s(dim, L"%s: %s", kSeedName[item.type], item.why);
+      swprintf_s(dim, L"%s: %s", ItemName(item.type), item.why);
       lines[count++] = {-1, dim};
     }
   } else if (g_open) {
@@ -2172,7 +2320,28 @@ bool SpellBookTestItem(float out[3]) {
   }
   const int depth_cm =
       depth_count > 0 ? depths[depth_next++ % depth_count] : 0;
-  const int i = g_test_item % g_count;
+  // spell_book_test_items: for each word "book" in turn, the item, a test
+  // key. With no key the word steps to the next item.
+  static int items[8] = {0};
+  static int item_count = -1;
+  static int item_next = 0;
+  if (item_count < 0) {
+    item_count = 0;
+    char path[MAX_PATH], text[128] = "";
+    if (IniPath(path)) {
+      GetPrivateProfileStringA("bwvr", "spell_book_test_items", "", text,
+                               sizeof(text), path);
+    }
+    char* context = nullptr;
+    for (char* word = strtok_s(text, " ,", &context);
+         word != nullptr && item_count < 8;
+         word = strtok_s(nullptr, " ,", &context)) {
+      const int value = atoi(word);
+      items[item_count++] = value > 0 ? value : 0;
+    }
+  }
+  const int i = item_count > 0 ? items[item_next++ % item_count] % g_count
+                               : g_test_item % g_count;
   ++g_test_item;
   float x = 0.0f, y = 0.0f;
   ItemCenter(g_layout, i, &x, &y);
@@ -2290,6 +2459,24 @@ void SpellBookAllChange(const char* by) {
   if (!g_all) UndoAll(ControllersFrameCount());
 }
 
+int SpellBookAllBookValue() {
+  ReadSettings();
+  return g_game_ok && g_into_ok ? (g_all_book ? 1 : 0) : kDebugCannot;
+}
+
+void SpellBookAllBookChange(const char* by) {
+  ReadSettings();
+  g_all_book = !g_all_book;
+  if (g_pull.state != kPullNone) StopPull();
+  ControllersGrabPulse(1, 0.5f, g_all_book ? 0.40f : 0.08f);
+  ModLog("spell book   : %s: debug_all_book=%d. %s, frame %llu", by,
+         g_all_book ? 1 : 0,
+         g_all_book ? "With debug_all_miracles=1 the book shows each miracle "
+                      "and power level of the game"
+                    : "The book shows the icons of the Worship Sites only",
+         ControllersFrameCount());
+}
+
 void SpellBookReport() {
   if (g_opens + g_closes + g_refusals + g_requests + g_pulls + g_orb_frames ==
       0) {
@@ -2353,8 +2540,20 @@ void SpellBookTextFitTest() {
       check(g_note_font, why, box, 2, "spell book note");
     }
   }
+  // The keys of the book: each seed type, and the power levels of the book
+  // of all miracles.
+  int keys[kSeedTypes + kMaxItems];
+  int key_count = 0;
+  for (int type = 0; type < kSeedTypes; ++type) keys[key_count++] = type;
+  {
+    int all[kMaxItems];
+    const int n = AllBookKeys(all);
+    for (int i = 0; i < n; ++i) {
+      if (LevelOfKey(all[i]) > 0) keys[key_count++] = all[i];
+    }
+  }
   // The counts where the cell gets smaller.
-  const int counts[] = {1, 9, 16, kSeedTypes};
+  const int counts[] = {1, 9, 16, kSeedTypes, kMaxItems};
   for (int count : counts) {
     const Layout l = LayoutFor(count);
     const int w = PixelsOf(l.width_m), h = PixelsOf(l.height_m);
@@ -2365,9 +2564,9 @@ void SpellBookTextFitTest() {
     TitleBox(count, w, h, &band);
     check(g_title_font, L"Miracles", band, 1, "spell book title");
     check(g_title_font, L"Miracles: all (test)", band, 1, "spell book title");
-    for (int type = 0; type < kSeedTypes; ++type) {
-      wchar_t title[48];
-      swprintf_s(title, L"%s (again)", kSeedName[type]);
+    for (int k = 0; k < key_count; ++k) {
+      wchar_t title[64];
+      swprintf_s(title, L"%s (again)", ItemName(keys[k]));
       check(g_title_font, title, band, 1, "spell book title");
     }
     for (const wchar_t* why : kWhys) {
@@ -2375,8 +2574,8 @@ void SpellBookTextFitTest() {
     }
     RECT name;
     NameBox(l, 0, &name);
-    for (int type = 0; type < kSeedTypes; ++type) {
-      check(g_name_font[SizeIndex(l)], BadgeName(type), name, 1,
+    for (int k = 0; k < key_count; ++k) {
+      check(g_name_font[SizeIndex(l)], BadgeName(keys[k]), name, 1,
             "spell book name");
     }
     g_width_px = saved_w;
@@ -2388,14 +2587,14 @@ void SpellBookTextFitTest() {
   HintCardCheckLine(L"Put your hand on a miracle");
   HintCardCheckLine(L"No miracle to ask for now");
   for (const wchar_t* why : kEmptyWhys) HintCardCheckLine(why);
-  for (int type = 0; type < kSeedTypes; ++type) {
+  for (int k = 0; k < key_count; ++k) {
     wchar_t line[96];
-    swprintf_s(line, L"Hold and pull out %s", kSeedName[type]);
+    swprintf_s(line, L"Hold and pull out %s", ItemName(keys[k]));
     HintCardCheckLine(line);
-    swprintf_s(line, L"Take %s", kSeedName[type]);
+    swprintf_s(line, L"Take %s", ItemName(keys[k]));
     HintCardCheckLine(line);
     for (const wchar_t* why : kWhys) {
-      swprintf_s(line, L"%s: %s", kSeedName[type], why);
+      swprintf_s(line, L"%s: %s", ItemName(keys[k]), why);
       HintCardCheckLine(line);
     }
   }

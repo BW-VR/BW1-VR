@@ -304,6 +304,46 @@ inline void MiracleChecks() {
     const bool none = CircleOfPath(flat, 0, middle, &widest);
     Check(!none && widest == 0.0f, "no path gives no circle", none ? 1 : 0, 0);
   }
+
+  // THE ORBS ON THE LAND: the 23 seed types that the game has on, on two
+  // arcs in front of the head.
+  {
+    const int n = 23;
+    float at[23][2];
+    bool all = true, front = true, reach = true;
+    // The head at (1, 2), the view along -z.
+    for (int i = 0; i < n; ++i) {
+      all = OrbPlace(i, n, 1.0f, 2.0f, 0.0f, -3.0f, at[i]) && all;
+      const float dx = at[i][0] - 1.0f, dz = at[i][1] - 2.0f;
+      if (-dz <= 0.0f) front = false;
+      const float d = sqrtf(dx * dx + dz * dz);
+      if (d < kOrbNearM - 1e-4f || d > kOrbFarM + 1e-4f) reach = false;
+    }
+    float closest = 1e9f;
+    for (int i = 0; i < n; ++i) {
+      for (int k = i + 1; k < n; ++k) {
+        const float dx = at[i][0] - at[k][0], dz = at[i][1] - at[k][1];
+        const float d = sqrtf(dx * dx + dz * dz);
+        if (d < closest) closest = d;
+      }
+    }
+    Check(all, "each of 23 orbs has a place", all, 1);
+    Check(front, "each orb is in front of the head", front, 1);
+    Check(reach, "each orb is 35 to 55 cm of the room from the head", reach, 1);
+    Check(closest >= 0.08f, "two orbs are 8 cm apart or more, cm",
+          static_cast<int>(closest * 100.0f), 8);
+    // A view along +x: the right of the view is +z, so the first orb of the
+    // near arc (the left end) has z below the head.
+    float first[2];
+    OrbPlace(0, n, 0.0f, 0.0f, 1.0f, 0.0f, first);
+    Check(first[0] > 0.0f && first[1] < 0.0f,
+          "the first orb is at the left of a view along +x", first[1] < 0.0f,
+          1);
+    float bad[2];
+    Check(!OrbPlace(23, n, 0.0f, 0.0f, 1.0f, 0.0f, bad) &&
+              !OrbPlace(0, n, 0.0f, 0.0f, 0.0f, 0.0f, bad),
+          "no place for an index past the count or for no view", 1, 1);
+  }
 }
 
 }  // namespace miracle_checks

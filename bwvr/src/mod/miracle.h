@@ -26,6 +26,13 @@ void MiracleReport();
 // the Grain state too (the state of a miracle in the Hand).
 bool MiraclePlacesHand();
 
+// The debug row "Spawn orbs" (debug_menu.cpp): one one-off seed of each
+// miracle on the land in front of the head, made by the game. The value is 1
+// while each of these orbs is on the land. A press makes the orbs that are
+// gone.
+int MiracleOrbsValue();
+void MiracleOrbsChange(const char* by);
+
 // hand_direct.cpp: a miracle is in the Hand, so the draw must offer the
 // objects in the cone of the aim to the pick, as it does for a far grab.
 bool MiracleWantsCone();

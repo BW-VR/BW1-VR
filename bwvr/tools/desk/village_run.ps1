@@ -43,7 +43,7 @@
 #                gesture_panel=1 and the book on the palm.
 # The other kinds (charge, store, neartake, land, job, tree, throw,
 # throwlive, throwhouse, throwhouselow, throwpile, probe, workshop, site, build, scaffold,
-# turn, fartake, fartotem, choice, look, book, bookhand, unlock, controls, rayover, walk, wall,
+# turn, fartake, fartotem, choice, look, book, bookhand, unlock, allmiracles, controls, rayover, walk, wall,
 # housestop, headhouse, pinch, small,
 # aimsign, aimmiracle, aimpast, tglow, tooltip) have a comment at their steps
 # below.
@@ -272,6 +272,44 @@ if ($Kind -eq 'totem') {
             "radial_menu_items=leash,places,recenter,debug,more,settings,names,pause;" +
             "fake_controller_left_points=$($ring.Points);debug_test_parts=$Parts;" +
             "debug_window_test_save=6;spell_book_test_save=8;text_fit_test=1;test_frame_rate=60"
+} elseif ($Kind -eq 'allmiracles') {
+    # Each miracle of the game, with no keyboard (bwvr/docs/miracles.md, "The
+    # book of all miracles" and "The orbs of all miracles"). Y and the left
+    # hand choose "debug" on the ring, and the debug window opens. The trigger
+    # presses the tab Miracles (tab7), the row "Unlock all miracles" (row0)
+    # and the row "Spawn all miracle orbs" (row1): one orb of each miracle
+    # goes onto the land in front of the head. Close closes the window. X
+    # opens the spell book: it has the 34 miracles and power levels of the
+    # game. The word "book" steps the right hand to item 11, Lightning, which
+    # no icon of the Worship Site has (spell_book_test_items). The grip and a
+    # pull of 15 cm take it, and the game puts it in the Hand with the
+    # function of the script. A grip of 40 frames pours it over the land, and
+    # a tap of B takes it out of the Hand. X opens the book again, the hand
+    # goes to item 15, Heal Increase (a power level), the grip and a pull take
+    # it, and a press casts it at the land. Then the place "hold" of
+    # seek_plan takes the nearest orb, the grip carries it, and the trigger
+    # makes it active. A tap of B takes it out of the Hand. Give it -Set
+    # "backend=dxwrapper\ddraw.dll" for eye pictures of the orbs and the
+    # casts. -Set "debug_all_book=0" gives the book of the 6 icons.
+    if ($Plan -eq '') { $Plan = 'gosite,hold' }
+    if ($Census -eq '') { $Census = '890,1300' }
+    if ($Seconds -eq 0) { $Seconds = 70 }
+    if ($Parts -eq '') { $Parts = 'tab7 row0 row1 close' }
+    $ring = Get-BwvrRingChoice 3 1000
+    if ($Steps -eq '') {
+        $Steps = $pre + 'seek@920+1 ' + $ring.Steps + ' aimdebug@1080+1 trigger@1090+4 shot@1110+1 ' +
+                 'aimdebug@1130+1 trigger@1140+4 aimdebug@1180+1 trigger@1190+4 shot@1210+1 ' +
+                 'aimdebug@1230+1 trigger@1240+4 ' +
+                 'x@1300+4 shot@1320+1 book@1340+1 shot@1352+1 grip@1370+60 pull@1375+40 shot@1420+1 ' +
+                 'grip@1460+40 shot@1480+1 shot@1500+1 b@1530+5 pull@1545+10 ' +
+                 'x@1580+4 book@1600+1 grip@1620+60 pull@1625+40 shot@1670+1 grip@1710+10 shot@1730+1 ' +
+                 'b@1760+5 pull@1775+10 seek@1800+1 shot@1810+1 grip@1840+260 trigger@1940+6 shot@1960+1 ' +
+                 'b@2160+5 shot@2180+1'
+    }
+    $keys = "$keys;debug_menu=1;debug_window=1;welcome_done=1;" +
+            "radial_menu_items=leash,places,recenter,debug,more,settings,names,pause;" +
+            "fake_controller_left_points=$($ring.Points);debug_test_parts=$Parts;" +
+            "spell_book_test_items=11 15;seek_class=OneOffSpellSeed;spell_book_test_save=8;test_frame_rate=60"
 } elseif ($Kind -eq 'controls') {
     # The page Controls of the VR Settings window (bwvr/docs/ui-layer.md,
     # "The page Controls", and bwvr/docs/controllers.md, "The map of the
@@ -939,6 +977,10 @@ if ($Kind -eq 'bookhand') {
 if ($Kind -eq 'unlock') {
     $pattern = '^spell book   :|^book bubble  :|^text fit     : (check: text_fit|.*cut)|^debug page   :|^debug window : (the window (opens|closes)|the trigger)|' +
                '^ring         : the player chose|^controllers  : the word (aimdebug|book)'
+}
+if ($Kind -eq 'allmiracles') {
+    $pattern = '^spell book   : (?!a new picture)|^debug page   : the player chose|^debug window : (the window (opens|closes)|the trigger)|' +
+               '^miracle      : (?!miracle_)|^hand pick    : (seek plan|the Hand holds)|^controllers  : the word (aimdebug|book)|^hand         : state'
 }
 if ($Kind -eq 'book') {
     $pattern = '^spell book   :|^book bubble  :|^village      : (test key|the pool|the miracle icon)|^miracle      : (?!miracle_).*(active in the Hand|left the Hand|takes)|' +

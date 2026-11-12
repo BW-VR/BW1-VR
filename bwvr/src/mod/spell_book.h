@@ -5,7 +5,8 @@
 // and its grip takes the miracle: the request goes to the game in its own
 // way, as at the end of a chain of gestures. The debug switch "Unlock all" gives each Worship
 // Site of the player every miracle of the game, with no cost in prayer
-// power.
+// power, and the book then shows each miracle and power level of the game
+// (debug_all_book=1).
 
 #pragma once
 
@@ -51,13 +52,15 @@ int SpellBookHint(MiracleLine lines[kMiracleLines]);
 bool SpellBookTestItem(float out[3]);
 
 // The switches of the debug page (debug_menu.cpp): spell_book,
-// spell_book_orbs and debug_all_miracles.
+// spell_book_orbs, debug_all_miracles and debug_all_book.
 int SpellBookValue();
 void SpellBookChange(const char* by);
 int SpellBookOrbsValue();
 void SpellBookOrbsChange(const char* by);
 int SpellBookAllValue();
 void SpellBookAllChange(const char* by);
+int SpellBookAllBookValue();
+void SpellBookAllBookChange(const char* by);
 
 // hand_glow.cpp: true while the book is open with spell_book_point=1. Then
 // the glow at the Hand's point does not show: the page shows the point of

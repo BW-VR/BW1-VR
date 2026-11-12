@@ -54,6 +54,14 @@ inline void SpellBookChecks() {
           "the 30 miracles of the game are 6 columns of 5 rows",
           thirty.columns * 10 + thirty.rows, 65);
     Near("a cell of a book of 30 is 4 cm", thirty.cell_m, 0.04, 1e-6);
+    const Layout all = LayoutFor(34);
+    Check(all.columns == 6 && all.rows == 6,
+          "the 34 miracles of the book of all miracles are 6 columns of 6 "
+          "rows",
+          all.columns * 10 + all.rows, 66);
+    Check(PixelsOf(all.height_m) <= kTexture,
+          "the book of all miracles fits the texture", PixelsOf(all.height_m),
+          864);
     const Layout none = LayoutFor(0);
     Check(none.count == 0 && none.width_m == kEmptyWidthM &&
               none.height_m == kEmptyHeightM,
@@ -95,6 +103,52 @@ inline void SpellBookChecks() {
          oy - cy, 0.10 * l.cell_m, 1e-6);
     Near("an orb in a cell of 6.5 cm is 4.3 cm across, cm",
          2.0 * kBubbleShare * l.cell_m * 100.0, 4.29, 1e-3);
+  }
+
+  // THE BOOK OF ALL MIRACLES. The flags and the magic types of the 30 seed
+  // types of Scripts\info.dat (DETAIL_SPELL_SEEDS, +0x17C and +0x124): 7
+  // Creature miracles are off, and 7 miracles have power levels.
+  {
+    bool on[kKeyTypes];
+    int levels[kKeyTypes];
+    for (int t = 0; t < kKeyTypes; ++t) {
+      on[t] = true;
+      levels[t] = 1;
+    }
+    const int off[] = {17, 18, 22, 23, 24, 25, 26};
+    for (int t : off) on[t] = false;
+    levels[0] = 3;   // Storm: Storm, its Increase and its Extreme (Tornado)
+    levels[2] = 3;   // Fireball
+    levels[3] = 2;   // Food: Food and Poisoned Food
+    levels[6] = 3;   // Lightning
+    levels[7] = 2;   // Heal
+    levels[9] = 2;   // Water
+    levels[29] = 3;  // Explosion
+    int keys[kMaxItems];
+    const int n = AllKeys(on, levels, keys, kMaxItems);
+    Check(n == 34, "the book of all miracles has 23 miracles and 11 power "
+                   "levels", n, 34);
+    Check(n <= kMaxItems, "they fit the book", n, kMaxItems);
+    Check(keys[0] == KeyOf(0, 0) && keys[1] == KeyOf(0, 1) &&
+              keys[2] == KeyOf(0, 2) && keys[3] == KeyOf(1, 0),
+          "each miracle is followed by its power levels", keys[3], 1);
+    Check(keys[11] == KeyOf(6, 0), "Lightning is item 11", keys[11], 6);
+    bool none_off = true, decode = true;
+    for (int i = 0; i < n; ++i) {
+      const int t = TypeOfKey(keys[i]);
+      if (t < 0 || t >= kKeyTypes || !on[t]) none_off = false;
+      if (KeyOf(t, LevelOfKey(keys[i])) != keys[i] ||
+          LevelOfKey(keys[i]) >= levels[t]) {
+        decode = false;
+      }
+    }
+    Check(none_off, "no seed type that the game has off is in the book",
+          none_off, 1);
+    Check(decode, "each key gives its seed type and its level back", decode,
+          1);
+    int few[4];
+    Check(AllKeys(on, levels, few, 4) == 4, "the list stops at the most",
+          AllKeys(on, levels, few, 4), 4);
   }
 
   // THE PLACE OF THE BOOK. With the grip pose of no turn, the book of the

@@ -43,7 +43,7 @@
 #                gesture_panel=1 and the book on the palm.
 # The other kinds (charge, store, neartake, land, job, tree, throw,
 # throwlive, throwhouse, throwhouselow, throwpile, probe, workshop, site, build, scaffold,
-# turn, fartake, fartotem, choice, look, book, bookhand, unlock, allmiracles, controls, rayover, walk, wall,
+# turn, fartake, fartotem, choice, look, book, bookhand, unlock, allmiracles, orbsave, controls, rayover, walk, wall,
 # housestop, headhouse, pinch, small,
 # aimsign, aimmiracle, aimpast, tglow, tooltip) have a comment at their steps
 # below.
@@ -310,6 +310,25 @@ if ($Kind -eq 'totem') {
             "radial_menu_items=leash,places,recenter,debug,more,settings,names,pause;" +
             "fake_controller_left_points=$($ring.Points);debug_test_parts=$Parts;" +
             "spell_book_test_items=11 15;seek_class=OneOffSpellSeed;spell_book_test_save=8;test_frame_rate=60"
+} elseif ($Kind -eq 'orbsave') {
+    # No orb of all miracles in a save (bwvr/docs/miracles.md, "What a save
+    # keeps"). With debug_all_miracles=1 the Worship Site has no limit of
+    # prayer power. At frame 1000 the test key miracle_test_orbs puts the 23
+    # orbs on the land, as the debug row does. At frame 1100 the test key
+    # miracle_test_save_steps runs the steps that the mod makes before a
+    # save, with no save: the game deletes each orb, and the site gets its
+    # limit back. 30 frames later the log checks that no deleted orb is on
+    # the land, and the steps after a save set the limit off again. At frame
+    # 1250 the orbs come again: the list is empty, so the game makes 23. No
+    # save is written. Give it -Set "backend=dxwrapper\ddraw.dll" for eye
+    # pictures before the delete and after it.
+    if ($Plan -eq '') { $Plan = 'gosite' }
+    if ($Census -eq '') { $Census = '890' }
+    if ($Seconds -eq 0) { $Seconds = 45 }
+    if ($Steps -eq '') {
+        $Steps = $pre + 'seek@920+1 shot@1020+1 shot@1160+1 shot@1270+1'
+    }
+    $keys = "$keys;debug_all_miracles=1;miracle_test_orbs=1000 1250;miracle_test_save_steps=1100;test_frame_rate=60"
 } elseif ($Kind -eq 'controls') {
     # The page Controls of the VR Settings window (bwvr/docs/ui-layer.md,
     # "The page Controls", and bwvr/docs/controllers.md, "The map of the
@@ -977,6 +996,9 @@ if ($Kind -eq 'bookhand') {
 if ($Kind -eq 'unlock') {
     $pattern = '^spell book   :|^book bubble  :|^text fit     : (check: text_fit|.*cut)|^debug page   :|^debug window : (the window (opens|closes)|the trigger)|' +
                '^ring         : the player chose|^controllers  : the word (aimdebug|book)'
+}
+if ($Kind -eq 'orbsave') {
+    $pattern = '^miracle      : (?!miracle_)|^spell book   : debug_all_miracles|^hooks        : (GameOSFile::SaveAllGame|GGame::ClearMap)|^save card    :'
 }
 if ($Kind -eq 'allmiracles') {
     $pattern = '^spell book   : (?!a new picture)|^debug page   : the player chose|^debug window : (the window (opens|closes)|the trigger)|' +

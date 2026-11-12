@@ -971,10 +971,10 @@ miracles" in the group Miracles of the debug window (the item "debug"
 of the ring). Then your towns know every
 miracle of the game, and your Worship Sites have no limit of prayer
 power. The book then shows all 34 miracles of the game, with the
-Increase and Extreme forms. A save that you make then keeps the
-miracles of the towns. The row "Spawn all miracle orbs" of the same
-group puts one bubble of each miracle on the land in front of you. A
-save keeps these bubbles too.
+Increase and Extreme forms. Warning: each save after that, also the
+save at the exit, keeps the miracles of the towns. The row "Spawn all
+miracle orbs" of the same group puts one bubble of each miracle on the
+land in front of you. The mod removes these bubbles before each save.
 
 A miracle from a reward or a dispenser is a bubble on the land. Close
 the grip on the bubble to carry it. Then press the trigger to use it.

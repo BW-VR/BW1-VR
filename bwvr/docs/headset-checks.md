@@ -407,8 +407,10 @@ effects in the world are not proven yet.
 **Which miracles you have.** The towns of each land give their miracles.
 The debug switch "Unlock all" (debug page, the group Miracles) gives each
 town all miracles with no cost, and the spell book then shows all 34
-miracles and power levels. The row "Spawn all miracle orbs" puts one orb of
-each miracle on the land in front of you.
+miracles and power levels. A save, also the save at the exit, keeps the
+miracles of the towns. The row "Spawn all miracle orbs" puts one orb of
+each miracle on the land in front of you, and the mod removes these orbs
+before each save.
 
 ### Water ("Shower of Life")
 

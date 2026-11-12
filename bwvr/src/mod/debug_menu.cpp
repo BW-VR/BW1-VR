@@ -1366,11 +1366,11 @@ const wchar_t* const kTips[] = {
     L"one to one, and the building does not turn by itself. Off: the "
     L"building turns by itself, as in the game.",
     // Unlock all
-    L"For a test only. Each town knows each miracle, the spell book shows "
-    L"each miracle, and the miracles cost no prayer power.",
+    L"For a test only. Each town knows each miracle, and the book shows each "
+    L"one. WARNING: a save, also the save at the exit, keeps these miracles.",
     // Spawn orbs
     L"For a test only. One orb of each miracle lies on the land in front of "
-    L"you. A press makes the orbs that are gone. A save keeps the orbs.",
+    L"you. A press makes the orbs that are gone. A save does not keep them.",
     // Book: all
     L"All: with Unlock all on, the spell book shows each miracle and power "
     L"level. Icons: only the 6 icons of the Worship Site.",

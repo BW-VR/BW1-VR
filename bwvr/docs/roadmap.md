@@ -70,6 +70,11 @@ These items come before the other work.
     Weak, Compassion, Angry and Itchy, in the mod.
   - Only a headset shows if the 4 cm cells of the book of 34 items are easy
     to pick, and if the orbs on the land are easy to reach.
+  - A save keeps the miracles that "Unlock all" gives the towns
+    (`miracles.md`, "What a save keeps"). The mod deletes its orbs and puts
+    the limit of prayer power back before each save, but it does not take
+    the miracles of the towns back. The recipe `village_run.ps1 -Kind
+    orbsave` waits for the test laptop.
   - The orbs in the cells: only a headset shows how they look in their
     holes of the page, with the land behind the glass.
   - The leash gestures and the scribble are not in the book.

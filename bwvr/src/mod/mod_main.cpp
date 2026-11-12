@@ -338,6 +338,11 @@ void ModLog(const char* format, ...);
 void EyeCaptureSaveUi(const char* name, uint64_t frame, int style,
                       const void* pixels, int pitch, uint32_t width,
                       uint32_t height);
+// miracle.cpp and spell_book.cpp: no test of the mod in a save (see
+// h_SaveAllGame).
+void MiracleBeforeSave();
+void SpellBookBeforeSave();
+void SpellBookAfterSave();
 
 namespace {
 
@@ -3085,10 +3090,18 @@ void ExitPathInstall();
 typedef int(__cdecl* SaveAllGameFn)(char* path);
 const uintptr_t kSaveAllGame = 0x00558160;
 SaveAllGameFn o_SaveAllGame = nullptr;
+bool g_save_hooked = false;
 int g_save_logs = 0;
 const int kMaxSaveLogs = 20;
 
+// NO TEST OF THE MOD IN A SAVE (docs/miracles.md, "What a save keeps"). Before
+// each save the game deletes the orbs of all miracles that lie on the land
+// (miracle.cpp), and each Worship Site gets back its limit of prayer power
+// (spell_book.cpp). After the save the switch "Unlock all" sets the limit off
+// again.
 int __cdecl h_SaveAllGame(char* path) {
+  MiracleBeforeSave();
+  SpellBookBeforeSave();
   LARGE_INTEGER t0, t1, hz;
   QueryPerformanceFrequency(&hz);
   QueryPerformanceCounter(&t0);
@@ -3098,6 +3111,7 @@ int __cdecl h_SaveAllGame(char* path) {
   const bool held =
       card && session && g_screen->HoldCard(bwvr::kCardHintPointing, layer);
   const int result = o_SaveAllGame(path);
+  SpellBookAfterSave();
   QueryPerformanceCounter(&t1);
   if (g_save_logs < kMaxSaveLogs) {
     ++g_save_logs;
@@ -3122,8 +3136,10 @@ void SaveCardInstall() {
       MH_CreateHook(target, reinterpret_cast<void*>(&h_SaveAllGame),
                     reinterpret_cast<void**>(&o_SaveAllGame));
   if (status == MH_OK) status = MH_EnableHook(target);
+  g_save_hooked = status == MH_OK;
   ModLog("hooks        : GameOSFile::SaveAllGame at 0x%08X %s (the card of "
-         "a save)", static_cast<unsigned>(kSaveAllGame),
+         "a save, and no test of the mod in a save)",
+         static_cast<unsigned>(kSaveAllGame),
          status == MH_OK ? "ok" : "FAILED");
 }
 
@@ -3351,6 +3367,10 @@ void EndOfDll(bool process_ends) {
 }
 
 }  // namespace
+
+// miracle.cpp: the mod sees each save, so it can keep its test objects out
+// of it.
+bool ModSaveHooked() { return g_save_hooked; }
 
 // The test key of xr_vulkan_upload (stereo.cpp, Shift Z). It changes the
 // key for the next session too.

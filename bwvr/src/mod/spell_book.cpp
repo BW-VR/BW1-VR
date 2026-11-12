@@ -1500,6 +1500,42 @@ void UndoAll(uint64_t frame) {
   g_flag_count = 0;
 }
 
+// THE SAVE. A save writes the flag of no limit of each Worship Site. So
+// before each save the sites get the flags that they had before the switch,
+// and after the save the switch sets them again. The miracles that the towns
+// know stay in the save (see docs/miracles.md, "What a save keeps").
+int g_flags_for_save = 0;
+
+void FlagsForSave(bool before_save) {
+  GameNow g;
+  if (g_flag_count == 0 || !ReadGame(&g)) {
+    g_flags_for_save = 0;
+    return;
+  }
+  uint8_t* sites[kSites];
+  const int site_count = Sites(g.player, sites);
+  int changed = 0;
+  for (int k = 0; k < g_flag_count; ++k) {
+    for (int s = 0; s < site_count; ++s) {
+      if (sites[s] != g_flags[k].site) continue;
+      int32_t* flag = reinterpret_cast<int32_t*>(sites[s] + kSiteNoLimit);
+      const int32_t want = before_save ? g_flags[k].before : 1;
+      if (*flag != want) {
+        *flag = want;
+        ++changed;
+      }
+    }
+  }
+  if (before_save) g_flags_for_save = changed;
+  if (changed > 0 && LogRoom()) {
+    ModLog("spell book   : debug_all_miracles=1: %s, %d Worship Sites %s the "
+           "flag of no limit of prayer power that they had before the "
+           "switch, frame %llu",
+           before_save ? "before the save" : "after the save", changed,
+           before_save ? "get back" : "lose again", ControllersFrameCount());
+  }
+}
+
 // --- the frame -------------------------------------------------------------------
 
 const char* const kCloseWords[] = {
@@ -2457,6 +2493,17 @@ void SpellBookAllChange(const char* by) {
                  "game and no limit of prayer power (a test)"
                : "", ControllersFrameCount());
   if (!g_all) UndoAll(ControllersFrameCount());
+}
+
+void SpellBookBeforeSave() {
+  ReadSettings();
+  FlagsForSave(true);
+}
+
+void SpellBookAfterSave() {
+  if (!g_all || g_flags_for_save == 0) return;
+  FlagsForSave(false);
+  g_flags_for_save = 0;
 }
 
 int SpellBookAllBookValue() {

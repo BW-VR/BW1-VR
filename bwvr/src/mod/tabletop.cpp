@@ -83,6 +83,7 @@
 #include "debug_menu.h"
 #include "hint_card.h"
 #include "hint_learn_math.h"
+#include "miracle.h"
 #include "table_math.h"
 #include "tabletop.h"
 #include "solid_math.h"
@@ -316,6 +317,7 @@ const float kPanStepUnits = 2.0f;
 const uintptr_t kClearMap = 0x00552BB0;
 typedef void(__fastcall* ClearMapFn)(void* game, void* unused);
 ClearMapFn o_ClearMap = nullptr;
+bool g_clear_map_hooked = false;
 
 typedef void(__fastcall* BlockCullFn)(uint8_t* block);
 typedef void(__cdecl* SkyDrawFn)();
@@ -3318,6 +3320,8 @@ void __cdecl h_SkyDraw() {
 // ground height.
 void __fastcall h_ClearMap(void* game, void* unused) {
   o_ClearMap(game, unused);
+  // The list of the orbs of all miracles is stale now (miracle.cpp).
+  MiracleMapCleared();
   if (!g_installed) return;
   g_have_table = false;
   g_build_cause = "a load or a new game";
@@ -3466,6 +3470,10 @@ void TabletopSetOptions(const TabletopSettings& settings) {
   if (high > 1000) high = 1000;
 }
 
+// miracle.cpp: the hook of GGame::ClearMap is in, so the list of the orbs of
+// all miracles goes at each load, new game and new land.
+bool TabletopClearMapWatched() { return g_clear_map_hooked; }
+
 // Only when play_mode picks the table. With any other play mode, nothing in
 // this file is hooked and nothing is written.
 void TabletopInstall() {
@@ -3499,8 +3507,9 @@ void TabletopInstall() {
     return;
   }
   // Both the table and the God view are built again after a load.
-  Hook(kClearMap, reinterpret_cast<void*>(&h_ClearMap),
-       reinterpret_cast<void**>(&o_ClearMap), "GGame::ClearMap");
+  g_clear_map_hooked =
+      Hook(kClearMap, reinterpret_cast<void*>(&h_ClearMap),
+           reinterpret_cast<void**>(&o_ClearMap), "GGame::ClearMap");
   // THE GOD VIEW has no edge: no block cull, no sky hook and no sea disc.
   // The near plane is in near_plane.cpp.
   if (g_settings.god) {

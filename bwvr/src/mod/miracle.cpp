@@ -68,6 +68,13 @@ bool ControllersCardPose(int which, float grip_position[3],
                          float grip_orientation[4], float head[3], bool* left);
 bool ControllersHeadTurn(float out[4]);
 void ControllersGrabPulse(int hands, float amplitude, float seconds);
+// tabletop.cpp: the hook of GGame::ClearMap is in.
+bool TabletopClearMapWatched();
+// mod_main.cpp: the hook of GameOSFile::SaveAllGame is in.
+bool ModSaveHooked();
+// spell_book.cpp: the flags of the Worship Sites before and after a save.
+void SpellBookBeforeSave();
+void SpellBookAfterSave();
 // head_pose.cpp: game units in a real meter.
 float HeadPoseScale();
 // hand_direct.cpp
@@ -297,9 +304,14 @@ int g_test_seed_count = 0;
 // asks for a cancel, as a shake does.
 uint64_t g_test_cancels[kMaxTestSeeds];
 int g_test_cancel_count = 0;
-// The test key miracle_test_orbs: the frame at which the orbs of all
+// The test key miracle_test_orbs: the frames at which the orbs of all
 // miracles go onto the land, as the debug row "Spawn orbs" puts them.
-uint64_t g_test_orbs = 0;
+const int kMaxTestOrbs = 4;
+uint64_t g_test_orbs[kMaxTestOrbs] = {};
+int g_test_orb_count = 0;
+// The test key miracle_test_save_steps: the frame at which the mod deletes
+// the orbs as it does before a save, with no save.
+uint64_t g_test_save_steps = 0;
 
 bool IniPath(char path[MAX_PATH]) {
   const DWORD length = GetModuleFileNameA(nullptr, path, MAX_PATH);
@@ -858,10 +870,20 @@ void Init() {
     g_test_cancels[g_test_cancel_count++] = static_cast<uint64_t>(frame);
     p += used;
   }
-  g_test_orbs = static_cast<uint64_t>(IniInt("miracle_test_orbs", 0));
-  if (g_test_orbs > 0) {
+  IniText("miracle_test_orbs", text, sizeof(text));
+  for (const char* p = text; *p != 0 && g_test_orb_count < kMaxTestOrbs;) {
+    while (*p == ' ' || *p == ',') ++p;
+    int frame = 0, used = 0;
+    if (sscanf_s(p, "%d%n", &frame, &used) < 1 || used == 0) break;
+    g_test_orbs[g_test_orb_count++] = static_cast<uint64_t>(frame);
+    p += used;
+  }
+  g_test_save_steps =
+      static_cast<uint64_t>(IniInt("miracle_test_save_steps", 0));
+  if (g_test_orb_count > 0) {
     ModLog("miracle      : test key miracle_test_orbs: the orbs of all "
-           "miracles go onto the land at frame %llu", g_test_orbs);
+           "miracles go onto the land at %d frames, the first at frame %llu",
+           g_test_orb_count, g_test_orbs[0]);
   }
   if (g_test_seed_count > 0) {
     ModLog("miracle      : test key miracle_test_seeds: %d one-off seeds, the "
@@ -1001,19 +1023,52 @@ void TestSeeds() {
 // one with OneOffSpellSeed::Create, as a script (SCRIPT_OBJECT_TYPE_ONE_SHOT_
 // SPELL) or a spell dispenser makes a seed. So each orb is an object of the
 // running game: the grip carries it, a short press or the trigger makes it
-// active, the Creature can eat it, and a save of the game keeps it
-// (OneOffSpellSeed::Save). A press makes only the orbs that are gone: an orb
-// that the Hand used, or that the game deleted, has no vtable of
-// OneOffSpellSeed any more.
+// active, and the Creature can eat it. A press makes only the orbs that are
+// gone: an orb that the Hand used, or that the game deleted, is marked to be
+// deleted (GameThing+0xA bit 1) or has no vtable of OneOffSpellSeed any more.
+//
+// NO ORB IN A SAVE. The game writes a save of the orb (OneOffSpellSeed::Save),
+// and it saves by itself at the exit and in its auto saves. So before each
+// save (GameOSFile::SaveAllGame, the one writer of each save, mod_main.cpp)
+// the mod deletes each orb of its list that lies on the land, with the
+// game's own delete of a one-off seed: the virtual ToBeDeleted(0) (slot 0xC,
+// OneOffSpellSeed::ToBeDeleted 0x0072A420), as OneOffSpellSeed::InterfaceTap
+// deletes a seed after its tap. That takes the seed off the map and out of
+// the lists of the game (MobileObject::ToBeDeleted), and the next
+// GameThing::ProcessDeadList of the game frees it. An orb that the Hand
+// holds stays. The game clears the map before each load, each new game and
+// each new land (GGame::ClearMap): the list of the mod is then stale, so the
+// mod drops it and deletes nothing.
 const int kInfoOn = 0x17C;
+const int kThingFlags = 0xA;         // GameThing: bit 1, to be deleted
+const int kSlotToBeDeleted = 0xC;    // the vtable slot of ToBeDeleted(int)
+typedef void(__fastcall* ToBeDeletedFn)(void* self, void* unused, int now);
+const uintptr_t kOneOffToBeDeleted = 0x0072A420;
 void* g_orbs[kSeedTypes] = {};
+// The unique id of each orb: the object heap of the game keeps it in the
+// dword before the object (UniqueKeyHeap::GetKeyFromAddress 0x007E19E0), and
+// a new object at the same address gets a new id. The game tests a pointer
+// in the same way (UniqueKeyHeap::IsUniqueIdAtAddressTheSame).
+uint32_t g_orb_ids[kSeedTypes] = {};
 int g_orb_logs = 0;
+
+uint32_t IdOf(const void* object) {
+  const uint8_t* key = static_cast<const uint8_t*>(object) - 4;
+  return IsBadReadPtr(key, 4) ? 0 : *reinterpret_cast<const uint32_t*>(key);
+}
+// The orbs that the last removal deleted, for the check of the test key
+// miracle_test_save_steps some frames later.
+void* g_removed[kSeedTypes] = {};
+int g_removed_count = 0;
+uint64_t g_removed_check = 0;
 
 bool OrbLives(int type) {
   const uint8_t* orb = static_cast<const uint8_t*>(g_orbs[type]);
   return orb != nullptr && !IsBadReadPtr(orb, kOneOffType + 4) &&
+         IdOf(orb) == g_orb_ids[type] &&
          *reinterpret_cast<const uintptr_t*>(orb) == kOneOffTable &&
-         *reinterpret_cast<const int32_t*>(orb + kOneOffType) == type;
+         *reinterpret_cast<const int32_t*>(orb + kOneOffType) == type &&
+         (orb[kThingFlags] & 1) == 0;
 }
 
 bool SeedTypeOn(int type) {
@@ -1027,6 +1082,16 @@ void SpawnOrbs(const char* by) {
                  sizeof(kCreateOneOffBytes))) {
     ModLog("miracle      : %s: OneOffSpellSeed::Create does not have the "
            "bytes of the disassembly, so no orb is made, frame %llu", by,
+           g_frame);
+    return;
+  }
+  // The list must go when the game clears the map, so the mod makes orbs
+  // only while the hook of GGame::ClearMap is in (tabletop.cpp).
+  if (!TabletopClearMapWatched() || !ModSaveHooked()) {
+    ModLog("miracle      : %s: the mod does not see %s, so no orb is made, "
+           "frame %llu", by,
+           !ModSaveHooked() ? "each save (GameOSFile::SaveAllGame)"
+                            : "GGame::ClearMap (no God view and no table)",
            g_frame);
     return;
   }
@@ -1075,12 +1140,16 @@ void SpawnOrbs(const char* by) {
     }
     g_orbs[type] = reinterpret_cast<CreateOneOffFn>(kCreateOneOff)(
         &coords, type, 0, 1.0f);
-    if (g_orbs[type] != nullptr) ++made;
+    if (g_orbs[type] != nullptr) {
+      g_orb_ids[type] = IdOf(g_orbs[type]);
+      ++made;
+    }
     if (g_orb_logs < 60) {
       ++g_orb_logs;
-      ModLog("miracle      : the game made the orb %p of %s (seed type %d) on "
-             "the land at %.1f %.1f, %.0f cm of the room from the head, frame "
-             "%llu", g_orbs[type], SeedName(type), type, world[0], world[2],
+      ModLog("miracle      : the game made the orb %p (unique id %u) of %s "
+             "(seed type %d) on the land at %.1f %.1f, %.0f cm of the room "
+             "from the head, frame %llu", g_orbs[type], g_orb_ids[type],
+             SeedName(type), type, world[0], world[2],
              sqrtf((flat[0] - head[0]) * (flat[0] - head[0]) +
                    (flat[1] - head[2]) * (flat[1] - head[2])) * 100.0f,
              g_frame);
@@ -1090,8 +1159,73 @@ void SpawnOrbs(const char* by) {
   ModLog("miracle      : %s: the orbs of all miracles: %d seed types are on in "
          "the game, the game made %d orbs with OneOffSpellSeed::Create, %d "
          "orbs were still on the land, and %d places were not land. %.1f "
-         "units a meter of the room. A save of the game keeps the orbs, "
+         "units a meter of the room. Before each save the mod deletes them, "
          "frame %llu", by, count, made, kept, sea, units, g_frame);
+}
+
+// Before a save: the game deletes each orb of the list that lies on the
+// land. An orb in the Hand stays. The list is empty after it.
+void RemoveOrbs(const char* why) {
+  Facts f;
+  const bool facts = ReadFacts(&f);
+  int removed = 0, held = 0, gone = 0;
+  g_removed_count = 0;
+  for (int t = 0; t < kSeedTypes; ++t) {
+    if (g_orbs[t] == nullptr) continue;
+    if (!OrbLives(t)) {
+      ++gone;
+      g_orbs[t] = nullptr;
+      continue;
+    }
+    if (facts && f.held == g_orbs[t]) {
+      ++held;
+      g_orbs[t] = nullptr;
+      continue;
+    }
+    void* orb = g_orbs[t];
+    if (reinterpret_cast<uintptr_t>(VTable(orb)[kSlotToBeDeleted / 4]) !=
+        kOneOffToBeDeleted) {
+      continue;
+    }
+    reinterpret_cast<ToBeDeletedFn>(VTable(orb)[kSlotToBeDeleted / 4])(
+        orb, nullptr, 0);
+    g_removed[g_removed_count++] = orb;
+    ++removed;
+    g_orbs[t] = nullptr;
+  }
+  int left = 0;
+  for (int t = 0; t < kSeedTypes; ++t) {
+    if (g_orbs[t] != nullptr) ++left;
+  }
+  if (removed + held + gone + left > 0) {
+    ModLog("miracle      : %s: the game deleted %d orbs of all miracles that "
+           "lay on the land (ToBeDeleted), so no save holds them. %d orbs "
+           "were in the Hand and stay, %d were gone already, and %d orbs of "
+           "the list are left, frame %llu", why, removed, held, gone, left,
+           g_frame);
+  }
+}
+
+// The test key miracle_test_save_steps: 30 frames after the removal, each
+// orb that it deleted is marked to be deleted or freed.
+void CheckRemoved() {
+  g_removed_check = 0;
+  int left = 0;
+  for (int i = 0; i < g_removed_count; ++i) {
+    const uint8_t* orb = static_cast<const uint8_t*>(g_removed[i]);
+    if (orb != nullptr && !IsBadReadPtr(orb, kOneOffType + 4) &&
+        *reinterpret_cast<const uintptr_t*>(orb) == kOneOffTable &&
+        (orb[kThingFlags] & 1) == 0) {
+      ++left;
+    }
+  }
+  int listed = 0;
+  for (int t = 0; t < kSeedTypes; ++t) {
+    if (g_orbs[t] != nullptr) ++listed;
+  }
+  ModLog("miracle      : test: 30 frames after the removal, %d of the %d "
+         "deleted orbs are still on the land, and the list has %d orbs, "
+         "frame %llu", left, g_removed_count, listed, g_frame);
 }
 
 // --- the cancel -------------------------------------------------------------
@@ -1342,15 +1476,49 @@ void MiracleOrbsChange(const char* by) {
   SpawnOrbs(by);
 }
 
+void MiracleBeforeSave() {
+  if (!g_ready) return;
+  RemoveOrbs("the game starts a save");
+}
+
+void MiracleMapCleared() {
+  int dropped = 0;
+  for (int t = 0; t < kSeedTypes; ++t) {
+    if (g_orbs[t] != nullptr) ++dropped;
+    g_orbs[t] = nullptr;
+  }
+  g_removed_count = 0;
+  g_removed_check = 0;
+  if (dropped > 0) {
+    ModLog("miracle      : the game cleared the map (a load, a new game or a "
+           "new land), so the mod drops its list of %d orbs and deletes "
+           "nothing, frame %llu", dropped, g_frame);
+  }
+}
+
 void MiracleFrame() {
   Init();
   g_frame = ControllersFrameCount();
   PollKey();
   TestSeeds();
   // The orbs of all miracles of the test key, as the debug row makes them.
-  if (g_test_orbs > 0 &&
-      ControllersTestFrame(g_test_orbs, g_frame) == g_test_orbs) {
-    SpawnOrbs("test key miracle_test_orbs");
+  for (int i = 0; i < g_test_orb_count; ++i) {
+    if (ControllersTestFrame(g_test_orbs[i], g_frame) == g_test_orbs[i]) {
+      SpawnOrbs("test key miracle_test_orbs");
+    }
+  }
+  // The steps before a save and after it, with no save
+  // (miracle_test_save_steps): the steps after it come 30 frames later.
+  if (g_test_save_steps > 0 &&
+      ControllersTestFrame(g_test_save_steps, g_frame) ==
+          g_test_save_steps) {
+    RemoveOrbs("test key miracle_test_save_steps, as before a save");
+    SpellBookBeforeSave();
+    g_removed_check = g_frame + 30;
+  }
+  if (g_removed_check != 0 && g_frame >= g_removed_check) {
+    CheckRemoved();
+    SpellBookAfterSave();
   }
   Facts f;
   // The log of each change also with the key off, so a log shows the fault.

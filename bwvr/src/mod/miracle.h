@@ -33,6 +33,14 @@ bool MiraclePlacesHand();
 int MiracleOrbsValue();
 void MiracleOrbsChange(const char* by);
 
+// mod_main.cpp, at the start of GameOSFile::SaveAllGame: the game deletes
+// each of these orbs that lies on the land, so no save holds them.
+void MiracleBeforeSave();
+
+// tabletop.cpp, after GGame::ClearMap (a load, a new game, a new land): the
+// list of the orbs is stale, so the mod drops it and deletes nothing.
+void MiracleMapCleared();
+
 // hand_direct.cpp: a miracle is in the Hand, so the draw must offer the
 // objects in the cone of the aim to the pick, as it does for a far grab.
 bool MiracleWantsCone();

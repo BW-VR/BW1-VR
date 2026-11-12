@@ -552,8 +552,9 @@ chants from a site.
   that the game has off makes a seed that casts the magic type of its info
   (26, Freeze, for the most of them), so the mod does not offer them.
 - `OneOffSpellSeed::Create`: one object of each of the 23 seed types on the
-  land. The game's own tap makes it active, and the game saves it with the
-  game (`OneOffSpellSeed::Save`, `GAME_THING_TYPE_ONE_OFF_SPELL_SEED`).
+  land. The game's own tap makes it active. A save of the game writes each
+  one-off seed (`OneOffSpellSeed::Save`, `GAME_THING_TYPE_ONE_OFF_SPELL_SEED`),
+  so the mod deletes its own seeds before each save.
 
 ## What the mod does (`miracle_hand=1`)
 
@@ -1097,9 +1098,10 @@ the pool, the game puts the Miracle in the Hand. The take does not take
 chants from the pool, but a cancel gives the chants of the miracle back to
 it (13000 chants for Forest). So the pool gets larger with each cancel
 while the switch is on. The switch at 0 puts the flags of the sites back.
-The miracles that the towns know stay. A save of the game made while the
-switch is on keeps the miracles of the towns, the icons and the flags of
-the sites. The switch itself writes nothing to a saved game.
+The miracles that the towns know stay. **A save of the game made while the
+switch is on, or after it was on, keeps the miracles of the towns and the
+icons of the sites**, also the save at the exit. The flags of the sites do
+not go into a save (see "What a save keeps"). The note of the row says so.
 
 ### The book of all miracles (`debug_all_book=1`)
 
@@ -1158,12 +1160,18 @@ The code is `SpawnOrbs` in `miracle.cpp`, with the places in
   has Storm, Forest, Fireball and so on.
 - Each orb is an object of the running game. The grip carries it, a short
   press or the trigger makes it active ("A seed that the Hand carries"), and
-  the Creature can eat it. A save of the game keeps the orbs that are on the
-  land, so the note of the row says so.
+  the Creature can eat it. No save holds an orb that lies on the land (see
+  "What a save keeps").
 - A press makes only the orbs that are gone. An orb that the Hand used, or
-  that the game deleted, has no vtable of `OneOffSpellSeed` any more. The
-  row is a toggle: "all out" while each orb of the mod is on the land, and
-  "not all" while one is gone. A press anywhere on the row makes the orbs.
+  that the game deleted, is marked to be deleted (`GameThing+0xA` bit 1), or
+  its unique id changed (the dword before the object, which the object heap
+  of the game gives each new object), or it has no vtable of
+  `OneOffSpellSeed` any more. The row is a toggle: "all out" while each orb
+  of the mod is on the land, and "not all" while one is gone. A press
+  anywhere on the row makes the orbs.
+- The row makes orbs only while the mod sees each save
+  (`GameOSFile::SaveAllGame`) and each clear of the map (`GGame::ClearMap`,
+  the God view and the table). Else the log says why, and no orb comes.
 - The debug window and the ring run in the frame of the controllers, on the
   thread of the frame of the mod, where the test seeds come too. The log line `the orbs of
   all miracles` gives the count that the game made, the orbs that were still
@@ -1173,6 +1181,45 @@ The code is `SpawnOrbs` in `miracle.cpp`, with the places in
 The row needs no switch "Unlock all", no Worship Site and no influence. A
 one-off seed makes its miracle active only inside the influence of the
 player (the tap of the game).
+
+### What a save keeps
+
+The game saves by itself: at the exit (slot 20, "Auto Save On Exit",
+`backend.md`, "The start of the game"), in its auto saves, in the Save Game
+Room and with the quick save. Each of these goes through
+`GameOSFile::SaveAllGame` (`0x00558160`): `SaveGameRoom::InstantSaveGame`
+calls it, and so do `0x00792ED3` and `0x00636105` [V]. The mod hooks it
+(`h_SaveAllGame` in `mod_main.cpp`, with the card "Saving..."). What the
+debug mode leaves in the game, and what a save keeps:
+
+| What | Does a save keep it | What the mod does |
+| --- | --- | --- |
+| The orbs of "Spawn orbs" on the land | No | Before each save the game deletes each orb of the list of the mod that lies on the land, with the delete of a one-off seed (the virtual `ToBeDeleted(0)`, slot `0xC`, `OneOffSpellSeed::ToBeDeleted` `0x0072A420`), as `OneOffSpellSeed::InterfaceTap` deletes a seed after its tap. That takes the seed off the map and out of the lists of the game (`MobileObject::ToBeDeleted`), and the next `GameThing::ProcessDeadList` of the game frees it. The list is then empty, and the row says "not all". A press after the save makes the orbs again. The log line `the game starts a save: the game deleted N orbs of all miracles` gives the count |
+| An orb in the Hand at the save | Yes [I] | The orb stays in the Hand, and the mod drops it from its list. It is a seed as a reward bubble of the game is |
+| The flag of no limit of prayer power of each Worship Site | No | Before each save each site gets back the flag that it had before the switch, and after the save the switch sets it again. The log lines `before the save, N Worship Sites get back the flag` and `after the save, N Worship Sites lose again the flag` |
+| The magic types that the towns know, and the icons of the Worship Sites | **Yes** | Nothing. See below |
+| The chants that a cancel gives back to a site | **Yes** | Nothing. While the switch is on, each cancel of a miracle of a site adds its chants to the pool of the site |
+| A miracle that `CreateSpellIntoHand` put in the Hand | Yes [I] | Nothing. It is the same `SpellSeed` that the tap of a reward bubble makes, with a full store of chants |
+
+**Why the mod does not take the miracles of the towns back.** The game has
+the inverse function, `Town::RemoveMagicTypesHeld` (`0x0073D450`). It
+clears the flag of the town (`Town+0xDFC`), turns the magic type off for
+the player (`GPlayer::SetMagicTypeEnabled`) and takes the icon off the
+Village Centre. But the icons of a Worship Site are objects with their own
+chants (`WorshipSpellIcon+0x134`) and their charge, and a seed in the Hand
+can belong to one. A removal and a new add around each save would delete
+these icons and their chants, and turn a magic type off for the player that
+another town of the player holds too. That is not safe. So a save that the
+game makes while "Unlock all" is on, or after it was on, keeps the miracles
+of the towns. The note of the row says so.
+
+When the game clears the map (a load, a new game, a new land:
+`GGame::ClearMap`, hooked in `tabletop.cpp`), the list of the orbs is stale.
+The mod drops it and deletes nothing (`MiracleMapCleared`).
+
+The test key `miracle_test_save_steps` runs the steps before a save at its
+frame, with no save, and the steps after a save 30 frames later. The recipe
+`village_run.ps1 -Kind orbsave` uses it.
 
 ### The trail at the fingertip (`gesture_trail=1`)
 
@@ -1668,8 +1715,11 @@ Test keys for the desktop runs only (the launcher removes them):
   Hand (`OneOffSpellSeed::Create`).
 - `miracle_test_cancel`: a list of frames. At each one the mod asks for a
   cancel.
-- `miracle_test_orbs`: a frame. At that frame the orbs of all miracles go
-  onto the land, as the row "Spawn orbs" puts them.
+- `miracle_test_orbs`: up to 4 frames. At each one the orbs of all miracles
+  go onto the land, as the row "Spawn orbs" puts them.
+- `miracle_test_save_steps`: a frame. At that frame the mod makes the steps
+  before a save, with no save, and 30 frames later the steps after a save
+  and a check of the deleted orbs (see "What a save keeps").
 - `spell_book_test_items`: for each word `book` in turn, the item that the
   word steps the hand to, for example `11 15`.
 - `influence_stream_test_log=1`: a log line for each stream of light of the
@@ -1724,8 +1774,12 @@ The tag `miracle` has one line for each change:
 
 - The keys at the start, and each press of the A/B key.
 - "the orbs of all miracles: N seed types are on in the game, the game made
-  N orbs ...", and "the game made the orb ... of Storm (seed type 0) on the
-  land at x z, N cm of the room from the head".
+  N orbs ...", and "the game made the orb ... (unique id N) of Storm (seed
+  type 0) on the land at x z, N cm of the room from the head".
+- "the game starts a save: the game deleted N orbs of all miracles that lay
+  on the land (ToBeDeleted), so no save holds them ...", and "the game
+  cleared the map ..., so the mod drops its list of N orbs and deletes
+  nothing".
 - "the Hand holds the one-off seed ... as an object".
 - "... is active in the Hand", with the seed, the power up, where it comes
   from, how it is cast, and the Hand state.

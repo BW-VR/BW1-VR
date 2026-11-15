@@ -353,6 +353,8 @@ int SpellBookPointValue();
 void SpellBookPointChange(const char* by);
 int SpellBookTapValue();
 void SpellBookTapChange(const char* by);
+int SpellBookRingValue();
+void SpellBookRingChange(const char* by);
 int SpellBookPalmValue();
 void SpellBookPalmChange(const char* by);
 // The sheet of the gestures over the palm (gesture_sheet.cpp).
@@ -361,6 +363,10 @@ void GestureSheetChange(const char* by);
 // A hand in front of the page of the book and of the ring (hand_cut.cpp).
 int HandCutValue();
 void HandCutChange(const char* by);
+int HandCutSidesValue();
+void HandCutSidesChange(const char* by);
+int HandCutBallValue();
+void HandCutBallChange(const char* by);
 int HandCutSolidValue();
 void HandCutSolidChange(const char* by);
 // The draw of a gesture (controllers.cpp, overlay.cpp).
@@ -693,6 +699,12 @@ const Switch kSwitches[] = {
     {kGroupInterface, L"Hand solid", L"A hand over the book is solid",
      "card_hand_solid", HandCutSolidValue, HandCutSolidChange,
      L"hint look|solid"},
+    {kGroupInterface, L"Hand cut sides", L"Both sides of the hand cut the page",
+     "card_hand_both_sides", HandCutSidesValue, HandCutSidesChange,
+     L"facing|both"},
+    {kGroupInterface, L"Orb cut", L"A pulled orb cuts the page for each eye",
+     "card_ball_cut", HandCutBallValue, HandCutBallChange,
+     L"round hole|each eye"},
 
     // Hand
     {kGroupHand, L"Catch moving", L"Reach for an object that moves",
@@ -864,6 +876,9 @@ const Switch kSwitches[] = {
      "spell_book_palm", SpellBookPalmValue, SpellBookPalmChange, L"off|on"},
     {kGroupMiracles, L"Gesture sheet", L"The palm shows the gestures",
      "gesture_sheet", GestureSheetValue, GestureSheetChange, L"off|on"},
+    {kGroupMiracles, L"Book ring", L"The miracles of the book on a ring",
+     "spell_book_ring", SpellBookRingValue, SpellBookRingChange,
+     L"rows|ring"},
     {kGroupMiracles, L"Book orbs", L"The game's orbs in the spell book",
      "spell_book_orbs", SpellBookOrbsValue, SpellBookOrbsChange,
      L"pictures|orbs"},
@@ -1202,6 +1217,12 @@ const wchar_t* const kTips[] = {
     // Hand solid
     L"Solid: a hand in front of the page of the spell book or of the ring has "
     L"its full opacity. Hint look: it stays faint while a hint shows in it.",
+    // Hand cut sides
+    L"Both: each part of a hand in front of the page cuts the page, on both "
+    L"sides. Facing: only the parts that face the eye.",
+    // Orb cut
+    L"Each eye: an orb that you pull out of the book cuts the page only where "
+    L"each eye sees the orb. Round hole: one larger hole for both eyes.",
     // Catch moving
     L"Extra reach for an object that moves. Pick: on the pick reach only. "
     L"Rest: on all of the reach at rest. Open: as Rest, the guard ends at an "
@@ -1408,6 +1429,9 @@ const wchar_t* const kTips[] = {
     // Gesture sheet
     L"On: the palm that turns up shows how to draw each miracle of your "
     L"Worship Sites, with the pictures of the game. Off: no sheet.",
+    // Book ring
+    L"Ring: up to 6 miracles on a ring, the first at the top, and the seals "
+    L"Back and Next in its middle. Rows: rows of 3, and the seals below.",
     // Book orbs
     L"Orbs: each cell of the spell book shows the orb of the game, the glass "
     L"ball with the miracle in it. Pictures: a flat picture with the gestures.",

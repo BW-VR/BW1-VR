@@ -86,7 +86,9 @@ int SpellBookAllValue();
 void SpellBookAllChange(const char* by);
 int SpellBookAllBookValue();
 void SpellBookAllBookChange(const char* by);
-// spell_book_b and spell_book_palm.
+// spell_book_b, spell_book_palm and spell_book_ring.
+int SpellBookRingValue();
+void SpellBookRingChange(const char* by);
 int SpellBookTapValue();
 void SpellBookTapChange(const char* by);
 int SpellBookPalmValue();

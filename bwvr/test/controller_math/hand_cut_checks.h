@@ -117,6 +117,39 @@ inline void HandCutChecks() {
        1e-6);
   Near("and clear past its edge", MarkCover(5.0f, 4.0f), 0.0, 1e-6);
   Near("and half at its edge", MarkCover(4.0f, 4.0f), 0.5, 1e-6);
+
+  // THE BALL OF A PULL on a page 40 cm in front of the eye, facing it.
+  {
+    Page p;
+    const float c[3] = {0.0f, 0.0f, -0.40f};
+    const float r[3] = {1.0f, 0.0f, 0.0f};
+    const float u[3] = {0.0f, 1.0f, 0.0f};
+    const float n[3] = {0.0f, 0.0f, 1.0f};
+    memcpy(p.center, c, sizeof(c));
+    memcpy(p.right, r, sizeof(r));
+    memcpy(p.up, u, sizeof(u));
+    memcpy(p.normal, n, sizeof(n));
+    const float eye[3] = {0.0f, 0.0f, 0.0f};
+    float x = 0.0f, y = 0.0f, rad = 0.0f;
+    const float on[3] = {0.05f, 0.02f, -0.40f};
+    Check(BallOnPage(eye, p, on, 0.03f, &x, &y, &rad) &&
+              fabsf(x - 0.05f) < 1e-5f && fabsf(y - 0.02f) < 1e-5f &&
+              fabsf(rad - 0.03f) < 1e-5f,
+          "a ball on the page has a disc of its own size at its place", 0, 0);
+    const float half[3] = {0.05f, 0.0f, -0.20f};
+    Check(BallOnPage(eye, p, half, 0.03f, &x, &y, &rad) &&
+              fabsf(x - 0.10f) < 1e-5f && fabsf(rad - 0.06f) < 1e-5f,
+          "a ball half way to the eye has a disc two times as far out and as "
+          "large: the ball covers it", 0, 0);
+    const float right_eye[3] = {0.032f, 0.0f, 0.0f};
+    const float middle[3] = {0.0f, 0.0f, -0.20f};
+    Check(BallOnPage(right_eye, p, middle, 0.03f, &x, &y, &rad) &&
+              fabsf(x + 0.032f) < 1e-5f,
+          "each eye has the disc where that eye sees the ball", 0, 0);
+    const float behind[3] = {0.0f, 0.0f, -0.45f};
+    Check(!BallOnPage(eye, p, behind, 0.03f, &x, &y, &rad),
+          "a ball behind the page has no disc", 0, 0);
+  }
 }
 
 }  // namespace hand_cut_checks

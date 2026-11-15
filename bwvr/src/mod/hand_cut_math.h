@@ -82,6 +82,31 @@ inline bool OntoPage(const float eye[3], const Page& p, const float point[3],
   return true;
 }
 
+// A ball in front of the page, as one eye sees it on the page: the middle
+// of its disc (x to the right and y up, in meters from the middle of the
+// page) and its radius. The disc is the ball itself as that eye sees it, so
+// a hole of this disc is covered by the ball in the eye picture of that eye.
+// False when no part of the ball is in front of the page, or the eye is not
+// in front of it.
+inline bool BallOnPage(const float eye[3], const Page& p, const float ball[3],
+                       float radius, float* x, float* y, float* r) {
+  const float fe = Front(p, eye);
+  const float fb = Front(p, ball);
+  if (!(fe > 0.01f) || !(radius > 0.0f) || fb <= -radius ||
+      fb >= fe - 0.001f) {
+    return false;
+  }
+  const float k = fe / (fe - fb);
+  float on[3];
+  for (int i = 0; i < 3; ++i) {
+    on[i] = eye[i] + (ball[i] - eye[i]) * k - p.center[i];
+  }
+  *x = Dot(on, p.right);
+  *y = Dot(on, p.up);
+  *r = radius * k;
+  return true;
+}
+
 // The span of a convex polygon of n points on the line y = sy: *x0 to *x1.
 // False when the line does not meet the polygon.
 inline bool SpanAt(const float (*pt)[2], int n, float sy, float* x0,

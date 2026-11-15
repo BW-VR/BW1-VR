@@ -49,19 +49,21 @@ These items come before the other work.
   turns a second (`throw_turn`, `throw.md`, "The turn of a thrown
   object"). The cap acts in 0 steps there. The table of `throw.md` for a
   tree and a rock needs a run in which each throw lands on the land.
-- **P20. The spell book: the open parts.** X opens a spell book over the
-  hand that does not point, and the pointing hand pulls a miracle out of it
-  with the grip: the game's own request (`spell_book=1`,
-  `spell_book_pull_cm=10`, the orbs of the game in the cells
-  `spell_book_orbs=1`, `debug_all_miracles` for tests on the debug page,
-  group Miracles, `miracles.md`, "The spell book"). The recipe `village_run.ps1 -Kind book` shows the
+- **P20. The spell book: the open parts.** A tap of B (or X) opens a spell
+  book over the hand that does not point, and the pointing hand pulls a
+  miracle out of it with the grip: the game's own request (`spell_book=1`,
+  `spell_book_b=1`, `spell_book_pull_cm=20`, the orbs of the game on a ring
+  `spell_book_ring=1`, `spell_book_orbs=1`, `debug_all_miracles` for tests
+  on the debug page, group Miracles, `miracles.md`, "The spell book"). The
+  palm that turns up shows the sheet of the gestures (`gesture_sheet=1`).
+  The recipe `village_run.ps1 -Kind book` shows the
   open, the halo, the card, the pull, the spring back, the take and a
   refusal. The checks of the book, the row of gestures and the draw are in
   `headset-checks.md`, "What the owner checks", and in R12. Open:
-  - No line of a card names the draw button (B) while the Hand is empty. So a
-    player of release 1.2.0, which has no book and no row of gestures, does
-    not find how to ask for a miracle with a gesture. The tap of the grip on
-    an icon of a Worship Site works there.
+  - No line of a card says that B held down draws a gesture while the Hand
+    is empty. The sheet of the gestures shows the shapes over the palm.
+  - Only a headset shows if the sheet of the gestures is easy to read over
+    the palm, and if a tap of B opens the book with no gesture by mistake.
   - The book of all miracles (`debug_all_book=1`, 34 items on 6 pages,
     `miracles.md`, "The book of all miracles") and the debug row "Spawn all
     miracle orbs" have no desktop run yet: the recipes `village_run.ps1
@@ -320,11 +322,14 @@ keeps the mod as it is.
 **The village, the Creature and the help**
 
 - **F27. The hand in front of a page.** The page of the spell book and of
-  the ring has a hole for each eye where a hand is in front of it
-  (`card_hand_front=1`, `ui-layer.md` 28). Open: the first cut after a
-  move takes 1 to 3 ms on the test laptop (0.05 ms on average), and
-  where the texture of the game makes the palm almost clear, the land
-  shows in the hole beside the arm.
+  the ring has a hole for each eye where a hand or the bubble of a pull is
+  in front of it (`card_hand_front=1`, `card_hand_both_sides=1`,
+  `card_ball_cut=1`, `ui-layer.md` 28). Open: the first cut after a move
+  takes 1 to 3 ms on the test laptop (0.05 ms on average). Where the
+  texture of the game makes the palm almost clear, the land shows in the
+  hole beside the arm. The controller model of the hints and the hand fight
+  in depth where their surfaces meet (the owner sees it in the headset):
+  the cause in the draw of the two meshes is not found yet.
 - **F22. Words that the card never shows.** The card shows the game's
   "Drop" and "Throw" with the word of the grip (`controller-hints.md`,
   9.9). The second VR mod leaves those two words out

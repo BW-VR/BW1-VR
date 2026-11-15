@@ -3220,9 +3220,12 @@ built and before the eye passes, for each eye:
 
 1. Each triangle of the mesh of each hand (`HandModelWorldMesh`, skinned on
    the CPU in the world) goes into the LOCAL space of OpenXR, and is cut to
-   its part in front of the plane of the page (`ClipFront`). Only the
-   triangles that face the eye count: the side of the triangle nearest to
-   the eye is the side that faces it. A triangle with a vertex below 50
+   its part in front of the plane of the page (`ClipFront`). Each triangle
+   counts, on both of its sides (`card_hand_both_sides=1`), because the
+   hand draws with no culling, and a test of one side for the whole hand
+   can take the wrong side while the hand turns. With
+   `card_hand_both_sides=0` only the triangles on the side of the triangle
+   nearest to the eye count, one side for the whole hand. A triangle with a vertex below 50
    percent of opacity makes no hole. The opacity is what the draw has: the
    alpha of the texture of the game at the vertex, times the opacity of the
    hand. The texture fades the wrist and the forearm, so there the page
@@ -3239,6 +3242,15 @@ built and before the eye passes, for each eye:
    edge: each pixel takes 3 quarters of its own pixel of the mask and 1
    quarter of the next, each way.
 
+**The bubble of a pull** (`card_ball_cut=1`). While the game draws the
+bubble that the hand pulls out of the spell book (`miracles.md`, "The
+pull"), the mask of each eye also gets the disc of the ball as that eye
+sees it (`BallOnPage`: the middle of the ball on the page along the line
+from the eye, and its radius times the same scale). The ball covers its
+own hole in each eye picture, so no hole shows beside the ball, and the
+hole does not grow when the ball comes to the head. The ball alone also
+splits the card into one quad for each eye.
+
 **A solid hand** (`card_hand_solid=1`). A hand goes faint while the
 controller of a hint shows in it (`hint_hand_opacity_pct`). While a hand is
 in front of the page, it has its full opacity, so the player sees a solid
@@ -3250,8 +3262,9 @@ picture of the owner (the book or the ring) keeps its pixels: the cut keeps
 a copy of the box that it cut and puts it back in the next frame, while the
 owner gives the same pixels with the same serial. The picture of the right
 eye is copied whole only for a new picture of the owner, and else only in
-the box of its last holes. When the eyes, the page and the hands moved 0.3
-mm or less, the cut of the frame before stays, with no work. The spell book
+the box of its last holes. When the eyes, the page, 12 points spread over
+each hand and the bubble of a pull moved 0.3 mm or less, the cut of the
+frame before stays, with no work. The spell book
 draws its picture again for the mark of the pick only when the mark moves a
 pixel. The holes scale each pixel with two 32 bit products. The report line
 has the mean and the longest time of the cut, with no save of a test
@@ -3299,6 +3312,8 @@ hand cut     : this window the cut ran in 450 frames, 0.120 ms on average and 0.
 | --- | --- | --- |
 | `card_hand_front` | 1 | 0: the page of the spell book and of the ring is over the hands, also where a hand is in front of it. The switch "Hand in front" of the debug page (group Interface) |
 | `card_hand_solid` | 1 | 0: a hand in front of the page keeps the faint opacity of a hint. The switch "Hand solid" of the debug page (group Interface) |
+| `card_hand_both_sides` | 1 | 0: only the triangles on the side that faces the eye make a hole, with one side for the whole hand. The switch "Hand cut sides" of the debug page (group Interface) |
+| `card_ball_cut` | 1 | 0: the book makes one round hole for both eyes where the bubble of a pull is in front of the page. The switch "Orb cut" of the debug page (group Interface) |
 | `hand_cut_test_save` | 0 | Test key. N: saves the pictures of both eyes of the first N frames with a cut, at most one each 30 frames, as `bwvr-handcut-left-<frame>.bmp` and `bwvr-handcut-right-<frame>.bmp` |
 
 The math checks are in `test/controller_math/hand_cut_checks.h`: the cut of

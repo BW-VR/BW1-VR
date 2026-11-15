@@ -19,6 +19,15 @@
 void HandCutOffer(const bwvr::CardLayer& layer, uint8_t* right,
                   const char* who);
 
+// spell_book.cpp, in each frame that the game's bubble of a pull shows: its
+// middle in the LOCAL space and its radius, in meters. With card_ball_cut=1
+// the cut makes a hole for each eye where that eye sees the bubble in front
+// of the page, the size of the bubble, so the bubble shows over the page and
+// the page has no hole beside it. True from HandCutBallOn when the cut does
+// it: then the book makes no hole of its own.
+void HandCutBall(const float center[3], float radius_m);
+bool HandCutBallOn();
+
 // stereo.cpp: once a frame, after OverlayFrame built the hands and before
 // the eye passes, with the eye views of this frame in place.
 void HandCutFrame();
@@ -34,6 +43,11 @@ int HandCutValue();
 void HandCutChange(const char* by);
 int HandCutSolidValue();
 void HandCutSolidChange(const char* by);
+// card_hand_both_sides and card_ball_cut.
+int HandCutSidesValue();
+void HandCutSidesChange(const char* by);
+int HandCutBallValue();
+void HandCutBallChange(const char* by);
 
 // Once a report window.
 void HandCutReport();

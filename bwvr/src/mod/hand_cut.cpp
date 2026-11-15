@@ -9,7 +9,8 @@
 //
 // WHAT. Once a frame, after the hands are built (hand_model.cpp skins each
 // mesh on the CPU in the world), for each eye: each triangle of each hand
-// that faces the eye is cut to its part in front of the plane of the page
+// (on both of its sides, card_hand_both_sides=1, as the hand draws with no
+// culling) is cut to its part in front of the plane of the page
 // (hand_cut_math.h), and that part goes onto the page along the lines from
 // the eye, as the eye picture of that eye has it (the declared view of the
 // projection layer). The page gets a hole there, so the eye sees the hand
@@ -19,6 +20,12 @@
 // of the hand behind the page makes no hole, so the page stays over it. The
 // text of the page stays sharp: it is still a quad layer. When no hand is in
 // front of the page, the card goes out as one quad for both eyes.
+//
+// THE BUBBLE OF A PULL (card_ball_cut=1). The game draws the bubble that the
+// hand pulls out of the spell book in the eye pictures (book_bubble.cpp). In
+// each eye the page gets a hole of the disc of the ball as that eye sees it
+// (hand_cut_math::BallOnPage), so the ball covers its own hole: no hole that
+// grows, and none beside the ball.
 //
 // A SOLID HAND (card_hand_solid=1). A hand goes faint while the controller
 // of a hint shows in it (hint_hand_opacity_pct). While a hand is in front of
@@ -45,6 +52,10 @@
 //                       over the hands, also where a hand is in front of it
 //   card_hand_solid=1   0: a hand in front of the page keeps the opacity of
 //                       the hint
+//   card_hand_both_sides=1  0: only the triangles that face the eye make a
+//                       hole, with one side for the whole hand
+//   card_ball_cut=1     0: the book makes one round hole for both eyes where
+//                       the bubble of a pull is in front of the page
 //   hand_cut_test_save=0  N: saves the pictures of both eyes of the first N
 //                       frames with a cut, at most one each 30 frames, as
 //                       bwvr-handcut-left-<frame>.bmp and
@@ -88,7 +99,16 @@ const float kStill = 0.0003f;
 bool g_read = false;
 bool g_on = true;
 bool g_solid = true;
+bool g_both_sides = true;  // card_hand_both_sides: each triangle cuts
+bool g_ball_cut = true;    // card_ball_cut: the bubble of a pull cuts
 int g_save = 0;
+// The game's bubble of a pull of the spell book in this frame
+// (HandCutBall): its middle in the LOCAL space and its radius in meters.
+uint64_t g_ball_frame = 0;
+float g_ball_at[3] = {0.0f, 0.0f, 0.0f};
+float g_ball_radius = 0.0f;
+bool g_ball_now = false;
+uint64_t g_ball_frames = 0;
 int g_saved = 0;
 uint64_t g_saved_frame = 0;
 
@@ -126,10 +146,13 @@ const uint8_t* g_right_for = nullptr;
 int g_right_box[4] = {};
 uint32_t g_left_serial = 0, g_right_serial = 0;
 
-// What the last cut saw: the eyes, the page and some points of the hands.
+// What the last cut saw: the eyes, the page, some points of the hands and
+// the bubble of a pull.
+const int kSeenPicks = 12;
+const int kSeenValues = 6 + 3 + 4 + 2 * kSeenPicks * 3 + 3;
 struct Seen {
   bool valid;
-  float values[40];
+  float values[kSeenValues];
 };
 Seen g_seen = {};
 
@@ -160,8 +183,22 @@ void ReadSettings() {
     strcat_s(path, MAX_PATH, "bwvr.ini");
     g_on = GetPrivateProfileIntA("bwvr", "card_hand_front", 1, path) != 0;
     g_solid = GetPrivateProfileIntA("bwvr", "card_hand_solid", 1, path) != 0;
+    g_both_sides =
+        GetPrivateProfileIntA("bwvr", "card_hand_both_sides", 1, path) != 0;
+    g_ball_cut = GetPrivateProfileIntA("bwvr", "card_ball_cut", 1, path) != 0;
     g_save = GetPrivateProfileIntA("bwvr", "hand_cut_test_save", 0, path);
   }
+  ModLog("hand cut     : card_hand_both_sides=%d: %s. card_ball_cut=%d: %s",
+         g_both_sides ? 1 : 0,
+         g_both_sides ? "each opaque triangle of a hand in front of the page "
+                        "makes a hole, on both of its sides"
+                      : "only the triangles that face the eye make a hole",
+         g_ball_cut ? 1 : 0,
+         g_ball_cut ? "the game's bubble of a pull out of the spell book makes "
+                      "a hole for each eye, the size of the bubble as that "
+                      "eye sees it"
+                    : "the book makes one round hole for both eyes where the "
+                      "bubble of a pull is in front of the page");
   ModLog("hand cut     : card_hand_front=%d: %s. card_hand_solid=%d: %s",
          g_on ? 1 : 0,
          g_on ? "a hand in front of the page of the spell book or of the "
@@ -302,7 +339,13 @@ uint64_t EyeMask(int eye, const float eye_at[3], const hc::Page& page,
   const float mid_x = 0.5f * (layer.rect[0] + 0.5f * layer.rect[2]);
   const float mid_y = 0.5f * (layer.rect[1] + 0.5f * layer.rect[3]);
   for (int hand = 0; hand < 2; ++hand) {
-    const float front = FrontSide(hands, hand, eye_at);
+    // With card_hand_both_sides=1 the side of a triangle does not count: the
+    // hand draws with no culling, and a test of one side for the whole hand
+    // takes the wrong side when the nearest triangle turns away.
+    const float front =
+        g_both_sides || hands.triangles[hand] == 0
+            ? 0.0f
+            : FrontSide(hands, hand, eye_at);
     for (int t = 0; t < hands.triangles[hand]; ++t) {
       const uint32_t* tri_index = hands.index[hand] + t * 3;
       bool ok = true;
@@ -314,7 +357,10 @@ uint64_t EyeMask(int eye, const float eye_at[3], const hc::Page& page,
         if (ok) memcpy(tri[k], g_local[hand][v], sizeof(tri[k]));
       }
       if (!ok) continue;
-      if (Cross3Dot(tri[0], tri[1], tri[2], eye_at) * front <= 0.0f) continue;
+      if (!g_both_sides &&
+          Cross3Dot(tri[0], tri[1], tri[2], eye_at) * front <= 0.0f) {
+        continue;
+      }
       float in_front[4][3];
       const int n = hc::ClipFront(tri, page, in_front);
       if (n == 0) continue;
@@ -330,6 +376,21 @@ uint64_t EyeMask(int eye, const float eye_at[3], const hc::Page& page,
       hc::FillConvex(px, n, mask, hw, hh, box);
       g_hand_front[hand] = true;
     }
+  }
+  // The game's bubble of a pull: the disc of the ball as this eye sees it.
+  // The ball covers its hole in this eye, so the page has no hole that the
+  // player sees.
+  float bx = 0.0f, by = 0.0f, br = 0.0f;
+  if (g_ball_now &&
+      hc::BallOnPage(eye_at, page, g_ball_at, g_ball_radius, &bx, &by, &br)) {
+    const int kSides = 24;
+    float disc[kSides][2];
+    for (int k = 0; k < kSides; ++k) {
+      const float a = 6.2831853f * k / kSides;
+      disc[k][0] = mid_x + (bx + br * cosf(a)) * ppm_x;
+      disc[k][1] = mid_y - (by + br * sinf(a)) * ppm_y;
+    }
+    hc::FillConvex(disc, kSides, mask, hw, hh, box);
   }
   if (box[0] >= box[2] || box[1] >= box[3]) {
     box[0] = box[1] = box[2] = box[3] = 0;
@@ -440,22 +501,27 @@ void SeenNow(const float eyes[2][3], const bwvr::CardLayer& layer,
   }
   for (int k = 0; k < 3; ++k) out->values[n++] = layer.position[k];
   for (int k = 0; k < 4; ++k) out->values[n++] = layer.orientation[k];
+  // Points of each hand spread over its vertices, so a move of one finger
+  // makes a new cut.
   for (int hand = 0; hand < 2; ++hand) {
     const int count = hands.triangles[hand] > 0 ? hands.vertices[hand] : 0;
-    const int picks[4] = {0, count / 3, 2 * count / 3, count - 1};
-    for (int p = 0; p < 4; ++p) {
+    for (int p = 0; p < kSeenPicks; ++p) {
+      const int pick = count > 0 ? (count - 1) * p / (kSeenPicks - 1) : 0;
       for (int k = 0; k < 3; ++k) {
-        out->values[n++] = count > 0 ? g_local[hand][picks[p]][k] : 0.0f;
+        out->values[n++] = count > 0 ? g_local[hand][pick][k] : 0.0f;
       }
     }
   }
-  while (n < 40) out->values[n++] = 0.0f;
+  for (int k = 0; k < 3; ++k) {
+    out->values[n++] = g_ball_now ? g_ball_at[k] : 0.0f;
+  }
+  while (n < kSeenValues) out->values[n++] = 0.0f;
   out->valid = true;
 }
 
 bool SameSeen(const Seen& a, const Seen& b) {
   if (!a.valid || !b.valid) return false;
-  for (int i = 0; i < 40; ++i) {
+  for (int i = 0; i < kSeenValues; ++i) {
     if (fabsf(a.values[i] - b.values[i]) > kStill) return false;
   }
   return true;
@@ -497,6 +563,19 @@ bool HandCutSolid(int hand) {
   return g_on && g_solid && hand >= 0 && hand <= 1 && g_hand_front[hand];
 }
 
+bool HandCutBallOn() {
+  ReadSettings();
+  return g_on && g_ball_cut;
+}
+
+void HandCutBall(const float center[3], float radius_m) {
+  ReadSettings();
+  if (!g_on || !g_ball_cut || !(radius_m > 0.0f)) return;
+  g_ball_frame = ControllersFrameCount();
+  for (int i = 0; i < 3; ++i) g_ball_at[i] = center[i];
+  g_ball_radius = radius_m;
+}
+
 void HandCutFrame() {
   ReadSettings();
   const uint64_t frame = ControllersFrameCount();
@@ -532,8 +611,11 @@ void HandCutFrame() {
   g_last_serial = layer.serial;
   // A new picture of the owner is clean.
   if (!same) g_left_cut = false;
+  g_ball_now = g_ball_cut && g_ball_frame == frame && g_ball_frame != 0;
+  if (g_ball_now) ++g_ball_frames;
 
-  if (!HandModelBuilt()) {
+  const bool built = HandModelBuilt();
+  if (!built && !g_ball_now) {
     if (!g_said_no_mesh) {
       g_said_no_mesh = true;
       ModLog("hand cut     : no mesh of a hand was built (the low poly hands), "
@@ -570,7 +652,7 @@ void HandCutFrame() {
 
   // Both hands into the LOCAL space, one time for both eyes.
   Hands hands = {};
-  for (int hand = 0; hand < 2; ++hand) {
+  for (int hand = 0; hand < 2 && built; ++hand) {
     const float* points = nullptr;
     hands.triangles[hand] =
         HandModelWorldMesh(hand, &points, &hands.index[hand],
@@ -714,6 +796,32 @@ void HandCutSolidChange(const char* by) {
          g_solid ? "A hand in front of the page has its full opacity"
                  : "A hand in front of the page keeps the opacity of the hint",
          ControllersFrameCount());
+}
+
+int HandCutSidesValue() {
+  ReadSettings();
+  return g_both_sides ? 1 : 0;
+}
+
+void HandCutSidesChange(const char* by) {
+  ReadSettings();
+  g_both_sides = !g_both_sides;
+  g_seen.valid = false;
+  ModLog("hand cut     : %s: card_hand_both_sides=%d, frame %llu", by,
+         g_both_sides ? 1 : 0, ControllersFrameCount());
+}
+
+int HandCutBallValue() {
+  ReadSettings();
+  return g_ball_cut ? 1 : 0;
+}
+
+void HandCutBallChange(const char* by) {
+  ReadSettings();
+  g_ball_cut = !g_ball_cut;
+  g_seen.valid = false;
+  ModLog("hand cut     : %s: card_ball_cut=%d, frame %llu", by,
+         g_ball_cut ? 1 : 0, ControllersFrameCount());
 }
 
 void HandCutReport() {

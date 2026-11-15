@@ -887,8 +887,15 @@ name.
 **The picture.** Each item is a bubble with the orb of the game in it: the
 glass ball with the miracle in it, as on the land and in the Hand (see "The
 orbs in the cells" below, `spell_book_orbs=1`). The name is under the
-bubble. The cells are 6.5 cm for up to 9 items, 5 cm for up to 16 and 4 cm
-for more, and a bubble is 0.66 of a cell across. The book uses the quad
+bubble. With `spell_book_ring=1` a book of 1 to 6 items has them on a
+ring, as the ring menu has its items: cells of 6.5 cm on a ring of 6.8 cm
+radius, the first item at the top and the next ones clockwise, spread
+evenly (2 items at the top and the bottom, 3 as a triangle, 4 at the four
+sides of the ring). The item under the hand has a round light, as the ring
+menu has. The book of 6 is 18.3 by 23.2 cm. More than 6 items, and each book
+with `spell_book_ring=0`, are rows and columns: cells of 6.5 cm for up to 9
+items, 5 cm for up to 16 and 4 cm for more. A bubble is 0.66 of a cell
+across. The book uses the quad
 layer of the ring (`kCardRing`), so it is sharp and never double. The bubble
 that the hand pulls out is the bubble of the game too (see "The pull"). A
 book with no item is 20 by 6 cm. It says "No miracle to ask for now" and the
@@ -984,11 +991,15 @@ the world (`fn_0068B7E0`). The mod does the same:
   of this frame (`ControllersLocalToWorld`).
 
 The book is a layer over the picture of the game, so it would hide the
-bubble. When a part of the ball is in front of the page, the book has a
-round hole where the head sees the ball (`BubbleHole`). The hole is larger
-by 3.2 mm for each cm that the ball is off the page, for the two eyes. Its
-edge is soft over 3 pixels. A ball behind the page makes no hole, so the
-book hides it.
+bubble. When a part of the ball is in front of the page, the page has a
+hole for each eye: the disc of the ball as that eye sees it
+(`card_ball_cut=1`, `hand_cut_math::BallOnPage`, `ui-layer.md`, "A hand in
+front of a card"). The page goes out as one quad for each eye, as for a
+hand in front of it. So the ball covers its own hole in each eye, and the
+page has no hole beside the ball. A ball behind the page makes no hole, so
+the book hides it. With `card_ball_cut=0` the book has one round hole for
+both eyes where the head sees the ball (`BubbleHole`), larger by 3.2 mm for
+each cm that the ball is off the page, with an edge soft over 3 pixels.
 
 With `spell_book_bubble=0`, or when a check of the game's code fails, the
 bubble is a flat picture on a quad of its own (`kCardBubble`): the gold halo,
@@ -1143,9 +1154,10 @@ The orb of a level is the game's orb of its seed type at its power up
 (`SpellSeedGraphic::Create` takes the power up).
 
 **The pages.** A page has 6 miracles at most, the count of the icons of a
-Village Centre, in the cells of the normal book of 6: 3 columns of 6.5 cm
-in 2 rows. A family (a miracle and its levels) stays on one page, so the 34
-items are 6 pages:
+Village Centre, on a ring of 6 (a hexagon) with cells of 6.5 cm, as the
+normal book of 6 has them (`spell_book_ring=1`). Cell 0 is at the top, and
+cells 1 to 5 go clockwise. A family (a miracle and its levels) stays on one
+page, so the 34 items are 6 pages:
 
 | Page | Cells 0 to 5 |
 | --- | --- |
@@ -1156,8 +1168,12 @@ items are 6 pages:
 | 5 | Teleport, Creature Freeze, Creature Small, Creature Big, Creature Weak, Creature Strong |
 | 6 | Creature Invisible, Creature Compassion, Creature Angry, Creature Itchy |
 
-A third row has the seal "Back" (cell 6, at the left, with "<") and the
-seal "Next" (cell 8, at the right, with ">"). The pointing hand picks a seal
+The seals "Back" (cell 6, with "<") and "Next" (cell 8, with ">") are side
+by side in the middle of the ring, 2.2 cm to the left and to the right of
+its middle, with a bubble of 3.1 cm. So the pointing hand reaches both
+without a move past the hand that holds the book. With
+`spell_book_ring=0` the page is 3 columns of 6.5 cm in 2 rows, and a third
+row has "Back" at the left and "Next" at the right. The pointing hand picks a seal
 as a miracle, and a grip on it turns the page at once: the book stays open,
 the hand gets the pulse `tick`, and "Next" on the last page goes to the
 first. The title of the book is "Miracles 2 of 6". With the hand on a
@@ -1817,6 +1833,7 @@ so the plain game has no flat band.
 | `miracle_max_m` | 4 | The most distance of a target in the aim, in m of the room. 0 is no limit |
 | `spell_book` | 1 | 0: the first face button of the hand that does not point has no job, and no book opens |
 | `spell_book_pull_cm` | 20 | The pull that takes a miracle out of the book, in cm of hand motion, 3 to 30. 0: the grip takes the miracle at once |
+| `spell_book_ring` | 1 | 1: a book of 1 to 6 miracles has them on a ring, and a page of the book of all miracles is a ring of 6 with the seals "Back" and "Next" in its middle. 0: rows and columns, and the seals in a third row |
 | `spell_book_b` | 1 | 1: a tap of B (the second face button of the pointing hand, at most `miracle_cancel_ms` and 5 cm) opens and closes the book while no miracle is in the Hand. 0: B does not open the book |
 | `spell_book_palm` | 0 | 1: the palm that turns up opens the book, and the sheet of the gestures does not show at rest. 0: the palm does not open the book |
 | `gesture_sheet` | 1 | 1: the palm that turns up at rest shows the sheet of the gestures. 0: no sheet, and the palm shows the row of the game's pictures |

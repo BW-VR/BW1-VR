@@ -466,6 +466,7 @@ float g_tap_ms = 0.0f, g_tap_cm = 0.0f;  // that tap, for the log
 uint64_t g_taps = 0;      // the taps of B that opened or closed the book
 bool g_orbs = true;       // spell_book_orbs: the cells show the orbs of the game
 bool g_point = true;      // spell_book_point: the mark of the point of the pick
+bool g_ring = true;       // spell_book_ring: the items on a ring
 bool g_game_ok = false;   // the functions of the game have their bytes
 
 bool IniPath(char path[MAX_PATH]) {
@@ -508,6 +509,7 @@ void ReadSettings() {
   if (g_tap_limit_ms > 2000) g_tap_limit_ms = 2000;
   g_orbs = IniKey("spell_book_orbs", 1) != 0;
   g_point = IniKey("spell_book_point", 1) != 0;
+  g_ring = IniKey("spell_book_ring", 1) != 0;
   g_game_ok =
       SameBytes(kCanRequest, kCanRequestBytes, sizeof(kCanRequestBytes)) &&
       SameBytes(kSendPacket, kSendPacketBytes, sizeof(kSendPacketBytes)) &&
@@ -554,6 +556,12 @@ void ReadSettings() {
                   "when that palm turns down"
                 : "the palm does not open the book. With gesture_sheet=1 it "
                   "shows the sheet of the gestures");
+  ModLog("spell book   : spell_book_ring=%d: %s", g_ring ? 1 : 0,
+         g_ring ? "a book of 1 to 6 miracles has them on a ring, the first at "
+                  "the top, and a page of the book of all miracles is a ring "
+                  "of 6 with the seals Back and Next in its middle"
+                : "the miracles are in rows and columns, and the seals in a "
+                  "third row");
   ModLog("spell book   : spell_book_b=%d: %s", g_tap_b ? 1 : 0,
          g_tap_b ? "a tap of B (the second face button of the pointing hand, "
                    "at most miracle_cancel_ms and 5 cm) opens and closes the "
@@ -580,6 +588,18 @@ void ReadSettings() {
 // The book of all miracles is on: the key debug_all_book, and the function
 // of the game with its bytes. It does not need the switch "Unlock all".
 bool AllBook() { return g_all_book && g_into_ok; }
+
+// The shape of the book (spell_book_math, THE SHAPES): with spell_book_ring=1
+// a book of 1 to 6 items is a ring, and a page of the book of all miracles a
+// ring of 6 with the seals in its middle.
+int BookShape() {
+  if (!g_ring) return kShapeGrid;
+  return AllBook() ? kShapeRingPage : kShapeRing;
+}
+
+// The shape of the book (spell_book_math, THE SHAPES): with spell_book_ring=1
+// a book of 1 to 6 items is a ring, and a page of the book of all miracles a
+// ring of 6 with the seals in its middle.
 int g_pages = 0;              // the count of its pages
 int g_all_count = 0;          // the count of its items, 34 in v1.42
 bool g_now_ready = true;      // the Hand was free at the last list
@@ -982,6 +1002,7 @@ struct Look {
   int pulled;        // the item whose bubble is out of the book, or -1
   bool all;
   bool orbs;         // the cells have holes for the orbs of the game
+  int shape;         // spell_book_math::kShapeGrid, kShapeRing or kShapeRingPage
   wchar_t title[48];
   wchar_t note[64];
 };
@@ -1116,7 +1137,15 @@ void Bubble(const Layout& l, int i, float* x, float* y, float* r) {
   CellPixel(l, i, x, y);
   const float cell = static_cast<float>(CellSize(l));
   *y -= kBubbleRise * cell;
-  *r = kBubbleShare * cell;
+  // A seal in the middle of a ring page is smaller than an orb.
+  *r = (SealCell(l, i) ? kSealShare : kBubbleShare) * cell;
+}
+
+// The half width of the part of the picture that belongs to item i: half a
+// cell, and less for a seal in the middle of a ring page.
+float HalfCell(const Layout& l, int i) {
+  const float cell = static_cast<float>(CellSize(l));
+  return SealCell(l, i) ? kSealOut * cell : 0.5f * cell;
 }
 
 // The orb of a dim item has this share of the page cleared over it.
@@ -1138,9 +1167,10 @@ void NameBox(const Layout& l, int i, RECT* out) {
   float cx = 0.0f, cy = 0.0f;
   CellPixel(l, i, &cx, &cy);
   const float cell = static_cast<float>(CellSize(l));
-  *out = {static_cast<LONG>(cx - 0.5f * cell + 4),
+  const float half = HalfCell(l, i);
+  *out = {static_cast<LONG>(cx - half + 4),
           static_cast<LONG>(by + br + 2),
-          static_cast<LONG>(cx + 0.5f * cell - 4),
+          static_cast<LONG>(cx + half - 4),
           static_cast<LONG>(cy + 0.5f * cell - 2)};
 }
 
@@ -1187,7 +1217,7 @@ bool SameLook(const Look& a, const Look& b) {
 void Raster(const Look& look) {
   if (!RasterStart()) return;
   const double start = NowSeconds();
-  const Layout l = LayoutFor(look.count);
+  const Layout l = LayoutFor(look.count, look.shape);
   g_width_px = PixelsOf(l.width_m);
   g_height_px = PixelsOf(l.height_m);
   const int w = g_width_px, h = g_height_px;
@@ -1289,12 +1319,16 @@ void Raster(const Look& look) {
         !look.can[i]                                        ? kDimFill
         : !nav && IsCreatureType(TypeOfKey(look.type[i]))    ? kCreatureFill
                                                              : kGod;
-    const int x0 = static_cast<int>(cx - 0.5f * cell);
+    const float half = HalfCell(l, i);
+    const int x0 = static_cast<int>(cx - half);
     const int y0 = static_cast<int>(cy - 0.5f * cell);
     // The ring stays inside its cell (spell_book_math::BubbleRing).
     const Ring halo = BubbleRing(by, br, static_cast<float>(y0), cell, lit);
-    const int x1 = static_cast<int>(cx + 0.5f * cell);
+    const int x1 = static_cast<int>(cx + half);
     const int y1 = static_cast<int>(cy + 0.5f * cell);
+    // On a ring the light under the hand is a disc, as on the ring menu, so
+    // it stays clear of the items next to it.
+    const float lit_r = half - 3.0f;
     for (int y = y0 < 0 ? 0 : y0; y < y1 && y < h; ++y) {
       const float py = static_cast<float>(y) + 0.5f;
       uint8_t* row = g_base + static_cast<size_t>(y) * kTexture * 4;
@@ -1302,9 +1336,13 @@ void Raster(const Look& look) {
         const float px = static_cast<float>(x) + 0.5f;
         uint8_t* out = row + x * 4;
         if (lit) {
-          Over(out, cell_lit,
-               cell_lit_alpha * RoundCover(px, py, x0 + 3.0f, y0 + 3.0f,
-                                           x1 - 3.0f, y1 - 3.0f, 0.12f * cell));
+          const float cover =
+              l.shape != kShapeGrid
+                  ? Clamp01(lit_r + 0.5f -
+                            sqrtf((px - cx) * (px - cx) + (py - cy) * (py - cy)))
+                  : RoundCover(px, py, x0 + 3.0f, y0 + 3.0f, x1 - 3.0f,
+                               y1 - 3.0f, 0.12f * cell);
+          Over(out, cell_lit, cell_lit_alpha * cover);
         }
         const float d = sqrtf((px - bx) * (px - bx) + (py - by) * (py - by));
         // The halo: a ring of gold round the bubble of the item under the
@@ -1501,6 +1539,7 @@ void BuildLook(Look* look) {
   }
   look->all = g_all;
   look->orbs = g_orbs && !BookBubbleFailed();
+  look->shape = BookShape();
   for (int i = 0; i < g_count; ++i) {
     look->type[i] = g_items[i].type;
     look->can[i] = g_items[i].can;
@@ -1934,8 +1973,13 @@ void PlaceBubble(int type, const float at[3], const float head[3],
       ControllersLocalToWorld(at, world, &units)) {
     BookBubbleShow(TypeOfKey(type), world, units, frame,
                    PowerUpOfLevel(LevelOfKey(type)));
-    if (g_have_plane && BubbleHole(g_plane, head, at, kBubbleRadiusM,
-                                   &g_hole)) {
+    // card_ball_cut=1: the cut of hand_cut.cpp makes the hole for each eye,
+    // the size of the bubble as that eye sees it. Else the book makes one
+    // round hole for both eyes.
+    if (HandCutBallOn()) {
+      HandCutBall(at, kBubbleRadiusM);
+    } else if (g_have_plane && BubbleHole(g_plane, head, at, kBubbleRadiusM,
+                                          &g_hole)) {
       g_hole_frame = frame;
     }
     return;
@@ -1953,7 +1997,7 @@ const float kMarkMargin = 0.02f;
 
 bool MarkShows() {
   if (!g_point || !g_point_valid || !g_have_plane) return false;
-  const Layout l = LayoutFor(g_drawn.count);
+  const Layout l = LayoutFor(g_drawn.count, g_drawn.shape);
   return fabsf(g_point_at[2]) <= kKeepDepthM &&
          fabsf(g_point_at[0]) <= 0.5f * l.width_m + kMarkMargin &&
          fabsf(g_point_at[1]) <= 0.5f * l.height_m + kMarkMargin;
@@ -2098,7 +2142,7 @@ bool g_said_orbs = false;
 
 void ShowOrbs(const Look& look, uint64_t frame) {
   if (!look.orbs || !g_have_plane) return;
-  const Layout l = LayoutFor(look.count);
+  const Layout l = LayoutFor(look.count, look.shape);
   int shown = 0;
   for (int i = 0; i < look.count; ++i) {
     if (i == look.pulled || look.type[i] < 0 || IsNavKey(look.type[i])) {
@@ -2188,6 +2232,20 @@ void SpellBookTapChange(const char* by) {
   ModLog("spell book   : %s: spell_book_b=%d. %s", by, g_tap_b ? 1 : 0,
          g_tap_b ? "A tap of B opens and closes the book"
                  : "A tap of B does not open the book");
+}
+
+int SpellBookRingValue() {
+  ReadSettings();
+  return g_ring ? 1 : 0;
+}
+
+void SpellBookRingChange(const char* by) {
+  ReadSettings();
+  g_ring = !g_ring;
+  g_have_drawn = false;
+  g_hover = -1;
+  g_hover_type = -1;
+  ModLog("spell book   : %s: spell_book_ring=%d", by, g_ring ? 1 : 0);
 }
 
 int SpellBookPalmValue() {
@@ -2417,7 +2475,7 @@ void SpellBookFrame() {
   // The list of the game, the place of the book, and the pick.
   ReadShapes();
   BuildList(g);
-  g_layout = LayoutFor(g_count);
+  g_layout = LayoutFor(g_count, BookShape());
   float grip[3], orientation[4], head[3];
   bool left = true;
   if (!ControllersCardPose(1, grip, orientation, head, &left)) return;

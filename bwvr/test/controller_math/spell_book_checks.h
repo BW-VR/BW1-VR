@@ -82,6 +82,77 @@ inline void SpellBookChecks() {
           PixelsOf(0.1234f), 396);
   }
 
+  // THE RING (spell_book_ring=1). A ring of 1 to 6 items and a ring page fit
+  // the texture, each item is inside the book under the title, and two
+  // items are a cell apart or more. The first item is at the top, and the
+  // next one to the right of it (clockwise).
+  {
+    bool fits = true, inside = true, apart = true;
+    for (int n = 1; n <= kRingMost + 1; ++n) {
+      const bool page = n > kRingMost;
+      const int count = page ? kPageCells : n;
+      const Layout l = LayoutFor(count, page ? kShapeRingPage : kShapeRing);
+      if (l.shape == kShapeGrid) fits = false;
+      if (PixelsOf(l.width_m) > kTexture || PixelsOf(l.height_m) > kTexture) {
+        fits = false;
+      }
+      const int items = page ? kPageItems : n;
+      for (int i = 0; i < items; ++i) {
+        float x = 0.0f, y = 0.0f;
+        ItemCenter(l, i, &x, &y);
+        const float half = 0.5f * l.cell_m;
+        if (fabsf(x) + half > 0.5f * l.width_m + 1e-5f ||
+            y + half > 0.5f * l.height_m - kTitleM + 1e-5f ||
+            y - half < -0.5f * l.height_m - 1e-5f) {
+          inside = false;
+        }
+        for (int k = i + 1; k < items; ++k) {
+          float x2 = 0.0f, y2 = 0.0f;
+          ItemCenter(l, k, &x2, &y2);
+          if (sqrtf((x - x2) * (x - x2) + (y - y2) * (y - y2)) <
+              l.cell_m - 1e-5f) {
+            apart = false;
+          }
+        }
+      }
+    }
+    Check(fits, "each ring fits the texture", fits, 1);
+    Check(inside, "each item of a ring is inside the book, under the title",
+          inside, 1);
+    Check(apart, "two items of a ring are a cell apart or more", apart, 1);
+    const Layout ring = LayoutFor(kPageCells, kShapeRingPage);
+    float x0 = 0.0f, y0 = 0.0f, x1 = 0.0f, y1 = 0.0f;
+    ItemCenter(ring, 0, &x0, &y0);
+    ItemCenter(ring, 1, &x1, &y1);
+    Check(fabsf(x0) < 1e-6f && x1 > 0.0f && y1 < y0,
+          "the first miracle of a page is at the top, the second to its right",
+          x1 > 0.0f, 1);
+    float bx = 0.0f, by = 0.0f, nx = 0.0f, ny = 0.0f, mx = 0.0f, my = 0.0f;
+    ItemCenter(ring, kCellBack, &bx, &by);
+    ItemCenter(ring, kCellNext, &nx, &ny);
+    ItemCenter(ring, 7, &mx, &my);
+    Check(bx < 0.0f && nx > 0.0f && fabsf(by - my) < 1e-6f &&
+              fabsf(ny - my) < 1e-6f,
+          "Back is left of the middle of the ring and Next right of it", 1, 1);
+    Check(fabsf(bx) < 0.5f * ring.cell_m,
+          "Back is less than half a cell from the middle, so the pointing hand "
+          "reaches it without a move past the hand of the book",
+          fabsf(bx) < 0.5f * ring.cell_m, 1);
+    const float at_back[3] = {bx, by, 0.0f};
+    const float at_next[3] = {nx, ny, 0.01f};
+    Check(Pick(ring, at_back, -1) == kCellBack &&
+              Pick(ring, at_next, -1) == kCellNext,
+          "the hand at a seal picks that seal", Pick(ring, at_back, -1),
+          kCellBack);
+    Check(SealCell(ring, kCellBack) && !SealCell(ring, 0) &&
+              !SealCell(LayoutFor(kPageCells), kCellBack),
+          "the seals of a ring page are seals, and the cells of the grid are "
+          "not", 1, 1);
+    Check(LayoutFor(7, kShapeRing).shape == kShapeGrid,
+          "7 items are a grid, not a ring", LayoutFor(7, kShapeRing).shape,
+          kShapeGrid);
+  }
+
   // THE ORBS. The orb of each item is inside its cell at each count, and
   // its middle is 0.10 of a cell above the middle of the cell.
   {

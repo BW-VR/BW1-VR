@@ -762,8 +762,9 @@ int ContextNow() {
     if (BookmarkAimHint(lines) > 0) return kCtxMark;
   }
   // The ray of a dialog box, or of a room of the Temple. A dialog box in the
-  // Temple keeps the lines of a dialog box.
-  if (ControllersMenuRay(from, to, &units)) {
+  // Temple keeps the lines of a dialog box. The ray of the circle of a Storm
+  // or a shield keeps the lines of the miracle.
+  if (ControllersMenuRay(from, to, &units) && !ControllersRayIsMiracleAim()) {
     return TempleCardRoom() >= 0 ? kCtxTemple : kCtxDialog;
   }
   if (TeleportAiming()) return kCtxTeleport;

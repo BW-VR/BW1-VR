@@ -288,6 +288,9 @@ bool ControllersLocalToWorld(const float local[3], float world[3],
 // The ray of the pointing hand while a dialog box is up and the controller
 // owns the pointer. The two ends are in the world. False when none is drawn.
 bool ControllersMenuRay(float from[3], float to[3], float* units);
+// True when that ray shows only for the circle of a Storm or a shield
+// (miracle_circle_aim=1, docs/miracles.md).
+bool ControllersRayIsMiracleAim();
 
 // The same ray in the LOCAL space of the runtime, in meters, while it can be
 // under a panel in the room (docs/ui-layer.md, "The ray over the panels").

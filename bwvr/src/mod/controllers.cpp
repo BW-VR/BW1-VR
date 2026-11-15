@@ -5881,6 +5881,18 @@ bool ControllersMenuRay(float from[3], float to[3], float* units) {
   return true;
 }
 
+// For hint_card.cpp: the ray of ControllersMenuRay shows only for the circle
+// of a Storm or a shield (miracle_circle_aim=1), so the card keeps the lines
+// of the miracle and not the lines of a dialog box.
+bool ControllersRayIsMiracleAim() {
+  float meters = 0.0f;
+  if (PlacesPanelRay(&meters) || DebugWindowRay(&meters) ||
+      WelcomePageRay(&meters) || BookmarkAimRay(&meters)) {
+    return false;
+  }
+  return !MenuUp() && !TempleRayOn() && MiracleAimShows();
+}
+
 // THE RAY OVER THE PANELS (ray_card.cpp, docs/ui-layer.md, "The ray over
 // the panels"). The ray of ControllersMenuRay in the LOCAL space of the
 // runtime, in meters, when the panels in the room can hide it: a panel of

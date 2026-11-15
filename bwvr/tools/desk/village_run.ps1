@@ -43,7 +43,7 @@
 #                gesture_panel=1 and the book on the palm.
 # The other kinds (charge, store, neartake, land, job, tree, throw,
 # throwlive, throwhouse, throwhouselow, throwpile, probe, workshop, site, build, scaffold,
-# turn, fartake, fartotem, choice, look, book, bookhand, unlock, allbook, orbsave, controls, rayover, walk, wall,
+# turn, fartake, fartotem, choice, look, book, bookhand, unlock, allbook, bookring, orbsave, controls, rayover, walk, wall,
 # housestop, headhouse, pinch, small,
 # aimsign, aimmiracle, aimpast, tglow, tooltip) have a comment at their steps
 # below.
@@ -308,6 +308,35 @@ if ($Kind -eq 'totem') {
     }
     $keys = "$keys;debug_all_book=1;spell_book_test_items=8 8 4 6 0 8 3 8 8 5;" +
             "seek_go=1827,2537;spell_book_test_save=8;fake_controller_pull_cm=25;test_frame_rate=60"
+} elseif ($Kind -eq 'bookring') {
+    # The book of all miracles on a ring, opened by a tap of B, and the sheet
+    # of the gestures (bwvr/docs/miracles.md, "The buttons", "The pages" and
+    # "The sheet of the gestures"). A tap of B opens the book at page 1. The
+    # right hand steps to cell 0 (Storm), and the grip and a pull of 25 cm
+    # take it: the log has its power up (-1) and the card its name. The hand
+    # in front of the page and the pulled orb cut the page for each eye
+    # (hand_cut_test_save). A tap of B takes Storm out of the Hand, and the
+    # next tap opens the book again. The grip on "Next" (cell 8) turns to
+    # page 2, and the hand takes Lightning Increase (cell 1, power up 0). A
+    # tap takes it out. The test key gesture_sheet_test_frame shows the sheet
+    # of the gestures for 300 frames. Then a tap opens the book and a tap
+    # closes it. The pictures of the book (bwvr-book-N), of the sheet
+    # (bwvr-sheet-N) and of the cut are saved. With the renderer Vulkan and
+    # video_view=1 each shot writes bwvr-vk-video-N.bmp, the left eye with the
+    # cards over it.
+    if ($Plan -eq '') { $Plan = 'gosite' }
+    if ($Census -eq '') { $Census = '890' }
+    if ($Seconds -eq 0) { $Seconds = 60 }
+    if ($Steps -eq '') {
+        $Steps = $pre + 'seek@920+1 b@1000+4 shot@1015+1 ' +
+                 'book@1030+1 shot@1040+1 grip@1050+70 pull@1055+40 shot@1075+1 shot@1090+1 pull@1140+10 ' +
+                 'shot@1160+1 b@1180+4 b@1230+4 book@1250+1 grip@1260+6 shot@1275+1 ' +
+                 'book@1290+1 grip@1300+70 pull@1305+40 pull@1390+10 shot@1410+1 b@1430+4 ' +
+                 'shot@1500+1 shot@1600+1 b@1800+4 shot@1815+1 b@1850+4 shot@1865+1'
+    }
+    $keys = "$keys;debug_all_book=1;spell_book_test_items=0 8 1;spell_book_test_save=12;" +
+            "gesture_sheet_test_frame=1450;gesture_sheet_test_save=2;hand_cut_test_save=4;" +
+            "fake_controller_pull_cm=25;video_view=1;test_frame_rate=60"
 } elseif ($Kind -eq 'orbsave') {
     # No orb of all miracles in a save (bwvr/docs/miracles.md, "What a save
     # keeps"). With debug_all_miracles=1 the Worship Site has no limit of

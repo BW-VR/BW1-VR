@@ -328,8 +328,13 @@ keeps the mod as it is.
   takes 1 to 3 ms on the test laptop (0.05 ms on average). Where the
   texture of the game makes the palm almost clear, the land shows in the
   hole beside the arm. The controller model of the hints and the hand fight
-  in depth where their surfaces meet (the owner sees it in the headset):
-  the cause in the draw of the two meshes is not found yet.
+  in depth where their surfaces meet (the owner sees it in the headset).
+  The likely cause: `hint_model.cpp` draws the faint front faces of the
+  body with the depth write before the mesh of the hands, so each part of
+  the faint hand behind or inside the body fails the depth test, and the
+  land shows there through the faint body. A fix changes the order or the
+  depth write of the two draws, in both renderers, together with the draw
+  of the hand with no culling.
 - **F22. Words that the card never shows.** The card shows the game's
   "Drop" and "Throw" with the word of the grip (`controller-hints.md`,
   9.9). The second VR mod leaves those two words out

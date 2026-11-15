@@ -129,14 +129,15 @@ want.
 
 ### Miracles
 
-16. **The spell book and the row of gestures.** Open the book (X, or the
-    palm up), pull a miracle out, and let one spring back. Hold B and look at
-    the row over the palm. Wrong: a book or a row that is hard to read or to
-    reach, a pull that feels stiff or loose, a book that opens by accident,
-    a bubble that looks wrong, or an orb in a cell that is not in its hole
-    of the page or is hard to see over the land behind it. The pointing hand
-    must show in front of the page when it is in front, with no edge of
-    page over it or band of land beside it.
+16. **The spell book, the sheet and the row of gestures.** Open the book
+    with a tap of B, pull a miracle out, and let one spring back. Turn the
+    palm up to see the sheet of the gestures, and hold B to see the row
+    over the palm. Wrong: a book, a sheet or a row that is hard to read or
+    to reach, a seal that is hard to pick, a pull that feels stiff or loose,
+    a book that opens by accident, a bubble that looks wrong, a hole in the
+    page beside a pulled orb, or an orb in a cell that is not in its hole of
+    the page. The pointing hand must show whole in front of the page when it
+    is in front, with no edge of page over it or band of land beside it.
 17. **A gesture and a cast.** Draw miracles in the air, draw a circle for
     Storm or a shield, and try the switch "Gesture point" (debug page,
     Miracles). Take a miracle out with a shake and with a tap of B. Wrong: a
@@ -384,8 +385,8 @@ can power up. The announcer calls the steps "Increase", "Extreme" and
 
 **How to get a miracle in the mod** (`miracles.md`, `village.md`):
 
-1. The spell book: press X (or turn the palm of that hand up), put the
-   pointing hand on a miracle, close the grip, and pull 10 cm.
+1. The spell book: tap B (or press X), put the pointing hand on a miracle,
+   close the grip, and pull 20 cm.
 2. A gesture in the air: hold B and draw the spiral and then the gesture of
    the miracle.
 3. The Worship Site: tap the grip on the icon of the miracle.

@@ -85,6 +85,7 @@
 #include "script_frame_math.h"
 #include "temple.h"
 #include "temple_math.h"
+#include "teleport.h"
 #include "text_click.h"
 #include "text_click_math.h"
 #include "walk_math.h"
@@ -704,15 +705,62 @@ bool TraceAimNow() {
 }
 
 // The orientation of the hand at the middle of the trace whose ray goes
-// through the pose of the trace now, on the plane of TraceAimNow.
+// through the pose of the trace now. In the God view and on the table the
+// template lies on the land itself: the middle is the land under the middle
+// of the plane, and each pose is at its offset across the land, at the
+// height of the land there. So the ray draws the template with its own shape
+// on the land. Else the pose is on the plane of TraceAimNow.
+int g_trace_aim_for = -1;         // the trace of the middle on the land
+float g_trace_aim_middle[3];       // in the world
 bool TraceAimOrientation(float roll, float q[4]) {
   const float* p = g_trace_cm[g_trace_now][g_trace_step];
   const float s = 0.01f * static_cast<float>(g_trace_aim.pct);
-  const float target[3] = {
-      kTraceCenterCm[0] + (p[0] - kTraceCenterCm[0]) * s,
+  const float dx = (p[0] - kTraceCenterCm[0]) * s;
+  const float dy = (p[1] - kTraceCenterCm[1]) * s;
+  float target[3] = {
+      kTraceCenterCm[0] + dx,
       kTraceCenterCm[1] - static_cast<float>(g_trace_aim.down_cm),
-      kTraceCenterCm[2] + static_cast<float>(g_trace_aim.forward_cm) +
-          (p[1] - kTraceCenterCm[1]) * s};
+      kTraceCenterCm[2] + static_cast<float>(g_trace_aim.forward_cm) + dy};
+  const float scale = HeadPoseScale();
+  if (g_last_table && scale > 0.0f) {
+    // cm of the room to the world: P0 + Lt * (gain * t), t in room units.
+    const auto to_world = [&](const float cm[3], float out[3]) {
+      float t[3];
+      for (int i = 0; i < 3; ++i) t[i] = cm[i] * scale * 0.01f * g_last_table_gain;
+      float moved[3];
+      controller_math::Apply(g_last_room, false, t, moved);
+      for (int i = 0; i < 3; ++i) out[i] = g_last_table_origin[i] + moved[i];
+    };
+    const int id = g_traces_used;
+    if (g_trace_aim_for != id) {
+      const float middle_cm[3] = {
+          kTraceCenterCm[0],
+          kTraceCenterCm[1] - static_cast<float>(g_trace_aim.down_cm),
+          kTraceCenterCm[2] + static_cast<float>(g_trace_aim.forward_cm)};
+      to_world(middle_cm, g_trace_aim_middle);
+      g_trace_aim_middle[1] =
+          TeleportGround(g_trace_aim_middle[0], g_trace_aim_middle[2]);
+      g_trace_aim_for = id;
+    }
+    // The right and the forward of the room across the land.
+    const float right_cm[3] = {100.0f, 0.0f, 0.0f};
+    const float ahead_cm[3] = {0.0f, 0.0f, 100.0f};
+    const float zero_cm[3] = {0.0f, 0.0f, 0.0f};
+    float r[3], f[3], o[3];
+    to_world(right_cm, r);
+    to_world(ahead_cm, f);
+    to_world(zero_cm, o);
+    float world[3];
+    for (int i = 0; i < 3; ++i) {
+      world[i] = g_trace_aim_middle[i] + (r[i] - o[i]) * dx * 0.01f +
+                 (f[i] - o[i]) * dy * 0.01f;
+    }
+    world[1] = TeleportGround(world[0], world[2]);
+    float in_room[3];
+    controller_math::TableRoomPoint(g_last_table_origin, g_last_room,
+                                    g_last_table_gain, world, in_room);
+    for (int i = 0; i < 3; ++i) target[i] = in_room[i] / scale * 100.0f;
+  }
   float d[3];
   for (int i = 0; i < 3; ++i) d[i] = target[i] - kTraceCenterCm[i];
   float yaw = 0.0f, pitch = 0.0f;

@@ -391,9 +391,10 @@ spell keeps the size between two values of its magic info
 (`GMagicRadiusSpellInfo`, `+0x58` the least and `+0x5C` the most):
 `SpellStormAndTornado::InitWithPos` (`0x0072DAA0`) and
 `SpellShield::InitWithPos` (`0x0072B5F0`) make a smaller size the least and
-a larger size the most, and the spell takes that value as its radius. A
-Storm has the least radius 20 units: a circle of the size 3.4 gives a storm
-of radius 20. The place must pass the cast rule of the magic info: Storm
+a larger size the most, and the spell takes that value as its radius. The plain Storm
+keeps 20 to 1000 units, and Spiritual Shield 5 to 1000 units (a desktop
+run reads them from the magic info): a circle of the size 3.4 gives a storm of
+radius 20. So in play only the least limit acts. The place must pass the cast rule of the magic info: Storm
 needs the influence (rule 2), and the two shields need land in the
 influence (rule 3). A place that fails gets the refusal of the game, the
 yellow cross and its sound (see "The refusal"). The cost of a shield or a
@@ -722,6 +723,16 @@ the game and the radius that the spell gets), and `the circle of the ray is
 report window has `the ray of a circle showed on N frames, and the grip drew
 N circles with it`. The overlay has `the trail of the circle of the ray
 starts`, `is red` or `is gold`, and `ends`.
+
+A desktop run (`miracle_run.ps1 -Kind aim`) draws the circle template with
+the ray on the land, 1.2 m of the room from the Hand's point. The game
+matches the circle of a Spiritual Shield and of a Storm. The mod puts each
+circle at the middle of the path of the ray, 40 units wide, with the size
+42 units. The circle of the game from the pixels of the plan was 250 units
+away. The shield and the storm start at that middle with the radius 42
+units. A ray that only grazes the land jumps over hills, and then the path
+does not match: the eye pictures show the ray and the gold trail on the
+land.
 
 **The circle is under the path of the real hand** (`miracle_circle_hand=1`,
 with `miracle_circle_aim=0`).

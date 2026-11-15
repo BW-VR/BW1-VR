@@ -843,7 +843,7 @@ The scripts in `bwvr/tools/desk/` use these keys and words.
 | `fake_controller_left_rots` | empty | The same for the word `lrot` and the left hand. Not mirrored: `0,0,-90` turns the left palm up, `0,0,90` turns it down. A test key |
 | `fake_controller_turns` | empty | Turns for the word `aimturn`: `yaw,pitch,0` in degrees, yaw to the left and pitch up. A third number that is not 0 makes the two angles the aim itself and not a turn. A test key |
 | `fake_controller_gestures` | empty | Template numbers of `Data\Gestures.jty` for the word `trace`, separated by spaces |
-| `fake_controller_trace_aim_cm` | 0 | Above 0: the word `trace` holds the hand at the middle of the trace and turns its aim, so its ray goes through the template on a level plane this many cm ahead of the middle. For the circle of the ray (`miracles.md`, "The circle of the pointer ray") |
+| `fake_controller_trace_aim_cm` | 0 | Above 0: the word `trace` holds the hand at the middle of the trace and turns its aim, so its ray goes through the template on a level plane this many cm ahead of the middle. In the God view and on the table the template lies on the land itself: its middle is the land under the middle of the plane, and each pose is at its offset across the land. For the circle of the ray (`miracles.md`, "The circle of the pointer ray") |
 | `fake_controller_trace_aim_down_cm` | 60 | That plane is this many cm under the middle of the trace |
 | `fake_controller_trace_aim_pct` | 300 | The template on that plane has this percent of the size of the trace |
 | `fake_controller_gesture_cm` | 30 | The side of the square for `trace`, in front of the head, 5 to 200 |

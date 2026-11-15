@@ -245,15 +245,16 @@ if ($Kind -eq 'away') {
     # The circle of the pointer ray (miracle_circle_aim=1): a Spiritual Shield
     # (4), then a Storm (0). The word "trace" holds the hand at the middle of
     # the trace and turns its aim, so the ray draws the circle of
-    # Gestures.jty (template 5) on a level plane 300 cm ahead and 60 cm down,
-    # at 300 percent of its size (fake_controller_trace_aim_cm). The grip
+    # Gestures.jty (template 5) on the land under a point 120 cm ahead and 80
+    # cm down, at 300 percent of its size (fake_controller_trace_aim_cm). A ray
+    # that only grazes the land jumps over the hills near the Temple. The grip
     # stays closed during the trace. The lines "miracle" give the land point
     # of the ray at the start, the circle of the ray, the place and the size
     # of the cast and the limits of the spell, and "miracle watch" the place
     # and the radius of the spell. Eye pictures before, during and after each
     # draw. Give it the dxwrapper renderer for the pictures.
     if ($Seeds -eq '') { $Seeds = '4@930 0@1500' }
-    $keys = "$keys;fake_controller_gestures=5,5;fake_controller_trace_aim_cm=300"
+    $keys = "$keys;fake_controller_gestures=5,5;fake_controller_trace_aim_cm=120;fake_controller_trace_aim_down_cm=80"
     if ($Steps -eq '') {
         $Steps = 'stick_up@800+10 stick_up@830+10 look@860+5000 point@900+1 ' +
                  'seek@960+1 grip@1000+3 shot@1080+1 trace@1100+200 grip@1106+150 shot@1170+1 shot@1300+1 ' +

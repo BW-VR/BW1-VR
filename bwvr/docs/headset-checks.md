@@ -142,11 +142,12 @@ want.
     the page. The pointing hand must show whole in front of the page when it
     is in front, with no edge of page over it or band of land beside it.
 17. **A gesture and a cast.** Draw miracles in the air, draw a circle on the
-    land with the ray for Storm or a shield, and try the switch "Gesture point" (debug page,
-    Miracles). Take a miracle out with a shake and with a tap of B. Wrong: a
-    draw that looks right and does not match (say which), a circle that gets
-    a different size on the land, or a way out that acts by accident or not
-    at all.
+    land with the ray for Storm or a shield, and try the switch "Gesture
+    point" (debug page, Miracles). Take a miracle out with a shake and with
+    a tap of B. Wrong: a draw that looks right and does not match (say
+    which), a circle that gets a different size or place on the land, a ray
+    or a trail on the land that is hard to see, or a way out that acts by
+    accident or not at all.
 18. **Water on a fire.** Set a house on fire with a Fireball, and pour Water
     on it. Wrong: the fire does not go out, the pour looks wrong, a second
     hand, or a red flow on the hand that looks wrong or is not on your hand.
@@ -579,9 +580,10 @@ land in front of you, and the mod removes these orbs before each save.
 - **Gesture.** Spiral, then a fork. It needs its own circle.
 - **In the mod.** Point the ray at the land, close the grip and draw a circle
   on the land with the ray. The cast comes when the game matches the circle.
-- **Proved.** Desktop runs: the circle, the cast, and the storm under the
-  hand (`miracle_circle_hand`): a grey cloud in front of the Hand, and a
-  dark sky.
+- **Proved.** Desktop runs: the circle that the ray draws on the land, and
+  the storm at its middle with the radius of the circle
+  (`miracle_circle_aim`). The circle of the hand in the air gave a grey
+  cloud in front of the Hand, and a dark sky.
 - **The owner's choice.** The look of the clouds over and near the head
   (B43): round clouds that clear near the eye (the default), or the flat
   clouds of the game that clear near the eye (`cloud_round_near=0`).
@@ -599,8 +601,10 @@ land in front of you, and the mod removes these orbs before each save.
 - **Gesture.** Spiral, then a fork. It needs its own circle.
 - **In the mod.** Point the ray at the land, close the grip and draw a circle
   on the land with the ray.
-- **Proved.** Desktop runs: the circle, the cast, and a dome at the
-  fingertips (`miracle_circle_hand`) that stands for more than 12 s.
+- **Proved.** Desktop runs: the circle that the ray draws on the land, and
+  the shield at its middle with the radius of the circle
+  (`miracle_circle_aim`). A dome of the circle of the hand stands for more
+  than 12 s.
 - **To prove.** A miracle cast at the dome does not get in.
 
 ### Physical Shield ("Armor of Faith")

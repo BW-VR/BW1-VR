@@ -146,13 +146,16 @@ void* g_ball = nullptr;
 float g_ball_middle[3] = {0.0f, kBallMiddle, 0.0f};
 float g_ball_frame = 0.0f;
 uint64_t g_ball_step_frame = 0;
-void* g_graphic[kSeedTypes] = {};
+// One graphic for each seed type and each power up (-1, 0 and 1).
+const int kPowerUps = 3;
+void* g_graphic[kSeedTypes][kPowerUps] = {};
 
 // What shows in this frame: the bubble that the hand pulls out, and the orbs
 // of the cells of the book. The game thread writes it in SpellBookFrame, and
 // the draw of the same thread reads it. radius is in world units.
 struct Show {
   int seed;
+  int power_up;
   float world[3];
   float radius;
   bool orb;
@@ -169,8 +172,8 @@ int g_orb_draws = 0;
 bool g_said_first = false;
 bool g_said_orb = false;
 
-void AddShow(int seed, const float world[3], float radius, bool orb,
-             uint64_t frame) {
+void AddShow(int seed, int power_up, const float world[3], float radius,
+             bool orb, uint64_t frame) {
   if (frame != g_frame) {
     g_frame = frame;
     g_show_count = 0;
@@ -178,6 +181,7 @@ void AddShow(int seed, const float world[3], float radius, bool orb,
   if (g_show_count >= kMostShows) return;
   Show& s = g_shows[g_show_count++];
   s.seed = seed;
+  s.power_up = power_up;
   for (int i = 0; i < 3; ++i) s.world[i] = world[i];
   s.radius = radius;
   s.orb = orb;
@@ -271,28 +275,33 @@ bool MakeBall() {
   return true;
 }
 
-// The graphic of one seed type, as the gesture help makes it.
-void* Graphic(int seed) {
+// The graphic of one seed type at one power up, as the gesture help makes it
+// (SpellSeedGraphic::Create takes the POWER_UP_TYPE as its last argument).
+void* Graphic(int seed, int power_up) {
   if (seed < 0 || seed >= kSeedTypes) return nullptr;
-  if (g_graphic[seed] != nullptr) return g_graphic[seed];
+  if (power_up < -1 || power_up > kPowerUps - 2) power_up = -1;
+  void*& slot = g_graphic[seed][power_up + 1];
+  if (slot != nullptr) return slot;
   void* player = LocalPlayer();
   if (player == nullptr) return nullptr;
   const float zero[3] = {0.0f, 0.0f, 0.0f};
   uint8_t coords[16] = {};
   reinterpret_cast<MapCoordsMakeFn>(kMapCoordsMake)(coords, zero);
   void* graphic = reinterpret_cast<SeedGraphicCreateFn>(kSeedGraphicCreate)(
-      coords, seed, player, 1.0f, -1);
+      coords, seed, player, 1.0f, power_up);
   if (graphic == nullptr ||
       *static_cast<uintptr_t*>(graphic) != kSeedGraphicTable) {
     g_failed = true;
-    ModLog("book bubble  : the game made no graphic of the seed type %d, so "
-           "the book shows its own picture of the bubble", seed);
+    ModLog("book bubble  : the game made no graphic of the seed type %d at "
+           "the power up %d, so the book shows its own picture of the bubble",
+           seed, power_up);
     return nullptr;
   }
   reinterpret_cast<SetAutoUpdateFn>(kSetAutoUpdate)(graphic, 0);
-  g_graphic[seed] = graphic;
+  slot = graphic;
   ++g_made;
-  ModLog("book bubble  : the graphic of the seed type %d is made", seed);
+  ModLog("book bubble  : the graphic of the seed type %d at the power up %d "
+         "is made", seed, power_up);
   return graphic;
 }
 
@@ -375,22 +384,22 @@ void DrawBall(const float world[3], const float eye[3], float s, int alpha) {
 }  // namespace
 
 void BookBubbleShow(int seed, const float world[3], float units_per_meter,
-                    uint64_t frame) {
+                    uint64_t frame, int power_up) {
   if (g_failed || seed < 0 || seed >= kSeedTypes ||
       !(units_per_meter > 0.0f)) {
     return;
   }
-  AddShow(seed, world, spell_book_math::kBubbleRadiusM * units_per_meter,
-          false, frame);
+  AddShow(seed, power_up, world,
+          spell_book_math::kBubbleRadiusM * units_per_meter, false, frame);
   ++g_shown_frames;
 }
 
 void BookBubbleShowOrb(int seed, const float world[3], float radius_units,
-                       uint64_t frame) {
+                       uint64_t frame, int power_up) {
   if (g_failed || seed < 0 || seed >= kSeedTypes || !(radius_units > 0.0f)) {
     return;
   }
-  AddShow(seed, world, radius_units, true, frame);
+  AddShow(seed, power_up, world, radius_units, true, frame);
 }
 
 void BookBubbleDraw() {
@@ -427,7 +436,7 @@ void BookBubbleDraw() {
   int orbs = 0;
   for (int k = 0; k < g_show_count; ++k) {
     const Show& show = g_shows[k];
-    void* graphic = Graphic(show.seed);
+    void* graphic = Graphic(show.seed, show.power_up);
     if (graphic == nullptr) continue;
     const float s = show.radius / kBallUnits;
     // The miracle first, then the glass over it.
@@ -471,7 +480,7 @@ void BookBubbleDrawPart(int seed, const float world[3], float radius_units,
     if (MakeBall()) DrawBall(world, nullptr, s, alpha);
     return;
   }
-  void* graphic = Graphic(seed);
+  void* graphic = Graphic(seed, -1);
   if (graphic != nullptr) DrawGraphic(graphic, world, s, alpha);
 }
 

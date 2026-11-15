@@ -1911,7 +1911,8 @@ void PlaceBubble(int type, const float at[3], const float head[3],
   float world[3], units = 0.0f;
   if (g_game_bubble && !BookBubbleFailed() &&
       ControllersLocalToWorld(at, world, &units)) {
-    BookBubbleShow(TypeOfKey(type), world, units, frame);
+    BookBubbleShow(TypeOfKey(type), world, units, frame,
+                   PowerUpOfLevel(LevelOfKey(type)));
     if (g_have_plane && BubbleHole(g_plane, head, at, kBubbleRadiusM,
                                    &g_hole)) {
       g_hole_frame = frame;
@@ -2088,7 +2089,8 @@ void ShowOrbs(const Look& look, uint64_t frame) {
     PointOn(g_plane, x, y, at);
     if (!ControllersLocalToWorld(at, world, &units)) return;
     BookBubbleShowOrb(TypeOfKey(look.type[i]), world,
-                      kBubbleShare * l.cell_m * units, frame);
+                      kBubbleShare * l.cell_m * units, frame,
+                      PowerUpOfLevel(LevelOfKey(look.type[i])));
     ++shown;
   }
   if (shown > 0) ++g_orb_frames;
@@ -2440,10 +2442,13 @@ void SpellBookInterfaceStep(void* face_in) {
       g_request_type = type;
       return;
     }
+    // The game takes the power up: -1 for the plain miracle, 0 for its
+    // "Increase" and 1 for its "Extreme" (spell_book_math::PowerUpOfLevel).
+    const int power_up = PowerUpOfLevel(level);
     void* seed = nullptr;
     if (g.hand_ready && KeyOk(type)) {
-      seed = reinterpret_cast<IntoHandFn>(kIntoHand)(g.status, type_of, level,
-                                                     1.0f);
+      seed = reinterpret_cast<IntoHandFn>(kIntoHand)(g.status, type_of,
+                                                     power_up, 1.0f);
     }
     Tally& tally = g_tally[type];
     if (seed == nullptr) {
@@ -2480,10 +2485,10 @@ void SpellBookInterfaceStep(void* face_in) {
     }
     if (AllLog()) {
       ModLog("spell book   : all miracles: %s (seed type %d, power level %d, "
-             "magic type %d, cast rule %d: %s) %s with "
+             "power up %d, magic type %d, cast rule %d: %s) %s with "
              "OneOffSpellSeed::CreateSpellIntoHand: the seed %p, %llu frames "
              "after the take, frame %llu", NarrowName(type), type_of, level,
-             magic, rule,
+             power_up, magic, rule,
              rule == 0   ? "anywhere"
              : rule == 1 ? "on land"
              : rule == 2 ? "inside the influence"
@@ -2761,8 +2766,12 @@ void SpellBookAllBookChange(const char* by) {
 
 // miracle.cpp: the game cast the miracle in the Hand, or refused the cast.
 // A miracle of the last take of the book of all miracles goes in the tally.
-void SpellBookNoteCast(int type, int level, bool refused, const char* why) {
-  if (g_book_key < 0 || KeyOf(type, level) != g_book_key) return;
+// power_up is the game's power up of the seed (SpellSeed+0x6C), -1 for the
+// plain miracle.
+void SpellBookNoteCast(int type, int power_up, bool refused, const char* why) {
+  if (g_book_key < 0 || KeyOf(type, LevelOfPowerUp(power_up)) != g_book_key) {
+    return;
+  }
   Tally& tally = g_tally[g_book_key];
   if (refused) {
     ++tally.cast_refused;

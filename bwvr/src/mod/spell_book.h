@@ -64,9 +64,10 @@ int SpellBookAllBookValue();
 void SpellBookAllBookChange(const char* by);
 
 // miracle.cpp: the game cast the miracle in the Hand (refused false), or
-// refused the cast with the reason. The tally of the book of all miracles
-// counts it when it is the miracle of the last take of that book.
-void SpellBookNoteCast(int type, int level, bool refused, const char* why);
+// refused the cast with the reason. power_up is the power up of the seed
+// (SpellSeed+0x6C): -1 for the plain miracle. The tally of the book of all
+// miracles counts it when it is the miracle of the last take of that book.
+void SpellBookNoteCast(int type, int power_up, bool refused, const char* why);
 
 // hand_glow.cpp: true while the book is open with spell_book_point=1. Then
 // the glow at the Hand's point does not show: the page shows the point of

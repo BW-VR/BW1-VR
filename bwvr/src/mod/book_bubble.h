@@ -7,14 +7,16 @@
 
 // The bubble of the seed type `seed` shows in this frame at the world point
 // `world`, with this many world units in a meter of the room. The game thread
-// calls it in each frame that the bubble shows.
+// calls it in each frame that the bubble shows. power_up is the power up of
+// the game (-1 the plain miracle, 0 its Increase, 1 its Extreme).
 void BookBubbleShow(int seed, const float world[3], float units_per_meter,
-                    uint64_t frame);
+                    uint64_t frame, int power_up = -1);
 // spell_book_orbs=1: the orb of the seed type `seed` in a cell of the book
 // shows in this frame at the world point `world`, with the radius
-// radius_units in world units. One call for each cell in each frame.
+// radius_units in world units, at the power up power_up. One call for each
+// cell in each frame.
 void BookBubbleShowOrb(int seed, const float world[3], float radius_units,
-                       uint64_t frame);
+                       uint64_t frame, int power_up = -1);
 // sky_detail.cpp: once in each eye pass, after the overlay's meshes.
 void BookBubbleDraw();
 // gesture_panel.cpp, inside its draw of an eye pass, with the camera of the

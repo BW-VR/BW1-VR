@@ -35,6 +35,16 @@ inline int KeyOf(int type, int level) { return type + kKeyTypes * level; }
 inline int TypeOfKey(int key) { return key < 0 ? -1 : key % kKeyTypes; }
 inline int LevelOfKey(int key) { return key < 0 ? 0 : key / kKeyTypes; }
 
+// THE POWER UP of the game for a level. The game's POWER_UP_TYPE is -1
+// (POWER_UP_TYPE_NONE) for the plain miracle, 0 for the "Increase" and 1 for
+// the "Extreme" (Enum.h of the decompilation). A seed casts the magic type at
+// GSpellSeedInfo+0x124 + 4 * (power up + 1). OneOffSpellSeed::
+// CreateSpellIntoHand and SpellSeed+0x6C take the power up, not the level.
+inline int PowerUpOfLevel(int level) { return level - 1; }
+inline int LevelOfPowerUp(int power_up) {
+  return power_up < 0 ? 0 : power_up + 1;
+}
+
 // The items of the book of all miracles. on[t] is the flag of the game for
 // seed type t (GSpellSeedInfo+0x17C), levels[t] the count of its magic types
 // (GSpellSeedInfo+0x124, 1 to 3), and creature[t] true for a Creature

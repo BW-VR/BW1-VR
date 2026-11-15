@@ -955,8 +955,8 @@ of the game draws both parts at a free place, at once, with no object in
 the world (`fn_0068B7E0`). The mod does the same:
 
 - One glass ball (`LH3DObject::Create`, `GJUtils::GetSharedMesh`), and one
-  graphic for each seed type (`SpellSeedGraphic::Create` `0x00726F60` with
-  auto update off). They are made at the first pull and kept, as the
+  graphic for each seed type and power up (`SpellSeedGraphic::Create`
+  `0x00726F60` with auto update off). They are made at the first use and kept, as the
   gesture help keeps its own. The graphic is not on the map and no save
   writes it. Its particles use the local random of the game.
 - In each eye pass, after the overlay's meshes at `0x0082F4C9`:
@@ -1122,7 +1122,8 @@ Spiritual Shield, Physical Shield, Wood, Flock of birds, Flock of animals,
 Teleport), then the 9 Creature miracles. The name of a level is the word of
 the game's tooltip: "Fireball Increase", "Fireball Extreme", "Poisoned
 Food". Its badge under the orb has a plus for each level ("Fireball++").
-The orb of a level is the orb of its seed type.
+The orb of a level is the game's orb of its seed type at its power up
+(`SpellSeedGraphic::Create` takes the power up).
 
 **The pages.** A page has 6 miracles at most, the count of the icons of a
 Village Centre, in the cells of the normal book of 6: 3 columns of 6.5 cm
@@ -1150,7 +1151,11 @@ the book does not turn the page: in the God view that stick moves the
 player (`move_stick`), also while the book is open.
 
 **The take.** Each take calls `OneOffSpellSeed::CreateSpellIntoHand` with
-the seed type and the level, also for a miracle that has an icon, before
+the seed type and the power up of the game, also for a miracle that has an
+icon. The power up is the level less 1: `POWER_UP_TYPE_NONE` (-1) for the
+plain miracle, 0 for "Increase" and 1 for "Extreme"
+(`spell_book_math::PowerUpOfLevel`). The seed casts the magic type at
+`GSpellSeedInfo+0x124` + 4 times (the power up + 1). The call comes before
 the next interface step, where the mod sends packet `0x25` for the normal
 book. That is the function of the script command for a one-off spell in the
 Hand, and of the tap of a one-off seed. It needs only a free Hand: no
@@ -1185,7 +1190,7 @@ lives for the time of its cast, with no site that pays.
 
 **The log.** Each take has the line `all miracles: the pointing hand takes
 Water (seed type 9, power level 0, page 3 of 6)`, then `Water (seed type
-9, power level 0, magic type 22, cast rule ...) goes into the Hand with
+9, power level 0, power up -1, magic type 22, cast rule ...) goes into the Hand with
 OneOffSpellSeed::CreateSpellIntoHand: the seed ...`. Each cast or refusal
 of the cast of the last take has `all miracles: Water from the book was cast
 by the game` (or `was refused by the game: the reason`). Each open and each

@@ -212,6 +212,73 @@ inline void SpellBookChecks() {
           "no item gives no page", one_start[0], 0);
     Check(PagesOf(keys, n, starts, 2) == 2 && starts[2] == 12,
           "the pages stop at the most", starts[2], 12);
+
+    // THE SLOT TO TYPE TABLE. Each cell of each page has the seed type and
+    // the level of the plan (docs/miracles.md, "The pages"), and the power
+    // up that goes to the game gives the magic type of the name: the magic
+    // types of the seed at +0x124 + 4 * (power up + 1).
+    struct Want {
+      int type, level, magic;
+    };
+    const Want plan[6][6] = {
+        // 1: Storm (16 17 18), Fireball (1 2 3)
+        {{0, 0, 16}, {0, 1, 17}, {0, 2, 18}, {2, 0, 1}, {2, 1, 2}, {2, 2, 3}},
+        // 2: Lightning (4 5 6), Explosion (7 8 9)
+        {{6, 0, 4}, {6, 1, 5}, {6, 2, 6}, {29, 0, 7}, {29, 1, 8}, {29, 2, 9}},
+        // 3: Food, Poisoned Food, Heal, Heal Increase, Water, Water Increase
+        {{3, 0, 14}, {3, 1, 15}, {7, 0, 10}, {7, 1, 11}, {9, 0, 22},
+         {9, 1, 23}},
+        // 4: Forest, the two shields, Wood, the two flocks
+        {{1, 0, 13}, {4, 0, 19}, {5, 0, 20}, {8, 0, 21}, {10, 0, 24},
+         {11, 0, 25}},
+        // 5: Teleport, Creature Freeze, Small, Big, Weak, Strong
+        {{28, 0, 12}, {12, 0, 26}, {13, 0, 27}, {14, 0, 28}, {15, 0, 29},
+         {16, 0, 30}},
+        // 6: Creature Invisible, Compassion, Angry, Itchy
+        {{19, 0, 33}, {20, 0, 34}, {21, 0, 35}, {27, 0, 41}, {-1, 0, 0},
+         {-1, 0, 0}}};
+    // The magic types of each seed type at its levels (the table "The magic
+    // types of the game").
+    int magic[kKeyTypes][kKeyLevels] = {};
+    for (int p = 0; p < 6; ++p) {
+      for (int c = 0; c < 6; ++c) {
+        if (plan[p][c].type >= 0) {
+          magic[plan[p][c].type][plan[p][c].level] = plan[p][c].magic;
+        }
+      }
+    }
+    bool table = true, magic_ok = true;
+    for (int p = 0; p < pages; ++p) {
+      PageCells(keys, starts, pages, p, cells);
+      for (int c = 0; c < kPageItems; ++c) {
+        const Want& w = plan[p][c];
+        const int want = w.type < 0 ? kKeyEmpty : KeyOf(w.type, w.level);
+        if (cells[c] != want) {
+          table = false;
+          printf("    page %d cell %d: key %d, the plan %d\n", p + 1, c,
+                 cells[c], want);
+        }
+        if (w.type < 0) continue;
+        const int up = PowerUpOfLevel(LevelOfKey(cells[c]));
+        const int index = up + 1;
+        if (index < 0 || index >= kKeyLevels ||
+            magic[TypeOfKey(cells[c])][index] != w.magic) {
+          magic_ok = false;
+        }
+      }
+    }
+    Check(table, "each cell of the 6 pages has the miracle of the plan", table,
+          1);
+    Check(magic_ok, "the power up of each cell casts the magic type of its "
+                    "name", magic_ok, 1);
+    Check(PowerUpOfLevel(0) == -1 && PowerUpOfLevel(1) == 0 &&
+              PowerUpOfLevel(2) == 1,
+          "the plain miracle is the power up -1 of the game, Increase 0, "
+          "Extreme 1", PowerUpOfLevel(0), -1);
+    Check(LevelOfPowerUp(-1) == 0 && LevelOfPowerUp(0) == 1 &&
+              LevelOfPowerUp(1) == 2,
+          "a power up of the game gives its level back", LevelOfPowerUp(-1),
+          0);
   }
 
   // THE PLACE OF THE BOOK. With the grip pose of no turn, the book of the

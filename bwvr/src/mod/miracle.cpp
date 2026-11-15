@@ -76,7 +76,7 @@ bool ModSaveHooked();
 // and the tally of the book of all miracles.
 void SpellBookBeforeSave();
 void SpellBookAfterSave();
-void SpellBookNoteCast(int type, int level, bool refused, const char* why);
+void SpellBookNoteCast(int type, int power_up, bool refused, const char* why);
 // head_pose.cpp: game units in a real meter.
 float HeadPoseScale();
 // hand_direct.cpp

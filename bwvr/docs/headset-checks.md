@@ -141,8 +141,8 @@ want.
     page beside a pulled orb, or an orb in a cell that is not in its hole of
     the page. The pointing hand must show whole in front of the page when it
     is in front, with no edge of page over it or band of land beside it.
-17. **A gesture and a cast.** Draw miracles in the air, draw a circle for
-    Storm or a shield, and try the switch "Gesture point" (debug page,
+17. **A gesture and a cast.** Draw miracles in the air, draw a circle on the
+    land with the ray for Storm or a shield, and try the switch "Gesture point" (debug page,
     Miracles). Take a miracle out with a shake and with a tap of B. Wrong: a
     draw that looks right and does not match (say which), a circle that gets
     a different size on the land, or a way out that acts by accident or not
@@ -408,7 +408,7 @@ can power up. The announcer calls the steps "Increase", "Extreme" and
 | At a place | Heal, Forest, Teleport, Explosion | Close the grip with the Hand over the place |
 | A pour | Water, Food, Wood, Lightning | Keep the grip closed over the place. Open it to stop |
 | A throw | Fireball, the two flocks | Close the grip, swing the hand, and open it |
-| A circle | Storm, the two shields | Close the grip and draw a circle over the land. The cast comes when the circle closes |
+| A circle | Storm, the two shields | Point the ray at the land, close the grip and draw a circle on the land with the ray. The cast comes when the circle closes |
 | On a Creature | The Creature miracles | Close the grip with the gold halo on a Creature (at the Hand, or in the aim) |
 
 Take a miracle out: tap B, or shake the hand. A miracle from a Worship Site
@@ -577,8 +577,8 @@ land in front of you, and the mod removes these orbs before each save.
 - **Cost.** 8000. The power ups (inverse spiral, then spiral): 15000 and
   20000.
 - **Gesture.** Spiral, then a fork. It needs its own circle.
-- **In the mod.** Close the grip and draw a circle over the land. The cast
-  comes when the game matches the circle.
+- **In the mod.** Point the ray at the land, close the grip and draw a circle
+  on the land with the ray. The cast comes when the game matches the circle.
 - **Proved.** Desktop runs: the circle, the cast, and the storm under the
   hand (`miracle_circle_hand`): a grey cloud in front of the Hand, and a
   dark sky.
@@ -597,7 +597,8 @@ land in front of you, and the mod removes these orbs before each save.
 - **Cost.** 7000, and more for each second that it stands. No power up in
   `info.dat`, although a help text names a larger shield.
 - **Gesture.** Spiral, then a fork. It needs its own circle.
-- **In the mod.** Close the grip and draw a circle over the land.
+- **In the mod.** Point the ray at the land, close the grip and draw a circle
+  on the land with the ray.
 - **Proved.** Desktop runs: the circle, the cast, and a dome at the
   fingertips (`miracle_circle_hand`) that stands for more than 12 s.
 - **To prove.** A miracle cast at the dome does not get in.
@@ -616,7 +617,8 @@ land in front of you, and the mod removes these orbs before each save.
   you throw at it stops.
 - **Cost.** 7000, and more for each second that it stands. No power up.
 - **Gesture.** Spiral, then a fork. It needs its own circle.
-- **In the mod.** Close the grip and draw a circle over the land.
+- **In the mod.** Point the ray at the land, close the grip and draw a circle
+  on the land with the ray.
 - **Proved.** Desktop runs: the refusal with no circle ("needs a circle on
   the land first"), and the cast: the dome stands over the circle in the eye
   pictures (`miracle_run.ps1 -Kind pshield`). A pig thrown at the dome

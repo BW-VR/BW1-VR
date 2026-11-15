@@ -41,6 +41,7 @@
 #include <string.h>
 
 #include "MinHook.h"
+#include "circle_aim_math.h"
 #include "controller_hints.h"
 #include "controller_math.h"
 #include "controllers.h"
@@ -165,6 +166,13 @@ const int kInfoOnObject = 0x118;
 // cast rule (CAST_RULE_TYPE).
 const uintptr_t kSeedMagicInfo = 0x007290F0;
 const int kMagicCastRule = 0x34;
+// GMagicInfo: its magic type. GMagicRadiusSpellInfo (Storm, the shields):
+// the least and the most radius of the spell. SpellStormAndTornado::
+// InitWithPos (0x0072DAA0) and SpellShield::InitWithPos (0x0072B5F0) keep the
+// size of the cast between the two.
+const int kMagicType = 0x10;
+const int kMagicLeast = 0x58;
+const int kMagicMost = 0x5C;
 // OneOffSpellSeed::Create, cdecl (const MapCoords*, SPELL_SEED_TYPE,
 // POWER_UP_TYPE, float). The caller cleans 0x10 bytes (0x00722BD5).
 const uintptr_t kCreateOneOff = 0x0072A2F0;
@@ -281,6 +289,7 @@ struct Settings {
   bool seed_use = true;      // miracle_seed_use: the trigger uses a seed
   bool circle_cast = true;   // miracle_circle_cast: a closed circle casts
   bool circle_hand = true;   // miracle_circle_hand: the circle of the real hand
+  bool circle_aim = true;    // miracle_circle_aim: the ray draws the circle
   float cone_deg = 6.0f;     // miracle_cone_deg: a new target in the aim
   float keep_deg = 10.0f;    // miracle_keep_deg: the target stays to here
   float touch_cm = 3.0f;     // miracle_touch_cm
@@ -457,6 +466,36 @@ float g_circle_path[kMaxCirclePoints][3];
 int g_circle_points = 0;
 bool g_circle_drawing = false;
 bool g_circle_moved = false;
+
+// THE AIM OF A CIRCLE (miracle_circle_aim=1), latched once a frame in
+// MiracleFrame: the ray of the pointing hand while a Storm or a shield is in
+// the Hand, its land point, and the path of that land point while the grip
+// draws the circle.
+struct Aim {
+  bool shows;          // the ray shows in this frame
+  bool draws;          // the grip draws the circle in this frame
+  bool have_land;      // the ray meets the land
+  float land[3];       // its land point, in the world
+  float direction[3];  // the direction of the ray, in the world
+  float distance;      // world units from the start of the ray to the land
+  float units;         // world units in a meter of the room
+  bool outside;        // the place of the cast is outside the influence
+  bool too_large;      // the circle of the path is larger than the spell
+  float least, most;   // the limits of the radius of the spell, or 0
+  int magic;           // the magic type of the seed
+};
+Aim g_aim = {};
+circle_aim_math::Path g_aim_path = {};
+uint64_t g_aim_shows = 0;      // frames with the ray, this window
+uint64_t g_aim_draws = 0;      // draws of a circle with the ray, this window
+bool g_aim_said_shows = false;
+bool g_aim_said_land = false;
+bool g_aim_said_large = false;
+// The limits of the radius of the spell of this seed and power level.
+const void* g_limit_seed = nullptr;
+int g_limit_power = -1;
+float g_limit_least = 0.0f, g_limit_most = 0.0f;
+int g_limit_magic = 0;
 uint64_t g_record_puts = 0;
 uint64_t g_record_clears = 0;
 uint64_t g_target_frames = 0;
@@ -844,6 +883,7 @@ void Init() {
   g_settings.seed_use = IniInt("miracle_seed_use", 1) != 0;
   g_settings.circle_cast = IniInt("miracle_circle_cast", 1) != 0;
   g_settings.circle_hand = IniInt("miracle_circle_hand", 1) != 0;
+  g_settings.circle_aim = IniInt("miracle_circle_aim", 1) != 0;
   g_settings.cone_deg = IniFloat("miracle_cone_deg", 6.0f);
   if (!(g_settings.cone_deg >= 0.5f)) g_settings.cone_deg = 0.5f;
   if (g_settings.cone_deg > 30.0f) g_settings.cone_deg = 30.0f;
@@ -952,6 +992,13 @@ void Init() {
                "of the path of the real hand"
              : "the circle has the place and the size that the game gives it "
                "from the pixels of the path");
+  ModLog("miracle      : miracle_circle_aim=%d: %s",
+         g_settings.circle_aim ? 1 : 0,
+         g_settings.circle_aim
+             ? "a Storm or a shield in the Hand shows the ray of the pointing "
+               "hand, and the land point of the ray draws the circle on the "
+               "land"
+             : "the hand draws the circle of a Storm or a shield in the air");
   if (g_settings.test_keys) {
     ModLog("keys         : Ctrl with numpad 8 changes miracle_hand between 1 "
            "and 0 (test_keys=1)");
@@ -971,6 +1018,20 @@ void MiracleHandChange(const char* by) {
 int MiracleHandValue() {
   Init();
   return g_settings.on ? 1 : 0;
+}
+
+// The switch "Circle aim" of the debug page: miracle_circle_aim.
+void MiracleCircleAimChange(const char* by) {
+  Init();
+  g_settings.circle_aim = !g_settings.circle_aim;
+  ControllersGesturePulse(0.5f, g_settings.circle_aim ? 0.24f : 0.08f);
+  ModLog("miracle      : %s: miracle_circle_aim=%d, frame %llu", by,
+         g_settings.circle_aim ? 1 : 0, g_frame);
+}
+
+int MiracleCircleAimValue() {
+  Init();
+  return g_settings.circle_aim ? 1 : 0;
 }
 
 namespace {
@@ -1518,6 +1579,158 @@ void MiracleMapCleared() {
   }
 }
 
+namespace {
+
+// The aim of the land up to this far along the ray, in meters of the room,
+// as the aim of a bookmark has it.
+const float kAimLandMostM = 60.0f;
+const float kAimLandStepM = 0.05f;
+const float kMapSize = 5120.0f;
+
+// The influence of the player at a world point: true when it is outside.
+bool OutsideInfluence(const Facts& f, const float at[3]) {
+  const MapCoords coords = {static_cast<int32_t>(at[0] * kMapScale),
+                            static_cast<int32_t>(at[2] * kMapScale), 0.0f};
+  if (reinterpret_cast<CoordsFn>(kInBounds)(&coords, nullptr) == 0) {
+    return true;
+  }
+  void* player = Player(f.face);
+  return player == nullptr ||
+         !(reinterpret_cast<PlayerInfluenceFn>(kPlayerInfluence)(
+               &coords, player, 0, 1, 1) > 0.0f);
+}
+
+// THE AIM OF A CIRCLE (miracle_circle_aim=1). Once a frame, after the facts:
+// while a Storm or a shield is in the Hand, the ray of the pointing hand
+// shows (ControllersMenuRay), and its land point is the point of the draw
+// of the circle (gesture_air.cpp). While the grip draws, the land point of
+// each frame goes into the path of the circle. The game reads the place of
+// the Hand many times a frame, so the mod changes no place of the Hand: the
+// drawn Hand stays at the real hand.
+void AimFrame(const Facts& f, bool have) {
+  const Aim last = g_aim;
+  g_aim = Aim{};
+  const bool circle_seed = have && f.seed != nullptr &&
+                           f.info.cast == miracle_math::kCastThrow &&
+                           f.info.gesture != 0;
+  if (!circle_seed) g_aim_said_shows = false;
+  if (!g_settings.circle_aim || !circle_seed || f.face[kFaceCircle] != 0) {
+    // The path stays after the match, for the circle of the cast
+    // (CircleFromHand). The next draw clears it.
+    return;
+  }
+  float origin[3], direction[3], eye[3], units = 0.0f;
+  if (!ControllersFarRay(origin, direction, &units, eye) || !(units > 0.0f)) {
+    return;
+  }
+  g_aim.shows = true;
+  g_aim.units = units;
+  for (int k = 0; k < 3; ++k) g_aim.direction[k] = direction[k];
+  ++g_aim_shows;
+  // The limits of the radius of the spell, from its magic info, once for
+  // each seed and power level. The cast reads them after the ray is gone.
+  if (f.seed != g_limit_seed || f.power != g_limit_power) {
+    g_limit_seed = f.seed;
+    g_limit_power = f.power;
+    g_limit_least = g_limit_most = 0.0f;
+    g_limit_magic = 0;
+    const uint8_t* magic = static_cast<const uint8_t*>(
+        reinterpret_cast<VirtualPtrFn>(kSeedMagicInfo)(f.seed, nullptr));
+    if (magic != nullptr && !IsBadReadPtr(magic, kMagicMost + 4)) {
+      const float least = *reinterpret_cast<const float*>(magic + kMagicLeast);
+      const float most = *reinterpret_cast<const float*>(magic + kMagicMost);
+      g_limit_magic = *reinterpret_cast<const int32_t*>(magic + kMagicType);
+      if (least >= 0.0f && most >= least && most < 10000.0f) {
+        g_limit_least = least;
+        g_limit_most = most;
+      }
+    }
+  }
+  g_aim.least = g_limit_least;
+  g_aim.most = g_limit_most;
+  g_aim.magic = g_limit_magic;
+  float step = kAimLandStepM * units;
+  if (step < 1.0f) step = 1.0f;
+  const float land = command_math::RayLandDistance(
+      origin, direction, step, kAimLandMostM * units,
+      [](float x, float z) { return TeleportGround(x, z); });
+  if (land > 0.0f) {
+    float point[3];
+    for (int k = 0; k < 3; ++k) point[k] = origin[k] + direction[k] * land;
+    if (point[0] >= 0.0f && point[0] < kMapSize && point[2] >= 0.0f &&
+        point[2] < kMapSize) {
+      g_aim.have_land = true;
+      g_aim.distance = land;
+      for (int k = 0; k < 3; ++k) g_aim.land[k] = point[k];
+    }
+  }
+  g_aim.draws = MiracleDrawsCircle();
+  if (g_aim.draws && !last.draws) {
+    circle_aim_math::Clear(&g_aim_path);
+    ++g_aim_draws;
+  }
+  if (!g_aim.draws && last.draws) circle_aim_math::Clear(&g_aim_path);
+  if (g_aim.draws && g_aim.have_land) {
+    circle_aim_math::Add(&g_aim_path, g_aim.land,
+                         circle_aim_math::kStepShare * g_aim.distance);
+  }
+  // The place of the cast: the middle of the path while the grip draws, and
+  // else the land point of the ray.
+  float middle[3], widest = 0.0f;
+  const bool circle =
+      g_aim.draws && circle_aim_math::CircleOf(g_aim_path, middle, &widest);
+  if (circle) {
+    g_aim.too_large =
+        circle_aim_math::TooLarge(circle_aim_math::SizeOf(widest), g_aim.most);
+    g_aim.outside = OutsideInfluence(f, middle);
+  } else if (g_aim.have_land) {
+    g_aim.outside = OutsideInfluence(f, g_aim.land);
+  }
+  if (!g_aim_said_shows && Log()) {
+    g_aim_said_shows = true;
+    ModLog("miracle      : %s is in the Hand, so the pointing hand shows its "
+           "ray, and the land point of the ray draws the circle "
+           "(miracle_circle_aim=1). The spell takes a radius of %.1f to %.1f "
+           "units (magic type %d), frame %llu", SeedName(f.info.type),
+           g_aim.least, g_aim.most, g_aim.magic, g_frame);
+  }
+  if (g_aim.draws && !last.draws && Log()) {
+    if (g_aim.have_land) {
+      ModLog("miracle      : the grip starts the circle of %s at the land "
+             "point of the ray %.1f %.1f, %.2f m of the room along the ray. "
+             "The land there is %s your influence, frame %llu",
+             SeedName(f.info.type), g_aim.land[0], g_aim.land[2],
+             g_aim.distance / units, g_aim.outside ? "outside" : "inside",
+             g_frame);
+    } else {
+      ModLog("miracle      : the grip starts the circle of %s, but the ray "
+             "meets no land within %.0f m of the room, frame %llu",
+             SeedName(f.info.type), kAimLandMostM, g_frame);
+    }
+  }
+  if (g_aim.too_large && !g_aim_said_large && Log()) {
+    g_aim_said_large = true;
+    ModLog("miracle      : the circle of the ray is %.1f units wide, so the "
+           "game gives it the size %.1f, more than the %.1f units of %s. The "
+           "trail on the land is red, and the spell gets the radius %.1f, "
+           "frame %llu", widest, circle_aim_math::SizeOf(widest), g_aim.most,
+           SeedName(f.info.type),
+           circle_aim_math::SpellRadius(circle_aim_math::SizeOf(widest),
+                                        g_aim.least, g_aim.most),
+           g_frame);
+  }
+  if (!g_aim.draws) g_aim_said_large = false;
+  if (g_aim.have_land != g_aim_said_land) {
+    g_aim_said_land = g_aim.have_land;
+    if (!g_aim.have_land && Log()) {
+      ModLog("miracle      : the ray of %s meets no land now, frame %llu",
+             SeedName(f.info.type), g_frame);
+    }
+  }
+}
+
+}  // namespace
+
 void MiracleFrame() {
   Init();
   g_frame = ControllersFrameCount();
@@ -1551,6 +1764,7 @@ void MiracleFrame() {
   const bool have = any && Active(&f);
   g_have = have;
   g_now = f;
+  AimFrame(f, have);
   // THE CHARGE (world_haptics, haptics.cpp). The press of a miracle that
   // casts at the release (a throw or a circle) starts the interface action
   // 8, and the miracle charges until the release. The Hand feels a short
@@ -1952,14 +2166,71 @@ namespace {
 // the circle, the mod puts the middle under the middle of the path of the
 // Hand's point, and the size at 1.05 times the widest span of that path
 // across the land. That is the rule of the game with the real hand.
+//
+// THE CIRCLE OF THE RAY (miracle_circle_aim=1). The pixels of the path are a
+// view of the land from above (circle_aim_math.h, the plan), and the game
+// puts its circle under the middle of their box through its own camera, so
+// the game's circle is not where the ray drew. The mod puts the middle of
+// the circle at the middle of the widest span of the path of the land point
+// of the ray, and the size at 1.05 times that span.
+void CircleFromAim(const Facts& f, float* place, float* size) {
+  const float units = HandDirectRoomUnits();
+  float middle[3], widest = 0.0f;
+  if (!circle_aim_math::CircleOf(g_aim_path, middle, &widest) ||
+      g_aim_path.count < 8) {
+    if (Log()) {
+      ModLog("miracle      : the game matched the circle of %s, but the path "
+             "of the ray has only %d points, so the circle stays at %.1f "
+             "%.1f with the size %.1f units, frame %llu",
+             SeedName(f.info.type), g_aim_path.count, place[0], place[2],
+             *size, g_frame);
+    }
+    return;
+  }
+  const float game[4] = {place[0], place[1], place[2], *size};
+  const MapCoords coords = {static_cast<int32_t>(middle[0] * kMapScale),
+                            static_cast<int32_t>(middle[2] * kMapScale), 0.0f};
+  float height = middle[1];
+  if (reinterpret_cast<CoordsFn>(kInBounds)(&coords, nullptr) != 0) {
+    height = reinterpret_cast<AltitudeFn>(kAltitude)(&coords, nullptr);
+  }
+  place[0] = middle[0];
+  place[1] = height;
+  place[2] = middle[2];
+  *size = circle_aim_math::SizeOf(widest);
+  ++g_circle_moves;
+  if (Log()) {
+    float hand[3];
+    const bool real = HandDirectRealPoint(hand);
+    const float hx = real ? middle[0] - hand[0] : 0.0f;
+    const float hz = real ? middle[2] - hand[2] : 0.0f;
+    ModLog("miracle      : the game matched the circle of %s. The ray drew it "
+           "on the land around %.1f %.1f, %.1f units wide in %d points, %.2f "
+           "m of the room from the Hand's point. The mod puts the circle "
+           "there with the size %.1f units (the game had %.1f %.1f with the "
+           "size %.1f). The spell gets the radius %.1f (%.1f to %.1f units "
+           "for magic type %d) (miracle_circle_aim=1), frame %llu",
+           SeedName(f.info.type), middle[0], middle[2], widest,
+           g_aim_path.count,
+           units > 0.0f ? sqrtf(hx * hx + hz * hz) / units : 0.0f, *size,
+           game[0], game[2], game[3],
+           circle_aim_math::SpellRadius(*size, g_limit_least, g_limit_most),
+           g_limit_least, g_limit_most, g_limit_magic, g_frame);
+  }
+}
+
 void CircleFromHand(const Facts& f) {
-  if (!g_settings.circle_hand || f.seed == nullptr || f.info.gesture == 0 ||
-      f.face[kFaceCircle] == 0 || g_circle_moved) {
+  if (!(g_settings.circle_hand || g_settings.circle_aim) || f.seed == nullptr ||
+      f.info.gesture == 0 || f.face[kFaceCircle] == 0 || g_circle_moved) {
     return;
   }
   g_circle_moved = true;
   float* place = reinterpret_cast<float*>(f.face + kFaceCirclePlace);
   float* size = reinterpret_cast<float*>(f.face + kFaceCircleSize);
+  if (g_settings.circle_aim) {
+    CircleFromAim(f, place, size);
+    return;
+  }
   const float units = HandDirectRoomUnits();
   if (g_circle_points < 8) {
     if (Log()) {
@@ -2098,6 +2369,36 @@ bool MiracleDrawsCircle() {
          (g_now.action == 8 || g_now.action == 9);
 }
 
+bool MiracleAimShows() { return g_ready && g_aim.shows; }
+
+bool MiracleAimRay(float* meters) {
+  if (!g_ready || !g_aim.shows) return false;
+  *meters = g_aim.have_land && g_aim.units > 0.0f
+                ? g_aim.distance / g_aim.units
+                : 0.0f;
+  return true;
+}
+
+bool MiracleAimLand(float land[3], float direction[3], float* distance,
+                    float* units) {
+  if (!g_ready || !g_aim.shows || !g_aim.have_land) return false;
+  for (int k = 0; k < 3; ++k) {
+    land[k] = g_aim.land[k];
+    direction[k] = g_aim.direction[k];
+  }
+  *distance = g_aim.distance;
+  *units = g_aim.units;
+  return true;
+}
+
+int MiracleAimPath(const float (**points)[3], bool* warn, float* units) {
+  *points = g_aim_path.point;
+  *warn = g_aim.too_large || g_aim.outside;
+  *units = g_aim.units;
+  if (!g_ready || !g_aim.draws) return 0;
+  return g_aim_path.count;
+}
+
 int MiracleHint(MiracleLine lines[kMiracleLines]) {
   if (!g_ready || !g_settings.on || !g_have) return 0;
   const bool seed_held = g_now.one_off && g_now.held != nullptr;
@@ -2154,12 +2455,17 @@ int MiracleHint(MiracleLine lines[kMiracleLines]) {
       add(kWordGrab, L"Hold, swing, open to throw");
       break;
     case miracle_math::kPromptCircle:
-      add(kWordGrab, L"Hold and draw a circle");
+      add(kWordGrab, g_aim.shows ? L"Point, hold, draw a circle"
+                                 : L"Hold and draw a circle");
       break;
     case miracle_math::kPromptHeld:
-      add(kWordGrab, g_now.info.gesture == 0 ? L"Open to throw"
-                     : g_settings.circle_cast ? L"Draw a circle to cast"
-                                              : L"Draw a circle, then open");
+      add(kWordGrab,
+          g_now.info.gesture == 0 ? L"Open to throw"
+          : g_aim.shows           ? (g_settings.circle_cast
+                                         ? L"Draw a circle on the land"
+                                         : L"Draw a circle on the land, then open")
+          : g_settings.circle_cast ? L"Draw a circle to cast"
+                                   : L"Draw a circle, then open");
       break;
     case miracle_math::kPromptRuns:
       add(-1, L"The miracle acts now");
@@ -2193,6 +2499,12 @@ int MiracleHint(MiracleLine lines[kMiracleLines]) {
                       : L"Use it inside your influence");
       break;
     default:
+      // THE AIM OF A CIRCLE: what the game will do with the circle now.
+      if (g_aim.shows && g_aim.outside) {
+        add(-1, L"This place is outside your influence");
+      } else if (g_aim.draws && g_aim.too_large) {
+        add(-1, L"The miracle is smaller than this circle");
+      }
       break;
   }
   if (miracle) {
@@ -2212,6 +2524,13 @@ void MiracleReport() {
       g_refusals == 0 && g_cancels == 0 && g_uses == 0 &&
       g_circle_casts == 0) {
     return;
+  }
+  if (g_aim_shows > 0) {
+    ModLog("miracle      : the ray of a circle showed on %llu frames, and the "
+           "grip drew %llu circles with it, this window (miracle_circle_aim=%d)",
+           g_aim_shows, g_aim_draws, g_settings.circle_aim ? 1 : 0);
+    g_aim_shows = 0;
+    g_aim_draws = 0;
   }
   ModLog("miracle      : a miracle was in the Hand on %llu frames and a "
          "one-off seed on %llu. %llu casts sent, %llu casts refused, %llu "

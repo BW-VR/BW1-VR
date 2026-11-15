@@ -27,6 +27,10 @@ Related docs: `grab.md` (the grip), `throw.md` (the throw), `creature.md`
   A shake of the real hand or a short press of the second face button
   cancels. The trigger makes a carried seed active. The mod gives a target
   with a halo to a Creature miracle.
+- A Storm or a shield in the Hand shows the ray of the pointing hand. With
+  the grip closed, the point of the ray on the land draws the circle, and a
+  gold trail lies on the land along it. The miracle goes where the ray drew
+  (`miracle_circle_aim=1`).
 - The first face button of the hand that does not point opens the spell
   book. It shows the miracles that the player can ask for now, with the
   pictures of their gestures. The grip of the pointing hand holds one, and a
@@ -366,12 +370,39 @@ these are true:
 - The game holds no circle now (`GInterface+0x17C` is 0).
 
 A match (`fn_005CF220`) of that type closes the circle. `fn_0057A5E0` gives
-the place and the size of the circle from the path: for a template of kind
-2 (`+0x64A`), the place is the middle of the box of the land points of the
-path, and the size is the width of that box across the view of the camera,
-times 1.05. The game keeps the circle at `GInterface+0x180` to `+0x190`,
-sets `+0x17C` to 1, and clears the ring (`fn_005CE420(1)`). The circle
-stays for 5 s (`+0x194`), and then `+0x17C` goes back to 0.
+the place and the size of the circle from the path. For a template of kind
+2 (`+0x64A`), it makes the box of the pixels of the path (`fn_005789D0`,
+`LHRegionF::CentreCoord`). The place is the land under the middle pixel of
+that box (`fn_005E5620`, through the game camera). The size comes from the
+width of the box at the distance of that land point from the camera, times
+1.05 [V for the pixel box and the land under its middle, I for the steps of
+the size]. So the circle is where the pixels of the path are on the screen,
+not where the land points of the samples are. The game keeps the circle at
+`GInterface+0x180` to `+0x190`, sets `+0x17C` to 1, and clears the ring
+(`fn_005CE420(1)`). The circle stays for 5 s (`+0x194`), and then `+0x17C`
+goes back to 0.
+
+Only three seed types have this gesture: Storm (with its two levels),
+Spiritual Shield and Physical Shield. So 5 of the 34 miracles of the Hand
+need a circle. No other miracle of the game takes a drawn shape.
+
+**The limits of the circle.** The game refuses no circle for its size. The
+spell keeps the size between two values of its magic info
+(`GMagicRadiusSpellInfo`, `+0x58` the least and `+0x5C` the most):
+`SpellStormAndTornado::InitWithPos` (`0x0072DAA0`) and
+`SpellShield::InitWithPos` (`0x0072B5F0`) make a smaller size the least and
+a larger size the most, and the spell takes that value as its radius. A
+Storm has the least radius 20 units: a circle of the size 3.4 gives a storm
+of radius 20. The place must pass the cast rule of the magic info: Storm
+needs the influence (rule 2), and the two shields need land in the
+influence (rule 3). A place that fails gets the refusal of the game, the
+yellow cross and its sound (see "The refusal"). The cost of a shield or a
+storm grows with the square of its size (`CalculateCostToMaintain`).
+
+**What the game shows.** No ring and no trail show while the path is drawn
+[I: no code reads the ring to draw it]. At the match the game draws the
+gesture on the land from the land points of the samples (`PSysGesture`, see
+"On a match"), and plays a sound at the newest land point.
 
 The release of action 8 (`FUN_005D48D0`) calls `FUN_005D3340`. With
 `+0x17C` set, the cast takes the circle as its gesture (`+0x1A4`) and the
@@ -626,7 +657,7 @@ Hand (see `grab.md`, "The grip holds").
 | Heal, Forest, Teleport, Explosion | Close the grip with the Hand over the place | `FUN_005D3340`: the cast at the land under the Hand |
 | Food, Wood, Water, Lightning | Keep the grip closed over the place | Action 10: a cast each game turn. The opening ends the pour |
 | Fireball, the flocks | Close the grip, swing the hand, open the grip | Action 8: the release sends the throw velocity, which the mod makes the speed of the real hand |
-| Storm, the two shields | Close the grip and draw a circle with the hand | The game matches the circle, and the cast comes at once, at its place. The grip that opens then does nothing more |
+| Storm, the two shields | Point the ray at the land, close the grip and draw a circle on the land with the ray | The game matches the circle, and the cast comes at once, at its place. The grip that opens then does nothing more |
 
 **The throw** has the velocity of the throw of an object: the top speed of
 the grip of the real hand in the 120 ms before the opening of the grip
@@ -637,10 +668,63 @@ Fireball turns in its flight by it. See `throw.md`, "A thrown miracle".
 
 **The circle.** The mod feeds the ring of the gestures while the grip is
 closed with a miracle that needs a circle, and the interface action is 8 or
-9. The path of the hand goes to the ring as it does for the draw button
+9. With `miracle_circle_aim=1` the land point of the ray goes to the ring
+(see "The circle of the pointer ray" below). With `miracle_circle_aim=0` the
+path of the hand goes to the ring as it does for the draw button
 (`MiracleDrawsCircle`, `ControllersGestureInput`, "Feeding a 3D path").
 
-**The circle is under the path of the real hand** (`miracle_circle_hand=1`).
+**The circle of the pointer ray** (`miracle_circle_aim=1`). The Hand cannot
+reach a far place, and a circle in the air has no clear place on the land.
+So while a Storm or a shield is in the Hand, the pointing hand shows its
+ray, as the aim of a bookmark does. The ray goes from the aim pose to its
+land point, with the glow at its end. The code is `AimFrame` in
+`miracle.cpp`, with the pure math in `circle_aim_math.h`.
+
+- **The ray and its land point** are latched once a frame
+  (`MiracleFrame`): the ray of the far grab (`ControllersFarRay`), and the
+  land along it up to 60 m of the room (`command_math::RayLandDistance`).
+  The ray does not show after the game matched the circle.
+- **The draw.** While the grip draws the circle (action 8 or 9), each
+  sample of the ring has the land point of the ray of that frame. Its pixel
+  is that land point in a view from above (`circle_aim_math::PlanFrom`):
+  the forward direction of the ray at the start of the draw is up on the
+  screen. A circle across 35 percent of the distance of the ray is a third
+  of the render height. So the game matches the shape on the land, and the
+  angle of the view does not flatten it. The samples go into the ring with
+  the game's own add of a sample (`fn_0057BBC0`), after the same tests of
+  the pause and of the wait after a match as the sampler of the game. A frame
+  in which the ray meets no land adds nothing.
+- **The place and the size.** The game puts its circle under the middle of
+  the pixel box through its camera, and the pixels of the plan are not on
+  the screen. So after the match `CircleFromAim` puts the middle of the circle
+  at the middle of the widest span of the path of the land point, and the
+  size at 1.05 times that span. The middle of the widest span does not move
+  to the side where the ray moved slowly, as a mean of the points does.
+- **The Hand stays at the real hand.** The mod changes no place of the Hand
+  for the circle. The game's own picture of the match (`PSysGesture`) comes
+  from the land points of the samples, so it lies where the ray drew.
+- **The trail on the land** (`overlay.cpp`, `BuildAimTrail`): a glow ribbon
+  2 cm of the room over the land along the path, gold while the circle is
+  good. It is red when the game will make the spell smaller than the circle
+  (the size is over the most of the magic info), or when the middle of the
+  path is outside the influence. The card then says why (see "The card").
+  When the draw ends the trail goes out in 0.3 s. The trail at the
+  fingertip does not show for this draw.
+
+The log lines: `... is in the Hand, so the pointing hand shows its ray`
+(with the least and the most radius of the spell), `the grip starts the
+circle of ... at the land point of the ray`, `gesture      : the ray draws
+the circle on the land from ...` (the plan), `the game matched the circle
+of ... The ray drew it on the land around ...` (the middle, the width, the
+count of points, the distance from the Hand's point, the size, the circle of
+the game and the radius that the spell gets), and `the circle of the ray is
+... wide, so the game gives it the size ...` when it is too large. Each
+report window has `the ray of a circle showed on N frames, and the grip drew
+N circles with it`. The overlay has `the trail of the circle of the ray
+starts`, `is red` or `is gold`, and `ends`.
+
+**The circle is under the path of the real hand** (`miracle_circle_hand=1`,
+with `miracle_circle_aim=0`).
 The game makes the circle from the land under the pixels of the path,
 through its own camera (`fn_0057A5E0`). The mod feeds the path as pixels on
 a plane around the pixel of the controller, so the land under those pixels
@@ -803,7 +887,8 @@ go, and one line of its text stays (the name of the miracle).
 | A miracle for a place | "[Grip] Cast here" |
 | A miracle to pour | "[Grip] Hold to pour", and "[Grip] Open to stop" while it pours |
 | A miracle to throw | "[Grip] Hold, swing, open to throw", and "[Grip] Open to throw" while the grip is closed |
-| A miracle that needs a circle | "[Grip] Hold and draw a circle", and "[Grip] Draw a circle to cast" while the grip is closed ("[Grip] Draw a circle, then open" with `miracle_circle_cast=0`) |
+| A miracle that needs a circle | "[Grip] Point, hold, draw a circle", and "[Grip] Draw a circle on the land" while the grip is closed ("Draw a circle on the land, then open" with `miracle_circle_cast=0`). With `miracle_circle_aim=0`: "[Grip] Hold and draw a circle", and "[Grip] Draw a circle to cast" ("Draw a circle, then open") |
+| The ray of a circle with no refusal | "This place is outside your influence" while the land point of the ray, or the middle of the path, is outside the influence. "The miracle is smaller than this circle" while the circle is larger than the spell can be |
 | The spell of a Creature miracle runs | "The miracle acts now" |
 | Each state of a miracle | "[B] Tap to cancel, or shake" |
 
@@ -1245,7 +1330,7 @@ How the mod casts each miracle of the book (see "The grip casts"):
 | --- | --- | --- |
 | Fireball and its levels, Flock of birds, Flock of animals | The throw: close the grip, swing, open | The plain Fireball and the two flocks in desktop runs. The levels are not run |
 | Lightning and its levels, Food, Poisoned Food, Wood, Water, Water Increase | The pour: keep the grip closed over the land | The plain ones in desktop runs. The levels are not run |
-| Storm and its levels, Spiritual Shield, Physical Shield | The grip and a circle drawn with the hand | Storm and Spiritual Shield in desktop runs. The levels of Storm are not run |
+| Storm and its levels, Spiritual Shield, Physical Shield | The grip and a circle that the ray draws on the land | Storm and Spiritual Shield in desktop runs. The levels of Storm are not run |
 | Heal, Heal Increase, Forest, Teleport, Explosion (the Mega-Blast of the game) and its levels | A press of the grip over the place | Heal, Forest, Teleport and Explosion in desktop runs. The levels are not run |
 | The 9 Creature miracles | A press of the grip with the halo on a Creature | Strong, Freeze, Shrink, Enlarge and Invisibility in desktop runs. Weak, Compassion, Angry and Itchy are not run |
 
@@ -1340,8 +1425,9 @@ ribbons"): gold in the middle and amber at the rim, 1.8 cm across at the
 newest end, with a light that adds to the picture.
 
 - The trail draws while `GestureInput.held` is true, the same input that
-  feeds the ring of the game. So it also draws for the circle of a shield,
-  while the grip is closed with a miracle that needs a circle.
+  feeds the ring of the game. With `miracle_circle_aim=0` it also draws for
+  the circle of a shield, while the grip is closed with a miracle that needs
+  a circle. With the ray the circle has its trail on the land.
 - The newest end is the point of the draw of this frame, so the ribbon
   always reaches the finger. A point goes in each 5 mm of the room. The
   trail keeps 96 points at the most.
@@ -1829,7 +1915,8 @@ so the plain game has no flat band.
 | `miracle_cancel_button` | 1 | 0: the second face button does not cancel |
 | `miracle_cancel_ms` | 400 | The longest press of that button that is a cancel. 50 to 2000 |
 | `miracle_seed_use` | 1 | 0: the trigger does not make a carried seed active. Then only a short press of the grip does |
-| `miracle_circle_hand` | 1 | 1: the circle of a Storm or a shield is on the land under the middle of the path of the real hand, with 1.05 times the widest span of that path as its size. 0: the circle that the game makes from the pixels of the path |
+| `miracle_circle_aim` | 1 | 1: a Storm or a shield in the Hand shows the ray of the pointing hand, and the land point of the ray draws the circle on the land, with a trail on the land (see "The circle of the pointer ray"). 0: the hand draws the circle in the air |
+| `miracle_circle_hand` | 1 | With `miracle_circle_aim=0`. 1: the circle of a Storm or a shield is on the land under the middle of the path of the real hand, with 1.05 times the widest span of that path as its size. 0: the circle that the game makes from the pixels of the path |
 | `miracle_site_pick` | 1 | 1: a teleport site that the game offers to its pick is a candidate of the real hand, so the Hand can take a site and put a villager on it. 0: the real hand has no site as a candidate |
 | `miracle_circle_cast` | 1 | 1: Storm and the two shields cast when the game matches the circle, with the grip still closed. 0: they cast when the grip opens |
 | `miracle_throw` | 1 | 1: a Fireball and a flock leave the Hand with the top speed of the grip of the real hand and fly straight, as a thrown object does. 2: the same, and they turn with the curve of the swing. 0: the game's filter of the speed of the Hand and its turn. See `throw.md`, "A thrown miracle" |
@@ -1872,8 +1959,9 @@ changes `spell_book_orbs`, "Book point" changes `spell_book_point`, "Book
 pull" changes `spell_book_pull_cm` between
 0 and its value in `bwvr.ini` (10 when that is 0), "Book bubble" changes
 `spell_book_bubble`, "Miracle hand" changes `miracle_hand`, "Gesture point"
-changes `gesture_point` (grip or fingertip), and "Gesture trail" changes
-`gesture_trail`. The hand that does not point gives a long pulse for
+changes `gesture_point` (grip or fingertip), "Gesture trail" changes
+`gesture_trail`, and "Circle aim" changes `miracle_circle_aim` (hand or
+ray). The hand that does not point gives a long pulse for
 1 and a short pulse for 0. These switches have no key of the keyboard. Choose
 "Gesture point" between two draws. In the group Picture, "Edge look" changes
 `influence_wall_look` (patch or hologram).

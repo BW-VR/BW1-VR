@@ -26,8 +26,8 @@
 #   Water (9): hold the grip for 90 frames, and a tap of B. Water stays in
 #   the Hand after a pour, and the tap takes it out. Then Heal (7): a press.
 #   Then a Creature seed that the Hand carries, and the trigger.
-# The other kinds (cancel, place, shield, away, fire, firelong, pshield,
-# teleport, storm, throwdir) have a comment at their steps below. -Seeds gives other
+# The other kinds (cancel, place, shield, aim, away, fire, firelong,
+# pshield, teleport, storm, throwdir) have a comment at their steps below. -Seeds gives other
 # seed types to the steps of a kind (the types are in bwvr/docs/miracles.md),
 # and -Steps gives other steps.
 param(
@@ -241,6 +241,25 @@ if ($Kind -eq 'away') {
                  'point@1300+1 seek@1360+1 grip@1400+260 trigger@1500+6 ' +
                  'touchc@1700+1 grip@1740+10 shot@1900+1'
     }
+} elseif ($Kind -eq 'aim') {
+    # The circle of the pointer ray (miracle_circle_aim=1): a Spiritual Shield
+    # (4), then a Storm (0). The word "trace" holds the hand at the middle of
+    # the trace and turns its aim, so the ray draws the circle of
+    # Gestures.jty (template 5) on a level plane 300 cm ahead and 60 cm down,
+    # at 300 percent of its size (fake_controller_trace_aim_cm). The grip
+    # stays closed during the trace. The lines "miracle" give the land point
+    # of the ray at the start, the circle of the ray, the place and the size
+    # of the cast and the limits of the spell, and "miracle watch" the place
+    # and the radius of the spell. Eye pictures before, during and after each
+    # draw. Give it the dxwrapper renderer for the pictures.
+    if ($Seeds -eq '') { $Seeds = '4@930 0@1500' }
+    $keys = "$keys;fake_controller_gestures=5,5;fake_controller_trace_aim_cm=300"
+    if ($Steps -eq '') {
+        $Steps = 'stick_up@800+10 stick_up@830+10 look@860+5000 point@900+1 ' +
+                 'seek@960+1 grip@1000+3 shot@1080+1 trace@1100+200 grip@1106+150 shot@1170+1 shot@1300+1 ' +
+                 'point@1470+1 seek@1540+1 grip@1580+3 trace@1680+200 grip@1686+150 shot@1750+1 shot@1900+1 ' +
+                 'b@1980+5 shot@2060+1'
+    }
 } elseif ($Kind -eq 'shield') {
     # A shield (4): the grip stays closed while the hand steps through the
     # circle of Gestures.jty (template 5), and opens. Then a storm (0).
@@ -284,7 +303,9 @@ $pattern = '^miracle      :|^sky mist     :|^sky cloud    :|^sky          : (sky
            '^hint card    : frame .*(iracle|ancel|Cast|pour|throw|Use)|^hand         : state|^miracle watch: |' +
            '^hand pick    : seek plan|^creature cmd : (the leash|a double press|test: aimcmd)|' +
            '^far grab    : (the grip closed|the grip opened)|^hand throw   : release|^miracle throw: |' +
-           '^comfort      : (the (snap|smooth) turn|\d+ snap turns)|^god view     : turned|^controllers  : the stick'
+           '^comfort      : (the (snap|smooth) turn|\d+ snap turns)|^god view     : turned|^controllers  : the stick|' +
+           '^gesture      : (the ray|the draw|the game matched)|^overlay      : the trail of the circle|' +
+           '^controllers  : (test key fake_controller_trace|the fake hand traces)'
 Get-Content $log | Where-Object { $_ -match $pattern } | ForEach-Object {
     $_.Substring(0, [Math]::Min(420, $_.Length))
 } | Select-Object -First 220

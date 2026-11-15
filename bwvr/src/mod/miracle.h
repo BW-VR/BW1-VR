@@ -97,6 +97,29 @@ void MiracleWatchReport();
 // that needs a circle on the land, so the path of the hand goes to the game.
 bool MiracleDrawsCircle();
 
+// THE AIM OF A CIRCLE (miracle_circle_aim=1, docs/miracles.md, "The circle
+// of the pointer ray"), latched once a frame in MiracleFrame. While a Storm
+// or a shield is in the Hand the pointing hand shows its ray, and the land
+// point of the ray draws the circle.
+// controllers.cpp: true while the ray shows.
+bool MiracleAimShows();
+// controllers.cpp, ControllersMenuRay: true while the ray shows. meters is
+// its length to the land, or 0 when it meets no land.
+bool MiracleAimRay(float* meters);
+// gesture_air.cpp: the land point of the ray in this frame, the direction of
+// the ray, the world units from its start to the land, and the world units in
+// a meter of the room. False when the ray does not show or meets no land.
+bool MiracleAimLand(float land[3], float direction[3], float* distance,
+                    float* units);
+// overlay.cpp: the path of the land point while the grip draws the circle,
+// in the world. warn is true when the game will make the spell smaller than
+// the circle, or will refuse its place. Returns the count of points, 0 when
+// no circle is drawn.
+int MiracleAimPath(const float (**points)[3], bool* warn, float* units);
+// The switch "Circle aim" of the debug page.
+int MiracleCircleAimValue();
+void MiracleCircleAimChange(const char* by);
+
 // temple.cpp, in GInterface::SendInvisibleDrawCollision: the game offers an
 // object with no mesh to its pick as a ball. A teleport site becomes a
 // candidate of the real hand (miracle_site_pick=1). True when it does.

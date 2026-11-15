@@ -670,6 +670,59 @@ void LoadTraces(const char* list) {
 // the step of the word "pull". The base pose is on the side of the
 // controller: on the left of the head for the left controller. The point of a
 // word is a place in the room, so it is not mirrored.
+// THE TRACE ON THE LAND, for the circle of the ray (docs/miracles.md, "The
+// circle of the pointer ray"). With the test key fake_controller_trace_aim_cm
+// above 0, the word "trace" holds the hand at the middle of the trace and
+// turns its aim, so that the ray goes through the template on a level plane
+// that many cm ahead of the middle and fake_controller_trace_aim_down_cm (60)
+// under it, at fake_controller_trace_aim_pct (300) percent of the size of
+// the trace. The ray then draws the template on the land in front.
+int IniInt(const char* key, int fallback);
+void AimTurnOfPointingHand(float* yaw_left_deg, float* pitch_up_deg);
+struct TraceAim {
+  bool read;
+  int forward_cm, down_cm, pct;
+};
+TraceAim g_trace_aim = {false, 0, 60, 300};
+
+bool TraceAimNow() {
+  if (!g_trace_aim.read) {
+    g_trace_aim.read = true;
+    g_trace_aim.forward_cm = IniInt("fake_controller_trace_aim_cm", 0);
+    g_trace_aim.down_cm = IniInt("fake_controller_trace_aim_down_cm", 60);
+    g_trace_aim.pct = IniInt("fake_controller_trace_aim_pct", 300);
+    if (g_trace_aim.forward_cm > 0) {
+      ModLog("controllers  : test key fake_controller_trace_aim_cm=%d: the "
+             "word \"trace\" turns the aim of the hand, so its ray draws the "
+             "template on a level plane %d cm ahead and %d cm down, at %d%% "
+             "of its size", g_trace_aim.forward_cm, g_trace_aim.forward_cm,
+             g_trace_aim.down_cm, g_trace_aim.pct);
+    }
+  }
+  return g_trace_aim.forward_cm > 0 && g_point_index == kTraceIndex &&
+         g_trace_now < g_trace_count && g_trace_points[g_trace_now] > 0;
+}
+
+// The orientation of the hand at the middle of the trace whose ray goes
+// through the pose of the trace now, on the plane of TraceAimNow.
+bool TraceAimOrientation(float roll, float q[4]) {
+  const float* p = g_trace_cm[g_trace_now][g_trace_step];
+  const float s = 0.01f * static_cast<float>(g_trace_aim.pct);
+  const float target[3] = {
+      kTraceCenterCm[0] + (p[0] - kTraceCenterCm[0]) * s,
+      kTraceCenterCm[1] - static_cast<float>(g_trace_aim.down_cm),
+      kTraceCenterCm[2] + static_cast<float>(g_trace_aim.forward_cm) +
+          (p[1] - kTraceCenterCm[1]) * s};
+  float d[3];
+  for (int i = 0; i < 3; ++i) d[i] = target[i] - kTraceCenterCm[i];
+  float yaw = 0.0f, pitch = 0.0f;
+  if (!controller_math::FakeAimAngles(d, &yaw, &pitch)) return false;
+  float turn_yaw = 0.0f, turn_pitch = 0.0f;
+  AimTurnOfPointingHand(&turn_yaw, &turn_pitch);
+  controller_math::FakeOrientation(yaw - turn_yaw, pitch - turn_pitch, roll, q);
+  return true;
+}
+
 void RightHandCm(float cm[3]) {
   cm[0] = static_cast<float>(g_fake.right_cm) * (g_left_handed ? -1.0f : 1.0f);
   cm[1] = static_cast<float>(g_fake.up_cm);
@@ -680,6 +733,8 @@ void RightHandCm(float cm[3]) {
     }
   } else if (g_point_index == kSeekIndex) {
     for (int i = 0; i < 3; ++i) cm[i] = g_seek_cm[i];
+  } else if (TraceAimNow()) {
+    for (int i = 0; i < 3; ++i) cm[i] = kTraceCenterCm[i];
   } else if (g_point_index == kTraceIndex && g_trace_now < g_trace_count &&
              g_trace_points[g_trace_now] > 0) {
     for (int i = 0; i < 3; ++i) cm[i] = g_trace_cm[g_trace_now][g_trace_step][i];
@@ -731,6 +786,8 @@ void FakeHand(int index, bwvr::HandInput* out) {
         static_cast<float>(g_lrots[g_lrot_index][0]),
         static_cast<float>(g_lrots[g_lrot_index][1]),
         static_cast<float>(g_lrots[g_lrot_index][2]), q);
+  } else if (role == 1 && TraceAimNow() && TraceAimOrientation(roll, q)) {
+    // The trace on the land turns the aim (fake_controller_trace_aim_cm).
   } else if (role == 1 && g_aim_set) {
     controller_math::FakeOrientation(g_aim_yaw, g_aim_pitch, roll, q);
   } else if (role == 1 && g_rot_index >= 0 && g_rot_index < g_rot_count) {
@@ -5160,6 +5217,14 @@ bool ControllersGestureInput(GestureInput* out) {
       g_point.have_grip && g_point.have_world && Usable()) {
     out->held = true;
     out->why = "the grip is closed with a miracle that needs a circle";
+    // With the ray, the land point of the ray draws the circle on the land
+    // (miracle_circle_aim=1).
+    if (MiracleAimShows()) {
+      out->aim = true;
+      out->aim_have_land =
+          MiracleAimLand(out->aim_land, out->aim_direction,
+                         &out->aim_distance, &out->aim_units);
+    }
   }
   for (int i = 0; i < 3; ++i) out->grip_room[i] = g_point.grip_room[i];
   for (int i = 0; i < 3; ++i) out->draw_room[i] = g_point.draw_room[i];
@@ -5781,6 +5846,9 @@ bool ControllersMenuRay(float from[3], float to[3], float* units) {
   if (!panel) panel = WelcomePageRay(&panel_meters);
   // The aim of a new bookmark: to its target, or 2 m long with none.
   if (!panel) panel = BookmarkAimRay(&panel_meters);
+  // A Storm or a shield in the Hand: to the land point that draws its
+  // circle (miracle_circle_aim=1), or 2 m long when it meets no land.
+  if (!panel) panel = MiracleAimRay(&panel_meters);
   if (!g_on || !g_pointer_owned || !(MenuUp() || TempleRayOn() || panel)) {
     return false;
   }

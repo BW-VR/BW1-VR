@@ -339,6 +339,8 @@ int UiPanelOverValue();
 void UiPanelOverChange(const char* by);
 int MiracleHandValue();
 void MiracleHandChange(const char* by);
+int MiracleCircleAimValue();
+void MiracleCircleAimChange(const char* by);
 int VillageTotemValue();
 void VillageTotemChange(const char* by);
 int VillageHoldValue();
@@ -945,6 +947,9 @@ const Switch kSwitches[] = {
      ControllersGesturePointChange, L"grip|fingertip"},
     {kGroupMiracles, L"Gesture trail", L"Trail at the fingertip",
      "gesture_trail", OverlayTrailValue, OverlayTrailChange, L"off|on"},
+    {kGroupMiracles, L"Circle aim", L"The ray draws a Storm or a shield",
+     "miracle_circle_aim", MiracleCircleAimValue, MiracleCircleAimChange,
+     L"hand|ray"},
 
     // Sound
     {kGroupSound, L"Sound step", L"Sound of the mod, step by step", "",
@@ -1531,6 +1536,9 @@ const wchar_t* const kTips[] = {
     // Gesture trail
     L"On: a ribbon follows the point of the draw while the draw button is "
     L"held. Off: no trail.",
+    // Circle aim
+    L"Ray: a Storm or a shield in the Hand shows the ray, and its point on "
+    L"the land draws the circle. Hand: the hand draws the circle in the air.",
     // Sound step
     L"A test. Each step removes more of the mod sound: as set, same distance "
     L"at each zoom, QMixer pans, the game picks the sounds, the game ears.",

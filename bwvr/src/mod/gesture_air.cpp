@@ -29,6 +29,13 @@
 // would drop the first sample, the Hand's point stands in for the land. The
 // game matches the ring itself, every frame, as with the mouse.
 //
+// THE CIRCLE OF THE RAY (miracle_circle_aim=1). While the grip draws the
+// circle of a Storm or a shield, the land point of the ray of the pointing
+// hand is the point of the draw (miracle.cpp, AimFrame). Each sample has that
+// land point, and its pixel is the land point in a view from above
+// (circle_aim_math.h, the plan). So the game matches the shape on the land,
+// and its picture of the match lies where the ray drew.
+//
 // While the controller owns the pointer, the game's own samples of the
 // pointer are dropped. The Hand's pixel moves with the head and with the
 // reach, and a wave of the hand must not cast a miracle. With the mouse as
@@ -45,6 +52,7 @@
 #include <string.h>
 
 #include "MinHook.h"
+#include "circle_aim_math.h"
 #include "controller_math.h"
 #include "controllers.h"
 #include "haptics.h"
@@ -163,7 +171,15 @@ float g_last_x = 0.0f, g_last_y = 0.0f;
 // corner between two samples is not cut (GestureCornerIndex).
 const int kMaxPending = 96;
 float g_pending[kMaxPending][2];
+float g_pending_land[kMaxPending][3];  // with the ray: the land of each pixel
 int g_pending_count = 0;
+// THE CIRCLE OF THE RAY (miracle_circle_aim=1): the land point of the ray
+// draws, in a view from above (circle_aim_math.h, the plan). The plan starts
+// at the first land point of the stroke.
+bool g_aim = false;
+bool g_aim_planned = false;
+circle_aim_math::Plan g_aim_plan;
+int g_aim_no_land = 0;         // frames of the stroke in which the ray met no land
 float g_tolerance = 9.0f;      // pixels off the line that make a corner
 int g_corners_kept = 0;
 int g_skyward = 0;             // samples with no land, given the Hand's point
@@ -352,17 +368,28 @@ void TypeList(uint32_t types, char* out, size_t size) {
 }
 
 // One sample through the game's own sampler. False when the game did not
-// take it.
-bool Add(uint8_t* face, uint8_t* ring, float px, float py) {
+// take it. With a land point (the circle of the ray) the sample goes into
+// the ring with that land point, as the sampler adds it after its own tests
+// (fn_005CEAD0: no sample while the game is paused or during the wait after
+// a match, then fn_0057BBC0 with the land under the pixel). The pixel of the
+// plan has no land of the game camera under it.
+bool Add(uint8_t* face, uint8_t* ring, float px, float py,
+         const float* land = nullptr) {
   const int32_t pixel[2] = {static_cast<int32_t>(px),
                             static_cast<int32_t>(py)};
   const uint8_t head = ring[kRingHead];
   const uint8_t count = ring[kRingCount];
-  g_feeding = true;
-  o_Sampler(face, nullptr, pixel);
-  g_feeding = false;
-  if (ring[kRingHead] == head && ring[kRingCount] == count &&
-      !Paused() && *reinterpret_cast<const float*>(face + kFaceCooldown) <= 0.0f) {
+  const bool waits =
+      Paused() || *reinterpret_cast<const float*>(face + kFaceCooldown) > 0.0f;
+  if (land != nullptr) {
+    if (!waits) reinterpret_cast<RingAddFn>(kRingAdd)(ring, nullptr, land, pixel);
+  } else {
+    g_feeding = true;
+    o_Sampler(face, nullptr, pixel);
+    g_feeding = false;
+  }
+  if (land == nullptr && ring[kRingHead] == head &&
+      ring[kRingCount] == count && !waits) {
     // The ring is empty and the pixel has no land under it, for example over
     // the sky. The game would drop it, and the stroke would lose its start.
     // The land point only places the game's picture of a match and a sound,
@@ -395,8 +422,35 @@ bool Add(uint8_t* face, uint8_t* ring, float px, float py) {
 // last one, and a corner between the two goes in first.
 void Feed(uint8_t* face, uint8_t* ring, const GestureInput& in) {
   float x, y;
-  controller_math::GesturePixel(g_plane, in.draw_room, g_start_x, g_start_y,
-                                g_pixels_per_unit, &x, &y);
+  const float* land = nullptr;
+  if (g_aim) {
+    // THE CIRCLE OF THE RAY: the land point of this frame in the plan. A
+    // frame in which the ray meets no land adds nothing.
+    if (!in.aim || !in.aim_have_land) {
+      ++g_aim_no_land;
+      return;
+    }
+    if (!g_aim_planned) {
+      g_aim_planned = circle_aim_math::PlanFrom(
+          in.aim_direction, in.aim_land, in.aim_distance, in.aim_units,
+          in.render_width, in.render_height, &g_aim_plan);
+      if (!g_aim_planned) return;
+      if (LogRoom()) {
+        ModLog("gesture      : the ray draws the circle on the land from %.1f "
+               "%.1f, %.2f m of the room along the ray. The plan has forward "
+               "%.2f %.2f up on the screen and %.2f pixels for a unit of the "
+               "land, frame %llu", in.aim_land[0], in.aim_land[2],
+               in.aim_units > 0.0f ? in.aim_distance / in.aim_units : 0.0f,
+               g_aim_plan.forward[0], g_aim_plan.forward[1],
+               g_aim_plan.pixels_per_unit, in.frame);
+      }
+    }
+    circle_aim_math::PlanPixel(g_aim_plan, in.aim_land, &x, &y);
+    land = in.aim_land;
+  } else {
+    controller_math::GesturePixel(g_plane, in.draw_room, g_start_x, g_start_y,
+                                  g_pixels_per_unit, &x, &y);
+  }
   // A grip far off the plane's scale is no gesture. It must not wrap the
   // game's integer pixel.
   if (!(fabsf(x) < 100000.0f && fabsf(y) < 100000.0f)) return;
@@ -404,7 +458,7 @@ void Feed(uint8_t* face, uint8_t* ring, const GestureInput& in) {
   const float py = floorf(y + 0.5f);
   if (!g_have_last) {
     g_pending_count = 0;
-    Add(face, ring, px, py);
+    Add(face, ring, px, py, land);
     return;
   }
   if (g_pending_count == kMaxPending) {
@@ -412,11 +466,17 @@ void Feed(uint8_t* face, uint8_t* ring, const GestureInput& in) {
     for (int i = 0; i < kMaxPending / 2; ++i) {
       g_pending[i][0] = g_pending[i * 2 + 1][0];
       g_pending[i][1] = g_pending[i * 2 + 1][1];
+      for (int k = 0; k < 3; ++k) {
+        g_pending_land[i][k] = g_pending_land[i * 2 + 1][k];
+      }
     }
     g_pending_count = kMaxPending / 2;
   }
   g_pending[g_pending_count][0] = px;
   g_pending[g_pending_count][1] = py;
+  for (int k = 0; k < 3; ++k) {
+    g_pending_land[g_pending_count][k] = land != nullptr ? land[k] : 0.0f;
+  }
   ++g_pending_count;
   for (int round = 0; round < 8; ++round) {
     if (!controller_math::GestureStepFar(g_last_x, g_last_y, px, py,
@@ -429,13 +489,18 @@ void Feed(uint8_t* face, uint8_t* ring, const GestureInput& in) {
         g_pending, g_pending_count - 1, g_last_x, g_last_y, px, py,
         g_tolerance);
     if (corner < 0) {
-      if (Add(face, ring, px, py)) g_pending_count = 0;
+      if (Add(face, ring, px, py, land)) g_pending_count = 0;
       return;
     }
-    if (!Add(face, ring, g_pending[corner][0], g_pending[corner][1])) return;
+    if (!Add(face, ring, g_pending[corner][0], g_pending[corner][1],
+             land != nullptr ? g_pending_land[corner] : nullptr)) {
+      return;
+    }
     ++g_corners_kept;
     const int rest = g_pending_count - (corner + 1);
     memmove(g_pending, g_pending + corner + 1, sizeof(g_pending[0]) * rest);
+    memmove(g_pending_land, g_pending_land + corner + 1,
+            sizeof(g_pending_land[0]) * rest);
     g_pending_count = rest;
   }
 }
@@ -460,6 +525,9 @@ void Begin(uint8_t* face, uint8_t* ring, const GestureInput& in) {
   g_path_px = 0.0f;
   g_tested = 0;
   g_after = 0;
+  g_aim = in.aim;
+  g_aim_planned = false;
+  g_aim_no_land = 0;
   ++g_strokes;
   // A new path: nothing before the press takes part in it.
   ClearRing(ring);
@@ -470,7 +538,7 @@ void Begin(uint8_t* face, uint8_t* ring, const GestureInput& in) {
            "of %.0f x %.0f. The plane faces the head: right %.2f %.2f %.2f, "
            "up %.2f %.2f %.2f. %.1f pixels per cm of hand, a sample every "
            "%.0f pixels. The point of the draw is the %s, %.1f cm of the room "
-           "from the grip. The camera is %s.", in.frame, g_start_x, g_start_y,
+           "from the grip. The camera is %s.%s", in.frame, g_start_x, g_start_y,
            in.render_width, in.render_height, g_plane.right[0],
            g_plane.right[1], g_plane.right[2], g_plane.up[0], g_plane.up[1],
            g_plane.up[2], g_pixels_per_unit * g_scale * 0.01f, g_spacing,
@@ -479,7 +547,10 @@ void Begin(uint8_t* face, uint8_t* ring, const GestureInput& in) {
                ? controller_math::Distance(in.draw_room, in.grip_room) /
                      g_scale * 100.0f
                : 0.0f,
-           CameraMoving() ? "moving, so the game clears the ring" : "still");
+           CameraMoving() ? "moving, so the game clears the ring" : "still",
+           g_aim ? " The land point of the ray draws, not the hand "
+                   "(miracle_circle_aim=1)."
+                 : "");
   }
   Feed(face, ring, in);
 }
@@ -503,6 +574,10 @@ void End(uint8_t* ring, const GestureInput& in) {
            g_refused, g_path_px,
            px_per_cm > 0.0f ? g_path_px / px_per_cm : 0.0f, RingCount(ring),
            RingCorners(ring));
+    if (g_aim && g_aim_no_land > 0) {
+      ModLog("gesture      : the ray met no land on %d frames of the draw, so "
+             "those frames added nothing", g_aim_no_land);
+    }
     if (g_fed > kRingSize) {
       ModLog("gesture      : the path had more than %d samples, so the ring "
              "lost its start. Draw it smaller, or set a larger "

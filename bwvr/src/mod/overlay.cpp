@@ -154,6 +154,7 @@
 #include "overlay_math.h"
 #include "ray_glow_math.h"
 #include "ray_tip_math.h"
+#include "miracle.h"
 #include "teleport.h"
 
 extern void ModLog(const char* format, ...);
@@ -1373,7 +1374,9 @@ void BuildGestureTrail() {
   }
   GestureInput in;
   const bool have = ControllersGestureInput(&in);
-  const bool held = have && in.held && in.scale > 0.0f &&
+  // The circle of the ray draws on the land, not at the finger
+  // (BuildAimTrail).
+  const bool held = have && in.held && !in.aim && in.scale > 0.0f &&
                     in.render_height > 0.0f;
   if (!held && g_trail.count == 0 && !g_trail.down) return;
   OverlayHands hands;
@@ -1426,6 +1429,91 @@ void BuildGestureTrail() {
     for (int k = 0; k < 3; ++k) {
       p.core[k] = kTrailCore[k] * newness * release;
       p.rim[k] = kTrailRim[k] * newness * release;
+    }
+  }
+}
+
+// THE TRAIL OF THE CIRCLE OF THE RAY (miracle_circle_aim=1, miracle.cpp).
+// While the grip draws the circle of a Storm or a shield, a ribbon lies on
+// the land along the path of the land point of the ray, kRingLiftM over the
+// land. The points are in the world: the land does not move. It is gold,
+// and red when the game will make the spell smaller than the circle or will
+// refuse its place. When the draw ends, the light falls to nothing over
+// gesture_trail_math::kReleaseSeconds. It draws with overlay=0 too.
+const int kAimTrailMost = 128;
+float g_aim_trail[kAimTrailMost][3];
+int g_aim_trail_count = 0;
+bool g_aim_trail_warn = false;
+bool g_aim_trail_down = false;
+float g_aim_trail_units = 0.0f;
+float g_aim_trail_release = 0.0f;
+int g_aim_trail_logs = 0;
+const float kAimTrailRed[3] = {1.00f, 0.27f, 0.27f};
+const float kAimTrailRedRim[3] = {0.80f, 0.08f, 0.08f};
+
+void BuildAimTrail() {
+  const float(*path)[3] = nullptr;
+  bool warn = false;
+  float units = 0.0f;
+  const int count = MiracleAimPath(&path, &warn, &units);
+  if (count >= 2 && units > 0.0f) {
+    // Each step of the path, at most kAimTrailMost points, with the newest.
+    const int every = (count + kAimTrailMost - 2) / (kAimTrailMost - 1);
+    int n = 0;
+    for (int i = 0; i < count && n < kAimTrailMost - 1; i += every) {
+      for (int k = 0; k < 3; ++k) g_aim_trail[n][k] = path[i][k];
+      ++n;
+    }
+    for (int k = 0; k < 3; ++k) g_aim_trail[n][k] = path[count - 1][k];
+    ++n;
+    g_aim_trail_count = n;
+    g_aim_trail_units = units;
+    if (warn != g_aim_trail_warn && g_aim_trail_logs < kMaxTrailLogs) {
+      ++g_aim_trail_logs;
+      ModLog("overlay      : the trail of the circle of the ray on the land "
+             "is %s, frame %llu", warn ? "red" : "gold", g_frame);
+    }
+    g_aim_trail_warn = warn;
+    if (!g_aim_trail_down && g_aim_trail_logs < kMaxTrailLogs) {
+      ++g_aim_trail_logs;
+      ModLog("overlay      : the trail of the circle of the ray starts on the "
+             "land at %.1f %.1f %.1f, frame %llu", path[0][0], path[0][1],
+             path[0][2], g_frame);
+    }
+    g_aim_trail_down = true;
+  } else if (g_aim_trail_down) {
+    g_aim_trail_down = false;
+    g_aim_trail_release = g_seconds;
+    if (g_aim_trail_logs < kMaxTrailLogs) {
+      ++g_aim_trail_logs;
+      ModLog("overlay      : the trail of the circle of the ray ends with %d "
+             "points, frame %llu", g_aim_trail_count, g_frame);
+    }
+  }
+  const float release = gesture_trail_math::ReleaseLight(
+      g_aim_trail_down, g_seconds, g_aim_trail_release);
+  if (!(release > 0.0f)) g_aim_trail_count = 0;
+  const int n = g_aim_trail_count;
+  if (n < 2 || g_glow_lines >= kGlowMaxLines ||
+      g_glow_points + n > kGlowMaxPoints) {
+    return;
+  }
+  const float* core = g_aim_trail_warn ? kAimTrailRed : kTrailCore;
+  const float* rim = g_aim_trail_warn ? kAimTrailRedRim : kTrailRim;
+  const float lift = kRingLiftM * g_aim_trail_units;
+  GlowLine& line = g_glow_line[g_glow_lines++];
+  line.first = g_glow_points;
+  line.count = n;
+  line.opacity = 0.0f;
+  for (int i = 0; i < n; ++i) {
+    glow_math::Point& p = g_glow_point[g_glow_points++];
+    p.p[0] = g_aim_trail[i][0];
+    p.p[1] = TeleportGround(g_aim_trail[i][0], g_aim_trail[i][2]) + lift;
+    p.p[2] = g_aim_trail[i][2];
+    p.half_width = kTrailHalfM * g_aim_trail_units;
+    for (int k = 0; k < 3; ++k) {
+      p.core[k] = core[k] * release;
+      p.rim[k] = rim[k] * release;
     }
   }
 }
@@ -2016,6 +2104,7 @@ void OverlayFrame() {
   BuildMenuRay();
   BuildFar();
   BuildGestureTrail();
+  BuildAimTrail();
   g_build_ticks = Now() - start;
 }
 

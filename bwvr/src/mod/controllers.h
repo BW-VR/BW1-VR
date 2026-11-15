@@ -65,6 +65,15 @@ struct GestureInput {
   float render_width;     // pixels
   float render_height;
   unsigned long long frame;  // the controllers frame
+  // The circle of a Storm or a shield with the ray (miracle_circle_aim=1):
+  // the land point of the ray draws, not the hand. have_land is false in a
+  // frame in which the ray meets no land.
+  bool aim;
+  bool aim_have_land;
+  float aim_land[3];       // in the world
+  float aim_direction[3];  // the direction of the ray, in the world
+  float aim_distance;      // world units from the start of the ray
+  float aim_units;         // world units in a meter of the room
 };
 
 // Move around by grabbing the world. See docs/god-view.md,

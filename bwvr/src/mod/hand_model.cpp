@@ -53,7 +53,9 @@
 // skin of one bone for each vertex folds triangles at the knuckles of a
 // curled finger. Seen along the hand, a triangle of such an edge shows its
 // back to the eye while it is in front. So the mod draws each triangle, also
-// one that faces away from the eye, and the depth test hides the inside.
+// one that faces away from the eye: those first, then the triangles that
+// face the eye. The depth test hides the inside of a hand that writes depth,
+// and a faint hand (no depth write) has its outside over its inside.
 // hand_two_sided=0 does not draw a triangle that faces away.
 
 #define WIN32_LEAN_AND_MEAN
@@ -1294,7 +1296,10 @@ bool OffScreen(const Vertex* v, float half_x, float half_y) {
   return left || right || top || bottom;
 }
 
-// The vertices of one hand for one eye, after the ones that are there.
+// The vertices of one hand for one eye, after the ones that are there. With
+// hand_two_sided=1 the triangles that face away come first, and the
+// triangles that face the eye after them. A faint hand writes no depth, so
+// that order puts the outside of the hand over its inside.
 int FillHand(const Built& built, const float camera[12], float near_plane,
              float half_x, float half_y, int n) {
   for (int v = 0; v < g_mesh.vertices; ++v) {
@@ -1305,7 +1310,12 @@ int FillHand(const Built& built, const float camera[12], float near_plane,
                             camera[4], camera[5], camera[6], camera[7],
                             camera[8]};
   const float mirror = hm::Det3(camera3) < 0.0f ? -built.mirror : built.mirror;
-  for (int t = 0; t < g_mesh.triangles; ++t) {
+  // Pass 0: the triangles that face away. Pass 1: the triangles that face
+  // the eye.
+  const int count = g_mesh.triangles;
+  for (int i = g_set.two_sided ? 0 : count; i < 2 * count; ++i) {
+    const int pass = i < count ? 0 : 1;
+    const int t = i - pass * count;
     const uint32_t* index = g_mesh.index + t * 3;
     const float* c0 = g_camera + index[0] * 3;
     const float* c1 = g_camera + index[1] * 3;
@@ -1314,10 +1324,12 @@ int FillHand(const Built& built, const float camera[12], float near_plane,
                        (c1[2] < near_plane ? 1 : 0) +
                        (c2[2] < near_plane ? 1 : 0);
     if (behind == 3) continue;
-    if (!hm::FacesCamera(c0, c1, c2, mirror)) {
-      ++g_culled;
-      if (!g_set.two_sided) continue;
+    const bool faces = hm::FacesCamera(c0, c1, c2, mirror);
+    if (faces != (pass == 1)) {
+      if (pass == 1 && !g_set.two_sided) ++g_culled;
+      continue;
     }
+    if (pass == 0) ++g_culled;
     Corner in[3], cut[4];
     for (int k = 0; k < 3; ++k) {
       CornerOf(built, static_cast<int>(index[k]), &in[k]);

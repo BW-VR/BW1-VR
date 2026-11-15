@@ -488,7 +488,11 @@ near plane, the stop at the land or the cut at a page:
   the land moves the hand but cuts nothing.
 
 With `hand_two_sided=1` (the default) the mod draws each triangle, also one
-that faces away, and the depth test hides the inside. This is the same in
+that faces away: those first, then the triangles that face the eye. The
+depth test hides the inside of a hand that writes depth. A faint hand (the
+hand of a hint controller, `hint_hand_opacity_pct`) writes no depth, and the
+order puts its outside over its inside. In the other order the inside of a
+faint hand shows over its outside as dark facets. This is the same in
 both backends: the CPU makes the triangles, and the device has no cull for
 them. The mesh of a file of the player draws the same way. The low poly
 hands have no cull.

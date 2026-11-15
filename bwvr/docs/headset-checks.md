@@ -36,8 +36,10 @@ want.
    land pulled down to your feet, a villager must look as high as you.
    Wrong: land or villagers that flicker or look wrong there. Look across
    the island from a hill there. Wrong: far trees and houses that pop in or
-   out, or fog that hides the far land. Move your head quickly from side to
-   side over the land at your waist. Wrong: the land or the hands swim or
+   out, or fog that hides the far land. Watch the clouds that drift low over
+   the hills. Wrong: a hard line where a cloud meets the land, or clouds
+   that look too flat (the debug switch "Cloud land"). Move your head
+   quickly from side to side over the land at your waist. Wrong: the land or the hands swim or
    come after the head.
 3. **The turn and the comfort vignette.** Set the settings row "Turn" to
    Smooth, and turn with a small push and a full push. Wrong: discomfort,
@@ -230,6 +232,11 @@ agents: the log does not tell the item yet.
   bulk take` (the real grip opened), or `hand bulk    : the bulk take ends`
   with the button of the game down (the game ended it), with the distance
   from the pile and the influence.
+- **A drifting cloud that the land cuts.** Log: `sky          : cloud_land=`
+  in each report window gives how many draws of a drifting cloud went into
+  the land or the sea, how many the mod made flatter, and the time of the
+  test for each frame (`backend.md`, "A drifting cloud stays over the
+  land").
 - **A double picture in play on a headset with canted views** (Pimax, N17).
   Log: `eye cant     :` gives the turn of each view from the head, and if
   each eye pass turns its camera by it (`eye_cant=1`).

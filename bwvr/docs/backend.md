@@ -5398,6 +5398,48 @@ at 8000 units. It reads no camera. In the second eye pass the time step is 0, an
 with one walk the right eye is a copy of the batches of the left eye, so a cloud is
 at the same place in both eyes.
 
+### A drifting cloud stays over the land
+
+The 70 clouds of `CloudInSky` are the drifting clouds. `CloudInSky::Open` gives
+each one a place 300 to 500 units up, x from -8000 to 8000 and z from -5000 to
+5000, a scale of 13 to 50 and a flatten of 2.5 to 5 (`0x005E2439` to
+`0x005E24E6`). `fn_005E25C0` turns that place by a fixed angle and adds
+(1280, 1280) for the draw. The first two are wide flat
+clouds at the far ends (scale 300, flatten 20, `0x005E26D0`). The entries are at
+`0x00D1A270`, 20 bytes each with the `LH3DMist` at `+0x10`, and `fn_005E25C0` moves
+as many as `0x00D1A278` holds. They are on each land.
+
+A dome that faces a camera near its height is a disc that stands up. It goes
+down from its place by its radius times `A`: up to 1000 units for a round cloud
+(`cloud_round_near` makes the near ones round), and up to 400 units with the
+flatten of the engine. The land is 0 to 171 units high and the sea is at y 0. So
+such a dome goes into the land and the sea, and the land cuts it with a hard line
+that moves with the cloud, as a sheet of fog that rolls through the hills. The eye
+of the God view is low, so most clouds are near its height.
+
+With `cloud_land=1` (default) the mod takes the rows of the basis as the engine
+will draw them (row 0 times the scale, rows 1 and 2 times `A`), and tests 37
+points of the half ball of the dome: 12 on each of the rings at 0, 30 and 60
+degrees over its base, and the pole (`sky_math.h`, `LandClearShare`). For each
+point under its place it asks the land under the point (`MapCoords::GetLHPoint`
+`0x00605C40`, the sea out of the map), and it makes rows 1 and 2 shorter by the
+share that keeps each point 10 units over the land or the sea. Row 0 is level, so
+the cloud keeps its width and gets flatter only as much as the land under it
+asks. The share is at least 0.05. The land is asked only when the lowest point of
+the dome (`DomeDrop`) is lower than 181 units. Between two test points the dome
+can go under the gap by less than 5 percent of its drop, at a wall of a hill. The
+shape changes only as the cloud drifts and as the table camera moves, so the mod
+adds no motion. The clouds of a Storm and the mists of the ground keep the rules
+above. `cloud_land=0` is the dome of the game, and `cloud_land=2` draws no
+drifting cloud (no fog that rolls over the land, and no clouds in the sky but
+those of the weather). The switch "Cloud land" of the debug page makes the same
+step.
+
+The report of each window has a line `cloud_land=N`: the draws of a drifting
+cloud, those that went into the land or the sea (measured with each value), the
+draws that were made flatter, the least share, the draws that value 2 did not
+draw, and the questions to the land with their time, in all and for each frame.
+
 `UpdateCamera` also builds a heading turn at `0x00EA1D88` from the stored camera. The
 draw at `0x0080DB30` turns billboard meshes at the lowest detail by it, so far trees
 would turn with the head. It is built again after each call from the camera the game
@@ -5465,6 +5507,9 @@ each save.
   and the count of the draws that `cloud_round_near` made rounder.
 - `sky_test_round_frame=N`: at frame N of the steps `cloud_round_near` goes to 0,
   or from 0 to 1000, one time.
+- `sky_test_land_frame=N,M,...`: at each of up to 4 frames of the steps
+  `cloud_land` makes one step, as the switch of the debug page does (1, 2, 0,
+  1).
 
 ### Sprites with world up
 
@@ -6241,8 +6286,9 @@ keys that the launcher sets.
 | `cloud_fade_near_cm`, `cloud_fade_far_cm` | 15, 60 | In the table and the God view a sky cloud is clear when the eye is in it or within the near distance of its surface, and whole from the far distance on, in cm of the room (see "Clouds"). A far distance of 0: each sky cloud is whole |
 | `cloud_round_near` | 1000 | In the table and the God view a sky cloud nearer than this many units keeps its round shape, and the flatten of the engine comes back to its full value at 2 times the distance (see "Clouds"). 0: each sky cloud has the flatten of the engine |
 | `clouds_head_free` | 1 | 1: in the table and the God view the clouds face the table camera, so a move of the head does not turn them. 0: they face the render head. See "Clouds" |
+| `cloud_land` | 1 | 1: a drifting cloud of the sky gets flatter where it must, so that it stays 10 units over the land and the sea. 0: the dome of the game, which the land cuts. 2: no drifting clouds. See "A drifting cloud stays over the land". The switch "Cloud land" of the debug page |
 | `moon_world_up` | 1 | 1: the moon turns with world up, so it stays fixed in the sky. 0: it turns with the camera of the head. See "The moon" |
-| `sky_test_frame`, `sky_test_trace`, `sky_test_hour`, `sky_test_mist_log`, `sky_test_mist_hide`, `sky_test_mist_hide_all`, `sky_test_round_frame` | 0, 0, -1, 0, 0, 0, 0 | Test keys of the desktop runs. See "The moon" |
+| `sky_test_frame`, `sky_test_trace`, `sky_test_hour`, `sky_test_mist_log`, `sky_test_mist_hide`, `sky_test_mist_hide_all`, `sky_test_round_frame`, `sky_test_land_frame` | 0, 0, -1, 0, 0, 0, 0, none | Test keys of the desktop runs. See "The moon" |
 | `sprite_world_up` | 1 | 1: smoke, fire and the other sprites keep world up, so they do not roll with the head. 0: they roll with the head. See "Sprites with world up" |
 | `sprite_test_frame`, `sprite_test_trace` | 0, 0 | Test keys of the desktop runs. See "Sprites with world up" |
 | `freeze_time` | 1 | See "Time, bars and the second eye pass" |

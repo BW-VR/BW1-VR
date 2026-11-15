@@ -39,6 +39,133 @@ inline float Largest9(const float a[9], const float b[9]) {
   return most;
 }
 
+// The lowest height of each point of the half ball of a dome, each degree, as
+// the engine draws it with `rows` at `place`, less the land under the point.
+template <class Land>
+inline float DomeLeastOverLand(const float place[3], const float rows[9],
+                               Land land) {
+  const float d = 3.14159265f / 180.0f;
+  float least = 1e9f;
+  for (int rise = 0; rise <= 90; ++rise) {
+    for (int turn = 0; turn < 360; ++turn) {
+      const float p[3] = {
+          sky_math::kDomeRadius * cosf(rise * d) * cosf(turn * d),
+          sky_math::kDomeRadius * sinf(rise * d),
+          sky_math::kDomeRadius * cosf(rise * d) * sinf(turn * d)};
+      float w[3];
+      for (int k = 0; k < 3; ++k) {
+        w[k] = place[k] + p[0] * rows[k] + p[1] * rows[3 + k] +
+               p[2] * rows[6 + k];
+      }
+      const float over = w[1] - land(w[0], w[2]);
+      if (over < least) least = over;
+    }
+  }
+  return least;
+}
+
+// The rows of a round dome of scale `scale` seen from a camera at `rise`
+// degrees under it, along world z, as h_MistDraw makes them.
+inline void SideRows(float scale, float rise, float rows[9]) {
+  const float d = 3.14159265f / 180.0f;
+  const float f[3] = {0.0f, sinf(rise * d), cosf(rise * d)};
+  const float r[3] = {1.0f, 0.0f, 0.0f};
+  float u[3];
+  sky_math::Cross3(f, r, u);
+  for (int k = 0; k < 3; ++k) {
+    rows[k] = r[k] * scale;
+    rows[3 + k] = -f[k] * scale;
+    rows[6 + k] = u[k] * scale;
+  }
+}
+
+inline void LandClearChecks() {
+  using namespace sky_math;
+  printf("\nA drifting cloud over the land\n");
+  auto flat = [](float, float) { return 50.0f; };
+  auto sea = [](float, float) { return 0.0f; };
+  // A round cloud of scale 30 (600 units wide) at 400, seen level from the
+  // side: its rim goes 600 units under its place, into the sea.
+  const float place[3] = {2000.0f, 400.0f, 2000.0f};
+  float rows[9];
+  SideRows(30.0f, 0.0f, rows);
+  Near("a round cloud seen level goes 600 units under its place",
+       DomeDrop(rows), 600.0, 1e-3);
+  Check(DomeLeastOverLand(place, rows, sea) < 0.0f,
+        "with no limit the round cloud goes into the sea",
+        DomeLeastOverLand(place, rows, sea) < 0.0f, 1);
+  int asked = 0;
+  const float share =
+      LandClearShare(place, rows, 10.0f, 171.0f, 0.05f, flat, &asked);
+  Near("over flat land at 50 the share keeps the rim 10 units over it",
+       share, (400.0 - 60.0) / 600.0, 1e-4);
+  float kept[9];
+  for (int i = 0; i < 9; ++i) kept[i] = i < 3 ? rows[i] : rows[i] * share;
+  Near("with the share the lowest point is 10 units over the land",
+       DomeLeastOverLand(place, kept, flat), 10.0, 0.05);
+  Near("the share keeps the width of the cloud", kept[0], 30.0, 1e-6);
+  Check(asked > 0 && asked <= kDomePoints,
+        "the land is asked once at most for each test point", asked,
+        kDomePoints);
+
+  // A flat cloud high up: no point comes near the highest land, and the land
+  // is not asked.
+  float high[9];
+  SideRows(30.0f, 0.0f, high);
+  for (int i = 3; i < 9; ++i) high[i] *= 0.15f;  // a flatten of about 6.7
+  asked = 0;
+  Near("a flat cloud high up keeps its shape",
+       LandClearShare(place, high, 10.0f, 171.0f, 0.05f, flat, &asked), 1.0,
+       1e-6);
+  Check(asked == 0, "a flat cloud high up does not ask the land", asked, 0);
+
+  // A hill under one side of a lower cloud makes it flatter than flat land.
+  auto hill = [](float x, float) { return x >= 2250.0f ? 160.0f : 0.0f; };
+  const float low[3] = {2000.0f, 300.0f, 2000.0f};
+  const float over_sea =
+      LandClearShare(low, rows, 10.0f, 171.0f, 0.05f, sea, nullptr);
+  const float over_hill =
+      LandClearShare(low, rows, 10.0f, 171.0f, 0.05f, hill, nullptr);
+  Near("over the sea the rim stays 10 units over it", over_sea,
+       (300.0 - 10.0) / 600.0, 1e-4);
+  Check(over_hill < over_sea,
+        "a hill under the side of the cloud makes it flatter",
+        over_hill < over_sea, 1);
+  for (int i = 0; i < 9; ++i) kept[i] = i < 3 ? rows[i] : rows[i] * over_hill;
+  // The edge of the hill is a wall between two test points, so a point
+  // between them can go under the gap, by less than 5 percent of the drop.
+  const float in_hill = DomeLeastOverLand(low, kept, hill);
+  Check(in_hill > 10.0f - 0.05f * 600.0f * over_hill,
+        "with that share the cloud stays within 5 percent of its drop of the "
+        "gap over a wall of a hill",
+        in_hill, 10.0f - 0.05f * 600.0f * over_hill);
+
+  // A cloud seen from 20 degrees under it: the pole points down at the
+  // camera, and the lowest point is on the curved surface.
+  float tilted[9];
+  SideRows(40.0f, 20.0f, tilted);
+  Near("the drop of a tilted dome is the radius times its scale",
+       DomeDrop(tilted), 800.0, 0.05);
+  Near("the drop is the lowest point of the half ball",
+       DomeDrop(tilted), place[1] - DomeLeastOverLand(place, tilted, sea),
+       1.0);
+  const float tilt_share =
+      LandClearShare(place, tilted, 10.0f, 171.0f, 0.05f, sea, nullptr);
+  for (int i = 0; i < 9; ++i) {
+    kept[i] = i < 3 ? tilted[i] : tilted[i] * tilt_share;
+  }
+  Check(DomeLeastOverLand(place, kept, sea) > 10.0f - 0.02f * 800.0f,
+        "between the test points the tilted dome stays within 2 percent of "
+        "its drop of the gap",
+        DomeLeastOverLand(place, kept, sea) > 10.0f - 0.02f * 800.0f, 1);
+
+  // A mist with its place under the land gets the flattest dome.
+  const float under[3] = {2000.0f, 20.0f, 2000.0f};
+  Near("a dome with its place in the land gets the least share",
+       LandClearShare(under, rows, 10.0f, 171.0f, 0.05f, flat, nullptr), 0.05,
+       1e-6);
+}
+
 inline void SkyChecks() {
   using namespace sky_math;
   printf("\nThe sky with no head in it\n");
@@ -173,6 +300,7 @@ inline void SkyChecks() {
        MistScale(30.0f, true, NearFlatten(4.0f, 600.0f, 1000.0f), cloud,
                  side),
        30.0, 1e-4);
+  LandClearChecks();
 }
 
 }  // namespace sky_checks

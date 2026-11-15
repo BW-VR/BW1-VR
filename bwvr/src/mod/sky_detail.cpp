@@ -64,6 +64,25 @@
 // software. One basis for all domes shows the base side of every dome behind
 // the game camera, and those domes vanish when the player turns around.
 //
+// A DRIFTING CLOUD STAYS OVER THE LAND
+//
+// CloudInSky (0x005E23F0) makes the 70 drifting clouds of the sky with their
+// place 300 to 500 units up and a scale of 13 to 50, and fn_005E25C0 moves
+// them along the wind. A dome that faces a camera near its height is a disc
+// that stands up, and it goes down by its radius times A under its place:
+// 260 to 1000 units for a round cloud. The land is 0 to 171 units high, so
+// such a dome goes into the land and the sea, and the land cuts it with a
+// hard line that moves with the cloud. The eye of the God view is low, so
+// most clouds are near its height.
+//
+// cloud_land=1 makes rows 1 and 2 of the basis of a drifting cloud shorter
+// by one share, so that each test point of the dome stays 10 units over the
+// land or the sea under it (sky_math::LandClearShare). Row 0 stays, so the
+// cloud keeps its width and gets flatter. The land is asked only when the
+// lowest point of the dome is lower than the highest land. cloud_land=0 is
+// the dome of the game, and cloud_land=2 draws no drifting cloud. The clouds
+// of a storm and the mists of the ground keep the rules above.
+//
 // THE MOON
 //
 // LH3DSky::Draw (0x0086B010) puts the moon at the stored camera plus the
@@ -126,12 +145,16 @@
 #include <windows.h>
 #include <math.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "MinHook.h"
+#include "debug_menu.h"
 #include "sky_math.h"
 
 extern void ModLog(const char* format, ...);
+// controllers.cpp: a short pulse of the hand, for a step of a switch.
+void ControllersGesturePulse(float amplitude, float seconds);
 // head_camera.cpp: the camera of the table frame that is drawn, with no
 // head. False outside a table frame.
 bool HeadCameraTableCamera(float out[3]);
@@ -179,6 +202,22 @@ const uint8_t kMistSkyCloud = 2;
 const int kMistScale = 0x88;    // float, the size of the dome
 const int kMistFlatten = 0x8C;  // float, how flat a cloud near the horizon is
 const float kDomeHeight = 20.0f;  // mist.l3d: the pole is at y 20
+
+// The drifting clouds of CloudInSky. 0x00D1A270 points to the entries, 20
+// bytes each, with the LH3DMist at +0x10. fn_005E25C0 moves as many as
+// 0x00D1A278 holds (0x005E25E1).
+const uintptr_t kCloudEntries = 0x00D1A270;
+const uintptr_t kCloudCount = 0x00D1A278;
+const int kCloudEntrySize = 0x14;
+const int kCloudEntryMist = 0x10;
+const uint32_t kCloudMost = 200;  // CloudInSky::Open keeps the count to 200
+// MapCoords::GetLHPoint, thiscall: the land point of a MapCoords.
+const uintptr_t kGetLHPoint = 0x00605C40;
+const float kMapScale = 6553.6f;  // MapCoords units in a world unit
+const float kMapSize = 5120.0f;   // 512 cells of 10 units
+const float kLandTop = 171.0f;    // an altitude byte of 255 times 0.67
+const float kLandGap = 10.0f;     // units over the land at the least
+const float kLandLeast = 0.05f;   // the least share of rows 1 and 2
 
 // The moon. fn_0086AC60 is __cdecl with three arguments: the place of the
 // moon, the turn that it makes (12 floats) and the matrix of the moon mesh.
@@ -519,6 +558,115 @@ void RoundTestCheck() {
          "cloud_round_near=%.0f now", frame, g_round_near);
 }
 
+// cloud_land: 0 the dome of the game, 1 a drifting cloud stays over the land
+// and the sea, 2 no drifting cloud. See A DRIFTING CLOUD STAYS OVER THE LAND.
+enum CloudLand {
+  kCloudLandGame = 0,
+  kCloudLandOver = 1,
+  kCloudLandHidden = 2,
+  kCloudLandModes = 3
+};
+int g_cloud_land = kCloudLandOver;
+// sky_test_land_frame: at each of these frames of the steps the switch makes
+// one step, as the debug page does.
+const int kLandTestFrames = 4;
+uint64_t g_land_test_frame[kLandTestFrames] = {0, 0, 0, 0};
+int g_land_test_next = 0;
+// For the report.
+uint64_t g_land_draws = 0;    // draws of a drifting cloud
+uint64_t g_land_reach = 0;    // of them, a dome that goes into the land
+uint64_t g_land_kept = 0;     // of them, made flatter by cloud_land=1
+uint64_t g_land_hidden = 0;   // draws that cloud_land=2 skipped
+uint64_t g_land_asked = 0;    // questions to the land
+float g_land_least = 1.0f;    // the least share in the window
+int64_t g_land_ticks = 0;     // the time of the test, in counts of the QPC
+uint64_t g_land_report_frame = 0;
+
+const char* CloudLandWords(int mode) {
+  switch (mode) {
+    case kCloudLandGame:
+      return "a drifting cloud is the dome of the game, and it can go into "
+             "the land and the sea";
+    case kCloudLandHidden:
+      return "the mod draws no drifting cloud of the sky";
+    default:
+      return "a drifting cloud stays 10 units over the land and the sea "
+             "under it, and it gets flatter where it must";
+  }
+}
+
+// True for one of the drifting clouds of CloudInSky.
+bool IsDriftingCloud(const void* mist) {
+  const uintptr_t entries = *reinterpret_cast<const uintptr_t*>(kCloudEntries);
+  if (entries == 0 || mist == nullptr) return false;
+  uint32_t count = *reinterpret_cast<const uint32_t*>(kCloudCount);
+  if (count > kCloudMost) count = kCloudMost;
+  for (uint32_t i = 0; i < count; ++i) {
+    const uintptr_t at = entries + i * kCloudEntrySize + kCloudEntryMist;
+    if (*reinterpret_cast<const void* const*>(at) == mist) return true;
+  }
+  return false;
+}
+
+// The height of the land under a point, or of the sea (y 0) out of the map
+// and over the sea.
+struct MapCoords {
+  int32_t x, z;
+  float over;  // added to the height of the land by GetLHPoint
+};
+typedef float*(__fastcall* GetLHPointFn)(const MapCoords* self, void* unused,
+                                         float* out);
+
+float LandUnder(float x, float z) {
+  if (!(x >= 0.0f && x < kMapSize && z >= 0.0f && z < kMapSize)) return 0.0f;
+  MapCoords at = {static_cast<int32_t>(x * kMapScale),
+                  static_cast<int32_t>(z * kMapScale), 0.0f};
+  float point[3] = {x, 0.0f, z};
+  reinterpret_cast<GetLHPointFn>(kGetLHPoint)(&at, nullptr, point);
+  return point[1] > 0.0f ? point[1] : 0.0f;
+}
+
+void CloudLandStep(const char* by) {
+  g_cloud_land = (g_cloud_land + 1) % kCloudLandModes;
+  ModLog("sky          : %s: cloud_land is %d now: %s, frame %llu", by,
+         g_cloud_land, CloudLandWords(g_cloud_land), ControllersFrameCount());
+}
+
+// At each frame of sky_test_land_frame the switch makes one step.
+void LandTestCheck() {
+  if (g_land_test_next >= kLandTestFrames) return;
+  const uint64_t key = g_land_test_frame[g_land_test_next];
+  if (key == 0) return;
+  if (ControllersTestFrame(key, ControllersFrameCount()) < key) return;
+  ++g_land_test_next;
+  CloudLandStep("sky_test_land_frame");
+}
+
+// The share of rows 1 and 2 of the basis that keeps a drifting cloud over
+// the land, from the basis of the mod and the scale of the engine. Counts
+// the draw for the report. 1 when the cloud does not go into the land.
+float DriftingCloudShare(const float position[3], const float basis[9],
+                         float scale, float a_engine) {
+  LARGE_INTEGER start, end;
+  QueryPerformanceCounter(&start);
+  // The rows as the engine draws them: row 0 times the scale, rows 1 and 2
+  // times A.
+  float rows[9];
+  for (int i = 0; i < 9; ++i) rows[i] = basis[i] * (i < 3 ? scale : a_engine);
+  int asked = 0;
+  const float share = sky_math::LandClearShare(
+      position, rows, kLandGap, kLandTop, kLandLeast, LandUnder, &asked);
+  QueryPerformanceCounter(&end);
+  g_land_ticks += end.QuadPart - start.QuadPart;
+  g_land_asked += static_cast<uint64_t>(asked);
+  ++g_land_draws;
+  if (share < 1.0f) {
+    ++g_land_reach;
+    if (share < g_land_least) g_land_least = share;
+  }
+  return share;
+}
+
 // At the first frame of play, the time of day of sky_test_hour.
 void TestHourCheck() {
   if (g_test_hour < 0 || g_test_hour_done) return;
@@ -610,6 +758,12 @@ void __fastcall h_MistDraw(void* self, void* unused) {
   if (TabletopHidesMist(self)) return;
   if (self != nullptr && MistHidden(static_cast<const uint8_t*>(self))) return;
   RoundTestCheck();
+  LandTestCheck();
+  const bool drifting = IsDriftingCloud(self);
+  if (drifting && g_cloud_land == kCloudLandHidden) {
+    ++g_land_hidden;
+    return;
+  }
   // The flatten that a near sky cloud gets for this draw, and the value of
   // the game to put back after it. The same for the color of a cloud that
   // fades.
@@ -692,6 +846,16 @@ void __fastcall h_MistDraw(void* self, void* unused) {
       if (sky_cloud) ++g_sky_draws;
       const bool limited = LimitPole(a, distance, basis);
       if (limited) ++g_poles_limited;
+      // A DRIFTING CLOUD STAYS OVER THE LAND. The share is measured with
+      // each value of cloud_land, for the report, and used with 1.
+      if (drifting && a_engine != 0.0f) {
+        const float share =
+            DriftingCloudShare(position, basis, scale, a_engine);
+        if (share < 1.0f && g_cloud_land == kCloudLandOver) {
+          for (int i = 3; i < 9; ++i) basis[i] *= share;
+          ++g_land_kept;
+        }
+      }
       if (g_mist_log && !sky_cloud) {
         MistLog(self, position, scale, a, flatten, mist[kMistFlags], distance,
                 stored, table_faced, limited);
@@ -869,6 +1033,24 @@ void SkyDetailInstall() {
                        "round shape, with the full flatten of the engine "
                        "from 2 times it"
                      : "Each sky cloud has the flatten of the engine");
+    const int land = static_cast<int>(
+        GetPrivateProfileIntA("bwvr", "cloud_land", kCloudLandOver, path));
+    g_cloud_land = land >= 0 && land < kCloudLandModes ? land : kCloudLandOver;
+    ModLog("sky          : cloud_land=%d. %s", g_cloud_land,
+           CloudLandWords(g_cloud_land));
+    char frames[128] = "";
+    GetPrivateProfileStringA("bwvr", "sky_test_land_frame", "", frames,
+                             sizeof(frames), path);
+    int read[kLandTestFrames] = {0, 0, 0, 0};
+    const int count = sscanf_s(frames, "%d,%d,%d,%d", &read[0], &read[1],
+                               &read[2], &read[3]);
+    for (int i = 0; i < kLandTestFrames && i < count; ++i) {
+      g_land_test_frame[i] = read[i] > 0 ? static_cast<uint64_t>(read[i]) : 0;
+    }
+    if (count > 0 && g_land_test_frame[0] != 0) {
+      ModLog("sky          : sky_test_land_frame=%s: at each of these frames "
+             "of the steps cloud_land makes one step", frames);
+    }
     const int hide_all = static_cast<int>(
         GetPrivateProfileIntA("bwvr", "sky_test_mist_hide_all", 0, path));
     g_mist_hide_all_frame = hide_all > 0 ? static_cast<uint64_t>(hide_all) : 0;
@@ -910,6 +1092,18 @@ void SkySetHeadFree(bool clouds, bool moon, int test_frame, bool trace,
 }
 
 bool SkyHeadFree() { return g_head_free; }
+
+// The switch cloud_land of the debug page: 0 game, 1 over the land, 2 off.
+int SkyCloudLandValue() {
+  if (!g_hooked) return kDebugCannot;
+  return g_cloud_land;
+}
+
+void SkyCloudLandChange(const char* by) {
+  if (!g_hooked) return;
+  CloudLandStep(by);
+  ControllersGesturePulse(0.5f, g_cloud_land != kCloudLandGame ? 0.30f : 0.08f);
+}
 
 // 0 draws the glare through the eye camera, 1 as the game draws it, and 2
 // hides it. Other values give 0.
@@ -954,6 +1148,32 @@ void SkyDetailReport() {
   g_fade_part = 0;
   g_fade_part_sum = 0.0;
   g_fade_whole = 0;
+  const uint64_t frame_now = ControllersFrameCount();
+  const uint64_t frames =
+      frame_now > g_land_report_frame ? frame_now - g_land_report_frame : 0;
+  g_land_report_frame = frame_now;
+  if (g_land_draws > 0 || g_land_hidden > 0) {
+    LARGE_INTEGER rate;
+    QueryPerformanceFrequency(&rate);
+    const double ms = rate.QuadPart > 0
+                          ? 1000.0 * static_cast<double>(g_land_ticks) /
+                                static_cast<double>(rate.QuadPart)
+                          : 0.0;
+    ModLog("sky          : cloud_land=%d: %llu of %llu draws of a drifting "
+           "cloud went into the land or the sea, %llu of them made flatter, "
+           "the least share of their height %.2f. %llu draws not drawn. The "
+           "test asked the land %llu times in %.3f ms, %.4f ms a frame",
+           g_cloud_land, g_land_reach, g_land_draws, g_land_kept,
+           g_land_reach > 0 ? g_land_least : 1.0f, g_land_hidden,
+           g_land_asked, ms, frames > 0 ? ms / frames : 0.0);
+  }
+  g_land_draws = 0;
+  g_land_reach = 0;
+  g_land_kept = 0;
+  g_land_hidden = 0;
+  g_land_asked = 0;
+  g_land_least = 1.0f;
+  g_land_ticks = 0;
   if (g_rounded > 0) {
     ModLog("sky          : %llu draws of a near sky cloud had less flatten "
            "(cloud_round_near=%.0f)", g_rounded, g_round_near);

@@ -146,6 +146,8 @@ int CullDistanceValue();
 void CullDistanceChange(const char* by);
 int CullFogValue();
 void CullFogChange(const char* by);
+int SkyCloudLandValue();
+void SkyCloudLandChange(const char* by);
 int InfluenceEdgeLookValue();
 void InfluenceEdgeLookChange(const char* by);
 int VkSceneEyesValue();
@@ -539,6 +541,9 @@ const Switch kSwitches[] = {
      L"game|2x|3x|5x|10x"},
     {kGroupPicture, L"Cull fog", L"Fog moves out with the models",
      "cull_fog", CullFogValue, CullFogChange, L"game|follows"},
+    {kGroupPicture, L"Cloud land", L"Drifting clouds and the land",
+     "cloud_land", SkyCloudLandValue, SkyCloudLandChange,
+     L"game|over land|off"},
     {kGroupPicture, L"Edge look", L"Look of the influence edge",
      "influence_wall_look", InfluenceEdgeLookValue, InfluenceEdgeLookChange,
      L"patch|hologram"},
@@ -1010,6 +1015,10 @@ const wchar_t* const kTips[] = {
     // Cull fog
     L"Follows: the fog starts and ends further out, as far as the cull "
     L"distance moves the map objects out. Game: the fog of the game.",
+    // Cloud land
+    L"Over land: a drifting cloud of the sky gets flatter so that it does "
+    L"not go into the land or the sea. Game: the land cuts it. Off: no "
+    L"drifting clouds.",
     // Edge look
     L"The glow at the edge of the influence near a hand. Hologram: a red grid "
     L"on the wall of the edge, with rings from the hand. Patch: a round glow.",

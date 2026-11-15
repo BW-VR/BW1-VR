@@ -195,4 +195,79 @@ inline float CloudGapCm(float distance, float radius, float units_per_meter) {
   return (distance - radius) / units_per_meter * 100.0f;
 }
 
+// A DRIFTING CLOUD OVER THE LAND (cloud_land). The dome of mist.l3d is a half
+// ball of radius 20 with its pole on local y. The engine draws a point p of it
+// at place + p.x * row 0 + p.y * row 1 + p.z * row 2, with the rows of the
+// basis after its own scale (row 0 times the scale, rows 1 and 2 times A). The
+// rows go in `rows` as rows[3 * j + k]: row j, world axis k.
+const float kDomeRadius = 20.0f;
+
+// How far the lowest point of the half ball goes under its place, in units.
+// It is the least value of p . c on the half ball, with c the heights of the
+// three rows. With c.y of 0 or more the least point is on the rim of the
+// base, else it is on the curved surface.
+inline float DomeDrop(const float rows[9]) {
+  const float cx = rows[1], cy = rows[4], cz = rows[7];
+  if (cy >= 0.0f) return kDomeRadius * sqrtf(cx * cx + cz * cz);
+  return kDomeRadius * sqrtf(cx * cx + cy * cy + cz * cz);
+}
+
+// The points of the half ball that LandClearShare tests: 12 points on each of
+// the rings at 0, 30 and 60 degrees over the base, and the pole. A ring point
+// each 30 degrees has the point straight under the place on the rim.
+const int kDomeRings = 3;
+const int kDomeRingPoints = 12;
+const int kDomePoints = kDomeRings * kDomeRingPoints + 1;
+
+inline void DomePoint(int i, float out[3]) {
+  if (i >= kDomeRings * kDomeRingPoints) {
+    out[0] = 0.0f;
+    out[1] = kDomeRadius;
+    out[2] = 0.0f;
+    return;
+  }
+  const float d = 3.14159265f / 180.0f;
+  const float rise = static_cast<float>(i / kDomeRingPoints) * 30.0f * d;
+  const float turn = static_cast<float>(i % kDomeRingPoints) * 30.0f * d;
+  out[0] = kDomeRadius * cosf(rise) * cosf(turn);
+  out[1] = kDomeRadius * sinf(rise);
+  out[2] = kDomeRadius * cosf(rise) * sinf(turn);
+}
+
+// The share of rows 1 and 2 that keeps each test point of the dome at least
+// `gap` units over the land. `land(x, z)` gives the height of the land or of
+// the sea under a point. Row 0 is level in the world, so a share of rows 1
+// and 2 makes the cloud flatter and keeps its width. The share is 1 when no
+// point goes under the land, and at least `least`. The land is asked only
+// when the lowest point of the dome is under `land_top` + `gap`: no land is
+// higher than `land_top`. `asked` counts the questions to the land.
+template <class Land>
+inline float LandClearShare(const float place[3], const float rows[9],
+                            float gap, float land_top, float least, Land land,
+                            int* asked) {
+  if (place[1] - DomeDrop(rows) >= land_top + gap) return 1.0f;
+  float share = 1.0f;
+  for (int i = 0; i < kDomePoints; ++i) {
+    float p[3];
+    DomePoint(i, p);
+    // The height of the point: one part that the share does not scale (row
+    // 0), and one part that it scales (rows 1 and 2).
+    const float fixed = p[0] * rows[1];
+    const float scaled = p[1] * rows[4] + p[2] * rows[7];
+    if (!(scaled < 0.0f)) continue;
+    if (place[1] + fixed + scaled >= land_top + gap) continue;
+    const float x = place[0] + p[0] * rows[0] + p[1] * rows[3] + p[2] * rows[6];
+    const float z = place[2] + p[0] * rows[2] + p[1] * rows[5] + p[2] * rows[8];
+    if (asked != nullptr) ++*asked;
+    const float floor = land(x, z) + gap;
+    const float room = place[1] + fixed - floor;
+    // The place itself is under the floor: the flattest cloud.
+    if (!(room > 0.0f)) return least;
+    const float most = room / -scaled;
+    if (most < share) share = most;
+  }
+  if (share < least) share = least;
+  return share;
+}
+
 }  // namespace sky_math

@@ -50,6 +50,12 @@
 #             -Set "backend=dxwrapper\ddraw.dll;test_frame_rate=60" for eye
 #             pictures, or "video_view=1;test_frame_rate=60" with Vulkan for
 #             pictures of the view for videos with the cards in them.
+#   angle     The angle of the hand on the controller (hand.md, "The angle
+#             of the hand"): the hands of the kind hints with the fit of
+#             Virtual Desktop (grip_fit_test=1). Eye pictures with
+#             hand_angle=1 and 0, then with the right hand on its side, with
+#             hand_two_sided=1 and 0. Give it
+#             -Set "backend=dxwrapper\ddraw.dll;test_frame_rate=60".
 #
 # THE START. The run starts in a test save (README.md, "A fast start"): the
 # save "pen" for the kinds one and fixed (the Creature pens of Land 1 after
@@ -217,6 +223,21 @@ if ($Kind -eq 'one') {
     $extra.fake_controller_left_rots = '-10,60,0'
     $Steps = 'point@4600+1 lpoint@4600+1 rot@4600+1 lrot@4600+1 shot@4640+1 ' +
              'shot@4760+1 shot@4840+1 lgrip@4880+80 shot@4920+1 shot@5000+1'
+} elseif ($Kind -eq 'angle') {
+    # The angle of the hand (hand.md, "The angle of the hand"): the hands of
+    # the kind hints, with the fit of Virtual Desktop. A picture with
+    # hand_angle=1, one with hand_angle=0 (the word anglekey), then the
+    # right hand turned on its side so the eye looks along the hand, with
+    # hand_two_sided=1 and with 0 (the word sideskey).
+    $extra.fake_head_pitch = -25
+    $extra.grip_fit_test = 1
+    $extra.fake_controller_points = "$first 18,-25,40"
+    $extra.fake_controller_left_points = '-18,-25,40'
+    $extra.fake_controller_rots = '10,60,0 10,10,90'
+    $extra.fake_controller_left_rots = '-10,60,0'
+    $Steps = 'point@4600+1 lpoint@4600+1 rot@4600+1 lrot@4600+1 shot@4700+1 ' +
+             'anglekey@4720+1 shot@4760+1 anglekey@4780+1 rot@4800+1 ' +
+             'shot@4840+1 sideskey@4860+1 shot@4900+1 sideskey@4920+1'
 } elseif ($Kind -eq 'glow') {
     # The glow at the Hand's point (hand-model.md, "The glow at the Hand's
     # point"). With hand_land_stop=0 the hand goes into the land, and the

@@ -270,6 +270,14 @@ void HandModelLookChange(const char* by);
 // The frame of the controller on the grip pose (grip_fit.cpp).
 int GripFitValue();
 void GripFitChange(const char* by);
+// The angle of the hand and its trim (grip_fit.cpp), both sides of the
+// triangles of the hands (hand_model.cpp).
+int GripFitHandAngleValue();
+void GripFitHandAngleChange(const char* by);
+int GripFitHandTrimValue(int axis);
+void GripFitHandTrimStep(int axis, int steps, const char* by);
+int HandModelTwoSidedValue();
+void HandModelTwoSidedChange(const char* by);
 int TargetGlowValue();
 void TargetGlowChange(const char* by);
 int TakeStreamValue();
@@ -775,6 +783,39 @@ const Switch kSwitches[] = {
      HandModelLookChange, L"player|evil|neutral|good"},
     {kGroupHand, L"Controller fit", L"Controller on the grip pose", "grip_fit",
      GripFitValue, GripFitChange, L"runtime|model"},
+    {kGroupHand, L"Hand angle", L"Angle of the hand on the controller",
+     "hand_angle", GripFitHandAngleValue, GripFitHandAngleChange,
+     L"model|palm"},
+    {kGroupHand, L"Hand yaw -", L"Hand yaw trim, degrees",
+     "hand_trim_yaw_deg", [] { return GripFitHandTrimValue(0); },
+     [](const char* by) { GripFitHandTrimStep(0, -1, by); }, L"", nullptr,
+     false},
+    {kGroupHand, L"Hand yaw +", L"Hand yaw trim, degrees",
+     "hand_trim_yaw_deg", [] { return GripFitHandTrimValue(0); },
+     [](const char* by) { GripFitHandTrimStep(0, 1, by); }, L"",
+     [](const char* by) { GripFitHandTrimStep(0, -1, by); }, true,
+     L"Hand yaw"},
+    {kGroupHand, L"Hand pitch -", L"Hand pitch trim, degrees",
+     "hand_trim_pitch_deg", [] { return GripFitHandTrimValue(1); },
+     [](const char* by) { GripFitHandTrimStep(1, -1, by); }, L"", nullptr,
+     false},
+    {kGroupHand, L"Hand pitch +", L"Hand pitch trim, degrees",
+     "hand_trim_pitch_deg", [] { return GripFitHandTrimValue(1); },
+     [](const char* by) { GripFitHandTrimStep(1, 1, by); }, L"",
+     [](const char* by) { GripFitHandTrimStep(1, -1, by); }, true,
+     L"Hand pitch"},
+    {kGroupHand, L"Hand roll -", L"Hand roll trim, degrees",
+     "hand_trim_roll_deg", [] { return GripFitHandTrimValue(2); },
+     [](const char* by) { GripFitHandTrimStep(2, -1, by); }, L"", nullptr,
+     false},
+    {kGroupHand, L"Hand roll +", L"Hand roll trim, degrees",
+     "hand_trim_roll_deg", [] { return GripFitHandTrimValue(2); },
+     [](const char* by) { GripFitHandTrimStep(2, 1, by); }, L"",
+     [](const char* by) { GripFitHandTrimStep(2, -1, by); }, true,
+     L"Hand roll"},
+    {kGroupHand, L"Hand sides", L"Both sides of each hand triangle",
+     "hand_two_sided", HandModelTwoSidedValue, HandModelTwoSidedChange,
+     L"front|both"},
 
     // Throw
     {kGroupThrow, L"Fast release", L"Release at once", "release_at_once",
@@ -1319,6 +1360,33 @@ const wchar_t* const kTips[] = {
     L"controller, the hands and the Hand go on the frame of the model of a "
     L"Meta Touch controller, 2.7 cm from the grip pose. Runtime: on the grip "
     L"pose of the runtime.",
+    // Hand angle
+    L"Palm: the hand has the angle of the palm pose of the runtime, 20 "
+    L"degrees from the grip pose toward the thumb. Model: the hand is on the "
+    L"frame of the controller model. The controller model does not move.",
+    // Hand yaw -
+    L"Turns the hand 5 degrees about the palm normal, toward the little "
+    L"finger.",
+    // Hand yaw +
+    L"The trim of the hand about the palm normal, -45 to 45 degrees. Plus "
+    L"turns the fingers toward the thumb. The value stays in bwvr.ini.",
+    // Hand pitch -
+    L"Turns the hand 5 degrees about the knuckles, toward the back of the "
+    L"hand.",
+    // Hand pitch +
+    L"The trim of the hand about the line of the knuckles, -45 to 45 "
+    L"degrees. Plus turns the fingers toward the palm. The value stays in "
+    L"bwvr.ini.",
+    // Hand roll -
+    L"Turns the hand 5 degrees about the fingers, the palm toward the little "
+    L"finger.",
+    // Hand roll +
+    L"The trim of the hand about the fingers, -45 to 45 degrees. Plus turns "
+    L"the palm toward the thumb. The value stays in bwvr.ini.",
+    // Hand sides
+    L"Both: the hands draw each triangle, also one that faces away, so no "
+    L"triangle is missing at an edge of the hand. Front: only the triangles "
+    L"that face the eye.",
     // Fast release
     L"On: a game turn runs on the frame after a release of the Hand, or after "
     L"the grip opens in a take. Off: the mod waits up to 100 ms for the game "

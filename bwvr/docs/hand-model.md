@@ -406,8 +406,10 @@ hand.
 
 **The place.** The mesh has the turn of the exact root (the rest turn of
 `hand_mesh_yaw_deg`, `hand_mesh_pitch_deg` and `hand_mesh_roll_deg`, then
-the fingers along the finger axis of the grip and the palm away from the
-back of the hand) and the size of the real hand: 623.6 mesh units are one
+the fingers along the finger axis of the hand frame and the palm away from
+the back of the hand). The hand frame is the grip with the angle of the
+hand (hand.md, "The angle of the hand"). The mesh has the size of the real
+hand: 623.6 mesh units are one
 hand length. It is then moved until the tip of its own index finger, at the
 rest curl of 0.12, is the point of the Hand (`MakePlacement`). So the glow,
 the pick, the touch of the land and each other interaction are at the tip of
@@ -452,9 +454,10 @@ back after it. The differences:
   texture by the alpha of the color. The blend is the plain alpha blend, so
   the wrist fades as in the game. A texel with an alpha below 8 of 255
   writes nothing.
-- A triangle that faces away from the eye is not drawn. The mod finds that
-  on the CPU, with the sign of each mirror on the way to the camera
-  (`FacesCamera`).
+- Both sides of each triangle draw (`hand_two_sided=1`, "Both sides of each
+  triangle" below). With `hand_two_sided=0` a triangle that faces away from
+  the eye is not drawn. The mod finds that on the CPU, with the sign of each
+  mirror on the way to the camera (`FacesCamera`).
 - The hands draw after the arc, the ray and the tether of the overlay,
   because the wrist is not opaque.
 - While the game draws its flow of a miracle on its Hand, the pointing hand
@@ -464,6 +467,53 @@ back after it. The differences:
 **When the low poly hands draw.** With `hand_model=0`. When a hand file of
 the game is not readable. When the device gives no texture. After the test
 key (below). Each case has a log line.
+
+### Both sides of each triangle
+
+When the triangles that face away do not draw, the mesh of the game shows
+holes at its edges at a glancing angle. The cause is that cull, and not the
+near plane, the stop at the land or the cut at a page:
+
+- The mesh is closed except at the wrist (5 open edges), and each triangle
+  has the same turn as its neighbors. A closed mesh of that kind has no hole
+  when the back faces go.
+- But it is a thin shell. At rest, 28 pairs of triangles that share an edge
+  turn more than 120 degrees from each other, along the sides of the fingers
+  and of the palm. The skin has one bone for each vertex, so a curl folds
+  more triangles at the knuckles: 43 such pairs in a fist.
+- Seen along the hand, a triangle of such an edge shows its back to the eye
+  while it is in front. The cull removes it, and the eye sees through the
+  edge.
+- The near plane cuts each triangle at its edge (`ClipNear`), and the stop at
+  the land moves the hand but cuts nothing.
+
+With `hand_two_sided=1` (the default) the mod draws each triangle, also one
+that faces away, and the depth test hides the inside. This is the same in
+both backends: the CPU makes the triangles, and the device has no cull for
+them. The mesh of a file of the player draws the same way. The low poly
+hands have no cull.
+
+The game's own Hand draws both sides too (`hand_exact.cpp`). The draw of a
+skinned mesh of the game removes a triangle that faces away, unless the
+material of its primitive is double sided (`LH3DMaterial::Flags` bit `0x1`,
+read by the clip of `LH3DP3` and by `LH3DRender::SetMaterial`, which sets the
+cull mode of the device). Before each draw of the Hand's mesh the hook of
+`fn_00813BA0` sets that bit by the switch. It finds the material through
+the mesh object (`LH3DMeshedObject` +0x7C, the mesh, +0x10 the submeshes,
+the submesh +0x8 the primitives, the material at +0x0 of the primitive),
+only when the counts are those of the file of the Hand (1 primitive, 22
+bones, 141 vertices). The hook is there only with `hand_hide_game=1`.
+
+The cut at a page (`hand_cut.cpp`, `card_hand_front=1`) makes the hole in the
+page from the triangles that face the eye. A triangle that faces away and is
+in front of the page makes no hole.
+
+The log: `hand model   : drawn in N eye passes, N triangles a pass, N
+triangles that face away (drawn too, hand_two_sided=1)` once a report
+window. `hand exact   : the material of the game's Hand has the flags 0x04
+(double sided: no). hand_two_sided=1: the game draws both sides of each
+triangle of its Hand` once. A change of the switch: `hand model   : <by>:
+hand_two_sided is N now`.
 
 ### The fingers from outside
 
@@ -531,12 +581,15 @@ draw over it.
 | --- | --- | --- |
 | `hand_model` | 1 | 1 draws both hands with the game's own hand mesh. 0 draws the low poly hands |
 | `hand_model_file` | 1 | 1 uses `bwvr-hand.glb` when it is beside the mod ("A hand that the player edited") |
+| `hand_two_sided` | 1 | 1 draws both sides of each triangle of the mod's hands and of the game's Hand ("Both sides of each triangle"). 0 does not draw a triangle that faces away. The switch "Hand sides" of the debug page (group Hand) changes it live, and so does the script word `sideskey` |
 | `hand_model_test_look` | | Test key. Frame numbers. At each one the look steps, as Shift and the minus key do |
 | `hand_model_test_swap` | | Test key. Frame numbers. At each one the hands change, as Ctrl and the minus key do |
 | `hand_model_file_path` | | Test key. The full path of a file to read in place of `bwvr-hand.glb` |
 
 `hand_mesh_yaw_deg`, `hand_mesh_pitch_deg` and `hand_mesh_roll_deg` (hand.md,
-"The exact Hand") turn the mesh of the mod's hands too. `hand_tint` colors
+"The exact Hand") turn the mesh of the mod's hands too, and `hand_angle` and
+`hand_trim_*_deg` (hand.md, "The angle of the hand") turn both kinds of
+hands on the controller. `hand_tint` colors
 only the low poly hands. The keys are read from `bwvr.ini` at the start. They
 are not in the launcher.
 

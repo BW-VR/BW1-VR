@@ -216,7 +216,12 @@ void ControllersRecenter(const char* by);
 struct OverlayHand {
   bool valid;          // active, with a grip pose that is tracked
   float position[3];   // the grip point in the world
-  float rotation[9];   // the grip axes in the world: L * M_grip
+  // The axes of the drawn hand in the world: L * M_hand, the grip axes with
+  // the turn of the hand (hand_angle, docs/hand.md, "The angle of the hand").
+  float rotation[9];
+  // The grip axes in the world, L * M_grip: the frame of the model of the
+  // controller (hint_model.cpp).
+  float controller[9];
   float trigger;       // 0 to 1
   float squeeze;       // 0 to 1
 };

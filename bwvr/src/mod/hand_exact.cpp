@@ -19,8 +19,9 @@
 // game made them, and only the drawn bones change. The Creature state does not
 // call the pose builder, so this seam reaches it too.
 //
-// THE ROOT (hand_exact_math.h, ExactRoot). The fingers go along the
-// controller's finger axis, the palm faces away from the back of the real
+// THE ROOT (hand_exact_math.h, ExactRoot). The fingers go along the finger
+// axis of the hand frame (the grip with the angle of the hand,
+// hand_angle_math.h), the palm faces away from the back of the real
 // hand, and the origin (the index tip of the mesh) is the target, which
 // controllers.cpp puts at the real index tip. The size is the real hand's
 // length over the mesh's length. The mirror of CHand+0x484C stays, so the
@@ -903,9 +904,109 @@ void NoteOtherDraw(void* mesh, uintptr_t back) {
          ControllersFrameCount());
 }
 
+// BOTH SIDES OF THE GAME'S HAND (hand_two_sided, docs/hand-model.md, "Both
+// sides of each triangle"). The draw of a skinned mesh removes a triangle
+// that faces away, unless the material of its primitive is double sided:
+// LH3DMaterial::Flags bit 0x1 [decomp: the clip of LH3DP3 and
+// LH3DRender::SetMaterial, which sets the cull mode of the device from it].
+// The mesh object of the Hand is an LH3DMeshedObject with its LH3DMesh at
+// +0x7C. The mesh has its submeshes at +0x10, a submesh has the count of
+// primitives at +0x4, the primitives at +0x8 and the count of bones at +0xC,
+// and a primitive has the material at +0x0 (the flags at +0x5) and the count
+// of vertices at +0x10. Before each draw of the Hand's mesh the bit follows
+// the switch. The walk is used only when the counts are the counts of the
+// file of the Hand (1 primitive, 22 bones, 141 vertices).
+const int kObjectMesh3d = 0x7C;
+const int kMeshSubmeshes = 0x10;
+const int kSubmeshPrimitiveCount = 0x4;
+const int kSubmeshPrimitives = 0x8;
+const int kSubmeshBones = 0xC;
+const int kPrimitiveFlags = 0x5;
+const int kPrimitiveVertices = 0x10;
+const uint8_t kDoubleSided = 0x1;
+uint8_t* g_two_sided_flags = nullptr;  // the flags byte of the Hand's material
+const void* g_two_sided_mesh = nullptr;
+bool g_two_sided_tried = false;
+bool g_two_sided_was = false;          // the bit as the file has it
+
+template <typename T>
+bool ReadAt(const void* base, int offset, T* out) {
+  if (base == nullptr) return false;
+  const uint8_t* at = static_cast<const uint8_t*>(base) + offset;
+  if (IsBadReadPtr(at, sizeof(T))) return false;
+  *out = *reinterpret_cast<const T*>(at);
+  return true;
+}
+
+uint8_t* FindHandFlags(const void* object) {
+  const void* mesh = nullptr;
+  const void* const* submeshes = nullptr;
+  const void* submesh = nullptr;
+  const void* const* primitives = nullptr;
+  const void* primitive = nullptr;
+  int32_t count = 0, bones = 0, vertices = 0;
+  if (!ReadAt(object, kObjectMesh3d, &mesh) ||
+      !ReadAt(mesh, kMeshSubmeshes, &submeshes) ||
+      !ReadAt(submeshes, 0, &submesh) ||
+      !ReadAt(submesh, kSubmeshPrimitiveCount, &count) ||
+      !ReadAt(submesh, kSubmeshPrimitives, &primitives) ||
+      !ReadAt(submesh, kSubmeshBones, &bones) ||
+      !ReadAt(primitives, 0, &primitive) ||
+      !ReadAt(primitive, kPrimitiveVertices, &vertices)) {
+    return nullptr;
+  }
+  if (count != 1 || bones != 22 || vertices != 141) {
+    ModLog("hand exact   : the mesh of the game's Hand is not as the mod knows "
+           "it (%d primitives, %d bones, %d vertices), so it stays one sided",
+           count, bones, vertices);
+    return nullptr;
+  }
+  uint8_t* flags =
+      static_cast<uint8_t*>(const_cast<void*>(primitive)) + kPrimitiveFlags;
+  return IsBadWritePtr(flags, 1) ? nullptr : flags;
+}
+
+void TwoSidedBeforeDraw(void* mesh) {
+  bool active = false;
+  const uint8_t* hand = static_cast<const uint8_t*>(HandDirectHand(&active));
+  if (hand == nullptr || *reinterpret_cast<void* const*>(hand + kHandMesh) !=
+                             mesh) {
+    return;
+  }
+  if (g_two_sided_mesh != mesh) {
+    // A new mesh object, or the first: find its material again.
+    if (g_two_sided_tried && g_two_sided_mesh == nullptr) return;
+    g_two_sided_tried = true;
+    g_two_sided_mesh = mesh;
+    g_two_sided_flags = FindHandFlags(mesh);
+    if (g_two_sided_flags == nullptr) {
+      g_two_sided_mesh = nullptr;
+      return;
+    }
+    g_two_sided_was = (*g_two_sided_flags & kDoubleSided) != 0;
+    ModLog("hand exact   : the material of the game's Hand has the flags "
+           "0x%02X (double sided: %s). hand_two_sided=%d: the game draws %s, "
+           "frame %llu",
+           *g_two_sided_flags, g_two_sided_was ? "yes" : "no",
+           HandModelTwoSided() ? 1 : 0,
+           HandModelTwoSided() ? "both sides of each triangle of its Hand"
+                               : "its Hand as the file has it",
+           ControllersFrameCount());
+  }
+  if (g_two_sided_flags == nullptr) return;
+  if (HandModelTwoSided()) {
+    *g_two_sided_flags |= kDoubleSided;
+  } else if (!g_two_sided_was) {
+    *g_two_sided_flags &= static_cast<uint8_t>(~kDoubleSided);
+  }
+}
+
 // The draw of a mesh of the Hand's class. It runs in each eye pass, and it
 // reads only values that are the same in both passes of a frame.
 void __fastcall h_MeshDraw(void* mesh, void* unused) {
+  // Also for a draw that the hook skips, so the material is set before the
+  // game draws its Hand again.
+  TwoSidedBeforeDraw(mesh);
   if (g_hide_live) {
     const uintptr_t back = reinterpret_cast<uintptr_t>(_ReturnAddress());
     const bool flow = g_flow_known && back == kFlowReturn;

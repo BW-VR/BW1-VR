@@ -45,7 +45,16 @@
 // format 0x1C4 that are projected on the CPU with the camera of the eye, and
 // each state put back after the draw. The texture is a surface of the mod.
 // Stage 0 multiplies it by the lit color, and the alpha of the texture makes
-// the wrist fade, as in the game. A triangle that faces away is not drawn.
+// the wrist fade, as in the game.
+//
+// BOTH SIDES (hand_two_sided=1). The mesh of the game is a thin shell: at
+// rest 28 pairs of triangles that share an edge turn more than 120 degrees
+// from each other, at the sides of the fingers and of the palm, and the
+// skin of one bone for each vertex folds triangles at the knuckles of a
+// curled finger. Seen along the hand, a triangle of such an edge shows its
+// back to the eye while it is in front. So the mod draws each triangle, also
+// one that faces away from the eye, and the depth test hides the inside.
+// hand_two_sided=0 does not draw a triangle that faces away.
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -119,6 +128,7 @@ struct Settings {
   float yaw = hx::kRestYawDeg;
   float pitch = hx::kRestPitchDeg;
   float roll = hx::kRestRollDeg;
+  bool two_sided = true;   // hand_two_sided
   // Tests with no key press: the frames at which the look steps and at which
   // the model goes off and on.
   uint64_t look_frames[8] = {0};
@@ -261,7 +271,12 @@ int IniFrames(const char* path, const char* key, uint64_t* out, int most) {
   return count;
 }
 
+// The keys are read one time: a switch of the debug page can come first.
+bool g_settings_read = false;
+
 void LoadSettings() {
+  if (g_settings_read) return;
+  g_settings_read = true;
   char path[MAX_PATH];
   if (!GameFolder(path, sizeof(path)) ||
       strlen(path) + 9 >= sizeof(path)) {
@@ -276,6 +291,8 @@ void LoadSettings() {
   g_set.yaw = IniFloat(path, "hand_mesh_yaw_deg", hx::kRestYawDeg);
   g_set.pitch = IniFloat(path, "hand_mesh_pitch_deg", hx::kRestPitchDeg);
   g_set.roll = IniFloat(path, "hand_mesh_roll_deg", hx::kRestRollDeg);
+  g_set.two_sided =
+      GetPrivateProfileIntA("bwvr", "hand_two_sided", 1, path) != 0;
   g_set.look_count = IniFrames(path, "hand_model_test_look",
                                g_set.look_frames, 8);
   g_set.swap_count = IniFrames(path, "hand_model_test_swap",
@@ -1299,7 +1316,7 @@ int FillHand(const Built& built, const float camera[12], float near_plane,
     if (behind == 3) continue;
     if (!hm::FacesCamera(c0, c1, c2, mirror)) {
       ++g_culled;
-      continue;
+      if (!g_set.two_sided) continue;
     }
     Corner in[3], cut[4];
     for (int k = 0; k < 3; ++k) {
@@ -1333,6 +1350,25 @@ void HandModelSwapChange(const char* by) {
 int HandModelSwapValue() {
   Load();
   return g_ready ? g_mode : kDebugCannot;
+}
+
+// The switch of hand_two_sided: 1 draws both sides of each triangle of the
+// mod's hands and of the mesh of the game's Hand (hand_exact.cpp), 0 not the
+// side that faces away.
+bool HandModelTwoSided() {
+  LoadSettings();
+  return g_set.two_sided;
+}
+int HandModelTwoSidedValue() { return HandModelTwoSided() ? 1 : 0; }
+void HandModelTwoSidedChange(const char* by) {
+  LoadSettings();
+  g_set.two_sided = !g_set.two_sided;
+  ControllersGesturePulse(0.5f, g_set.two_sided ? 0.30f : 0.08f);
+  ModLog("hand model   : %s: hand_two_sided is %d now, %s, frame %llu", by,
+         g_set.two_sided ? 1 : 0,
+         g_set.two_sided ? "the hands draw both sides of each triangle"
+                         : "the hands do not draw a triangle that faces away",
+         g_frame);
 }
 
 // Shift and the minus key of the number pad: the next look. The value is 0
@@ -1660,11 +1696,14 @@ void HandModelReport() {
   if (g_draws == 0 && g_failed == 0) return;
   const double passes = g_draws > 0 ? static_cast<double>(g_draws) : 1.0;
   ModLog("hand model   : drawn in %llu eye passes, %.0f triangles a pass, "
-         "%.0f that face away not drawn, %llu passes failed. On the CPU: "
-         "%.3f ms a pass to project and draw, and %.3f ms a pass to skin and "
-         "light",
+         "%.0f triangles that face away (%s, hand_two_sided=%d), %llu passes "
+         "failed. "
+         "On the CPU: %.3f ms a pass to project and draw, and %.3f ms a "
+         "pass to skin and light",
          g_draws, static_cast<double>(g_triangles_drawn) / passes,
-         static_cast<double>(g_culled) / passes, g_failed,
+         static_cast<double>(g_culled) / passes,
+         g_set.two_sided ? "drawn too" : "not drawn",
+         g_set.two_sided ? 1 : 0, g_failed,
          Ms(g_draw_ticks) / passes, Ms(g_build_ticks) / passes);
   if (g_flow_draws > 0) {
     ModLog("hand model   : the flow of a miracle was on the pointing hand in "

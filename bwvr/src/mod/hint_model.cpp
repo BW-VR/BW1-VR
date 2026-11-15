@@ -19,10 +19,11 @@
 //
 // THE PLACE. A model is in the grip space of its hand: meters, right handed,
 // y up and -z ahead, as the grip pose of OpenXR. The overlay gives the grip
-// pose in the world (OverlayHand: position and rotation L * M_grip, where
-// M_grip has z the other way). So a point p of the model is in the world at
+// pose in the world (OverlayHand: position and the controller axes
+// L * M_grip, where M_grip has z the other way). The drawn hand has its own
+// axes (rotation, hand_angle). So a point p of the model is in the world at
 //
-//   position + rotation * (p.x, p.y, -p.z) * units_per_meter
+//   position + controller * (p.x, p.y, -p.z) * units_per_meter
 //
 // and the controller is at the real controller, one to one, at each scale of
 // the world. A real hand in the land is drawn on the land (hand_land.cpp),
@@ -1260,8 +1261,9 @@ void GripToWorld(const OverlayHand& hand, float units, const float p[3],
                  float out[3]) {
   const float q[3] = {p[0] * units, p[1] * units, -p[2] * units};
   for (int r = 0; r < 3; ++r) {
-    out[r] = hand.position[r] + hand.rotation[r * 3 + 0] * q[0] +
-             hand.rotation[r * 3 + 1] * q[1] + hand.rotation[r * 3 + 2] * q[2];
+    out[r] = hand.position[r] + hand.controller[r * 3 + 0] * q[0] +
+             hand.controller[r * 3 + 1] * q[1] +
+             hand.controller[r * 3 + 2] * q[2];
   }
 }
 
@@ -1353,7 +1355,7 @@ void BuildSide(int side, const OverlayHand& real, const float stop[3],
     return;
   }
   if (!Grow(&b, *m)) return;
-  for (int k = 0; k < 9; ++k) b.rotation[k] = hand.rotation[k];
+  for (int k = 0; k < 9; ++k) b.rotation[k] = hand.controller[k];
   for (int k = 0; k < 3; ++k) b.position[k] = hand.position[k];
   b.units = units;
   bwvr::HandInput input;
@@ -1410,7 +1412,8 @@ void BuildSide(int side, const OverlayHand& real, const float stop[3],
   }
   // The y of a normal in the world: the second row of the rotation, with
   // the flip of z.
-  const float ry[3] = {hand.rotation[3], hand.rotation[4], -hand.rotation[5]};
+  const float ry[3] = {hand.controller[3], hand.controller[4],
+                       -hand.controller[5]};
   for (int p = 0; p < m->parts; ++p) {
     const Part& part = m->part[p];
     const Node& d = m->node[part.node];

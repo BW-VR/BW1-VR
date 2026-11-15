@@ -1804,9 +1804,15 @@ in the view, with the cards of the land prompt on both hands
 with Vulkan and `video_view=1` the pictures of the view for videos
 (`bwvr-vk-video-N.bmp`), which have the cards over the eye picture.
 
-**The fit in the hand.** The models and the drawn hand use the same frame
-(`OverlayHand`), so they turn together. On a runtime of the table of 9.15
-that frame is the frame of the model on the grip pose (`grip_fit=1`). The test program drew the low
+**The fit in the hand.** The models and the drawn hand move together. The
+model is on the controller axes of `OverlayHand` (`controller`), and the
+drawn hand is on its own axes (`rotation`): the grip with the angle of the
+real hand, 37.9 degrees from the frame of the model about the palm normal
+(`hand_angle=1`, hand.md, "The angle of the hand"). So the real hand wins
+over the fit of the drawn hand to the model. On a runtime of the table of
+9.15 the controller axes are the frame of the model on the grip pose
+(`grip_fit=1`). With `hand_angle=0` the hand is on the controller axes, as
+the rest of this paragraph has it. The test program drew the low
 poly hand of the overlay at the grip of each model, and gave the box of
 each model in the grip space. The frames agree: the fingers of the hand
 open along -y, the back of the right hand is at +x (the strap of the Index
@@ -1884,8 +1890,10 @@ pose does not change: it is the aim pose of the runtime, and the presets of
 
 The change is in `ControllersFrame`, before any code reads the hands. So
 the model, the hand, the cards at the wrist, the Hand of the game and its
-point of the pick, the throw and the check of the view all use the frame of
-the model. The log line of the grip to aim (`controllers.md`, 8.4) reads
+point of the pick, the throw and the check of the view all use the grip
+point of the frame of the model. The model and its cards use its axes. The
+hand turns from them by the angle of the real hand (`hand_angle`, hand.md,
+"The angle of the hand"). The log line of the grip to aim (`controllers.md`, 8.4) reads
 the poses of the runtime. The bridge (`xr_bridge=1`) does not send the name
 of the runtime, so it has no fit.
 

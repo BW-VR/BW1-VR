@@ -39,9 +39,9 @@ inline void Cross(const float a[3], const float b[3], float out[3]) {
 
 // --- the test hand -----------------------------------------------------------
 
-// THE HAND FRAME is the frame of the grip pose, after head_pose.cpp turns the
-// runtime's axes into the game's left handed frame (a flip of z). For the
-// right hand:
+// THE HAND FRAME is the frame of the grip pose with the angle of the hand
+// (hand_angle_math.h), after head_pose.cpp turns the runtime's axes into the
+// game's left handed frame (a flip of z). For the right hand:
 //
 //   +x  out of the back of the hand, so the palm faces -x
 //   -y  along the open fingers, from the wrist to the finger tips

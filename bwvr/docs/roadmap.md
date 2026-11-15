@@ -312,12 +312,14 @@ keeps the mod as it is.
     (`hint_style=2`, `controller-hints.md`, 9.14). Desktop runs show the
     cards on the outer side of each hand, level in the view, with no
     crossings, with a continuous ink outline, at 0.2 to 0.6 ms a frame.
-    The model and the hand are on the frame of the WebXR model, fitted on
-    the grip pose of Virtual Desktop, the Oculus runtime and SteamVR
-    (`grip_fit=1`, `controller-hints.md`, 9.15), and the VR Settings window
-    has a trim of 5 mm steps. Only a headset can show that they are on the
-    real controllers, and whether the cards read at 55 cm
-    (`headset-checks.md`, 21).
+    The model is on the frame of the WebXR model, fitted on the grip pose
+    of Virtual Desktop, the Oculus runtime and SteamVR (`grip_fit=1`,
+    `controller-hints.md`, 9.15), and the VR Settings window has a trim of
+    5 mm steps. The hand has the angle of the palm pose of the runtime at
+    the same grip point (`hand_angle=1`, `hand.md`, "The angle of the
+    hand"), with a trim in degrees on the debug page. Only a headset can
+    show that they are on the real controllers and the real hands, and
+    whether the cards read at 55 cm (`headset-checks.md`, 5 and 21).
 
 **The village, the Creature and the help**
 

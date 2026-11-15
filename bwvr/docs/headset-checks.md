@@ -66,7 +66,10 @@ want.
    of a wrong size, a finger that jumps, or an object that looks wrong in the
    palm (name the object). Touch the tips of the two real controllers.
    Wrong: drawn tips that do not touch (the fit of `controller-hints.md`,
-   9.15). Reach slowly to the edge of your influence and
+   9.15). Wrong: a drawn hand at an angle that is not the angle of your
+   real hand (the debug rows "Hand yaw", "Hand pitch" and "Hand roll" turn
+   it, and the log keeps the values), or a hand with a gap at an edge when
+   you look along it. Reach slowly to the edge of your influence and
    past it, with each hand. Wrong: a red hologram at the edge that comes too
    late or too early, that is hard to see or too strong, that shakes or
    turns with the hand, rings that are too fast, or a fade of the hand that

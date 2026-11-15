@@ -3746,6 +3746,7 @@ void CreatureChecks() {
 #include "eye_cant_checks.h"
 #include "view_check_checks.h"
 #include "grip_fit_checks.h"
+#include "hand_angle_checks.h"
 #include "panel_raster_checks.h"
 #include "card_send_checks.h"
 #include "controls_layout_checks.h"
@@ -4213,6 +4214,7 @@ int main() {
   eye_cant_checks::EyeCantChecks();
   view_check_checks::ViewCheckChecks();
   grip_fit_checks::GripFitChecks();
+  hand_angle_checks::HandAngleChecks();
   panel_raster_checks::PanelRasterChecks();
   card_send_checks::CardSendChecks();
   controls_layout_checks::ControlsLayoutChecks();

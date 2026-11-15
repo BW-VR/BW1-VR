@@ -161,6 +161,8 @@ extern void ModLog(const char* format, ...);
 // real hand.
 bool ControllersCardPose(int which, float grip_position[3],
                          float grip_orientation[4], float head[3], bool* left);
+// The orientation of the drawn hand of the same hand (hand_angle).
+bool ControllersHandOrientation(int which, float out[4]);
 int ControllersHandCm();
 int ControllersHandScalePct();
 void ControllersGesturePulse(float amplitude, float seconds);
@@ -3123,10 +3125,15 @@ void HintCardEndFrame() {
                                       head_now, &p.left);
     if (p.have_hand) {
       for (int i = 0; i < 3; ++i) head[i] = head_now[i];
-      hint_card_math::HandFromGrip(p.grip_position, p.grip_orientation, p.left,
-                                   hand_m, &p.hand);
-      hint_card_math::HandOutline(p.grip_position, p.grip_orientation, p.left,
-                                  hand_m, p.outline);
+      // The hand has its own angle on the controller (hand_angle).
+      float turn[4];
+      if (!ControllersHandOrientation(h, turn)) {
+        for (int i = 0; i < 4; ++i) turn[i] = p.grip_orientation[i];
+      }
+      hint_card_math::HandFromGrip(p.grip_position, turn, p.left, hand_m,
+                                   &p.hand);
+      hint_card_math::HandOutline(p.grip_position, turn, p.left, hand_m,
+                                  p.outline);
     }
     // THE CONTROLLER IN THE HAND (hint_style=2): a hand with a model has
     // the cards of its buttons (ModelCards), and no card at the wrist. The
@@ -3290,10 +3297,14 @@ bool HintCardSavingLayer(bwvr::CardLayer* out) {
                             (ControllersHandScalePct() * 0.01f);
   const float hand_m = hand_length > 0.05f ? hand_length : 0.19f;
   const float size = g_size_pct * 0.01f;
-  hint_card_math::HandFromGrip(p.grip_position, p.grip_orientation, p.left,
-                               hand_m, &p.hand);
-  hint_card_math::HandOutline(p.grip_position, p.grip_orientation, p.left,
-                              hand_m, p.outline);
+  float turn[4];
+  if (!ControllersHandOrientation(kPointing, turn)) {
+    for (int i = 0; i < 4; ++i) turn[i] = p.grip_orientation[i];
+  }
+  hint_card_math::HandFromGrip(p.grip_position, turn, p.left, hand_m,
+                               &p.hand);
+  hint_card_math::HandOutline(p.grip_position, turn, p.left, hand_m,
+                              p.outline);
   hint_card_math::CardSize(c.rect_w, c.rect_h, kPixelsPerMeter / size,
                            kMostWidth * size, &p.width, &p.height);
   if (!c.visible || p.left != c.side_left_hand) c.side = 0;

@@ -121,3 +121,7 @@ int HandModelDraw(IDirect3DDevice7* device, const float camera[12],
 
 // Once a report window.
 void HandModelReport();
+
+// hand_two_sided: true when the hands draw both sides of each triangle. The
+// mesh of the game's Hand follows it too (hand_exact.cpp).
+bool HandModelTwoSided();

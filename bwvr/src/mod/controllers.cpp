@@ -218,6 +218,8 @@ bool TabletopMoveAllowed();
 // prompt_moves, for the words "teleportkey" and "promptkey" of the script.
 void TeleportSwitchToggle(const char* by);
 void HintCardMovesToggle(const char* by);
+// hand_model.cpp: the switch of hand_two_sided (the word sideskey).
+void HandModelTwoSidedChange(const char* by);
 
 void ControllersPump();
 bool ControllersFarAllowed(const char** why);
@@ -344,6 +346,10 @@ enum FakeInput {
   // The stick of the left hand forward at half of a full push: a push under
   // the threshold of the speed ramp (move_stick_ramp).
   kLStickHalf,
+  // The switches of hand_angle (grip_fit.cpp) and of hand_two_sided
+  // (hand_model.cpp) act on the first frame of the word.
+  kAngleKey,
+  kSidesKey,
   kInputCount
 };
 
@@ -359,7 +365,7 @@ const char* const kInputName[kInputCount] = {
     "aimtemple",  "gripdip",    "exit",       "bench",
     "lmenu",      "layoutkey",  "movekey",    "teleportkey", "promptkey",
     "book",       "lrot",       "aimplaces",  "lstick_click",
-    "aimdebug",   "aimmark",    "lstick_half"};
+    "aimdebug",   "aimmark",    "lstick_half", "anglekey",  "sideskey"};
 
 // The fake hand positions for the word "point", in cm from the head center.
 // A value can have decimals.
@@ -863,6 +869,11 @@ bwvr::HandInput g_hands[2];
 // The hands of this frame as the runtime gives them, for the log line of the
 // aim pose seen from the grip pose (LogGripToAim).
 bwvr::HandInput g_runtime_hands[2];
+// The orientation of the drawn hand of each hand in this frame, in the space
+// of g_hands (GripFitFrame, hand_angle_math.h). The drawn hand, the Hand of
+// the game, its point and the cards beside the hand use it. The model of the
+// controller uses the grip pose.
+float g_hand_q[2][4] = {{0.0f, 0.0f, 0.0f, 1.0f}, {0.0f, 0.0f, 0.0f, 1.0f}};
 // The aim orientation of each hand in this frame, with the turn of UpdateAim.
 // Every user of the aim reads this one and the point below: the pointer, the
 // menu ray, the teleport, the grab from a distance and the Creature commands.
@@ -1318,6 +1329,12 @@ void UpdateScript() {
     if (step.input == kPromptKey && t == step.start) {
       HintCardMovesToggle("The word promptkey");
     }
+    if (step.input == kAngleKey && t == step.start) {
+      GripFitHandAngleChange("The word anglekey");
+    }
+    if (step.input == kSidesKey && t == step.start) {
+      HandModelTwoSidedChange("The word sideskey");
+    }
     if (step.input == kBook && t == step.start) {
       float local[3];
       if (SpellBookTestItem(local)) {
@@ -1359,7 +1376,7 @@ void UpdateScript() {
         i == kAimCommand || i == kAimTurn || i == kDeactivate ||
         i == kAimTemple || i == kExit || i == kBench || i == kLayoutKey ||
         i == kMoveKey || i == kBook || i == kAimPlaces || i == kAimDebug ||
-        i == kAimMark) {
+        i == kAimMark || i == kAngleKey || i == kSidesKey) {
       continue;
     }
     if (i == kPose2) {
@@ -1580,13 +1597,12 @@ void Compute() {
   p.eye_distance = controller_math::Distance(p.origin, eye);
 
   // The direct hand: the grip pose in the room, then the reach from the
-  // anchor, then the world.
+  // anchor, then the world. The axes are the axes of the drawn hand
+  // (g_hand_q), so the index tip and the exact Hand turn with the hand.
   {
     float m_grip[9], t_grip[3];
     if (HeadPoseToRoom(grip_pose ? hand.grip_position : hand.aim_position,
-                       grip_pose ? hand.grip_orientation
-                                 : hand.aim_orientation,
-                       m_grip, t_grip)) {
+                       g_hand_q[index], m_grip, t_grip)) {
       if (p.grip_tracked) {
         for (int i = 0; i < 3; ++i) g_tracked_grip[i] = t_grip[i];
         g_have_tracked_grip = true;
@@ -4981,7 +4997,7 @@ void ControllersFrame() {
   }
   g_runtime_hands[0] = g_hands[0];
   g_runtime_hands[1] = g_hands[1];
-  GripFitFrame(g_hands, g_fake.mode != 0, g_frame);
+  GripFitFrame(g_hands, g_fake.mode != 0, g_frame, g_hand_q);
   MapButtons();
   LatchFront();
   LogBothButtons();
@@ -5227,6 +5243,19 @@ bool ControllersCardPose(int which, float grip_position[3],
   return true;
 }
 
+// For hint_card.cpp: the orientation of the drawn hand of one hand (`which`
+// as in ControllersCardPose), in the LOCAL space, from the last controllers
+// frame. The grip pose of ControllersCardPose is the frame of the model of
+// the controller. False when that hand has no pose.
+bool ControllersHandOrientation(int which, float out[4]) {
+  if (!g_on || g_frame == 0) return false;
+  const int index = which == 0 ? PointingIndex() : 1 - PointingIndex();
+  const bwvr::HandInput& hand = g_hands[index];
+  if (!hand.active || (!hand.grip_valid && !hand.aim_valid)) return false;
+  for (int i = 0; i < 4; ++i) out[i] = g_hand_q[index][i];
+  return true;
+}
+
 // For radial_menu.cpp: the hand that does not point, with its grip point and
 // the head center in the LOCAL space. False before the first frame. The ring
 // may open while the pointing hand is not active, so this does not ask
@@ -5422,7 +5451,8 @@ bool g_overlay_seen_tracked[2] = {false, false};
 // each hand in the world, one to one, and its trigger and squeeze. It takes the
 // head sample of this frame and the steps of Compute, on the table and off
 // it, so the pointing grip lands on the point the direct hand uses when the
-// reach gain is 0. The rotation is L * M_grip, as HandToWorld gives it. A
+// reach gain is 0. The controller axes are L * M_grip, as HandToWorld gives
+// them, and the rotation is L * M_hand, the axes of the drawn hand. A
 // hand that is not active, or whose pose is not tracked, is not valid. False
 // with the controllers off, before the first frame, or with no head sample.
 // overlay.cpp calls it once a frame, after ControllersFrame.
@@ -5467,16 +5497,19 @@ bool ControllersOverlayHands(OverlayHands* out) {
                  &g_overlay_seen_tracked[index])) {
       continue;
     }
-    float m_grip[9], t_grip[3], t_grip_w[3];
+    float m_grip[9], m_hand[9], t_grip[3], t_grip_w[3], t_same[3];
     if (!HeadPoseToRoom(grip_pose ? hand.grip_position : hand.aim_position,
                         grip_pose ? hand.grip_orientation
                                   : hand.aim_orientation,
-                        m_grip, t_grip)) {
+                        m_grip, t_grip) ||
+        !HeadPoseToRoom(grip_pose ? hand.grip_position : hand.aim_position,
+                        g_hand_q[index], m_hand, t_same)) {
       continue;
     }
     controller_math::ScaleRoom(t_grip, gain, t_grip_w);
     controller_math::HandToWorld(eye, room, t_head_w, t_grip_w, m_grip,
-                                 o.position, o.rotation);
+                                 o.position, o.controller);
+    controller_math::Multiply(room, m_hand, o.rotation);
     o.trigger = hand.trigger;
     o.squeeze = hand.squeeze;
     o.valid = true;
@@ -5524,10 +5557,13 @@ bool ControllersOverlayHandsRoom(OverlayHands* out) {
                  &g_overlay_seen_tracked[index])) {
       continue;
     }
+    float same[3];
     if (!HeadPoseToRoom(grip_pose ? hand.grip_position : hand.aim_position,
                         grip_pose ? hand.grip_orientation
                                   : hand.aim_orientation,
-                        o.rotation, o.position)) {
+                        o.controller, o.position) ||
+        !HeadPoseToRoom(grip_pose ? hand.grip_position : hand.aim_position,
+                        g_hand_q[index], o.rotation, same)) {
       continue;
     }
     o.trigger = hand.trigger;

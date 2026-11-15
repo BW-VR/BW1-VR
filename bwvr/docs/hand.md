@@ -752,12 +752,14 @@ and a spell on a bone follow the exact root. The seam reaches every state, the
 Creature state too, so the pose builder hook of `hand_direct.cpp` needs no
 change.
 
-**The root** (`ExactRoot` in `hand_exact_math.h`). From the pointing grip's
-axes in the world `R = L * M_grip`, of the frame of `controllers.cpp`:
+**The root** (`ExactRoot` in `hand_exact_math.h`). From the axes of the
+pointing hand in the world `R = L * M_hand`, of the frame of
+`controllers.cpp`. `M_hand` is the grip with the angle of the hand ("The
+angle of the hand" below):
 
 ```
-f = R (-y_grip)                   the open fingers
-b = R (+x_grip), -x for the left hand     the back of the hand
+f = R (-y_hand)                   the open fingers
+b = R (+x_hand), -x for the left hand     the back of the hand
 F = [b x f, f, -b]                columns
 M = diag(s, 1, 1)                 s = -1 while +0x484C is set
 row j = k F M Q e_j,  row 3 = the point
@@ -956,12 +958,105 @@ the palm. So the defaults are a yaw of 11.0 and a pitch of -0.58. Then that
 line goes along the controller's finger axis. The palm and the knuckle line
 lie flat in the stored mesh, so the roll is 0.
 
+So the rest turn adds no turn to the hand: the line of the mesh is the
+finger axis `-y` of the hand frame. The angle of the hand on the controller
+comes from the hand frame itself (below).
+
 In the Normal state the drawn bones, taken back into the stored mesh frame
 through the inverse of the exact root, are the bones of the file: only the
 middle, ring and little fingers bend toward the palm. In the Camera state (the
 land drag) the game's grip animation curls the fingers, and the wrist moves up
 to 6 cm from the index tip. The fingers of the game's animations are the
 game's own: the trigger and the grip do not bend the game's fingers.
+
+### The angle of the hand
+
+The drawn hand, the exact Hand and the point of the Hand turn with one hand
+frame. The model of the controller turns with the grip. The code is in
+`grip_fit.cpp` (the keys and the log), with the pure math in
+`hand_angle_math.h` and the checks in `hand_angle_checks.h`.
+
+**The real hand on a controller.** The grip pose of OpenXR has `-z` through
+the tube of the closed fingers, from the little finger to the thumb. A real
+hand does not hold a handle at a right angle to its fingers: the handle lies
+across the palm at a slant, from the heel of the hand to the root of the
+index finger. The Oculus runtime gives the real hand as its palm pose
+(`XR_EXT_palm_pose`: `-z` along the straight index finger, `+x` the normal of
+the palm). Virtual Desktop has the constants of the Oculus runtime
+(`rebindControllerActions` in `action.cpp` of VirtualDesktop-OpenXR, the
+poses `oculusGripPose` and `oculusPalmPose`). From them:
+
+- The palm pose is the grip pose turned 70.0 degrees about `-x` of the grip.
+- So the open fingers of the real hand are 20.0 degrees from `-y` of the
+  grip, toward `-z`, the thumb end of the handle.
+- The palm normal of the palm pose is `x` of the grip.
+
+**The turns on the way to the drawn hand.** For the right hand of a Touch
+Plus on Virtual Desktop:
+
+| Step | The turn | About |
+| --- | --- | --- |
+| The grip pose of the runtime | 0 | |
+| The fit of the controller model (`grip_fit=1`, controller-hints.md, 9.15) | 18.0 degrees: -17.9 about `x`, 0.1 about `y`, 1.9 about `z` | Mostly the palm normal. The fingers go toward `+z`, the bottom of the handle |
+| The hand frame on the frame of the model (`hand_angle=0`) | 0: the fingers along `-y`, the back along `+x` | |
+| The rest turn of the mesh | 0 for the line of the hand (above) | |
+
+So with `hand_angle=0` the fingers of the drawn hand are 37.9 degrees from
+the fingers of the palm pose, about the palm normal, toward the little
+finger. The palm normal is 1.9 degrees from the palm normal of the palm
+pose. With no fit (`grip_fit=0`) the fingers are 20.0 degrees from them.
+
+**What the mod does** (`hand_angle=1`, the default). The hand frame is the
+grip pose of the runtime turned 20 degrees about `x`: the palm pose. Its
+place is the grip point of the frame of the model, so the knuckles stay at
+the handle: the knuckle of the middle finger moves 0.6 cm, and the middle
+of the palm comes 2.5 cm nearer to the palm centroid of the Oculus runtime
+(from 5.1 to 2.6 cm). The hand turns 37.9 degrees from the frame of the
+model, about an axis within 3 degrees of the palm normal. The model of the
+controller does not move. The same turn is in each hand of the frame
+(`GripFitFrame` gives the orientation of each hand), so these use it: the
+mesh of the mod's hands and the low poly hands, the exact Hand (its root and
+the spell on a bone), the index tip that is the point of the Hand and of
+the draw of a gesture, the held object in the palm, the stop at the land,
+the fingers that react to the world, and the cards beside the hand (the
+outline of the hand). These keep the grip or the aim: the model of the
+controller and its cards, the ray and its tip (the aim pose), the grab of
+the world and the throw (the motion of the grip point), and the look at the
+palm (the palm normal changes by less than 2 degrees).
+
+The left hand is the mirror image, so it has the same turn. A runtime with
+no fit gets the palm turn from its own grip pose. A hand with no grip pose
+(the aim pose in its place) gets only the trim.
+
+**The trim of the player.** Three keys turn the hand after that, in the hand
+frame, from -45 to 45 degrees in steps of 5 degrees:
+
+- `hand_trim_yaw_deg`: about the palm normal. Plus turns the fingers toward
+  the thumb.
+- `hand_trim_pitch_deg`: about the line of the knuckles. Plus turns the
+  fingers toward the palm.
+- `hand_trim_roll_deg`: about the fingers. Plus turns the palm toward the
+  thumb.
+
+The debug page (group Hand) has the rows "Hand yaw", "Hand pitch" and "Hand
+roll". A step acts at the next frame and writes the key into `bwvr.ini`, so
+the trim stays.
+
+**The log.**
+
+- `hand angle   : hand_angle=1. The hand has the angle of the palm pose of
+  the runtime ... The trim of the hand is N degrees of yaw, N of pitch and N
+  of roll` once.
+- `hand angle   : the right hand turns 37.9 degrees from the frame of the
+  model of the controller, about 1.00 -0.01 -0.05 of that frame (37.9, -0.5
+  and -1.9 degrees about x, y and z). Its fingers are 37.9 degrees from the
+  fingers on that frame` for each hand, and again at a change of the switch
+  or of a trim (16 lines at most).
+- `hand angle   : <by>: hand_angle is N now` and `hand angle   : <by>: the
+  trim of the hand is ...` at each change.
+
+Only a headset shows whether the drawn hand now lies as the real hand lies
+on the controller (`headset-checks.md`).
 
 ### Keys
 
@@ -971,6 +1066,10 @@ game's own: the trigger and the grip do not bend the game's fingers.
 | `hand_mesh_yaw_deg` | 11.0 | The rest turn of the mesh about its palm normal, in degrees |
 | `hand_mesh_pitch_deg` | -0.58 | The rest turn about its thumb axis |
 | `hand_mesh_roll_deg` | 0 | The rest turn about its fingers |
+| `hand_angle` | 1 | 1 gives the hands the angle of the palm pose of the runtime: the grip pose turned 20 degrees about the palm normal ("The angle of the hand"). 0 puts the hands on the frame of the model of the controller. The switch "Hand angle" of the debug page and the script word `anglekey` change it live |
+| `hand_trim_yaw_deg` | 0 | The trim of the hand about the palm normal, -45 to 45 degrees. Plus turns the fingers toward the thumb. The row "Hand yaw" of the debug page writes it |
+| `hand_trim_pitch_deg` | 0 | The trim about the line of the knuckles. Plus turns the fingers toward the palm. The row "Hand pitch" |
+| `hand_trim_roll_deg` | 0 | The trim about the fingers. Plus turns the palm toward the thumb. The row "Hand roll" |
 | `hand_wrist_lock` | 1 | 1 keeps the wrist bone of the game's Hand at the real wrist in each animation |
 | `hand_hide_game` | 1 | 1 hides the mesh of the game's Hand while the controller places it, and the overlay draws both hands. 0 draws the game's Hand too |
 | `hand_hide_all` | 1 | 1 hides the mesh of the game's Hand in each state (the Totem state too) and its flow of a miracle. 0 hides it only in the exact states, and the game draws its flow as a second Hand |
@@ -982,6 +1081,7 @@ game's own: the trigger and the grip do not bend the game's fingers.
 | `fake_controller_rots` | | Test key. `yaw,pitch,roll` in degrees, separated by spaces. The script word `rot` turns the fake right hand to the next one |
 
 The keys are read from `bwvr.ini` at the start. They are not in the launcher.
+The debug page writes the three trims into `bwvr.ini`.
 With `test_keys=1`, the minus key of the number pad shows and hides the mesh
 of the game's Hand while the game runs. The pointing controller gives a long
 pulse for hidden and a short pulse for shown. The debug page has the three

@@ -1430,8 +1430,8 @@ const wchar_t* const kTips[] = {
     L"On: the palm that turns up shows how to draw each miracle of your "
     L"Worship Sites, with the pictures of the game. Off: no sheet.",
     // Book ring
-    L"Ring: up to 6 miracles on a ring, the first at the top, and the seals "
-    L"Back and Next in its middle. Rows: rows of 3, and the seals below.",
+    L"Ring: up to 6 miracles on a ring, the first at the upper left, and the "
+    L"seals Back and Next in its middle. Rows: rows of 3, the seals below.",
     // Book orbs
     L"Orbs: each cell of the spell book shows the orb of the game, the glass "
     L"ball with the miracle in it. Pictures: a flat picture with the gestures.",

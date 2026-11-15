@@ -63,12 +63,21 @@ inline void GestureSheetChecks() {
     PictureAt(0, &start, &side);
     PictureAt(2, &last, &last_side);
     float name_left = 0.0f, name_w = 0.0f;
-    NameAt(&name_left, &name_w);
+    const Layout two = LayoutFor(3, 2);
+    NameAt(two, &name_left, &name_w);
     Check(side < last_side && last + 0.5f * last_side < name_left,
           "the start of the chain is smaller, and the name is after the "
           "pictures", side < last_side, 1);
     Near("a column holds the start, two gestures and the name, m",
-         name_left + name_w, ColumnWidth(), 1e-6);
+         name_left + name_w, two.column_m, 1e-6);
+    const Layout one = LayoutFor(3, 1);
+    float one_left = 0.0f, one_w = 0.0f, mid1 = 0.0f, side1 = 0.0f;
+    NameAt(one, &one_left, &one_w);
+    PictureAt(1, &mid1, &side1);
+    Check(one_left > mid1 + 0.5f * side1 && one_left < name_left &&
+              one.width_m < two.width_m,
+          "with one gesture after the start, the name follows that gesture",
+          one_left < name_left, 1);
     const Layout seven_rows = LayoutFor(7);
     Near("a sheet of 6 miracles and again is 25 cm high, cm",
          seven_rows.height_m * 100.0, 25.0, 1e-3);

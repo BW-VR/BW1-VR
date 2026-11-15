@@ -888,11 +888,11 @@ name.
 glass ball with the miracle in it, as on the land and in the Hand (see "The
 orbs in the cells" below, `spell_book_orbs=1`). The name is under the
 bubble. With `spell_book_ring=1` a book of 1 to 6 items has them on a
-ring, as the ring menu has its items: cells of 6.5 cm on a ring of 6.8 cm
-radius, the first item at the top and the next ones clockwise, spread
-evenly (2 items at the top and the bottom, 3 as a triangle, 4 at the four
-sides of the ring). The item under the hand has a round light, as the ring
-menu has. The book of 6 is 18.3 by 23.2 cm. More than 6 items, and each book
+ring, as the ring menu has its items: cells of 6.5 cm on a ring of 7.8 cm
+radius with a flat top and bottom, the first item at the upper left and the
+next ones clockwise, spread evenly (2 items at the left and the right, 3 as
+a triangle, 4 as a rectangle). The item under the hand has a round light,
+as the ring menu has. The book of 6 is 22.1 by 23.0 cm. More than 6 items, and each book
 with `spell_book_ring=0`, are rows and columns: cells of 6.5 cm for up to 9
 items, 5 cm for up to 16 and 4 cm for more. A bubble is 0.66 of a cell
 across. The book uses the quad
@@ -1155,8 +1155,8 @@ The orb of a level is the game's orb of its seed type at its power up
 
 **The pages.** A page has 6 miracles at most, the count of the icons of a
 Village Centre, on a ring of 6 (a hexagon) with cells of 6.5 cm, as the
-normal book of 6 has them (`spell_book_ring=1`). Cell 0 is at the top, and
-cells 1 to 5 go clockwise. A family (a miracle and its levels) stays on one
+normal book of 6 has them (`spell_book_ring=1`). Cell 0 is at the upper
+left, cell 1 at the upper right, and cells 2 to 5 go on clockwise. A family (a miracle and its levels) stays on one
 page, so the 34 items are 6 pages:
 
 | Page | Cells 0 to 5 |
@@ -1494,8 +1494,10 @@ player whose magic type is on, as the book lists them, then a row for the
 gesture "again" (`GSpellSystemInfo+0x10`): "Again: the last miracle". A row
 has the gestures of the chain of the miracle (`GSpellSeedInfo+0x100`): the
 start (the spiral or the inverse spiral) small and light, then the gesture
-of the miracle, and the name. Up to 7 rows are one column of 18.6 cm, and
-more rows are two columns. A sheet of 6 miracles and "again" is 25 cm high.
+of the miracle, and the name. Up to 7 rows are one column, and more rows
+are two columns. The names follow the pictures: a sheet whose
+chains have two gestures is 15.6 cm wide, and 18.6 cm with a chain of
+three. A sheet of 6 miracles and "again" is 25 cm high.
 With no Worship Site the sheet says "No miracle to cast now" and "You have
 no Worship Site".
 

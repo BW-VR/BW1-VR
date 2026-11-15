@@ -61,25 +61,33 @@ struct Layout {
   int rows;      // the count of the rows
   int columns;   // 1 or 2
   int per_column;
+  int after;       // the most gestures after the start of a chain, 1 or 2
   float column_m;  // the width of one column
   float width_m;
   float height_m;
   float pixels_per_meter;
 };
 
-// The width of a column: the start, two gestures and the name.
-inline float ColumnWidth() {
-  return kStartM + kGapM + 2.0f * (kGestureM + kGapM) + kGapM + kNameM;
+// The width of a column: the start, the gestures after it and the name.
+// after is the most gestures after the start in a row of the sheet, so the
+// names follow the pictures with no empty space.
+inline float ColumnWidth(int after = 2) {
+  if (after < 1) after = 1;
+  if (after > kMostGestures - 1) after = kMostGestures - 1;
+  return kStartM + kGapM + after * (kGestureM + kGapM) + kGapM + kNameM;
 }
 
-inline Layout LayoutFor(int rows) {
+inline Layout LayoutFor(int rows, int after = 2) {
   Layout l;
   if (rows < 0) rows = 0;
   if (rows > kMostRows) rows = kMostRows;
   l.rows = rows;
   l.columns = rows > kColumnRows ? 2 : 1;
   l.per_column = rows == 0 ? 0 : (rows + l.columns - 1) / l.columns;
-  l.column_m = ColumnWidth();
+  if (after < 1) after = 1;
+  if (after > kMostGestures - 1) after = kMostGestures - 1;
+  l.after = after;
+  l.column_m = ColumnWidth(after);
   if (rows == 0) {
     l.width_m = kEmptyWidthM;
     l.height_m = kEmptyHeightM;
@@ -134,8 +142,8 @@ inline void PictureAt(int k, float* middle_x, float* side) {
 
 // The box of the name of a row: its left side from the left side of the row,
 // and its width.
-inline void NameAt(float* left, float* width) {
-  *left = kStartM + kGapM + 2.0f * (kGestureM + kGapM) + kGapM;
+inline void NameAt(const Layout& l, float* left, float* width) {
+  *left = kStartM + kGapM + l.after * (kGestureM + kGapM) + kGapM;
   *width = kNameM;
 }
 

@@ -324,7 +324,14 @@ void DrawGesture(int gesture, float x, float y, float px, const Rgb& ink) {
 void Raster(const Look& look) {
   if (!RasterStart()) return;
   const double start = NowSeconds();
-  const Layout l = LayoutFor(look.rows);
+  // The names follow the most gestures after the start of a chain.
+  int after = 1;
+  for (int r = 0; r < look.rows; ++r) {
+    if (look.row[r].seed >= 0 && look.row[r].count - 1 > after) {
+      after = look.row[r].count - 1;
+    }
+  }
+  const Layout l = LayoutFor(look.rows, after);
   g_layout = l;
   const float ppm = l.pixels_per_meter;
   g_width_px = PixelsOf(l.width_m, ppm);
@@ -355,7 +362,7 @@ void Raster(const Look& look) {
   for (int r = 0; r < look.rows; ++r) {
     float left = 0.0f, middle = 0.0f, name_left = 0.0f, name_w = 0.0f;
     RowAt(l, r, &left, &middle);
-    NameAt(&name_left, &name_w);
+    NameAt(l, &name_left, &name_w);
     RECT box = {static_cast<LONG>((left + name_left) * ppm),
                 static_cast<LONG>((middle - 0.5f * kRowM) * ppm),
                 static_cast<LONG>((left + name_left + name_w) * ppm),

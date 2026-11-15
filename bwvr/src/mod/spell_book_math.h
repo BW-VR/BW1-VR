@@ -169,7 +169,7 @@ const float kKeepDepthM = 0.09f;
 
 // THE SHAPES of a book. kShapeGrid: rows and columns. kShapeRing
 // (spell_book_ring=1, up to 6 items): the items on a ring, as the ring menu
-// has them, the first at the top and the next ones clockwise. kShapeRingPage:
+// has them, the first at the upper left and the next ones clockwise. kShapeRingPage:
 // a page of the book of all miracles, the 6 cells of a page on a ring of 6
 // (a hexagon) and the seals "Back" and "Next" side by side in its middle,
 // where the pointing hand reaches them without a move past the hand that
@@ -180,7 +180,7 @@ const int kShapeRingPage = 2;
 const int kRingMost = 6;
 // The radius of the ring, in cells: two items next to each other on a ring
 // of 6 are this far apart.
-const float kRingCells = 1.05f;
+const float kRingCells = 1.2f;
 // A seal in the middle of the ring: the middle of each seal is this share of
 // a cell to the left or right of the middle, and its bubble has this radius.
 const float kSealOut = 0.34f;
@@ -222,10 +222,11 @@ inline Layout LayoutFor(int count, int shape = kShapeGrid) {
     l.rows = 3;
     l.cell_m = 0.065f;
     l.ring_m = kRingCells * l.cell_m;
-    // The items at the sides of the ring are cos 30 of the radius out.
-    l.width_m = 2.0f * 0.8660254f * l.ring_m + l.cell_m;
+    // The items at the left and the right are one radius out, and the
+    // rows at the top and the bottom are sin 60 of the radius up and down.
+    l.width_m = 2.0f * l.ring_m + l.cell_m;
     if (l.width_m < kLeastWidthM) l.width_m = kLeastWidthM;
-    l.height_m = kTitleM + 2.0f * l.ring_m + l.cell_m;
+    l.height_m = kTitleM + 2.0f * 0.8660254f * l.ring_m + l.cell_m;
     return l;
   }
   l.columns = count <= 3    ? count
@@ -245,13 +246,16 @@ inline Layout LayoutFor(int count, int shape = kShapeGrid) {
 // The middle of item i on the book: meters to the right and up from the
 // center of the book. The first item is at the top left, and the items go
 // to the right, then down.
-// THE SLOTS of a ring: slot s is at 90 - 60 s degrees round the middle, so
-// slot 0 is at the top and the next ones go clockwise. A ring of fewer than 6
-// items keeps its items apart and the ring even.
+// THE SLOTS of a ring: slot s is at 120 - 60 s degrees round the middle, so
+// slot 0 is at the upper left, slot 1 at the upper right, slot 2 at the
+// right, and so on clockwise to slot 5 at the left. The ring has a flat top
+// and bottom, so the middle row has room for the seals between the items at
+// the left and the right, and the names under the items do not meet them. A
+// ring of fewer than 6 items keeps its items apart and the ring even.
 inline int RingSlot(int count, int i) {
   static const int kSlots[7][6] = {{0, 0, 0, 0, 0, 0}, {-1, 0, 0, 0, 0, 0},
-                                   {0, 3, 0, 0, 0, 0}, {0, 2, 4, 0, 0, 0},
-                                   {1, 2, 4, 5, 0, 0}, {0, 1, 2, 4, 5, 0},
+                                   {5, 2, 0, 0, 0, 0}, {0, 2, 4, 0, 0, 0},
+                                   {0, 1, 3, 4, 0, 0}, {0, 1, 2, 3, 4, 0},
                                    {0, 1, 2, 3, 4, 5}};
   if (count < 1 || count > kRingMost || i < 0 || i >= count) return -1;
   return kSlots[count][i];
@@ -267,8 +271,9 @@ inline void ItemCenter(const Layout& l, int i, float* x, float* y) {
   *y = 0.0f;
   if (l.columns <= 0 || i < 0 || i >= l.count) return;
   if (l.shape != kShapeGrid) {
-    // The middle of the ring: the top item touches the band of the title.
-    const float mid = 0.5f * l.height_m - kTitleM - 0.5f * l.cell_m - l.ring_m;
+    // The middle of the ring: the top row touches the band of the title.
+    const float mid = 0.5f * l.height_m - kTitleM - 0.5f * l.cell_m -
+                      0.8660254f * l.ring_m;
     *y = mid;
     int slot = -1;
     if (l.shape == kShapeRing) {
@@ -281,7 +286,7 @@ inline void ItemCenter(const Layout& l, int i, float* x, float* y) {
       *x = kSealOut * l.cell_m;
     }
     if (slot >= 0) {
-      const float a = (90.0f - 60.0f * slot) * 0.017453293f;
+      const float a = (120.0f - 60.0f * slot) * 0.017453293f;
       *x = l.ring_m * cosf(a);
       *y = mid + l.ring_m * sinf(a);
     }

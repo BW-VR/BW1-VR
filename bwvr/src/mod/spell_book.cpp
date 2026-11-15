@@ -558,7 +558,7 @@ void ReadSettings() {
                   "shows the sheet of the gestures");
   ModLog("spell book   : spell_book_ring=%d: %s", g_ring ? 1 : 0,
          g_ring ? "a book of 1 to 6 miracles has them on a ring, the first at "
-                  "the top, and a page of the book of all miracles is a ring "
+                  "the upper left, and a page of the book of all miracles is a ring "
                   "of 6 with the seals Back and Next in its middle"
                 : "the miracles are in rows and columns, and the seals in a "
                   "third row");

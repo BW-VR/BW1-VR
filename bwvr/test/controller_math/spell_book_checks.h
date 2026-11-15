@@ -124,9 +124,20 @@ inline void SpellBookChecks() {
     float x0 = 0.0f, y0 = 0.0f, x1 = 0.0f, y1 = 0.0f;
     ItemCenter(ring, 0, &x0, &y0);
     ItemCenter(ring, 1, &x1, &y1);
-    Check(fabsf(x0) < 1e-6f && x1 > 0.0f && y1 < y0,
-          "the first miracle of a page is at the top, the second to its right",
-          x1 > 0.0f, 1);
+    Check(x0 < 0.0f && x1 > 0.0f && fabsf(y1 - y0) < 1e-6f &&
+              fabsf(x0 + x1) < 1e-6f,
+          "the first miracle of a page is at the upper left, the second at "
+          "the upper right", x1 > 0.0f, 1);
+    // The names under the items at the left and the right of the ring do
+    // not meet the seals: a seal and its ring end before the cell of the
+    // item at the left starts.
+    float lx = 0.0f, ly = 0.0f;
+    ItemCenter(ring, 5, &lx, &ly);
+    Check(lx + 0.5f * ring.cell_m < -kSealOut * ring.cell_m -
+                                         (kSealShare + 0.06f) * ring.cell_m +
+                                         0.05f * ring.cell_m,
+          "the item at the left of the ring is clear of the seal Back",
+          lx < 0.0f, 1);
     float bx = 0.0f, by = 0.0f, nx = 0.0f, ny = 0.0f, mx = 0.0f, my = 0.0f;
     ItemCenter(ring, kCellBack, &bx, &by);
     ItemCenter(ring, kCellNext, &nx, &ny);

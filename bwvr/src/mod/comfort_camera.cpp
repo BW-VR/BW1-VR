@@ -98,6 +98,8 @@ void TabletopGodLookPoint(const float position[3], const float focus[3],
                           float out[3]);
 // A test with no key press: the test keys of the place at a game camera.
 void TabletopGodSpawnToggle();
+// hand_direct.cpp: the CHand of the last frame, or null.
+void* HandDirectGameHand();
 
 namespace {
 
@@ -172,9 +174,17 @@ const uintptr_t kGlideTime = 0x009CE614;
 // exactly the keys. Left is positive.
 const uintptr_t kKeyTurn = 0x00C5B0C8;
 const uintptr_t kKeyTilt = 0x00C5B0C4;
-// Set while the Hand drags the land.
+// CameraModeNew3::Update writes these on each update [V]. kHandDragA is
+// ControlMap::IsActionPerformed(2), the Action button of the game
+// (BINDABLE_ACTION_ACTION, 0x0045ABA0). kHandDragB is set in the land drag
+// (interface hand mode 0x14), or in hand mode 0x1B while the Move button is
+// held (0x0045ABCA). With both buttons down the update clears the two and
+// turns and zooms the camera.
 const uintptr_t kHandDragA = 0x00C5B0B4;
 const uintptr_t kHandDragB = 0x00C5B0F0;
+// CHand: the Hand state, and the state of a miracle in the Hand.
+const int kHandState = 0x4878;
+const int32_t kStateGrain = 8;
 
 // The wheel. CMouse::ProcessButtons adds the DirectInput wheel total, 120 for
 // a click, to this int and keeps the sum until a reader clears it. Action 3
@@ -480,16 +490,67 @@ bool FinishFlight(uint8_t* mode, float elapsed_before) {
   return true;
 }
 
+// A miracle is in the Hand (the Grain state).
+bool MiracleInHand() {
+  const uint8_t* hand = static_cast<const uint8_t*>(HandDirectGameHand());
+  if (hand == nullptr || IsBadReadPtr(hand + kHandState, sizeof(int32_t))) {
+    return false;
+  }
+  return *reinterpret_cast<const int32_t*>(hand + kHandState) == kStateGrain;
+}
+
 // Whether the camera may turn now. The script's own switch comes first: the
 // tutorial turns the controls on one at a time, and a turn it has not
 // allowed yet must not happen.
+//
+// THE ACTION BUTTON WITH A MIRACLE. While a miracle is in the Hand, the grip
+// is the Action button of the game (docs/miracles.md, "The grip casts"), and
+// the closed grip of a charge, a pour or a circle holds it. The Action button
+// alone does not move the camera of the game, so it does not stop a turn
+// then. The land drag still stops it.
+// The cause that stops a turn now, or null when the camera may turn.
+const char* WhyNoTurn(uint8_t* mode, uint32_t features) {
+  if ((features & kFeatureTurn) == 0) return "the script has the turn off";
+  if (mode[kModePivotForced] != 0) return "a script holds the pivot";
+  if (*reinterpret_cast<int32_t*>(mode + kModeFight) != 0) return "a fight";
+  if (*reinterpret_cast<int32_t*>(kHandDragA) != 0 && !MiracleInHand()) {
+    return "the Action button of the game is held";
+  }
+  if (*reinterpret_cast<int32_t*>(kHandDragB) != 0) return "a land drag";
+  return nullptr;
+}
+
 bool MayTurn(uint8_t* mode, uint32_t features) {
-  if ((features & kFeatureTurn) == 0) return false;
-  if (mode[kModePivotForced] != 0) return false;
-  if (*reinterpret_cast<int32_t*>(mode + kModeFight) != 0) return false;
-  if (*reinterpret_cast<int32_t*>(kHandDragA) != 0) return false;
-  if (*reinterpret_cast<int32_t*>(kHandDragB) != 0) return false;
-  return true;
+  return WhyNoTurn(mode, features) == nullptr;
+}
+
+// The log of a turn that a miracle in the Hand lets through, and of a
+// refused turn, a few times a run. The smooth turn asks on each update while
+// the stick is held, so it has a line only when its cause changes.
+int g_turn_cause_logs = 0;
+const int kMaxTurnCauseLogs = 30;
+const char* const kMiracleLetsTurn = "miracle";
+const char* g_smooth_cause = nullptr;
+
+void LogTurnCause(uint8_t* mode, uint32_t features, bool smooth) {
+  const char* why = WhyNoTurn(mode, features);
+  const bool action = *reinterpret_cast<int32_t*>(kHandDragA) != 0;
+  const char* cause =
+      why != nullptr ? why
+                     : (action && MiracleInHand() ? kMiracleLetsTurn : nullptr);
+  if (smooth) {
+    if (cause == g_smooth_cause) return;
+    g_smooth_cause = cause;
+  }
+  if (cause == nullptr || g_turn_cause_logs >= kMaxTurnCauseLogs) return;
+  ++g_turn_cause_logs;
+  if (why != nullptr) {
+    ModLog("comfort      : the %s turn is refused: %s", smooth ? "smooth" : "snap",
+           why);
+  } else {
+    ModLog("comfort      : the %s turn goes on while a miracle in the Hand "
+           "holds the Action button of the game", smooth ? "smooth" : "snap");
+  }
 }
 
 // Turn a point about the position, about world up. A positive angle turns
@@ -562,6 +623,7 @@ bool SmoothTurnRequest(uint8_t* mode, uint32_t features, float share) {
     ++g_smooth_grab_refused;
     return false;
   }
+  if (mode != nullptr) LogTurnCause(mode, features, true);
   if (mode == nullptr || !MayTurn(mode, features)) {
     ++g_smooth_refused;
     return false;
@@ -1643,6 +1705,7 @@ void ModeUpdate(uint8_t* mode, void* unused) {
     ++g_grab_turns_refused;
     return;
   }
+  LogTurnCause(mode, features_before, false);
   if (!MayTurn(mode, features_before)) {
     ++g_refused;
     return;

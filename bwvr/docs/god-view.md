@@ -511,12 +511,29 @@ a desktop frame is shorter, so a hold of 60 frames there is shorter than
 The turn stops in the frame in which the stick comes back into the dead
 zone: a frame with no request turns nothing, and nothing glides. The larger
 axis of the stick wins, so one frame never zooms and turns. A push that the
-game refused (the turn switch of the tutorial, a fight, a drag of the Hand),
+game refused (the turn switch of the tutorial, a fight, a land drag, the
+Action button of the game),
 a grab of the world, a dialog box, and a hold that stopped because the stick
 went forward or back, must come back into the dead zone before the stick
 turns again. A held turn key turns the view at the full speed. A drag of the
 middle mouse turns in steps of 45 degrees, and so do a view that is not the
 God view and a room of the Temple.
+
+**The tests of the game** (`MayTurn` in `comfort_camera.cpp`). A snap turn
+and the smooth turn need the turn switch of the script, no pivot that a
+script holds, and no fight. `CameraModeNew3::Update` also sets two flags on
+each update [V]: `0x00C5B0F0` in the land drag (interface hand mode `0x14`,
+or the Move button in hand mode `0x1B`), and `0x00C5B0B4` while the Action
+button of the game is held (`ControlMap::IsActionPerformed(2)`,
+`BINDABLE_ACTION_ACTION`). The first one stops a turn. The second one stops
+a turn unless a miracle is in the Hand (Hand state 8, Grain): then the grip
+is the Action button, and the closed grip of a charge, a pour or a circle
+holds it. The Action button alone does not move the camera of the game, so
+the view turns with a miracle in the Hand as it does with an empty Hand. The
+log has a line for a turn that a miracle lets through and for a refused turn
+with its cause (`comfort : the snap turn goes on while a miracle in the Hand
+holds the Action button of the game`, `comfort : the snap turn is refused:
+...`), 30 at most.
 
 The smooth turn writes as a snap turn writes. A turn alone turns the game
 camera about its own focus (`god_turn_keeps_focus`), and the version of the

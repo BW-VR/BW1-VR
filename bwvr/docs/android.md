@@ -4059,6 +4059,7 @@ game with the new place comes.
 | `vk_cheap_draws` | 0 | 1: the vertices and the indices stay bound in a pass, and a draw names its place in the ring. The debug page has the row "Cheap draws" |
 | `vk_tiny_pixels` | 10 | The limit of the tiny draws in tenths of a pixel |
 | `remote_control` | 0 | A test aid: 1, the switches of the debug page follow `bwvr-control.txt` of the game folder (see "The test run" below). It counts at the next Play |
+| `auto_play` | 0 | A test aid: 1 starts "Play in VR" and 2 "Play, new game" one time, with no player (see "The test run with no player" below). It counts at the start of the app |
 | `pose_log` | 0 | A test aid: 1 writes one record for each frame of the session into `bwvr-pose.bin` of the folder of the app, and `tools/android/pose_report.py` names the frames that do not fit the frames around them |
 
 The keys are in `bwvr.ini` of the game folder, read at each Play.
@@ -4173,8 +4174,64 @@ apps (`vrcmd --set-settings-bool steamvr.disableAsync 1`, and 0 turns it on), so
 shows as a stutter and not as a rotated old picture. Motion smoothing is off there already.
 Whether the compositor takes the value with no new start is not proven.
 
+**The test run with no player** (`auto_play` in `bwvr.ini`, 0 by default). With 1 the app
+starts "Play in VR" one time, and with 2 "Play, new game", when Wine is ready and the session
+shows frames (`play_rules.h`, `StepAutoPlay`). At its start the app removes the key from
+`bwvr.ini`, before the game, so a new start of the app after a fault starts no game. The app
+waits for Wine for at most 10 minutes. A game that the player started first ends the wait with
+no start. The log has "menu : auto_play ..." for the key, the start and the end of the wait.
+"Play in VR" continues the saved game of slot 20 of the profile, so a test run puts a test save
+there only after a copy of the profile, and puts the profile back after the run.
+
+On a Quest the PC does the whole run over ADB (USB or the network):
+
+```bash
+python tools/android/quest_test.py run tools/android/frame_tests/quest_first.json <folder> --save pen
+```
+
+- A run starts only when the display of the Quest is off and neither the app nor the game runs.
+- `tools/android/quest_guard.sh` goes to `/data/local/tmp/bwvr-guard` of the Quest and does each
+  step there, so the steps also come when the PC or the network fails. It copies `Profiles`,
+  `Scripts/CreatureMind`, `bwvr.ini` and `bwvr-hint-counts.ini` of the game folder and checks
+  each copy by MD5. The PC keeps a second copy in `local/quest-guard` of the main checkout and
+  checks it too. Then slot 20 of the player moves beside the game folder
+  (`bwvr-guard-slot20`, the same file system, so each file keeps its owner), and the test save of
+  `local/test-saves/<name>/20` goes into slot 20.
+- `bwvr.ini` gets the keys of the run: `auto_play=1`, `remote_control=1`, `pose_log=1`,
+  `menu_skip_test_frame=70`, `intro_skip_test_frame=5`, `registry_test_guard=1`, and the keys of
+  `"ini"` of the test file.
+- The display of a Quest that nobody wears stays on only by the proximity sensor
+  (`com.oculus.vrpowermanager.prox_close`). Android on the Quest turns the display off only
+  after 24 hours, and an LCD can get burn-in. So `awake` of the guard starts a timer on the Quest
+  first, and only then tells the sensor that the Quest is worn. When the time is over, the timer
+  does `finish`: it stops the app, puts the files back, resets the sensor
+  (`com.oculus.vrpowermanager.automation_disable`) and sends the sleep key.
+- The PC starts the app, waits for the first scene, and sends the steps of the test in
+  `bwvr-control.txt`, as `frame_test.py` does. Then it does `finish` at once, reads the state of
+  the display until it is off, and stops the timer only then. Then it gets the logs and prints
+  the table of `frame_test.py`. When the Quest stops the session of the app (the line "the
+  session state is 6" in the log of the app), the run ends with "NOT MEASURED": a window of the
+  system has the focus, and the app shows no picture.
+- The restore first stops the app, and the stop holds only when no process of the app or of the
+  game shows for 5 s in a row: a start of the app that waited can come some seconds after a stop.
+  A process that comes up during the restore stops it, and the restore goes again, at most 3
+  times. The restore puts back each file of the copy whose MD5 differs, and keeps the owner and
+  the mode of a file that is there. A file of the shell that the app wrote again comes back as a
+  file of the shell with its mode. It removes each file and folder that the run made. Then it compares
+  the list, the folders and the MD5 of each file with the copy. Only then does it give
+  "restore OK". The log of the guard is `/data/local/tmp/bwvr-guard/guard.log`.
+- `quest_test.py finish` does the end of a run by hand, and `quest_test.py state` shows the guard,
+  the timer and the display.
+
+Known limits of the run with no player: the cameras of the Quest must see a room with light.
+In the dark the tracking goes to a mode for low light (`lowLightHands` in logcat), the boundary
+opens its window, and the Quest stops the session of the app 3 s after its start. The head of
+a Quest on a table does not move, so the view is still. The game camera moves only by the game. The owner of the app cannot be set by
+the shell, so a file that the run removed comes back as a file of the shell with read and write
+for each user.
+
 **The tests.** `.\dev.ps1 build`: the checks of `remote_checks.h` for the file of the test
-run, and the checks of `late_camera_checks.h`: the move
+run, the checks of `play_rules_checks.h` for `auto_play`, and the checks of `late_camera_checks.h`: the move
 for a step of the head, a turned eye, the clip position of a moved vertex with a
 move in depth and with no move, a point behind the eye, the walk in the map, a
 snap turn as a cut, and an even walk with a mod 0 to 5 slots late.

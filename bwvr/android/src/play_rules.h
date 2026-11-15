@@ -289,6 +289,21 @@ inline std::vector<std::string> GameArgs(const std::string& loader, bool new_gam
   return args;
 }
 
+// A TEST AID (auto_play of bwvr.ini, 0 by default): a test run with no
+// player. 1 starts "Play in VR" and 2 "Play, new game", one time. The app
+// waits until Wine is ready, for at most kAutoPlayMostMs. A game that runs
+// already (the player started it) ends the wait with no start.
+constexpr double kAutoPlayMostMs = 600000.0;
+
+enum class AutoPlay { kNone, kWait, kPlay, kNewGame, kGiveUp };
+
+inline AutoPlay StepAutoPlay(int value, bool wine_ready, bool game_on, double waited_ms) {
+  if (value != 1 && value != 2) return AutoPlay::kNone;
+  if (game_on) return AutoPlay::kGiveUp;
+  if (wine_ready) return value == 2 ? AutoPlay::kNewGame : AutoPlay::kPlay;
+  return waited_ms >= kAutoPlayMostMs ? AutoPlay::kGiveUp : AutoPlay::kWait;
+}
+
 // THE FRAME RATE of the game from the frames of the live stream: the frame
 // numbers of the mod at two times (ms).
 inline double FramesPerSecond(unsigned long long frame0, double ms0, unsigned long long frame1,

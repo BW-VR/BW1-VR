@@ -287,6 +287,10 @@ struct App {
   double play_ms = 0.0;    // the time of the last Play
   std::string play_clock;  // and its time of the day
   bool first_frame = false;  // a frame of the game came after Play
+  // A TEST AID (auto_play, TakeAutoPlay): 1 or 2 from the start of the app
+  // until the app starts the game or gives up, else 0.
+  int auto_play = 0;
+  double auto_play_ms = 0.0;  // the time at which the app took the key
   // THE SCREEN QUAD (stream_screen=1): the screen pictures of the stream that
   // went to the quad.
   uint64_t screen_pictures = 0;
@@ -2246,6 +2250,46 @@ void GameTick(App* app) {
   ShowProfile(app);
 }
 
+// auto_play (0 by default, bwvr.ini only): a test aid for a test run with no
+// player (docs/android.md, "The test run with no player"). 1 starts "Play in
+// VR" and 2 "Play, new game", one time, when Wine is ready and the session
+// shows frames. The app removes the key from bwvr.ini at its start, before
+// the game, so a new start of the app after a fault starts no game. 0: only
+// the player starts a game.
+void TakeAutoPlay(App* app) {
+  const int value = app->ini.GetInt("bwvr", "auto_play", 0);
+  if (play_rules::StepAutoPlay(value, false, false, 0.0) == play_rules::AutoPlay::kNone) return;
+  app->ini.Remove("bwvr", "auto_play");
+  if (!WriteTextFile(app->game.ini_path, app->ini.Text())) {
+    AppLog("menu         : auto_play=%d, but the app cannot remove the key from %s, so it "
+           "starts no game", value, app->game.ini_path.c_str());
+    return;
+  }
+  app->auto_play = value;
+  app->auto_play_ms = NowMs();
+  AppLog("menu         : auto_play=%d. The app starts \"%s\" one time when Wine is ready, "
+         "and bwvr.ini has no auto_play now", value,
+         value == 2 ? "Play, new game" : "Play in VR");
+}
+
+// Each frame of the session, until the start or the end of the wait.
+void StepAutoPlay(App* app) {
+  if (app->auto_play == 0) return;
+  const double waited_ms = NowMs() - app->auto_play_ms;
+  const play_rules::AutoPlay step =
+      play_rules::StepAutoPlay(app->auto_play, app->wine.Ready(), app->game_on, waited_ms);
+  if (step == play_rules::AutoPlay::kWait) return;
+  app->auto_play = 0;
+  if (step == play_rules::AutoPlay::kGiveUp) {
+    AppLog("menu         : auto_play. %s, so the app starts no game",
+           app->game_on ? "A game runs already" : "Wine was not ready in 10 minutes");
+    return;
+  }
+  AppLog("menu         : auto_play. Wine is ready %.1f s after the start of the app, and the "
+         "app starts the game", waited_ms / 1000.0);
+  Play(app, step == play_rules::AutoPlay::kNewGame);
+}
+
 void Do(App* app, Action action) {
   switch (action) {
     case Action::kSave:
@@ -2761,6 +2805,7 @@ void android_main(android_app* android) {
   AppLog("app          : the folder of the app is %s", app.folder.c_str());
 
   Load(&app);
+  TakeAutoPlay(&app);
   // time_log=1 (the default): while the game runs, each 10 s the lines of the
   // times (time_log.h). 0: no lines. Before the threads of Wine and of the
   // paint start, so they get their names.
@@ -3080,6 +3125,7 @@ void android_main(android_app* android) {
         step_at = now;
       };
       MenuButton(&app, input);
+      StepAutoPlay(&app);
       step(XrApp::kStepUi);
       // The input of the mod: after xrSyncActions of BeginFrame, with the
       // views of xrLocateViews at the display time of this frame.

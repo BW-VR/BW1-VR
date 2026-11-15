@@ -139,6 +139,29 @@ inline void GameStartChecks() {
   Check(play_rules::Clock(9, 5, 7) == "09:05:07", "the clock of the status line", 0, 0);
 }
 
+inline void AutoPlayChecks() {
+  printf("\nPlay: auto_play, the start of a test run with no player\n");
+  using play_rules::AutoPlay;
+  using play_rules::StepAutoPlay;
+  const double most = play_rules::kAutoPlayMostMs;
+  Check(StepAutoPlay(0, true, false, 0.0) == AutoPlay::kNone &&
+            StepAutoPlay(3, true, false, 0.0) == AutoPlay::kNone &&
+            StepAutoPlay(-1, true, false, 0.0) == AutoPlay::kNone,
+        "auto_play=0 and a value that is not 1 or 2 start no game", 0, 0);
+  Check(StepAutoPlay(1, true, false, 0.0) == AutoPlay::kPlay &&
+            StepAutoPlay(2, true, false, 0.0) == AutoPlay::kNewGame,
+        "1 is Play in VR and 2 is Play, new game, when Wine is ready", 0, 0);
+  Check(StepAutoPlay(1, false, false, 0.0) == AutoPlay::kWait &&
+            StepAutoPlay(2, false, false, most - 1.0) == AutoPlay::kWait,
+        "the app waits while Wine is not ready", 0, 0);
+  Check(StepAutoPlay(1, false, false, most) == AutoPlay::kGiveUp &&
+            StepAutoPlay(1, true, false, most) == AutoPlay::kPlay,
+        "after 10 minutes with no Wine the app gives up, and a ready Wine still starts", 0, 0);
+  Check(StepAutoPlay(1, true, true, 0.0) == AutoPlay::kGiveUp &&
+            StepAutoPlay(2, false, true, 0.0) == AutoPlay::kGiveUp,
+        "a game that runs already ends the wait with no start", 0, 0);
+}
+
 inline void MaskChecks() {
   printf("\nPlay: the input of the mod while the game runs\n");
   namespace ic = input_channel;
@@ -664,6 +687,7 @@ inline void PlayRulesChecks() {
   RunKeyChecks();
   RegistryChecks();
   GameStartChecks();
+  AutoPlayChecks();
   MaskChecks();
   MenuButtonChecks();
   StickChordChecks();

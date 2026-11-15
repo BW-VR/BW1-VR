@@ -1,0 +1,12 @@
+{
+  "name": "quest first",
+  "start_most_s": 240,
+  "step_s": 12,
+  "skip_s": 3,
+  "most_s": 120,
+  "cycle": [
+    {"step": "compose rate 2", "keys": {"compose_rate": 2}},
+    {"step": "compose rate 1", "keys": {"compose_rate": 1}}
+  ],
+  "end_keys": {"compose_rate": 2}
+}

@@ -5440,6 +5440,15 @@ cloud, those that went into the land or the sea (measured with each value), the
 draws that were made flatter, the least share, the draws that value 2 did not
 draw, and the questions to the land with their time, in all and for each frame.
 
+A desktop run in the test save `temple` (Land 1, the God view, dxwrapper,
+`sky_test_land_frame`) shows it. With `cloud_land=0` a cloud behind the hills
+comes down to the ridge, and the ridge cuts it with a hard line. With 1 the same
+cloud ends over the ridge with a round lower edge. About 7 to 10 percent of the
+draws of a drifting cloud go into the land or the sea, and the least share is
+0.47 to 0.89. The test asks the land about 35 times a frame and takes 0.007 ms
+of a frame on the CPU. With `cloud_round_near=0` a near cloud is flat and ends
+over the horizon, so most of the cut comes from the round near clouds.
+
 `UpdateCamera` also builds a heading turn at `0x00EA1D88` from the stored camera. The
 draw at `0x0080DB30` turns billboard meshes at the lowest detail by it, so far trees
 would turn with the head. It is built again after each call from the camera the game

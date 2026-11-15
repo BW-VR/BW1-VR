@@ -1577,6 +1577,7 @@ const char* const kRetiredKeys[] = {
     "fake_mouse_script", "fake_mouse_step_px", "fake_mouse_x_pct",
     "fake_mouse_y_pct", "fake_mouse_x2_pct", "fake_mouse_y2_pct",
     "radial_test_save", "spell_book_test_save", "gesture_panel_test_frame",
+    "gesture_sheet_test_save", "gesture_sheet_test_frame",
     "places_panel_test_save", "places_test_buttons", "snapshot_test_dir",
     "debug_window_test_save", "debug_test_parts", "welcome_test_save",
     "card_send_test_save",

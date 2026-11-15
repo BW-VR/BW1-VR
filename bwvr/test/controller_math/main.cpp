@@ -3676,6 +3676,7 @@ void CreatureChecks() {
 #include "debug_menu_checks.h"
 #include "teleport_checks.h"
 #include "spell_book_checks.h"
+#include "gesture_sheet_checks.h"
 #include "text_fit_checks.h"
 #include "hand_cut_checks.h"
 #include "gesture_panel_checks.h"
@@ -4134,6 +4135,7 @@ int main() {
   debug_menu_checks::DebugMenuChecks();
   teleport_checks::TeleportChecks();
   spell_book_checks::SpellBookChecks();
+  gesture_sheet_checks::GestureSheetChecks();
   text_fit_checks::TextFitChecks();
   hand_cut_checks::HandCutChecks();
   gesture_panel_checks::GesturePanelChecks();

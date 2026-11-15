@@ -48,7 +48,7 @@ bool g_white_ready = false;
 // number of the picture and the part. A draw of the same picture uses the
 // image with no copy.
 // The number of the cards of XrScreen (xr_screen.h, kCards).
-const int kCards = 14;
+const int kCards = 15;
 vk::Image g_cards[kCards] = {};
 bool g_card_written[kCards] = {};
 const uint8_t* g_card_pixels[kCards] = {};

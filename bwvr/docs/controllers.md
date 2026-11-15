@@ -698,10 +698,11 @@ to the object or the land under the Hand.
 
 **The second face button.** B (Y on a left handed player's pointing hand) is
 the gesture draw button (`gesture_button=1`, default). `gesture_button=2`
-uses the stick click, and 0 turns the draw off. See `miracles.md`. While a
-miracle is in the Hand, a short press takes the miracle out of the Hand: at
-most `miracle_cancel_ms` (400 ms) and 5 cm of hand motion. A longer press, or
-a press with motion, draws a gesture. While A holds a teleport, B cancels the
+uses the stick click, and 0 turns the draw off. See `miracles.md`. A short
+press is a tap: at most `miracle_cancel_ms` (400 ms) and 5 cm of hand
+motion. While a miracle is in the Hand, a tap takes the miracle out of the
+Hand. At other times a tap opens or closes the spell book
+(`spell_book_b=1`). A longer press, or a press with motion, draws a gesture. While A holds a teleport, B cancels the
 teleport and not the miracle. While the Hand carries a one-off seed, the
 trigger makes the seed active and does not reach the game. While the grip is
 closed with a miracle that needs a circle, the path of the hand goes to the
@@ -995,7 +996,7 @@ The pointing hand is the right hand. When the left controller is the Hand
 | Grip | The right button of the game: take, carry, let go, throw, stroke, tap, cast (3.6, `grab.md`). A grip closed on a far target and pulled fetches it (`grab.md`). A short grip on your Creature from a distance changes its leash, and a grip that stays closed makes it stay (`creature.md`) |
 | Trigger | The left button: click. A drag on the land moves nothing in the God view. With the leash on the Hand, a Creature command (`creature.md`). With a one-off seed in the Hand, it makes the seed active (`miracles.md`). While a text of the game waits for a click, the trigger is that click and nothing more (`controller-hints.md`, section 10) |
 | A | Hold to aim the teleport arc, let go to go there (`god-view.md`). `teleport=0` gives a jump to the object or the land under the Hand |
-| B (Y on the left hand) | Hold and draw: a gesture (`miracles.md`). A short press with a miracle in the Hand takes the miracle out. B while A is down cancels the teleport |
+| B (Y on the left hand) | Hold and draw: a gesture (`miracles.md`). A tap opens and closes the spell book (`spell_book_b`, `miracles.md`, "The spell book"). A tap with a miracle in the Hand takes the miracle out. B while A is down cancels the teleport |
 | Stick left and right | One snap turn (5.4). In the Temple it turns the player in the room (11.4). No turn while a dialog box is up (`menu_stops_turn`, `god-view.md`, section 5.8) |
 | Stick forward and back | In the God view, one zoom step of the view, or a zoom while the stick is held (`god_zoom_smooth=1`), and no zoom while a dialog box is up (`menu_stops_turn`). In other views, a wheel click. While the ray is on the debug window, it scrolls the list of the window (10.8) |
 | Stick click | The gesture button with `gesture_button=2` |
@@ -1008,7 +1009,8 @@ The pointing hand is the right hand. When the left controller is the Hand
 | --- | --- |
 | Grip | Grabs the land: pull to move it across, and up or down, one to one. Both grips turn and scale the land (`god-view.md`, section 5). `grab_hand=2` also lets the grip of the pointing hand grab the land when the Hand is empty and over nothing it can hold |
 | Y (B when the left hand points) | Hold: opens the ring, and the hand picks an item (section 10) |
-| X (A when the left hand points) | Opens and closes the spell book: the miracles that you can ask for now (`miracles.md`, "The spell book"). The grip of the pointing hand holds one, and a pull of 10 cm takes it out |
+| X (A when the left hand points) | Opens and closes the spell book, as a tap of B does: the miracles that you can ask for now (`miracles.md`, "The spell book"). The grip of the pointing hand holds one, and a pull takes it out |
+| Palm up | The sheet of the gestures: how to draw each miracle of your Worship Sites (`gesture_sheet`, `miracles.md`). While you draw a gesture, the row of the game's pictures |
 | Stick | In the God view: push it to walk over the land, or to fly with `move_type=1` (`move_stick`, `god-view.md`, section 5.7). No job in the other views and in a room of the Temple |
 | Stick click | Hold it for 1 s with the stick at rest: the view recenters, as F11 does (`recenter_hold`, `god-view.md`, section 5.8) |
 | Trigger | No job |

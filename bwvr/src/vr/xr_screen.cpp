@@ -246,8 +246,8 @@ const char* const kCardName[kCards] = {
     "first card of a button", "second card of a button",
     "third card of a button", "fourth card of a button",
     "ray card", "card of the end of the ray", "Creature card",
-    "ring of the right eye"};
-static_assert(kCardRingRight + 1 == kCards,
+    "ring of the right eye", "sheet of the gestures"};
+static_assert(kCardSheet + 1 == kCards,
               "each card has a name");
 // What a card holds, for the line that says where it goes after a failure.
 const char* const kCardHolds[kCards] = {"hints", "hints", "subtitles",
@@ -257,7 +257,8 @@ const char* const kCardHolds[kCards] = {"hints", "hints", "subtitles",
                                         "rays over the panels",
                                         "ends of the rays over the panels",
                                         "Creature panels",
-                                        "hands in front of the ring"};
+                                        "hands in front of the ring",
+                                        "gestures of the miracles"};
 // The runtime refused a frame with a quad of the interface panel.
 bool g_panel_refused = false;
 
@@ -2912,9 +2913,9 @@ void XrScreen::RecordVideoLayers(const float eye_position[3], uint32_t width,
         kCardSubtitles,       kCardCreature,        kCardHintPointing,
         kCardHintOther,
         kCardHintButton0,     kCardHintButton0 + 1, kCardHintButton0 + 2,
-        kCardHintButton0 + 3, kCardRing,            kCardRingRight,
-        kCardBubble,          kCardKeyboard,        kCardRay,
-        kCardRayTip};
+        kCardHintButton0 + 3, kCardSheet,           kCardRing,
+        kCardRingRight,       kCardBubble,          kCardKeyboard,
+        kCardRay,             kCardRayTip};
     for (int i = 0; i < kCards; ++i) {
       const int card = card_order[i];
       if (g_have_staged_card[card] && g_staged_card[card].visible &&
@@ -3564,9 +3565,9 @@ bool XrScreen::BuildFrame() {
         kCardSubtitles,       kCardCreature,        kCardHintPointing,
         kCardHintOther,
         kCardHintButton0,     kCardHintButton0 + 1, kCardHintButton0 + 2,
-        kCardHintButton0 + 3, kCardRing,            kCardRingRight,
-        kCardBubble,          kCardKeyboard,        kCardRay,
-        kCardRayTip};
+        kCardHintButton0 + 3, kCardSheet,           kCardRing,
+        kCardRingRight,       kCardBubble,          kCardKeyboard,
+        kCardRay,             kCardRayTip};
     for (int i = 0; i < kCards; ++i) {
       const int card = card_order[i];
       if (g_have_staged_card[card] && g_staged_card[card].visible &&

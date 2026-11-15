@@ -115,6 +115,9 @@ struct PanelQuad {
 //                      has holes where the hand is in front of the page for
 //                      its eye (hand_cut.cpp, docs/ui-layer.md, "A hand in
 //                      front of a card")
+//   kCardSheet         the sheet of the gestures over the palm of the hand
+//                      that does not point (docs/miracles.md, "The sheet of
+//                      the gestures")
 const int kCardHintPointing = 0;
 const int kCardHintOther = 1;
 const int kCardSubtitles = 2;
@@ -127,7 +130,8 @@ const int kCardRay = 10;
 const int kCardRayTip = 11;
 const int kCardCreature = 12;
 const int kCardRingRight = 13;
-const int kCards = 14;
+const int kCardSheet = 14;
+const int kCards = 15;
 
 // True for a card that holds hints: the two hint cards and the cards of
 // the buttons.

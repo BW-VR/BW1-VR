@@ -843,14 +843,28 @@ The code is in `src/mod/spell_book.cpp`, with the pure math in
 now, and the pointing hand pulls one out with the grip. No gesture is
 necessary. The gestures stay as they are.
 
-**The button.** With `button_layout=1` the first face button of the hand that
-does not point (X, or A when the left hand points) opens the book. A second
-press closes it. The book also closes when the pointing hand takes a
-miracle, when the ring opens, and when a dialog box or the game menu is up.
-The book does not open in the Temple, in a cut scene, while the ring shows,
-or while the controllers cannot act. Then the press gives the pulse
-`refused`. On an Index controller that button sends Esc, and with
-`button_layout=0` it opens the ring, so it does not open the book there.
+**The buttons.** A tap of B (the second face button of the pointing hand,
+Y when the left hand points) opens the book over the other hand
+(`spell_book_b=1`). A tap is a press of at most `miracle_cancel_ms` (400 ms)
+with 5 cm of hand motion or less. A second tap closes the book. A longer
+press, or a press with motion, draws a gesture as before. A tap with a
+miracle in the Hand takes the miracle out ("The way out"), and does not
+open the book. A press of B that closed a window (the debug window, the
+panel of places, the welcome page, the aim of a bookmark) or that stopped a
+teleport is no tap. A tap where the book cannot open does nothing, with no
+pulse, because B has other jobs there. The log line `a tap of B (... ms,
+the hand moved ... cm) opens the book` has each tap.
+
+With `button_layout=1` the first face button of the hand that does not
+point (X, or A when the left hand points) also opens and closes the book.
+On an Index controller that button sends Esc, and with `button_layout=0` it
+opens the ring, so it does not open the book there. The tap of B works with
+each layout.
+
+The book also closes when the pointing hand takes a miracle, when the ring
+opens, and when a dialog box or the game menu is up. The book does not open
+in the Temple, in a cut scene, while the ring shows, or while the
+controllers cannot act. Then a press of X gives the pulse `refused`.
 
 **The place.** The center of the book is 12 cm from the grip point along the
 normal of the open palm, and 2 cm up (`BookCenter`). With the palm up, the
@@ -1031,15 +1045,18 @@ book give the reason for 4 s, or until the book closes. A close by a take
 keeps the reason, because the game refuses a take after the book closed. The game itself shows nothing for a request
 that it refuses.
 
-**The card of the other hand.** On the land with an empty Hand the card of the
-hand that does not point has "[X] Spells" (or "[A] Spells" when the left
-hand points), while a press can open the book. While the book is open, that
-card does not show.
+**The cards of the hands.** On the land with an empty Hand the card of the
+pointing hand has "[B] Tap for spells" while a tap can open the book, and
+the card of the hand that does not point has "[X] Spells" (or "[A] Spells"
+when the left hand points) while a press of that button can open it. While
+the book is open, these lines do not show.
 
-### The book on the palm (`spell_book_palm=1`)
+### The book on the palm (`spell_book_palm=0`)
 
-The book also opens when the palm of the hand that does not point turns up
-and stays up for 0.4 s. It is the second way beside the button. The normal
+With `spell_book_palm=1` the book also opens when the palm of the hand that
+does not point turns up and stays up for 0.4 s. By default the palm shows
+the sheet of the gestures (see "The sheet of the gestures"), and B opens the
+book. The normal
 of the palm is the axis of `BookCenter` (+x of the grip of the left hand,
 -x of the right hand). The code is in `spell_book.cpp`, and the math
 (`PalmBookStep`) in `gesture_panel_math.h`.
@@ -1064,7 +1081,7 @@ of the palm is the axis of `BookCenter` (+x of the grip of the left hand,
   shows a gesture that goes on from a gesture that the player drew, the
   palm gives the row and does not open the book.
 
-With `spell_book_palm=0` only the button opens the book.
+With `spell_book_palm=0` (the default) the palm does not open the book.
 
 ### The debug switch "Unlock all" (`debug_all_miracles=1`)
 
@@ -1418,20 +1435,73 @@ The camera of the eye is put in place for the draw and put back after it.
 - The controllers can act, no dialog box is up, no ring shows, and the cut
   scene window is not up.
 
-**The palm and the book.** With `spell_book_palm=1` the palm that turns up
-also opens the book (see "The book on the palm"). The rule:
+**The palm, the sheet and the book.** The palm that turns up also shows the
+sheet of the gestures (`gesture_sheet=1`, see below), or opens the book
+with `spell_book_palm=1`. The rule:
 
 - While the draw button (B) is down, the palm shows the row.
 - While the game shows a picture that goes on from a gesture that the
   player drew (a chain after a spiral, the gestures of a power up, the
   scribble with a Miracle in the Hand), the palm shows the row. The draw
   button is up between the pieces of a chain, and the row stays.
-- At other times (an empty Hand at rest) the palm opens the book.
+- At other times (an empty Hand at rest) the palm opens the book with
+  `spell_book_palm=1`, or else shows the sheet.
 
-With `spell_book_palm=0` the palm always shows the row.
+With `gesture_sheet=0` and `spell_book_palm=0` the palm always shows the
+row.
 
 With `gesture_panel=0` the game draws its pictures as before, and the
 headset does not show them.
+
+### The sheet of the gestures (`gesture_sheet=1`)
+
+The code is in `src/mod/gesture_sheet.cpp`, with the pure math in
+`gesture_sheet_math.h`. The sheet shows how to draw each miracle that the
+player can ask for, with the gesture pictures of the game. The flat game
+shows these pictures at the lower right of its screen, and the lens of the
+headset cuts that corner off.
+
+**The place.** The sheet is a card of its own (`kCardSheet`) at the place
+of the book: 12 cm from the grip of the hand that does not point along the
+normal of its palm, and 2 cm up (`BookCenter`). It faces the head with no
+roll. It moves with the hand, one to one.
+
+**When.** The sheet shows while the palm is up (40 degrees or less from the
+up of the room, until more than 60 degrees), the book is closed, the row of
+the game does not want the palm (the rule above), the controllers can act,
+no dialog box, ring or cut scene window is up, and the player is not in the
+Temple. With `spell_book_palm=1` the palm opens the book and the sheet does
+not show.
+
+**What.** A row for each miracle with an icon at a Worship Site of the
+player whose magic type is on, as the book lists them, then a row for the
+gesture "again" (`GSpellSystemInfo+0x10`): "Again: the last miracle". A row
+has the gestures of the chain of the miracle (`GSpellSeedInfo+0x100`): the
+start (the spiral or the inverse spiral) small and light, then the gesture
+of the miracle, and the name. Up to 7 rows are one column of 18.6 cm, and
+more rows are two columns. A sheet of 6 miracles and "again" is 25 cm high.
+With no Worship Site the sheet says "No miracle to cast now" and "You have
+no Worship Site".
+
+**The pictures of the game [V].** The game draws a gesture picture from two
+textures of 256 by 256 pixels, `data\textures\S_Gesture0.raw` and
+`S_Gesture1.raw` (RGB), each with an alpha file (`S_Gesture0a.raw`,
+`S_Gesture1a.raw`). Each texture is a grid of 4 by 4 cells of 64 pixels.
+`fn_0057D5D0` takes the gesture type: the texture is the type / 16, and the
+cell is the type % 16, in rows from the top left (`DisplayGesture` at
+`0x0068B380` passes the type of `+0x0C`). The strokes are white, so the mod
+reads the two alpha files of the game folder once, and draws the alpha of
+each cell in the ink of the page. It ships no picture of the game. When a
+file is not there, the log says so and the palm shows the row as before.
+
+**The look.** With `hint_card_style=1` the sheet is a page of the parchment
+of the hint cards, with dark brown ink, and the start of a chain in a
+lighter brown. A thin rule is between two rows. With `hint_card_style=0` it
+is the dark panel with white pictures and letters.
+
+**The log.** `gesture sheet: the sheet of N rows shows over the left palm`,
+`the sheet does not show: the reason`, each new picture with its size and
+time, and once a report window the frames that it showed.
 
 ### The camera path of a miracle (`miracle_camera_still=1`)
 
@@ -1747,7 +1817,11 @@ so the plain game has no flat band.
 | `miracle_max_m` | 4 | The most distance of a target in the aim, in m of the room. 0 is no limit |
 | `spell_book` | 1 | 0: the first face button of the hand that does not point has no job, and no book opens |
 | `spell_book_pull_cm` | 10 | The pull that takes a miracle out of the book, in cm of hand motion, 3 to 30. 0: the grip takes the miracle at once |
-| `spell_book_palm` | 1 | 0: the palm that turns up does not open the book. Only the button opens it |
+| `spell_book_b` | 1 | 1: a tap of B (the second face button of the pointing hand, at most `miracle_cancel_ms` and 5 cm) opens and closes the book while no miracle is in the Hand. 0: B does not open the book |
+| `spell_book_palm` | 0 | 1: the palm that turns up opens the book, and the sheet of the gestures does not show at rest. 0: the palm does not open the book |
+| `gesture_sheet` | 1 | 1: the palm that turns up at rest shows the sheet of the gestures. 0: no sheet, and the palm shows the row of the game's pictures |
+| `gesture_sheet_test_save` | 0 | A test key: N saves the first N pictures of the sheet as `bwvr-sheet-NNNNN.bmp` |
+| `gesture_sheet_test_frame` | 0 | A test key: from this frame of the scripted controller the sheet shows for 300 frames, also with the palm down |
 | `gesture_panel` | 1 | 0: no row over the palm. The game draws its gesture pictures at the corner of its screen, and the headset does not show them |
 | `gesture_panel_cm` | 30 | The width of the row of the gesture pictures over the palm, in cm, for 3 pictures or more, 10 to 80 |
 | `spell_book_bubble` | 1 | 1: the bubble that the hand pulls out is the game's own bubble. 0: it is a flat picture with the two gestures |

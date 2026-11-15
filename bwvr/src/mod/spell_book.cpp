@@ -79,9 +79,14 @@
 //
 //   spell_book=1             0: the first face button of the hand that does
 //                            not point has no job
-//   spell_book_palm=1        the book also opens when the palm of that hand
-//                            turns up and stays up for 0.4 s, and closes
-//                            when that palm turns down. 0: only the button
+//   spell_book_b=1           a tap of B (the second face button of the
+//                            pointing hand) opens and closes the book while
+//                            no miracle is in the Hand. 0: B does not
+//   spell_book_palm=0        1: the book also opens when the palm of the
+//                            other hand turns up and stays up for 0.4 s, and
+//                            closes when that palm turns down. 0: the palm
+//                            shows the sheet of the gestures
+//                            (gesture_sheet.cpp)
 //   spell_book_pull_cm=10    the pull that takes a miracle out of the book,
 //                            in cm of hand motion, 3 to 30. 0: the grip
 //                            takes the miracle at once
@@ -131,6 +136,7 @@
 #include "gesture_panel.h"
 #include "gesture_panel_math.h"
 #include "haptics.h"
+#include "miracle_math.h"
 #include "radial_menu.h"
 #include "spell_book.h"
 #include "spell_book_math.h"
@@ -452,7 +458,12 @@ int g_pull_cm = 10;       // 0: the grip takes the miracle at once
 int g_pull_ini = 10;      // the value of bwvr.ini, for the debug page
 bool g_style = true;      // hint_card_style: the book is a page of parchment
 bool g_game_bubble = true;  // the game draws the bubble that the hand pulls out
-bool g_palm = true;       // spell_book_palm: the palm that turns up opens it
+bool g_palm = false;      // spell_book_palm: the palm that turns up opens it
+bool g_tap_b = true;      // spell_book_b: a tap of B opens and closes it
+int g_tap_limit_ms = 400; // miracle_cancel_ms: the longest press of a tap
+bool g_tap_asked = false; // controllers.cpp saw a tap of B in this frame
+float g_tap_ms = 0.0f, g_tap_cm = 0.0f;  // that tap, for the log
+uint64_t g_taps = 0;      // the taps of B that opened or closed the book
 bool g_orbs = true;       // spell_book_orbs: the cells show the orbs of the game
 bool g_point = true;      // spell_book_point: the mark of the point of the pick
 bool g_game_ok = false;   // the functions of the game have their bytes
@@ -490,7 +501,11 @@ void ReadSettings() {
   g_pull_ini = g_pull_cm > 0 ? g_pull_cm : 10;
   g_game_bubble = IniKey("spell_book_bubble", 1) != 0;
   g_style = IniKey("hint_card_style", 1) != 0;
-  g_palm = IniKey("spell_book_palm", 1) != 0;
+  g_palm = IniKey("spell_book_palm", 0) != 0;
+  g_tap_b = IniKey("spell_book_b", 1) != 0;
+  g_tap_limit_ms = IniKey("miracle_cancel_ms", 400);
+  if (g_tap_limit_ms < 50) g_tap_limit_ms = 50;
+  if (g_tap_limit_ms > 2000) g_tap_limit_ms = 2000;
   g_orbs = IniKey("spell_book_orbs", 1) != 0;
   g_point = IniKey("spell_book_point", 1) != 0;
   g_game_ok =
@@ -537,7 +552,13 @@ void ReadSettings() {
          g_palm ? "the book also opens when the palm of the hand that does "
                   "not point turns up and stays up for 0.4 s, and it closes "
                   "when that palm turns down"
-                : "only the button opens the book");
+                : "the palm does not open the book. With gesture_sheet=1 it "
+                  "shows the sheet of the gestures");
+  ModLog("spell book   : spell_book_b=%d: %s", g_tap_b ? 1 : 0,
+         g_tap_b ? "a tap of B (the second face button of the pointing hand, "
+                   "at most miracle_cancel_ms and 5 cm) opens and closes the "
+                   "book, while no miracle is in the Hand"
+                 : "a tap of B does not open the book");
   ModLog("spell book   : spell_book_orbs=%d: %s", g_orbs ? 1 : 0,
          g_orbs ? "each cell shows the orb of the game, the glass ball with "
                   "the miracle in it"
@@ -2130,6 +2151,99 @@ bool SpellBookCanOpen() {
          hand.book_face && !hand.dialog;
 }
 
+bool SpellBookTapOn() {
+  ReadSettings();
+  return g_on && g_game_ok && g_tap_b;
+}
+
+bool SpellBookTapCanOpen() {
+  ReadSettings();
+  if (!SpellBookTapOn() || g_open || RadialMenuShows()) return false;
+  RingHand hand;
+  return ControllersRingHand(&hand) && hand.active && hand.usable &&
+         !hand.dialog;
+}
+
+void SpellBookTapB(float seconds, float moved_m) {
+  ReadSettings();
+  if (!g_on || !g_tap_b) return;
+  g_tap_ms = seconds * 1000.0f;
+  g_tap_cm = moved_m * 100.0f;
+  if (!miracle_math::CancelTap(seconds, moved_m, g_tap_limit_ms * 0.001f,
+                               0.05f)) {
+    return;
+  }
+  g_tap_asked = true;
+}
+
+int SpellBookTapValue() {
+  ReadSettings();
+  return g_tap_b ? 1 : 0;
+}
+
+void SpellBookTapChange(const char* by) {
+  ReadSettings();
+  g_tap_b = !g_tap_b;
+  g_tap_asked = false;
+  ModLog("spell book   : %s: spell_book_b=%d. %s", by, g_tap_b ? 1 : 0,
+         g_tap_b ? "A tap of B opens and closes the book"
+                 : "A tap of B does not open the book");
+}
+
+int SpellBookPalmValue() {
+  ReadSettings();
+  return g_palm ? 1 : 0;
+}
+
+void SpellBookPalmChange(const char* by) {
+  ReadSettings();
+  g_palm = !g_palm;
+  ModLog("spell book   : %s: spell_book_palm=%d. %s", by, g_palm ? 1 : 0,
+         g_palm ? "The palm that turns up opens the book"
+                : "The palm does not open the book");
+}
+
+int SpellBookSiteMiracles(int out[], int most) {
+  ReadSettings();
+  GameNow g;
+  if (!ReadGame(&g)) return 0;
+  uint8_t* sites[kSites];
+  const int site_count = Sites(g.player, sites);
+  bool seen[kSeedTypes] = {};
+  int found = 0;
+  for (int s = 0; s < site_count; ++s) {
+    uint8_t* icons[kMaxIcons];
+    const int count = Icons(sites[s], icons);
+    for (int i = 0; i < count && found < most; ++i) {
+      const int type = SeedTypeOf(icons[i]);
+      if (type < 0 || seen[type]) continue;
+      if (reinterpret_cast<VirtualIntFn>(VTable(icons[i])[kIconOn / 4])(
+              icons[i], nullptr) != 1) {
+        continue;
+      }
+      seen[type] = true;
+      out[found++] = type;
+    }
+  }
+  return site_count > 0 ? found : -1;
+}
+
+int SpellBookChain(int seed, int out[3]) {
+  if (seed < 0 || seed >= kSeedTypes) return 0;
+  int n = 0;
+  for (int k = 0; k < 3; ++k) {
+    const int gesture = *reinterpret_cast<const int32_t*>(
+        SeedInfo(seed) + kInfoGestures + 4 * k);
+    if (gesture > 0 && gesture < kGestureTypes) out[n++] = gesture;
+  }
+  return n;
+}
+
+const wchar_t* SpellBookSeedName(int seed) {
+  if (seed < 0 || seed >= kSeedTypes) return L"";
+  return kSeedName[seed];
+}
+
 void SpellBookFrame() {
   ReadSettings();
   const uint64_t frame = ControllersFrameCount();
@@ -2156,11 +2270,40 @@ void SpellBookFrame() {
     g_button_seen_up = false;
     g_button_before = false;
   }
+  // The book can be open: the hand and the game let the player ask for a
+  // miracle. The first face button opens it only on a controller where that
+  // button has the job of the book, and the tap of B on each controller.
+  const bool can_stay = have_hand && hand.active && hand.usable &&
+                        have_game && !g.temple && !g.cutscene &&
+                        !CutsceneWindowFlat();
+  // THE TAP OF B (spell_book_b=1). A tap with a miracle in the Hand takes
+  // the miracle out (miracle.cpp), so it does not open the book. A tap where
+  // the book cannot open does nothing, with no pulse: B has other jobs there.
+  if (g_tap_asked) {
+    g_tap_asked = false;
+    const char* skip = nullptr;
+    if (have_game && g.grain) {
+      skip = "a miracle is in the Hand, so the tap takes it out";
+    } else if (!g_open && (!can_stay || RadialMenuShows() ||
+                           (have_hand && hand.dialog))) {
+      skip = "the book cannot open now";
+    }
+    if (skip == nullptr) {
+      press = true;
+      ++g_taps;
+    }
+    if (LogRoom()) {
+      ModLog("spell book   : a tap of B (%.0f ms, the hand moved %.1f cm) %s, "
+             "frame %llu", g_tap_ms, g_tap_cm,
+             skip != nullptr ? skip
+             : g_open        ? "closes the book"
+                             : "opens the book",
+             frame);
+    }
+  }
   OpenInput in = {};
   in.press = press;
-  in.can_open = have_hand && hand.active && hand.usable && hand.book_face &&
-                have_game && !g.temple && !g.cutscene &&
-                !CutsceneWindowFlat();
+  in.can_open = can_stay && (hand.book_face || g_tap_b);
   in.ring = RadialMenuShows();
   in.menu = have_hand && hand.dialog;
   // The palm that turns up (spell_book_palm=1). It opens the book only when
@@ -2831,12 +2974,13 @@ void SpellBookReport() {
   ModLog("spell book   : the book opened %llu times and closed %llu times "
          "this window: %llu pulls (%llu snaps, %llu back into the book), "
          "%llu miracles taken, %llu requests to the game, %llu "
-         "Miracles in the Hand, %llu refusals. The palm opened it %llu "
-         "times and closed it %llu times. The picture was drawn %llu "
-         "times, the longest draw took %.2f ms",
+         "Miracles in the Hand, %llu refusals. A tap of B opened or closed "
+         "it %llu times. The palm opened it %llu times and closed it %llu "
+         "times. The picture was drawn %llu times, the longest draw took "
+         "%.2f ms",
          g_opens, g_closes, g_pulls, g_snaps, g_backs, g_plucks, g_requests,
-         g_arrived, g_refusals, g_palm_opens, g_palm_closes, g_rasters,
-         g_raster_ms);
+         g_arrived, g_refusals, g_taps, g_palm_opens, g_palm_closes,
+         g_rasters, g_raster_ms);
   int shown = 0, draws = 0, made = 0;
   int orb_draws = 0;
   BookBubbleCounts(&shown, &draws, &made, &orb_draws);
@@ -2855,6 +2999,7 @@ void SpellBookReport() {
   g_pulls = g_snaps = g_backs = 0;
   g_opens = g_closes = g_plucks = g_requests = g_arrived = g_refusals = 0;
   g_palm_opens = g_palm_closes = 0;
+  g_taps = 0;
   g_rasters = 0;
   g_raster_ms = 0.0;
 }

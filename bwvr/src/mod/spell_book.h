@@ -1,5 +1,6 @@
-// The spell book (docs/miracles.md, "The spell book"): a press of the first
-// face button of the hand that does not point opens a book over that hand.
+// The spell book (docs/miracles.md, "The spell book"): a tap of B on the
+// pointing hand, or a press of the first face button of the hand that does
+// not point, opens a book over the hand that does not point.
 // It holds the miracles that the player can ask for now, each with the orb
 // of the game (or the pictures of its gestures). The pointing hand picks one,
 // and its grip takes the miracle: the request goes to the game in its own
@@ -42,6 +43,29 @@ bool SpellBookButtonOn();
 // For the hint card: a press of the button can open the book now.
 bool SpellBookCanOpen();
 
+// THE TAP OF B (spell_book_b=1). controllers.cpp, at the release of B (the
+// second face button of the pointing hand) that closed no window and stopped
+// no teleport: the length of the press and the most motion of the hand in
+// meters. A short press with a still hand (miracle_cancel_ms, 5 cm) opens or
+// closes the book in the next SpellBookFrame, while no miracle is in the
+// Hand.
+void SpellBookTapB(float seconds, float moved_m);
+// spell_book_b is on.
+bool SpellBookTapOn();
+// For the hint card: a tap of B can open the book now.
+bool SpellBookTapCanOpen();
+
+// For the sheet of the gestures (gesture_sheet.cpp): the seed types of the
+// miracles that the Worship Sites of the player offer (icons whose magic type
+// is on), at most `most`, in the order of the icons. -1 when the player has no
+// Worship Site.
+int SpellBookSiteMiracles(int out[], int most);
+// The gesture types of the chain of a seed type (GSpellSeedInfo+0x100): the
+// start of the chain first. The count, 0 to 3.
+int SpellBookChain(int seed, int out[3]);
+// The short name of a seed type, as the book has it.
+const wchar_t* SpellBookSeedName(int seed);
+
 // hint_card.cpp: the lines of the pointing card while the book is open, or
 // for a moment after the game refused a miracle of the book. The return
 // value is the count of lines, 0 with no book.
@@ -62,6 +86,11 @@ int SpellBookAllValue();
 void SpellBookAllChange(const char* by);
 int SpellBookAllBookValue();
 void SpellBookAllBookChange(const char* by);
+// spell_book_b and spell_book_palm.
+int SpellBookTapValue();
+void SpellBookTapChange(const char* by);
+int SpellBookPalmValue();
+void SpellBookPalmChange(const char* by);
 
 // miracle.cpp: the game cast the miracle in the Hand (refused false), or
 // refused the cast with the reason. power_up is the power up of the seed

@@ -351,6 +351,13 @@ int SpellBookOrbsValue();
 void SpellBookOrbsChange(const char* by);
 int SpellBookPointValue();
 void SpellBookPointChange(const char* by);
+int SpellBookTapValue();
+void SpellBookTapChange(const char* by);
+int SpellBookPalmValue();
+void SpellBookPalmChange(const char* by);
+// The sheet of the gestures over the palm (gesture_sheet.cpp).
+int GestureSheetValue();
+void GestureSheetChange(const char* by);
 // A hand in front of the page of the book and of the ring (hand_cut.cpp).
 int HandCutValue();
 void HandCutChange(const char* by);
@@ -851,6 +858,12 @@ const Switch kSwitches[] = {
      L"Spawn all miracle orbs"},
     {kGroupMiracles, L"Spell book", L"X opens the spell book", "spell_book",
      SpellBookValue, SpellBookChange, L"off|on"},
+    {kGroupMiracles, L"Book by B", L"A tap of B opens the spell book",
+     "spell_book_b", SpellBookTapValue, SpellBookTapChange, L"off|on"},
+    {kGroupMiracles, L"Book on palm", L"The palm that turns up opens the book",
+     "spell_book_palm", SpellBookPalmValue, SpellBookPalmChange, L"off|on"},
+    {kGroupMiracles, L"Gesture sheet", L"The palm shows the gestures",
+     "gesture_sheet", GestureSheetValue, GestureSheetChange, L"off|on"},
     {kGroupMiracles, L"Book orbs", L"The game's orbs in the spell book",
      "spell_book_orbs", SpellBookOrbsValue, SpellBookOrbsChange,
      L"pictures|orbs"},
@@ -1386,6 +1399,15 @@ const wchar_t* const kTips[] = {
     // Spell book
     L"On: the first face button of the hand that does not point opens the "
     L"spell book. Off: that button has no job.",
+    // Book by B
+    L"On: a short tap of B with a still hand opens and closes the spell book. "
+    L"Off: B only draws gestures and takes a miracle out of the Hand.",
+    // Book on palm
+    L"On: the palm of the hand that does not point opens the spell book when "
+    L"it turns up. Off: the palm shows the gestures.",
+    // Gesture sheet
+    L"On: the palm that turns up shows how to draw each miracle of your "
+    L"Worship Sites, with the pictures of the game. Off: no sheet.",
     // Book orbs
     L"Orbs: each cell of the spell book shows the orb of the game, the glass "
     L"ball with the miracle in it. Pictures: a flat picture with the gestures.",

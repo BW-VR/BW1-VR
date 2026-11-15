@@ -41,9 +41,10 @@
 //
 // WHEN. The row shows while the palm is up (gesture_panel_math.h), the game
 // has a picture, the spell book is closed, and no ring, dialog box or cut
-// scene window is up. With spell_book_palm=1 a palm that turns up at rest
-// opens the book. Then the row wants the palm only while the draw button is
-// down, or while the game shows a picture that goes on from a gesture that
+// scene window is up. With gesture_sheet=1 a palm that turns up at rest shows
+// the sheet of the gestures (gesture_sheet.cpp), and with spell_book_palm=1
+// it opens the book. Then the row wants the palm only while the draw button
+// is down, or while the game shows a picture that goes on from a gesture that
 // the player drew: a chain, a power up, the scribble.
 //
 // CHECKS. The first bytes of each function of the game that this file hooks
@@ -63,6 +64,7 @@
 #include "cutscene_window.h"
 #include "gesture_panel.h"
 #include "gesture_panel_math.h"
+#include "gesture_sheet.h"
 #include "radial_menu.h"
 #include "spell_book.h"
 #include "spell_book_math.h"
@@ -469,6 +471,8 @@ void GesturePanelFrame() {
     why = "the spell book is open";
   } else if (SpellBookPalmOn() && !g_draw_held && !g_goes_on) {
     why = "the palm opens the spell book now";
+  } else if (GestureSheetOn() && !g_draw_held && !g_goes_on) {
+    why = "the palm shows the sheet of the gestures now";
   } else if (!hand.usable || hand.dialog) {
     why = "the controllers cannot act, or a dialog box is up";
   } else if (RadialMenuShows()) {

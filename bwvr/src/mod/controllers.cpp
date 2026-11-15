@@ -80,6 +80,7 @@
 #include "text_fit.h"
 #include "hand_cut.h"
 #include "gesture_panel.h"
+#include "gesture_sheet.h"
 #include "grip_fit.h"
 #include "script_frame_math.h"
 #include "temple.h"
@@ -90,6 +91,10 @@
 #include "zoom_math.h"
 
 extern void ModLog(const char* format, ...);
+
+// Below: the motion of the pointing hand in the room, in game units.
+bool ControllerDirectMotion(float reach_room_out[3], float grip_room_out[3],
+                            float room_out[9]);
 
 // head_pose.cpp
 float HeadPoseScale();
@@ -2626,6 +2631,41 @@ bool GestureButtonDown(const bwvr::HandInput& hand) {
   return false;
 }
 
+// THE TAP OF B FOR THE SPELL BOOK (spell_book_b=1, spell_book.cpp). A short
+// press of B is a tap: the spell book gets its length and the motion of the
+// hand at its release, and decides if it is a tap that opens or closes the
+// book. A press that closed a window or stopped a teleport is no tap.
+bool g_b_tap_down = false;
+bool g_b_tap_claimed = false;
+double g_b_tap_since = 0.0;
+float g_b_tap_from[3] = {0.0f, 0.0f, 0.0f};
+float g_b_tap_moved = 0.0f;
+
+void LatchBookTap(const bwvr::HandInput& hand, bool b, bool closed_window) {
+  float reach[3], grip[3], room[9];
+  const float life = HeadPoseScale();
+  const bool motion =
+      life > 0.1f && ControllerDirectMotion(reach, grip, room);
+  if (b && !g_b_tap_down) {
+    g_b_tap_since = NowSeconds();
+    g_b_tap_moved = 0.0f;
+    g_b_tap_claimed = closed_window;
+    for (int i = 0; i < 3; ++i) g_b_tap_from[i] = motion ? grip[i] : 0.0f;
+  } else if (b && motion) {
+    const float dx = grip[0] - g_b_tap_from[0],
+                dy = grip[1] - g_b_tap_from[1],
+                dz = grip[2] - g_b_tap_from[2];
+    const float moved = sqrtf(dx * dx + dy * dy + dz * dz) / life;
+    if (moved > g_b_tap_moved) g_b_tap_moved = moved;
+  }
+  if (b && hand.primary && TeleportOwnsA()) g_b_tap_claimed = true;
+  if (!b && g_b_tap_down && !g_b_tap_claimed) {
+    SpellBookTapB(static_cast<float>(NowSeconds() - g_b_tap_since),
+                  g_b_tap_moved);
+  }
+  g_b_tap_down = b;
+}
+
 // Once a frame, from ControllersFrame, after the latches of the pump.
 void LatchGesture(bool back) {
   const bwvr::HandInput& hand = g_hands[PointingIndex()];
@@ -2638,14 +2678,17 @@ void LatchGesture(bool back) {
   // (places_panel.cpp). A press of B closes them, and the draw button must
   // go up before it draws.
   const bool b = hand.active && hand.secondary;
+  bool closed_window = false;
   if (b && !g_window_b_before &&
       (DebugWindowCloseBy("the player pressed B") |
        PlacesPanelCloseBy("the player pressed B") |
        BookmarkAimStopBy("the player pressed B") |
        WelcomePageCloseBy("the player pressed B"))) {
     g_gesture_need_up = down;
+    closed_window = true;
   }
   g_window_b_before = b;
+  LatchBookTap(hand, b, closed_window);
   // While A holds a teleport, B cancels it and starts no gesture.
   if (down && !g_gesture_held && hand.primary && TeleportOwnsA()) {
     g_gesture_need_up = true;
@@ -5001,6 +5044,7 @@ void ControllersFrame() {
   ControlsPageWarmFrame();
   SpellBookFrame();
   GesturePanelFrame();
+  GestureSheetFrame();
   TextFitTestFrame();
 }
 
@@ -6291,6 +6335,7 @@ void ControllersReport() {
   text_fit::Report();
   HandCutReport();
   GesturePanelReport();
+  GestureSheetReport();
   TempleReport();
   TextClickReport();
   if (g_god_zooms != 0 || g_god_holds != 0) {

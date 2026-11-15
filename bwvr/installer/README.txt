@@ -437,6 +437,8 @@ controller. The left menu button opens the game menu with each hand.
                       your right hand.
   X (left hand)       Open or close the spell book: the miracles that
                       you can ask for now. See MIRACLES.
+  Palm up             The sheet of the gestures: how to draw each
+                      miracle of your Worship Sites.
 
 To change the grab of the world, set "Grab the world" in the
 launcher (key grab_hand). 1 uses the grip of your other hand. 2 also
@@ -955,16 +957,26 @@ To cast a miracle, hold B and draw its gesture in the air: the same
 shape that you draw with the mouse. Draw it in front of you, as you
 see it, about 30 cm across. Moves of the Hand without B do not draw.
 
-The spell book is the other way. Press X on your left hand: a book
-opens over that hand with each miracle that your Worship Sites can
+The spell book is the other way. Tap B on your right hand, or press
+X on your left hand: a book opens over your left hand with each miracle that your Worship Sites can
 give you now, each in its orb of the game. Put your right hand
 on a miracle: a gold halo shows on it, the controller ticks, and the
 card on your hand names it. Close the grip to take the miracle. The
 game takes the prayer power as for the gestures, and the Miracle
 comes into your Hand. A grey miracle is one that the game refuses
-now, and the card says why. Press X again to close the book. With the
-left hand as the pointing hand, A opens the book at your right hand.
-Set spell_book=0 in bwvr.ini to give X no job.
+now, and the card says why. Tap B or press X again to close the book.
+A tap is short, with a still hand: a longer press of B draws a
+gesture. With the left hand as the pointing hand, Y or A opens the
+book at your right hand. Set spell_book=0 in bwvr.ini to give X no
+job, and spell_book_b=0 to give the tap of B no job.
+
+Turn the palm of your left hand up to see the sheet of the gestures:
+for each miracle of your Worship Sites, the gesture pictures of the
+game and its name. The flat game shows these pictures at the lower
+right of the screen. While you draw a gesture, the palm shows the
+pictures of the game for the next gesture. Set gesture_sheet=0 in
+bwvr.ini to turn the sheet off, and spell_book_palm=1 to open the book
+with the palm.
 
 To test each miracle, use "All miracles in the book" in the group
 Miracles of the debug window (the item "debug" of the ring), or set

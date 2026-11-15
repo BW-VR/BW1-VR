@@ -1089,7 +1089,11 @@ void AddPrompts(Content cards[kHands], int context, bool first_show) {
       // the leashes and more) and the menu of the game.
       AddPrompt(cards, kWordRing, L"Ring menu", kToneOther,
                 hint_learn_math::kSkillRing);
-      // The spell book (spell_book.cpp), while a press can open it.
+      // The spell book (spell_book.cpp), while a press can open it: a tap of
+      // B on the pointing hand, and the first face button of the other hand.
+      if (SpellBookTapCanOpen()) {
+        AddPrompt(cards, kWordGesture, L"Tap for spells", kToneOther);
+      }
       if (SpellBookCanOpen()) {
         AddPrompt(cards, kWordBook, L"Spells", kToneOther);
       }

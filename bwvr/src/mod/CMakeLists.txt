@@ -111,6 +111,7 @@ add_library(bwvr_mod SHARED
     spell_book.cpp
     book_bubble.cpp
     gesture_panel.cpp
+    gesture_sheet.cpp
     debug_menu.cpp
     temple.cpp
     throw_physics.cpp

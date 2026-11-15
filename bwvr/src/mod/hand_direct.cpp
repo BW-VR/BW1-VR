@@ -9672,6 +9672,39 @@ void HandDirectGripOpened() {
   }
 }
 
+// For miracle_throw.cpp: the swing of a thrown miracle, as the throw of an
+// object takes it (ThrowPhysicsPlan). It is the top speed of the grip from
+// the peak window before the opening of the grip to now, in the room's axes
+// and in units at the life size scale. The room basis and the two scales come
+// with it, and the times of the top speed and of the opening before now, in
+// ms. The latch of the opening stays for the release of an object. False
+// with no motion, or with no scale of the God view or the table.
+bool HandDirectSwing(float peak_room[3], float room[9], float* life,
+                     float* units_per_meter, double* peak_ms,
+                     double* opened_ms) {
+  if (!g_installed || !g_owns || g_history_count < 2) return false;
+  const double now = NowSeconds();
+  if (now - g_grip_history[g_history_count - 1].time > kStaleSeconds) {
+    return false;
+  }
+  *life = HeadPoseScale();
+  *units_per_meter = TabletopViewScale();
+  if (!(*life > 0.0f) || !(*units_per_meter > 0.0f)) return false;
+  const bool latched = g_latch.valid && now - g_latch.time >= 0.0 &&
+                       now - g_latch.time <= kLatchSeconds;
+  const double opened = latched ? g_latch.time : now;
+  double at = now;
+  if (!throw_math::PeakVelocity(g_grip_history, g_history_count,
+                                opened - throw_math::kPeakWindow, now,
+                                throw_math::kPeakHalfSpan, peak_room, &at)) {
+    return false;
+  }
+  for (int i = 0; i < 9; ++i) room[i] = g_room[i];
+  *peak_ms = (now - at) * 1000.0;
+  *opened_ms = (now - opened) * 1000.0;
+  return true;
+}
+
 // stereo.cpp, around each eye pass. On the table the choice of the last pass
 // goes into the next record before the pass draws too, so the game sees the
 // choice all through the pass.

@@ -27,7 +27,7 @@
 #   the Hand after a pour, and the tap takes it out. Then Heal (7): a press.
 #   Then a Creature seed that the Hand carries, and the trigger.
 # The other kinds (cancel, place, shield, away, fire, firelong, pshield,
-# teleport, storm) have a comment at their steps below. -Seeds gives other
+# teleport, storm, throwdir) have a comment at their steps below. -Seeds gives other
 # seed types to the steps of a kind (the types are in bwvr/docs/miracles.md),
 # and -Steps gives other steps.
 param(
@@ -187,6 +187,36 @@ if ($Kind -eq 'away') {
                  'point@1700+1 seek@1760+1 grip@1800+3 point@1880+1 grip@1920+10 ' +
                  'point@2000+1 seek@2060+1 grip@2100+260 trigger@2200+6 shot@2420+1'
     }
+} elseif ($Kind -eq 'throwdir') {
+    # Four Fireballs (2) thrown ahead, to the left, to the right, and on a
+    # swing that curves to the left (docs/throw.md, "A thrown miracle"). For
+    # each one: a tap makes the seed active, the hand goes to the start of
+    # the swing, the grip closes, the hand steps 6 cm two times on the last
+    # two frames of the grip, and the grip opens. The lines "miracle throw"
+    # give the real hand, the game's filter of the Hand and what the cast
+    # got, and the path of the Fireball after it. Then a fifth Fireball: the
+    # grip stays closed while the stick of the pointing hand turns the view
+    # left, zooms, and turns it right, and the stick of the other hand walks.
+    # The lines "comfort" and "god view" show the turns with the miracle in
+    # the Hand and the Action button of the game held. The grip then opens
+    # with a still hand.
+    if ($Seeds -eq '') { $Seeds = '2@930 2@1350 2@1770 2@2190 2@2610' }
+    $keys = "$keys;test_frame_rate=60"
+    $points = '0,-30,60 ' +
+              '0,-32,40 0,-31,46 0,-30,52 ' +
+              '6,-32,48 0,-31,49 -6,-30,50 ' +
+              '-6,-32,48 0,-31,49 6,-30,50 ' +
+              '6,-32,40 5,-31,47 1,-30,52 ' +
+              '0,-30,60'
+    if ($Steps -eq '') {
+        $Steps = 'stick_up@800+10 stick_up@830+10 look@860+5000 point@900+1'
+        foreach ($b in 930, 1350, 1770, 2190) {
+            $Steps += " seek@$($b + 30)+1 grip@$($b + 70)+3 point@$($b + 150)+1 grip@$($b + 190)+60" +
+                      " point@$($b + 247)+1 point@$($b + 248)+1"
+        }
+        $Steps += ' seek@2640+1 grip@2680+3 point@2760+1 grip@2800+150 stick_left@2830+8 ' +
+                  'stick_up@2870+8 stick_right@2910+8 lstick_up@2920+20'
+    }
 } elseif ($Kind -eq 'cancel') {
     # A shake of a new miracle, the button on a new miracle, and a shake while
     # the spell of a cast miracle runs.
@@ -253,7 +283,8 @@ if (-not (Test-Path $log)) { "no log at $log"; exit 1 }
 $pattern = '^miracle      :|^sky mist     :|^sky cloud    :|^sky          : (sky_test|cloud_round|cloud_fade|the test keys|.*near sky cloud)|^hand press   : the grip pressed|^haptics      : (effect (14|18|19|20|21|23|24|25|26|27|28)|cast|refused)|' +
            '^hint card    : frame .*(iracle|ancel|Cast|pour|throw|Use)|^hand         : state|^miracle watch: |' +
            '^hand pick    : seek plan|^creature cmd : (the leash|a double press|test: aimcmd)|' +
-           '^far grab    : (the grip closed|the grip opened)|^hand throw   : release'
+           '^far grab    : (the grip closed|the grip opened)|^hand throw   : release|^miracle throw: |' +
+           '^comfort      : (the (snap|smooth) turn|\d+ snap turns)|^god view     : turned|^controllers  : the stick'
 Get-Content $log | Where-Object { $_ -match $pattern } | ForEach-Object {
     $_.Substring(0, [Math]::Min(420, $_.Length))
 } | Select-Object -First 220

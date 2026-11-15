@@ -3644,6 +3644,7 @@ void CreatureChecks() {
 
 #include "aim_checks.h"
 #include "miracle_checks.h"
+#include "miracle_throw_checks.h"
 #include "audio_checks.h"
 #include "command_checks.h"
 #include "exact_checks.h"
@@ -4130,6 +4131,7 @@ int main() {
   village_checks::VillageChecks();
   aim_checks::AimChecks();
   miracle_checks::MiracleChecks();
+  miracle_throw_checks::MiracleThrowChecks();
   ring_checks::RingChecks();
   ring_sheet_checks::RingSheetChecks();
   debug_menu_checks::DebugMenuChecks();

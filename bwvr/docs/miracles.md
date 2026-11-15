@@ -625,12 +625,15 @@ Hand (see `grab.md`, "The grip holds").
 | A Creature miracle | Close the grip with the halo on a Creature | `fn_005D30D0`: the cast on the object |
 | Heal, Forest, Teleport, Explosion | Close the grip with the Hand over the place | `FUN_005D3340`: the cast at the land under the Hand |
 | Food, Wood, Water, Lightning | Keep the grip closed over the place | Action 10: a cast each game turn. The opening ends the pour |
-| Fireball, the flocks | Close the grip, swing the hand, open the grip | Action 8: the release sends the speed of the Hand |
+| Fireball, the flocks | Close the grip, swing the hand, open the grip | Action 8: the release sends the throw velocity, which the mod makes the speed of the real hand |
 | Storm, the two shields | Close the grip and draw a circle with the hand | The game matches the circle, and the cast comes at once, at its place. The grip that opens then does nothing more |
 
-**The throw** uses the game's own speed of the Hand: the Grain state filters
-the motion of the Hand, which is the motion of the real hand. The mod does
-not change it.
+**The throw** has the velocity of the throw of an object: the top speed of
+the grip of the real hand in the 120 ms before the opening of the grip
+(`miracle_throw=1`), and no turn. The game's own speed of the Hand is a
+filter of 62 ms of the motion of the Hand's point, and it gives a direction
+of the past. The game also sends the turn of the path of the Hand, and a
+Fireball turns in its flight by it. See `throw.md`, "A thrown miracle".
 
 **The circle.** The mod feeds the ring of the gestures while the grip is
 closed with a miracle that needs a circle, and the interface action is 8 or
@@ -1829,6 +1832,7 @@ so the plain game has no flat band.
 | `miracle_circle_hand` | 1 | 1: the circle of a Storm or a shield is on the land under the middle of the path of the real hand, with 1.05 times the widest span of that path as its size. 0: the circle that the game makes from the pixels of the path |
 | `miracle_site_pick` | 1 | 1: a teleport site that the game offers to its pick is a candidate of the real hand, so the Hand can take a site and put a villager on it. 0: the real hand has no site as a candidate |
 | `miracle_circle_cast` | 1 | 1: Storm and the two shields cast when the game matches the circle, with the grip still closed. 0: they cast when the grip opens |
+| `miracle_throw` | 1 | 1: a Fireball and a flock leave the Hand with the top speed of the grip of the real hand and fly straight, as a thrown object does. 2: the same, and they turn with the curve of the swing. 0: the game's filter of the speed of the Hand and its turn. See `throw.md`, "A thrown miracle" |
 | `miracle_touch_cm` | 3 | A body this near to the Hand's point is the target at the Hand, in cm of the room |
 | `miracle_cone_deg` | 6 | The cone of the aim for a new target at a distance |
 | `miracle_keep_deg` | the cone and 4 | The target of the last frame stays to this angle |

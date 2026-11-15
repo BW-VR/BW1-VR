@@ -243,6 +243,11 @@ agents: the log does not tell the item yet.
   each eye pass turns its camera by it (`eye_cant=1`).
 - **An old picture in one eye** (B16). Log: `eye clean    : an eye pass drew
   no sky` names the scene of that frame.
+- **A Fireball that does not go where it is thrown.** Log: `miracle throw:`
+  gives the top speed of the real hand, how many degrees the game's own
+  filter of the Hand was to the right or the left of it, what the cast got,
+  and how many degrees the path of the Fireball goes to the side of that
+  (`throw.md`, "A thrown miracle").
 - **A miracle that shows nothing** (Storm, a shield, Shrink, Enlarge,
   Invisibility). Log: `miracle watch:` says if the game made the spell, its
   radius in cm of the room and how long it stands, or what a Creature
@@ -527,8 +532,9 @@ land in front of you, and the mod removes these orbs before each save.
 - **Cost.** 3500. The power ups (inverse spiral, then spiral): 7000 and
   10000.
 - **Gesture.** Spiral, then the vertical line. A throw.
-- **In the mod.** Close the grip, swing the hand, and open the grip. It flies
-  with the speed of the hand.
+- **In the mod.** Close the grip, swing the hand, and open the grip. It
+  leaves with the top speed of the grip of the real hand, as a thrown object
+  does (`miracle_throw`).
 - **Proved.** Desktop runs: the throw with a step of the hand, not with a
   real swing. A Fireball that falls from a still hand onto a house sets it
   on fire, and the house burns for 24 s and more (`miracle_run.ps1 -Kind

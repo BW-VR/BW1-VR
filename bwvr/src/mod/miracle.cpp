@@ -50,6 +50,7 @@
 #include "haptics.h"
 #include "miracle.h"
 #include "miracle_math.h"
+#include "miracle_throw.h"
 #include "teleport.h"
 #include "village.h"
 
@@ -710,11 +711,17 @@ int __fastcall h_CastAtLand(void* self, void* unused) {
                      f.seed != nullptr;
   const int32_t before =
       watch ? *reinterpret_cast<const int32_t*>(f.face + kFaceDropTurn) : 0;
+  // A THROWN MIRACLE (miracle_throw.cpp): the velocity of the real hand goes
+  // where the cast reads it.
+  const bool thrown = watch && f.info.cast == miracle_math::kCastThrow &&
+                      f.info.gesture == 0;
+  if (thrown) MiracleThrowBeforeCast(f.hand, SeedName(f.info.type));
   const int result = o_CastAtLand(self, unused);
-  if (watch && before == 0 &&
-      *reinterpret_cast<const int32_t*>(f.face + kFaceDropTurn) != 0) {
-    SaidCast(f, false);
-  }
+  const bool sent =
+      watch && before == 0 &&
+      *reinterpret_cast<const int32_t*>(f.face + kFaceDropTurn) != 0;
+  if (thrown) MiracleThrowAfterCast(sent);
+  if (sent) SaidCast(f, false);
   return result;
 }
 
@@ -908,6 +915,7 @@ void Init() {
           reinterpret_cast<void**>(&o_UpdateSpellInfo),
           "the spell info of a player GInterfaceStatus::UpdateSpellInfo");
   MiracleWatchInstall();
+  MiracleThrowInstall();
   LogKeys("miracle_hand");
   ModLog("miracle      : miracle_site_pick=%d. %s", g_settings.site_pick ? 1 : 0,
          g_settings.site_pick
@@ -1515,6 +1523,7 @@ void MiracleFrame() {
   g_frame = ControllersFrameCount();
   PollKey();
   TestSeeds();
+  MiracleThrowFrame();
   // The orbs of all miracles of the test key, as the debug row makes them.
   for (int i = 0; i < g_test_orb_count; ++i) {
     if (ControllersTestFrame(g_test_orbs[i], g_frame) == g_test_orbs[i]) {

@@ -97,6 +97,7 @@ add_library(bwvr_mod SHARED
     creature_stay.cpp
     creature_look.cpp
     miracle.cpp
+    miracle_throw.cpp
     miracle_watch.cpp
     village.cpp
     radial_menu.cpp

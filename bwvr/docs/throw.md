@@ -21,6 +21,9 @@ object is in `grab.md`.
   object goes down as in the game (`throw_land_rest`).
 - A tree that falls comes to rest in about 1 s after its first contact
   (`throw_tree_settle`).
+- A thrown Fireball or flock leaves the Hand with the top speed of the grip
+  of the real hand and with no turn, as a thrown object does, and then has
+  the game's physics (`miracle_throw`, see "A thrown miracle").
 - A thrown object turns at about the pace of the game. The mod scales the
   turn of the release and the torque of the flick (packet `0x40`) to the
   steps of the flight. Before each substep it cuts the turn of the picture to
@@ -185,8 +188,9 @@ game sees the speeds of its own physics.
     the sea, leaves the physics (a new pick up), or after 60 s. Up to 4
     objects fly at one time.
 
-**What keeps the game's time.** A Miracle in the Hand gets the velocity of
-the square root law. A tree flies as a rock does, unless `throw_trees=0`. The
+**What keeps the game's time.** A Miracle keeps the game's physics. It leaves
+the Hand with the velocity of the real hand in the world (see "A thrown
+miracle"). A tree flies as a rock does, unless `throw_trees=0`. The
 disassembly shows that a tree is a physics object like a rock:
 `Object::InitialisePhysicsFromHand` `0x00636F00` calls
 `PhysicsObject::AddObject` for each object. The only differences are the
@@ -1310,3 +1314,127 @@ closes it again, and the trace of 12 values.
 
 The checks in a headset are in `headset-checks.md`, and the checks that a
 desktop run can prove are in `roadmap.md`, R12.
+
+## A thrown miracle
+
+A Fireball (and its two power levels) and the two flocks are cast at the
+release: the grip closes, the hand swings, and the grip opens
+(`miracles.md`, "The grip casts"). The miracle leaves the Hand in the
+direction and with the speed of the real hand, as a thrown object does.
+
+### What the game does [V]
+
+- **The speed of the Hand.** With a miracle in the Hand the Grain state
+  (`HandStateGrain_vfunc3` `0x005B3310`) keeps a filter of the speed of the
+  Hand at `CHand+0x48C8`. Each update moves the filtered velocity toward the
+  velocity of the Hand's point (`CHand+0x78`) in that update, by the part
+  `1 - exp(-r dt)`, with `r = -10 ln(1 - 0.8)` = 16.09 a second (the float at
+  `0x00BF014C`). That is a time constant of 62 ms.
+- **The cast.** The release of the miracle (`FUN_005D48D0`) calls the cast at
+  the land point `FUN_005D3340`. It copies `CHand+0x48C8`, with no cap, to
+  the first vector of packet `0x4D` (`0x005D351C`), with the Hand's point
+  (`+0x48E0`). The miracle leaves the Hand with that velocity. The release
+  action of an object (`0x005D4DB0`) does not run for a miracle, so the
+  velocity of the throw of an object never reaches a miracle.
+- **The turn of the Hand.** The same packet has the turn of the Hand at
+  `CHand+0x48D4` (`0x005D354E`). The Grain state writes it as `(0, y, 0)`
+  (`0x005B36C6`): y is a filter of how fast the direction of the path of the
+  Hand across the land turns (`__CIacos` at `0x005B363F`), over its speed.
+  The cast copies y (`GInterfaceStatus+0x54`) to the cast info at `+0x34`
+  (`SpellSeed::DoPreCastThings`, `0x007294D5`). A Fireball turns in its
+  flight by it [I for the use: the desktop runs show the turn].
+- **The Fireball.** The particle system of a Fireball carries a
+  `MagicFireBall`. `AttatchFireBallToAtom::ModifyAtomCollection`
+  (`0x00682FD0`) makes it with `MagicFireBall::Create` at the place of the
+  first atom of the collection (`+0x40`), and it moves the ball with that
+  atom on each update. The atom has its place at `+0x80`, `+0x84` and
+  `+0x88`.
+
+So the game's velocity of a thrown miracle is the mean of about the last 60
+ms of the motion of the Hand's point, read when the grip opened. A swing that
+curves gives a direction of the past, and a hand that slows at the opening
+gives less speed. A swing that curves also makes the Fireball turn in its
+flight, and a swing of a real arm always curves. The Hand's point is the index tip of the Hand (`hand.md`,
+section 4), and not the grip, so a turn of the wrist in the swing moves it
+more than the grip, and to the side. The throw of an object takes the top
+speed of the grip in the swing ("The speed of a throw").
+
+### What the mod does
+
+With `miracle_throw=1` (the default) the hook of the cast at the land point
+(`miracle.cpp`) writes the velocity of the throw of an object to
+`CHand+0x48C8`, before the cast reads it (`miracle_throw.cpp`). It is the
+top speed of the grip in the 120 ms before the opening of the grip
+(`HandDirectSwing` in `hand_direct.cpp`, `throw_math::PeakVelocity`), turned
+from the room into the world and scaled to s units in a meter
+(`miracle_throw_math::SwingWorld`). That is `s v` in world units a second:
+the speed of the real hand in the world, which is the unit of the game's
+filter. It also writes no turn to `CHand+0x48D4`, so the miracle flies
+straight, as a thrown object does. The game's physics of the miracle then
+flies it. The mod does not change the flight of a miracle.
+
+With no motion of the grip, or outside the God view and the table, the cast
+keeps the game's filter, and it still gets no turn. `miracle_throw=2` gives
+the velocity of the real hand and keeps the game's turn. `miracle_throw=0`
+keeps the game's filter and its turn. The debug page has the switch
+"Miracle throw" in the group Throw (game, hand, hand turns).
+
+A swing of 0.3 s with a top speed of 4 m/s that turns 70 degrees to the left
+(the math check): with the grip open at the top speed, the game's filter is
+8.6 degrees to the right of the swing and has 2.95 m/s. The top speed of the
+grip is 2.6 degrees from the swing and has 3.97 m/s.
+
+### Keys
+
+| Key | Default | What it does |
+| --- | --- | --- |
+| `miracle_throw` | 1 | 1: a Fireball and a flock leave the Hand with the top speed of the grip of the real hand in the 120 ms before the opening of the grip, and with no turn, as a thrown object does. 2: the same velocity, with the game's turn of the path of the Hand. 0: the game's filter of the speed of the Hand (62 ms) and its turn |
+
+### The log
+
+Tag `miracle throw`. The key at the start. For each throw: the top speed of
+the real hand, its time before the cast, the time of the opening of the
+grip, the speed and the direction of the game's filter (degrees to the right
+or the left of the real hand), the game's turn of the Hand, and the velocity
+and the turn that the cast got. For a
+Fireball: where its flight starts and how far that is from the Hand's point,
+then its place 0.25, 0.5, 1, 2 and 4 s after the start and its last place.
+Each place has the distance across the land from the start, and how many
+degrees its path goes to the right or the left of the velocity that the cast
+got and of the game's filter.
+
+### Checks
+
+`MiracleThrowChecks` in `bwvr/test/controller_math/miracle_throw_checks.h`
+covers the side of a direction in the axes of the game, the game's filter
+(1 - 1/e of a step after 62 ms), the velocity in a turned room at a scale,
+and the curved swing above.
+
+### Desktop runs
+
+`miracle_run.ps1 -Kind throwdir` throws four Fireballs from seeds of the test
+key `miracle_test_seeds`: ahead, to the left, to the right, and on a swing
+that curves to the left. A fifth Fireball stays in the Hand with the grip
+closed while the stick turns the view and zooms (`god-view.md`, section 4).
+The scripted hand steps 6 cm on each of the last two frames of the grip, at
+44.4 units per meter.
+
+| `miracle_throw` | The cast gets | The flight of the Fireball |
+| --- | --- | --- |
+| 1 | 3.65 to 3.94 m/s of the real hand. The ahead, left and right throws go in three directions 90 degrees apart. The turn is 0 (the game had 5.23 for the curved swing) | 130 to 134 units across the land in 2 s. The path is straight, 6.5 to 8 degrees to the right of the velocity of the cast, also for the curved swing |
+| 2 | The same velocity, and the game's turn | The same, but the Fireball of the curved swing turns to the left: its path is 5, 12.5 and 20 degrees to the left of the cast after 0.3, 0.6 and 1 s |
+| 0 | 0.68 to 0.73 m/s: the game's filter, because the scripted hand stops one frame before the opening | 34 to 60 units across the land in all. 8 to 12 degrees to the right of the cast at first |
+
+### Open
+
+- In each direction a Fireball flies 6.5 to 8 degrees to the right of the
+  velocity that the cast gets, with the turn 0, at 44.4 units per meter and
+  about 3.7 m/s. The cause is in the particle system of the Fireball and is
+  not found. Not measured: other scales and speeds.
+- The horizontal speed of a Fireball in its flight is about 45 percent of
+  the speed that the cast gets (69 of 160 units a second). Its range at each
+  scale of the God view is not measured in a headset (`roadmap.md`, F6).
+- The flocks get the same velocity and no turn. No run shows where a flock
+  goes.
+- Only a headset shows a real swing: the speed and the turn of the game for
+  a real arm, and how near the path is to the throw.

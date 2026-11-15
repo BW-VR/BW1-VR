@@ -913,7 +913,7 @@ The words that act on the first frame of the word only:
 | `slap` | The same with 12 cm |
 | `trace` | Steps the right hand through the next template of `fake_controller_gestures`: it holds the first pose for 10 frames, so the script can press the draw button, then takes the next still pose every 2 frames. The template holds the corners of the path on a square of side 1. The word puts it on a square of `fake_controller_gesture_cm` in front of the head and adds a point every 8.5 percent of the side. See `miracles.md` |
 | `aimfar` | Turns the aim of the right hand to the nearest far target. It turns the ray and not the pose: it takes the turn of the preset and of the trim off the pose (section 8). See `grab.md` |
-| `pull` | Steps the right hand 15 cm toward the head center over the frames of the word. The next `pull` steps it back |
+| `pull` | Steps the right hand 15 cm toward the head center over the frames of the word (`fake_controller_pull_cm`, 1 to 60). The next `pull` steps it back |
 | `aimcmd` | Turns the aim to the middle of the body of the nearest object that a Creature command can act on. `command_test_class` names the class. See `creature.md` |
 | `aimturn` | Turns the aim by the next step of `fake_controller_turns`. A turn is a step and not a motion. See `creature.md` |
 | `aimtemple` | Turns the aim to the next target of `temple_test_targets` (11.6) |

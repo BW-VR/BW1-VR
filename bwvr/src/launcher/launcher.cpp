@@ -1571,7 +1571,7 @@ const char* const kRetiredKeys[] = {
     "fake_controller_left_points", "fake_head_right_cm", "fake_head_up_cm",
     "fake_head_forward_cm", "grab_probe", "fake_controller_gestures",
     "fake_controller_gesture_cm", "fake_controller_front",
-    "fake_controller_stick_pct", "hint_profile",
+    "fake_controller_stick_pct", "fake_controller_pull_cm", "hint_profile",
     "hint_selftest",   "miracle_test_seeds", "miracle_test_cancel",
     "miracle_test_orbs", "miracle_test_save_steps", "spell_book_test_items",
     "fake_mouse_script", "fake_mouse_step_px", "fake_mouse_x_pct",

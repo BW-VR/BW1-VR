@@ -87,7 +87,7 @@
 //                            closes when that palm turns down. 0: the palm
 //                            shows the sheet of the gestures
 //                            (gesture_sheet.cpp)
-//   spell_book_pull_cm=10    the pull that takes a miracle out of the book,
+//   spell_book_pull_cm=20    the pull that takes a miracle out of the book,
 //                            in cm of hand motion, 3 to 30. 0: the grip
 //                            takes the miracle at once
 //   debug_all_miracles=0     1: each Worship Site of the player has every
@@ -454,8 +454,8 @@ bool g_into_ok = false;   // CreateSpellIntoHand has its bytes
 int g_save = 0;
 int g_saved = 0;
 bool g_test_keys = false;
-int g_pull_cm = 10;       // 0: the grip takes the miracle at once
-int g_pull_ini = 10;      // the value of bwvr.ini, for the debug page
+int g_pull_cm = 20;       // 0: the grip takes the miracle at once
+int g_pull_ini = 20;      // the value of bwvr.ini, for the debug page
 bool g_style = true;      // hint_card_style: the book is a page of parchment
 bool g_game_bubble = true;  // the game draws the bubble that the hand pulls out
 bool g_palm = false;      // spell_book_palm: the palm that turns up opens it
@@ -494,11 +494,11 @@ void ReadSettings() {
   g_into_ok = SameBytes(kIntoHand, kIntoHandBytes, sizeof(kIntoHandBytes));
   g_save = IniKey("spell_book_test_save", 0);
   g_test_keys = IniKey("test_keys", 0) != 0;
-  g_pull_cm = IniKey("spell_book_pull_cm", 10);
+  g_pull_cm = IniKey("spell_book_pull_cm", 20);
   if (g_pull_cm < 0) g_pull_cm = 0;
   if (g_pull_cm > 0 && g_pull_cm < 3) g_pull_cm = 3;
   if (g_pull_cm > 30) g_pull_cm = 30;
-  g_pull_ini = g_pull_cm > 0 ? g_pull_cm : 10;
+  g_pull_ini = g_pull_cm > 0 ? g_pull_cm : 20;
   g_game_bubble = IniKey("spell_book_bubble", 1) != 0;
   g_style = IniKey("hint_card_style", 1) != 0;
   g_palm = IniKey("spell_book_palm", 0) != 0;

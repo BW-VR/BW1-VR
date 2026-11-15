@@ -30,7 +30,7 @@ Related docs: `grab.md` (the grip), `throw.md` (the throw), `creature.md`
 - The first face button of the hand that does not point opens the spell
   book. It shows the miracles that the player can ask for now, with the
   pictures of their gestures. The grip of the pointing hand holds one, and a
-  pull of 10 cm takes it out of the book, with the game's own request. A
+  pull of 20 cm takes it out of the book, with the game's own request. A
   grip that opens before that puts the miracle back. The palm of that hand
   that turns up and stays up for 0.4 s also opens the book.
 - For tests, the debug switch "All miracles in the book" gives the book each
@@ -936,7 +936,7 @@ cell. The title of the book and the card of the pointing hand name it:
 "[Grip] Hold and pull out Fireball". Each new item gives the pulse `tick` on
 the pointing hand and the cue "ring move".
 
-**The pull** (`spell_book_pull_cm=10`). The grip on a picked item that the
+**The pull** (`spell_book_pull_cm=20`). The grip on a picked item that the
 game lets the player ask for does not take the miracle at once:
 
 1. The bubble of the item comes out of the book on an elastic band. It is
@@ -949,7 +949,7 @@ game lets the player ask for does not take the miracle at once:
    hand at 0.03 to 0.45, and the hand of the book at half of that. The
    buzz goes up with the pull, faster near the end (`PullBuzz`), times
    `haptics_pct`. The grip at the start gives the pulse `take`.
-3. When the gap from the cell to the hand is 10 cm more than at the grip
+3. When the gap from the cell to the hand is 20 cm more than at the grip
    (`PullShare`), the bubble snaps into the hand: the take below, a pulse of
    0.65 for 35 ms on the pointing hand and 0.26 on the other hand. The
    bubble stays at the hand until the Miracle is in the Hand, at most 20
@@ -1816,7 +1816,7 @@ so the plain game has no flat band.
 | `miracle_keep_deg` | the cone and 4 | The target of the last frame stays to this angle |
 | `miracle_max_m` | 4 | The most distance of a target in the aim, in m of the room. 0 is no limit |
 | `spell_book` | 1 | 0: the first face button of the hand that does not point has no job, and no book opens |
-| `spell_book_pull_cm` | 10 | The pull that takes a miracle out of the book, in cm of hand motion, 3 to 30. 0: the grip takes the miracle at once |
+| `spell_book_pull_cm` | 20 | The pull that takes a miracle out of the book, in cm of hand motion, 3 to 30. 0: the grip takes the miracle at once |
 | `spell_book_b` | 1 | 1: a tap of B (the second face button of the pointing hand, at most `miracle_cancel_ms` and 5 cm) opens and closes the book while no miracle is in the Hand. 0: B does not open the book |
 | `spell_book_palm` | 0 | 1: the palm that turns up opens the book, and the sheet of the gestures does not show at rest. 0: the palm does not open the book |
 | `gesture_sheet` | 1 | 1: the palm that turns up at rest shows the sheet of the gestures. 0: no sheet, and the palm shows the row of the game's pictures |

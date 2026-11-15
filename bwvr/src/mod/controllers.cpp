@@ -1253,7 +1253,14 @@ void UpdateScript() {
     if (step.input == kAimDebug && t == step.start) AimDebug();
     if (step.input == kAimMark && t == step.start) Seek(kSeekMark);
     if (step.input == kPull && t == step.start) {
-      // 15 cm toward the head center, or back to where the hand was.
+      // fake_controller_pull_cm (15) toward the head center, or back to
+      // where the hand was.
+      static int pull_cm = -1;
+      if (pull_cm < 0) {
+        pull_cm = IniInt("fake_controller_pull_cm", 15);
+        if (pull_cm < 1) pull_cm = 1;
+        if (pull_cm > 60) pull_cm = 60;
+      }
       float here[3];
       RightHandCm(here);
       for (int k = 0; k < 3; ++k) here[k] -= g_pull_cm[k];
@@ -1261,14 +1268,19 @@ void UpdateScript() {
       const bool back = controller_math::Length(g_pull_cm) > 0.5f;
       for (int k = 0; k < 3; ++k) {
         g_pull_from[k] = g_pull_cm[k];
-        g_pull_to[k] = back || !(length > 1.0f) ? 0.0f
-                                                : -here[k] / length * 15.0f;
+        g_pull_to[k] = back || !(length > 1.0f)
+                           ? 0.0f
+                           : -here[k] / length * static_cast<float>(pull_cm);
       }
       g_pull_start = g_frame;
       g_pull_frames = step.frames > 0 ? step.frames : 1;
-      ModLog("controllers  : the fake hand steps %s over %llu frames at frame "
-             "%llu", back ? "back to where it was" : "15 cm toward the head",
-             g_pull_frames, g_frame);
+      if (back) {
+        ModLog("controllers  : the fake hand steps back to where it was over "
+               "%llu frames at frame %llu", g_pull_frames, g_frame);
+      } else {
+        ModLog("controllers  : the fake hand steps %d cm toward the head over "
+               "%llu frames at frame %llu", pull_cm, g_pull_frames, g_frame);
+      }
     }
     if (step.input == kSeek && t == step.start) Seek(kSeekObject);
     if (step.input == kSeekCreature && t == step.start) Seek(kSeekLine);

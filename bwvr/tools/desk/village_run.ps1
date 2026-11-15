@@ -200,7 +200,7 @@ if ($Kind -eq 'totem') {
     # middle of the first item and then of the second. The grip closes on the
     # second item, the word "pull" moves the hand 9 cm toward the head, and
     # the grip opens: the bubble springs back into the book. The hand goes
-    # back. The grip closes again and the hand moves 15 cm: at 10 cm the
+    # back. The grip closes again and the hand moves 25 cm: at 20 cm the
     # bubble snaps into the hand, and the game puts the miracle in the Hand.
     # A tap of B cancels it. Then the pool of the site has no chants, X opens
     # the book again, the right hand goes to an item and the grip takes it:
@@ -220,7 +220,7 @@ if ($Kind -eq 'totem') {
                  'pull@1320+10 b@1350+5 x@1420+4 book@1440+1 shot@1452+1 grip@1470+20 shot@1482+1 ' +
                  'x@1540+4 shot@1560+1'
     }
-    $keys = "$keys;spell_book_test_save=16"
+    $keys = "$keys;spell_book_test_save=16;fake_controller_pull_cm=25"
 } elseif ($Kind -eq 'bookhand') {
     # The pointing hand in front of the page of the spell book and behind it
     # (bwvr/docs/ui-layer.md, "A hand in front of a card"). X opens the book,
@@ -279,7 +279,7 @@ if ($Kind -eq 'totem') {
     # and Heal, and its Worship Site has their icons. X opens the book at
     # page 1 of 6. The word "book" steps the right hand to a cell of the page
     # (spell_book_test_items), and a short grip on the cell "Next" (8) or
-    # "Back" (6) turns the page. The grip and a pull of 15 cm take:
+    # "Back" (6) turns the page. The grip and a pull of 25 cm take:
     #   Water (page 3, cell 4), a miracle with an icon, and a pour of 40
     #   frames. Then Lightning (page 2, cell 0), with no icon: the take drops
     #   Water first with the game's drop, and a pour. Then Heal Increase
@@ -307,7 +307,7 @@ if ($Kind -eq 'totem') {
                  'b@2100+5 shot@2140+1'
     }
     $keys = "$keys;debug_all_book=1;spell_book_test_items=8 8 4 6 0 8 3 8 8 5;" +
-            "seek_go=1827,2537;spell_book_test_save=8;test_frame_rate=60"
+            "seek_go=1827,2537;spell_book_test_save=8;fake_controller_pull_cm=25;test_frame_rate=60"
 } elseif ($Kind -eq 'orbsave') {
     # No orb of all miracles in a save (bwvr/docs/miracles.md, "What a save
     # keeps"). With debug_all_miracles=1 the Worship Site has no limit of

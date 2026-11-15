@@ -834,6 +834,9 @@ const Switch kSwitches[] = {
      L"off|on"},
 
     // Miracles
+    {kGroupMiracles, L"All in book", L"All 34 miracles in the book (test)",
+     "debug_all_book", SpellBookAllBookValue, SpellBookAllBookChange,
+     L"off|on", nullptr, true, L"All miracles in the book"},
     {kGroupMiracles, L"Unlock all", L"Unlock all miracles, no cost (test)",
      "debug_all_miracles", SpellBookAllValue, SpellBookAllChange, L"off|on",
      nullptr, true, L"Unlock all miracles"},
@@ -841,9 +844,6 @@ const Switch kSwitches[] = {
      "", MiracleOrbsValue, MiracleOrbsChange, L"not all|all out", nullptr,
      true,
      L"Spawn all miracle orbs"},
-    {kGroupMiracles, L"Book: all", L"All miracles and levels in the book",
-     "debug_all_book", SpellBookAllBookValue, SpellBookAllBookChange,
-     L"icons|all"},
     {kGroupMiracles, L"Spell book", L"X opens the spell book", "spell_book",
      SpellBookValue, SpellBookChange, L"off|on"},
     {kGroupMiracles, L"Book orbs", L"The game's orbs in the spell book",
@@ -1365,15 +1365,15 @@ const wchar_t* const kTips[] = {
     L"On: with a scaffold in the Hand, a roll of the wrist turns the building "
     L"one to one, and the building does not turn by itself. Off: the "
     L"building turns by itself, as in the game.",
+    // All in book
+    L"For a test only. The spell book shows all 34 miracles and levels, 6 "
+    L"on a page, with no cost in prayer power. The town learns nothing.",
     // Unlock all
-    L"For a test only. Each town knows each miracle, and the book shows each "
-    L"one. WARNING: a save, also the save at the exit, keeps these miracles.",
+    L"For a test only. Each town knows each miracle, with no cost in power. "
+    L"WARNING: a save, also the save at the exit, keeps these miracles.",
     // Spawn orbs
     L"For a test only. One orb of each miracle lies on the land in front of "
     L"you. A press makes the orbs that are gone. A save does not keep them.",
-    // Book: all
-    L"All: with Unlock all on, the spell book shows each miracle and power "
-    L"level. Icons: only the 6 icons of the Worship Site.",
     // Spell book
     L"On: the first face button of the hand that does not point opens the "
     L"spell book. Off: that button has no job.",

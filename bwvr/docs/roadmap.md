@@ -62,14 +62,15 @@ These items come before the other work.
     player of release 1.2.0, which has no book and no row of gestures, does
     not find how to ask for a miracle with a gesture. The tap of the grip on
     an icon of a Worship Site works there.
-  - The book of all miracles (`debug_all_miracles=1`, `debug_all_book=1`,
-    34 items) and the debug row "Spawn all miracle orbs" (`miracles.md`,
-    "The magic types of the game") have no desktop run yet: the recipe
-    `village_run.ps1 -Kind allmiracles` waits for the test laptop. No run
-    has cast a power level (Increase, Extreme), or the Creature miracles
-    Weak, Compassion, Angry and Itchy, in the mod.
-  - Only a headset shows if the 4 cm cells of the book of 34 items are easy
-    to pick, and if the orbs on the land are easy to reach.
+  - The book of all miracles (`debug_all_book=1`, 34 items on 6 pages,
+    `miracles.md`, "The book of all miracles") and the debug row "Spawn all
+    miracle orbs" have no desktop run yet: the recipes `village_run.ps1
+    -Kind allbook` and `-Kind orbsave` wait for the test laptop. No run has
+    cast a power level (Increase, Extreme), or the Creature miracles Weak,
+    Compassion, Angry and Itchy, in the mod. The tally line of each report
+    window says which of the 34 a session cast.
+  - Only a headset shows if the seals "Back" and "Next" are easy to pick,
+    and if the orbs on the land are easy to reach.
   - A save keeps the miracles that "Unlock all" gives the towns
     (`miracles.md`, "What a save keeps"). The mod deletes its orbs and puts
     the limit of prayer power back before each save, but it does not take

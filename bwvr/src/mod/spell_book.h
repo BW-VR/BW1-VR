@@ -5,8 +5,9 @@
 // and its grip takes the miracle: the request goes to the game in its own
 // way, as at the end of a chain of gestures. The debug switch "Unlock all" gives each Worship
 // Site of the player every miracle of the game, with no cost in prayer
-// power, and the book then shows each miracle and power level of the game
-// (debug_all_book=1).
+// power. The switch "All miracles in the book" (debug_all_book=1) shows each
+// miracle and power level of the game on pages of 6, with no change to the
+// town.
 
 #pragma once
 
@@ -61,6 +62,11 @@ int SpellBookAllValue();
 void SpellBookAllChange(const char* by);
 int SpellBookAllBookValue();
 void SpellBookAllBookChange(const char* by);
+
+// miracle.cpp: the game cast the miracle in the Hand (refused false), or
+// refused the cast with the reason. The tally of the book of all miracles
+// counts it when it is the miracle of the last take of that book.
+void SpellBookNoteCast(int type, int level, bool refused, const char* why);
 
 // hand_glow.cpp: true while the book is open with spell_book_point=1. Then
 // the glow at the Hand's point does not show: the page shows the point of

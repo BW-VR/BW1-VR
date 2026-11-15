@@ -54,14 +54,20 @@ inline void SpellBookChecks() {
           "the 30 miracles of the game are 6 columns of 5 rows",
           thirty.columns * 10 + thirty.rows, 65);
     Near("a cell of a book of 30 is 4 cm", thirty.cell_m, 0.04, 1e-6);
-    const Layout all = LayoutFor(34);
-    Check(all.columns == 6 && all.rows == 6,
-          "the 34 miracles of the book of all miracles are 6 columns of 6 "
-          "rows",
-          all.columns * 10 + all.rows, 66);
-    Check(PixelsOf(all.height_m) <= kTexture,
-          "the book of all miracles fits the texture", PixelsOf(all.height_m),
-          864);
+    // A page of the book of all miracles: the 6 cells of the normal book of
+    // 6, and a third row for the cells "Back" and "Next".
+    const Layout six = LayoutFor(6);
+    const Layout page = LayoutFor(kPageCells);
+    Check(page.columns == six.columns && page.rows == 3,
+          "a page of all miracles is 3 columns of 3 rows",
+          page.columns * 10 + page.rows, 33);
+    Near("its cells are the cells of the normal book of 6", page.cell_m,
+         six.cell_m, 1e-6);
+    float sx = 0.0f, sy = 0.0f, px = 0.0f, py = 0.0f;
+    ItemCenter(six, 4, &sx, &sy);
+    ItemCenter(page, 4, &px, &py);
+    Near("a cell of the page is across the page where it is in the book of 6",
+         px, sx, 1e-6);
     const Layout none = LayoutFor(0);
     Check(none.count == 0 && none.width_m == kEmptyWidthM &&
               none.height_m == kEmptyHeightM,
@@ -107,13 +113,15 @@ inline void SpellBookChecks() {
 
   // THE BOOK OF ALL MIRACLES. The flags and the magic types of the 30 seed
   // types of Scripts\info.dat (DETAIL_SPELL_SEEDS, +0x17C and +0x124): 7
-  // Creature miracles are off, and 7 miracles have power levels.
+  // Creature miracles are off, and 7 miracles have power levels. The seed
+  // types 12 to 27 are the Creature miracles.
   {
-    bool on[kKeyTypes];
+    bool on[kKeyTypes], creature[kKeyTypes];
     int levels[kKeyTypes];
     for (int t = 0; t < kKeyTypes; ++t) {
       on[t] = true;
       levels[t] = 1;
+      creature[t] = t >= 12 && t <= 27;
     }
     const int off[] = {17, 18, 22, 23, 24, 25, 26};
     for (int t : off) on[t] = false;
@@ -125,14 +133,20 @@ inline void SpellBookChecks() {
     levels[9] = 2;   // Water
     levels[29] = 3;  // Explosion
     int keys[kMaxItems];
-    const int n = AllKeys(on, levels, keys, kMaxItems);
+    const int n = AllKeys(on, levels, creature, keys, kMaxItems);
     Check(n == 34, "the book of all miracles has 23 miracles and 11 power "
                    "levels", n, 34);
-    Check(n <= kMaxItems, "they fit the book", n, kMaxItems);
     Check(keys[0] == KeyOf(0, 0) && keys[1] == KeyOf(0, 1) &&
-              keys[2] == KeyOf(0, 2) && keys[3] == KeyOf(1, 0),
-          "each miracle is followed by its power levels", keys[3], 1);
-    Check(keys[11] == KeyOf(6, 0), "Lightning is item 11", keys[11], 6);
+              keys[2] == KeyOf(0, 2) && keys[3] == KeyOf(2, 0),
+          "first the miracles with 3 levels, each followed by its levels",
+          keys[3], 2);
+    Check(keys[12] == KeyOf(3, 0) && keys[13] == KeyOf(3, 1),
+          "then the miracles with 2 levels", keys[12], 3);
+    Check(keys[18] == KeyOf(1, 0), "then the single miracles of the god",
+          keys[18], 1);
+    Check(keys[25] == KeyOf(12, 0) && keys[33] == KeyOf(27, 0),
+          "then the 9 Creature miracles, Freeze first and Itchy last",
+          keys[25], 12);
     bool none_off = true, decode = true;
     for (int i = 0; i < n; ++i) {
       const int t = TypeOfKey(keys[i]);
@@ -147,8 +161,57 @@ inline void SpellBookChecks() {
     Check(decode, "each key gives its seed type and its level back", decode,
           1);
     int few[4];
-    Check(AllKeys(on, levels, few, 4) == 4, "the list stops at the most",
-          AllKeys(on, levels, few, 4), 4);
+    Check(AllKeys(on, levels, creature, few, 4) == 4,
+          "the list stops at the most", AllKeys(on, levels, creature, few, 4),
+          4);
+
+    // THE PAGES: 6 miracles a page at most, and a family on one page.
+    int starts[kMostPages + 1];
+    const int pages = PagesOf(keys, n, starts, kMostPages);
+    Check(pages == 6, "34 items are 6 pages", pages, 6);
+    bool six = true, once = true, whole = true;
+    int seen = 0;
+    for (int p = 0; p < pages; ++p) {
+      const int size = starts[p + 1] - starts[p];
+      if (size < 1 || size > kPageItems) six = false;
+      seen += size;
+      // A family does not go past the end of its page.
+      const int last = starts[p + 1] - 1;
+      if (last + 1 < n && TypeOfKey(keys[last + 1]) == TypeOfKey(keys[last])) {
+        whole = false;
+      }
+    }
+    if (seen != n || starts[0] != 0 || starts[pages] != n) once = false;
+    Check(six, "each page has 1 to 6 miracles", six, 1);
+    Check(once, "each item is on one page", once, 1);
+    Check(whole, "no family goes over two pages", whole, 1);
+    Check(starts[6] - starts[5] == 4, "the last page has 4 miracles",
+          starts[6] - starts[5], 4);
+    Check(starts[1] == 6 && keys[3] == KeyOf(2, 0),
+          "page 1 has Storm and Fireball with their levels side by side",
+          starts[1], 6);
+    int cells[kPageCells];
+    PageCells(keys, starts, pages, 5, cells);
+    Check(cells[0] != kKeyEmpty && cells[3] != kKeyEmpty &&
+              cells[4] == kKeyEmpty && cells[5] == kKeyEmpty &&
+              cells[7] == kKeyEmpty,
+          "the last page has 4 cells of miracles and empty cells", cells[4],
+          kKeyEmpty);
+    Check(cells[kCellBack] == kKeyBack && cells[kCellNext] == kKeyNext &&
+              kCellBack == 6 && kCellNext == 8,
+          "Back is at the left of the third row, Next at the right",
+          cells[kCellNext], kKeyNext);
+    PageCells(keys, starts, pages, 99, cells);
+    Check(cells[0] == keys[starts[5]], "a page past the end shows the last",
+          cells[0], keys[starts[5]]);
+    Check(TurnPage(5, 6, true) == 0 && TurnPage(0, 6, false) == 5 &&
+              TurnPage(2, 6, true) == 3 && TurnPage(2, 6, false) == 1,
+          "Next and Back go round the pages", TurnPage(5, 6, true), 0);
+    int one_start[2];
+    Check(PagesOf(keys, 0, one_start, kMostPages) == 0 && one_start[0] == 0,
+          "no item gives no page", one_start[0], 0);
+    Check(PagesOf(keys, n, starts, 2) == 2 && starts[2] == 12,
+          "the pages stop at the most", starts[2], 12);
   }
 
   // THE PLACE OF THE BOOK. With the grip pose of no turn, the book of the

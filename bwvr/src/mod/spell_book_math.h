@@ -20,14 +20,14 @@
 
 namespace spell_book_math {
 
-// The most items: the 34 miracles of the book of all miracles fit in 6 rows
-// of 6 cells.
+// The most items of a list of the game: the 34 miracles and power levels of
+// the book of all miracles fit.
 const int kMaxItems = 36;
 
-// THE BOOK OF ALL MIRACLES (debug_all_miracles=1 and debug_all_book=1). An
-// item is a seed type at a power level: the key is the seed type plus
-// kKeyTypes times the level (0 the plain miracle, 1 the "Increase" and 2 the
-// "Extreme" of the game). The game has 30 seed types and 3 levels.
+// THE BOOK OF ALL MIRACLES (debug_all_book=1). An item is a seed type at a
+// power level: the key is the seed type plus kKeyTypes times the level (0
+// the plain miracle, 1 the "Increase" and 2 the "Extreme" of the game). The
+// game has 30 seed types and 3 levels.
 const int kKeyTypes = 30;
 const int kKeyLevels = 3;
 
@@ -35,24 +35,95 @@ inline int KeyOf(int type, int level) { return type + kKeyTypes * level; }
 inline int TypeOfKey(int key) { return key < 0 ? -1 : key % kKeyTypes; }
 inline int LevelOfKey(int key) { return key < 0 ? 0 : key / kKeyTypes; }
 
-// The items of the book of all miracles, in the order of the seed types of
-// the game, each one followed by its power levels. on[t] is the flag of the
-// game for seed type t (GSpellSeedInfo+0x17C), and levels[t] is the count of
-// its magic types (GSpellSeedInfo+0x124, 1 to 3). A type that the game has
-// off is not in the book. The count of the keys.
+// The items of the book of all miracles. on[t] is the flag of the game for
+// seed type t (GSpellSeedInfo+0x17C), levels[t] the count of its magic types
+// (GSpellSeedInfo+0x124, 1 to 3), and creature[t] true for a Creature
+// miracle. A type that the game has off is not in the book. The order: the
+// miracles with 3 levels, then with 2, then the single miracles of the god,
+// then the Creature miracles, each group in the order of the seed types.
+// Each miracle is followed by its levels. The count of the keys.
 inline int AllKeys(const bool on[kKeyTypes], const int levels[kKeyTypes],
-                   int out[], int most) {
+                   const bool creature[kKeyTypes], int out[], int most) {
   int count = 0;
-  for (int t = 0; t < kKeyTypes; ++t) {
-    if (!on[t]) continue;
-    int n = levels[t];
-    if (n < 1) n = 1;
-    if (n > kKeyLevels) n = kKeyLevels;
-    for (int level = 0; level < n && count < most; ++level) {
-      out[count++] = KeyOf(t, level);
+  // group 0, 1, 2: the god's miracles with 3, 2 and 1 levels. 3: Creature.
+  for (int group = 0; group < 4; ++group) {
+    for (int t = 0; t < kKeyTypes; ++t) {
+      if (!on[t]) continue;
+      int n = levels[t];
+      if (n < 1) n = 1;
+      if (n > kKeyLevels) n = kKeyLevels;
+      const int of = creature[t] ? 3 : kKeyLevels - n;
+      if (of != group) continue;
+      for (int level = 0; level < n && count < most; ++level) {
+        out[count++] = KeyOf(t, level);
+      }
     }
   }
   return count;
+}
+
+// THE PAGES of the book of all miracles. A page has the 6 miracles of a
+// Village Centre at most, in the cells of the normal book of 6 (3 columns
+// of 6.5 cm, 2 rows), and a third row with the cell "Back" at the left and
+// the cell "Next" at the right. A family (a miracle and its power levels)
+// stays on one page, so a miracle and its levels are side by side.
+// starts[p] is the index of the first key of page p, and starts[pages] is
+// the count of the keys. The count of the pages, at most `most`.
+const int kPageItems = 6;
+const int kPageCells = 9;
+const int kCellBack = 6;
+const int kCellNext = 8;
+const int kMostPages = 12;
+const int kKeyBack = 1000;   // the cell that goes to the page before
+const int kKeyNext = 1001;   // the cell that goes to the next page
+const int kKeyEmpty = -1;    // a cell with nothing in it
+inline bool IsNavKey(int key) { return key == kKeyBack || key == kKeyNext; }
+
+inline int PagesOf(const int keys[], int count, int starts[], int most) {
+  int pages = 0, on_page = 0, end = 0;
+  for (int i = 0; i < count;) {
+    int family = 1;
+    while (i + family < count &&
+           TypeOfKey(keys[i + family]) == TypeOfKey(keys[i])) {
+      ++family;
+    }
+    if (pages == 0 || on_page + family > kPageItems) {
+      if (pages >= most) break;
+      starts[pages++] = i;
+      on_page = 0;
+    }
+    on_page += family;
+    i += family;
+    end = i;
+  }
+  starts[pages] = end;
+  return pages;
+}
+
+// The 9 cells of page `page` (0 the first): its keys, kKeyEmpty in a cell
+// with no key, and the cells "Back" and "Next".
+inline void PageCells(const int keys[], const int starts[], int pages,
+                      int page, int cells[kPageCells]) {
+  for (int c = 0; c < kPageCells; ++c) cells[c] = kKeyEmpty;
+  if (pages <= 0) return;
+  if (page < 0) page = 0;
+  if (page >= pages) page = pages - 1;
+  int c = 0;
+  for (int i = starts[page]; i < starts[page + 1] && c < kPageItems; ++i) {
+    cells[c++] = keys[i];
+  }
+  cells[kCellBack] = kKeyBack;
+  cells[kCellNext] = kKeyNext;
+}
+
+// The page after a turn: "Next" on the last page goes to the first, and
+// "Back" on the first goes to the last.
+inline int TurnPage(int page, int pages, bool next) {
+  if (pages <= 0) return 0;
+  page += next ? 1 : -1;
+  if (page >= pages) page = 0;
+  if (page < 0) page = pages - 1;
+  return page;
 }
 
 // The picture: 32 pixels for each cm, as the ring. The ring and the book

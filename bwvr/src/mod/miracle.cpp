@@ -72,9 +72,11 @@ void ControllersGrabPulse(int hands, float amplitude, float seconds);
 bool TabletopClearMapWatched();
 // mod_main.cpp: the hook of GameOSFile::SaveAllGame is in.
 bool ModSaveHooked();
-// spell_book.cpp: the flags of the Worship Sites before and after a save.
+// spell_book.cpp: the flags of the Worship Sites before and after a save,
+// and the tally of the book of all miracles.
 void SpellBookBeforeSave();
 void SpellBookAfterSave();
+void SpellBookNoteCast(int type, int level, bool refused, const char* why);
 // head_pose.cpp: game units in a real meter.
 float HeadPoseScale();
 // hand_direct.cpp
@@ -612,6 +614,8 @@ int __fastcall h_Refuse(void* self, void* unused, void* held,
     g_refusal = WhyRefused(f, at, had_object);
     g_refusal_at = NowSeconds();
     ++g_refusals;
+    SpellBookNoteCast(f.info.type, f.power, true,
+                      miracle_math::RefusalWords(g_refusal));
     if (g_settings.on) HapticsPulse(haptics_math::kRefused);
     if (Log()) {
       ModLog("miracle      : the game refused the cast of %s at %.1f %.1f: "
@@ -661,6 +665,7 @@ void SaidCast(const Facts& f, bool on_object) {
     if (++g_pour_casts > 1) return;
     g_pour_from = g_frame;
   }
+  SpellBookNoteCast(f.info.type, f.power, false, "");
   if (!Log()) return;
   const int32_t* land =
       reinterpret_cast<const int32_t*>(f.face + kFaceNextLand);
@@ -1474,6 +1479,15 @@ int MiracleOrbsValue() {
 void MiracleOrbsChange(const char* by) {
   Init();
   SpawnOrbs(by);
+}
+
+// spell_book.cpp: a take of the book of all miracles while a miracle is in
+// the Hand. The game's own drop runs before the next interface step, as for
+// the button B: the miracle of a Worship Site gives its chants back, and a
+// one-off miracle is deleted (SpellSeed::ThrowObjectFromHand).
+void MiracleBookCancel() {
+  Init();
+  AskCancel("the spell book, for a different miracle");
 }
 
 void MiracleBeforeSave() {

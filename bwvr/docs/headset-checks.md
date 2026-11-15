@@ -405,12 +405,17 @@ a house, Water on burning trees and the dome of a Physical Shield. The other
 effects in the world are not proven yet.
 
 **Which miracles you have.** The towns of each land give their miracles.
-The debug switch "Unlock all" (debug page, the group Miracles) gives each
-town all miracles with no cost, and the spell book then shows all 34
-miracles and power levels. A save, also the save at the exit, keeps the
-miracles of the towns. The row "Spawn all miracle orbs" puts one orb of
-each miracle on the land in front of you, and the mod removes these orbs
-before each save.
+To test each miracle, use the debug switch "All miracles in the book"
+(debug page, the group Miracles, the first row). The spell book then shows
+all 34 miracles and power levels, 6 on a page, with the seals "Back" and
+"Next" under them. Each take costs no prayer power, and the town learns
+nothing. A take with a miracle in the Hand changes it. The row "Unlock all"
+gives each town all miracles, and a save, also the save at the exit, keeps
+them. The row "Spawn all miracle orbs" puts one orb of each miracle on the
+land in front of you, and the mod removes these orbs before each save.
+
+- Is a seal "Back" or "Next" easy to pick and to grip, and does the turn of
+  the page feel clear?
 
 ### Water ("Shower of Life")
 

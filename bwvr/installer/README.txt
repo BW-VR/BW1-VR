@@ -966,15 +966,20 @@ now, and the card says why. Press X again to close the book. With the
 left hand as the pointing hand, A opens the book at your right hand.
 Set spell_book=0 in bwvr.ini to give X no job.
 
-For tests, set debug_all_miracles=1 in bwvr.ini, or use "Unlock all
-miracles" in the group Miracles of the debug window (the item "debug"
-of the ring). Then your towns know every
-miracle of the game, and your Worship Sites have no limit of prayer
-power. The book then shows all 34 miracles of the game, with the
-Increase and Extreme forms. Warning: each save after that, also the
-save at the exit, keeps the miracles of the towns. The row "Spawn all
-miracle orbs" of the same group puts one bubble of each miracle on the
-land in front of you. The mod removes these bubbles before each save.
+To test each miracle, use "All miracles in the book" in the group
+Miracles of the debug window (the item "debug" of the ring), or set
+debug_all_book=1 in bwvr.ini. Then the book shows all 34 miracles of
+the game, with the Increase and Extreme forms, 6 on a page. Grip the
+seal "Next" or "Back" under them to turn the page. A miracle from
+this book costs no prayer power, and your towns learn nothing. Take a
+miracle while one is in your Hand to change it.
+
+The row "Unlock all miracles" of the same group gives your towns
+every miracle of the game, and your Worship Sites no limit of prayer
+power. Warning: each save after that, also the save at the exit, keeps
+the miracles of the towns. The row "Spawn all miracle orbs" puts one
+bubble of each miracle on the land in front of you. The mod removes
+these bubbles before each save.
 
 A miracle from a reward or a dispenser is a bubble on the land. Close
 the grip on the bubble to carry it. Then press the trigger to use it.

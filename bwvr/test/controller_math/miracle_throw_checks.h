@@ -42,6 +42,40 @@ inline void MiracleThrowChecks() {
         "straight up has no side", SideDegrees(ahead, straight_up), 0.0);
   Near("up and ahead is 45 degrees up", UpDegrees(up_ahead), 45.0, 0.01);
 
+  // THE BALLS OF A FIREBALL. The speed map of the game, and the turn of each
+  // ball of the three of Fireball Increase. The desktop runs measured the
+  // last ball at the start of its flight: 7.24 degrees to the right for a
+  // cast of 162.3 units a second, 9.00 for 59.5 and 6.84 for 190.0.
+  Near("a cast of 30 units a second gives a ball of 30", FireballSpeed(30.0f),
+       30.0, 1e-4);
+  Near("a cast of 162.26 gives a ball of 92.10", FireballSpeed(162.26f),
+       92.10, 0.01);
+  Near("a cast of 59.53 gives a ball of 53.57", FireballSpeed(59.53f), 53.57,
+       0.01);
+  Near("a cast of 1000 gives the top speed of 200", FireballSpeed(1000.0f),
+       200.0, 1e-4);
+  Near("the fan at no speed is 0.2 rad", FireballFanRadians(0.0f), 0.2, 1e-6);
+  Near("the fan at the top speed is 0.04 rad", FireballFanRadians(250.0f),
+       0.04, 1e-6);
+  Near("ball 0 of 3 flies along the cast",
+       FireballBallSideDegrees(0, 3, 162.26f), 0.0, 1e-6);
+  Near("ball 1 of 3 at 162.3 units a second: 7.24 degrees to the left",
+       FireballBallSideDegrees(1, 3, 162.26f), -7.24, 0.02);
+  Near("ball 2 of 3 at 162.3 units a second: 7.24 degrees to the right",
+       FireballBallSideDegrees(2, 3, 162.26f), 7.24, 0.02);
+  Near("ball 2 of 3 at 59.5 units a second: 9.00 degrees to the right",
+       FireballBallSideDegrees(2, 3, 59.53f), 9.00, 0.02);
+  Near("ball 2 of 3 at 190.0 units a second: 6.77 degrees to the right",
+       FireballBallSideDegrees(2, 3, 189.97f), 6.77, 0.02);
+  Near("the plain Fireball has one ball on the cast",
+       FireballBallSideDegrees(1, 1, 162.26f), 0.0, 1e-6);
+  {
+    double sum = 0.0;
+    for (int i = 0; i < 8; ++i) sum += FireballBallSideDegrees(i, 8, 100.0f);
+    Near("the eight balls of Extreme turn left and right by the same sum", sum,
+         0.0, 1e-3);
+  }
+
   // THE GAME'S FILTER. A constant velocity for one time constant (1 / r, 62
   // ms) in steps of 1 ms gives 1 - 1/e of it, and dt = 0 changes nothing.
   {

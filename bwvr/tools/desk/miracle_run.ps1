@@ -27,7 +27,7 @@
 #   the Hand after a pour, and the tap takes it out. Then Heal (7): a press.
 #   Then a Creature seed that the Hand carries, and the trigger.
 # The other kinds (cancel, place, shield, aim, away, fire, firelong,
-# pshield, teleport, storm, throwdir) have a comment at their steps below. -Seeds gives other
+# pshield, teleport, storm, throwdir, throwspeed) have a comment at their steps below. -Seeds gives other
 # seed types to the steps of a kind (the types are in bwvr/docs/miracles.md),
 # and -Steps gives other steps.
 param(
@@ -216,6 +216,32 @@ if ($Kind -eq 'away') {
         }
         $Steps += ' seek@2640+1 grip@2680+3 point@2760+1 grip@2800+150 stick_left@2830+8 ' +
                   'stick_up@2870+8 stick_right@2910+8 lstick_up@2920+20'
+    }
+} elseif ($Kind -eq 'throwspeed') {
+    # Four Fireballs (2) thrown ahead, as -Kind throwdir, at two speeds and
+    # two scales of the God view (docs/throw.md, "A thrown miracle"). At 44.4
+    # units a meter: a swing that steps 6 cm two times (about 3.6 m/s), then
+    # one that steps 2 cm two times (about 1.2 m/s). Then two zoom steps out,
+    # to 100 units a meter, and the same two swings. The lines "miracle
+    # throw" give the velocity that the cast got, the balls and the path of
+    # ball 0. The points go round, and the list of the controller starts
+    # with its own base point: the two steps "point" at frames 1610 and 1620
+    # take the base point and the first point of this list before the zoom,
+    # so the third seed comes under the first point. Each seek goes to a seed
+    # (seek_class), because at 100 units a meter a tree is nearer.
+    if ($Seeds -eq '') { $Seeds = '2@930 2@1350 2@1770 2@2190' }
+    $keys = "$keys;test_frame_rate=60;seek_plan=hold,hold,hold,hold;" +
+            'seek_class=OneOffSpellSeed,OneOffSpellSeed,OneOffSpellSeed,OneOffSpellSeed'
+    $points = '0,-30,60 ' +
+              '0,-32,40 0,-31,46 0,-30,52 ' +
+              '0,-32,46 0,-31,48 0,-30,50'
+    if ($Steps -eq '') {
+        $Steps = 'stick_up@800+10 stick_up@830+10 look@860+5000 point@900+1'
+        foreach ($b in 930, 1350, 1770, 2190) {
+            $Steps += " seek@$($b + 30)+1 grip@$($b + 70)+3 point@$($b + 150)+1 grip@$($b + 190)+60" +
+                      " point@$($b + 247)+1 point@$($b + 248)+1"
+        }
+        $Steps += ' point@1610+1 point@1620+1 stick_down@1640+10 stick_down@1680+10'
     }
 } elseif ($Kind -eq 'cancel') {
     # A shake of a new miracle, the button on a new miracle, and a shake while

@@ -1347,8 +1347,23 @@ direction and with the speed of the real hand, as a thrown object does.
   `MagicFireBall`. `AttatchFireBallToAtom::ModifyAtomCollection`
   (`0x00682FD0`) makes it with `MagicFireBall::Create` at the place of the
   first atom of the collection (`+0x40`), and it moves the ball with that
-  atom on each update. The atom has its place at `+0x80`, `+0x84` and
-  `+0x88`.
+  atom on each update. It does this for each atom of the list (the next
+  atom is at `+0x18`). The atom has its place at `+0x80`, `+0x84` and
+  `+0x88`, and its velocity at `+0x34`.
+- **The balls.** `CreateWithInitialDirection::ModifyAtomCollection`
+  (`0x0069E950`) makes the atoms. For the player's cast it takes the
+  direction of the velocity of the cast, 0.3 rad higher (`fn_0069E6B0`),
+  and a speed from a map of the speed of the cast (`fn_0069E620`): the same
+  up to 50 units a second, then a line to 200 at 450, and 200 above. Ball 0
+  gets that direction and speed. The plain Fireball has one ball. Increase
+  has 3 and Extreme has 8 (`NumAtoms` of the particle files
+  `SF_FireBallThrowPU` and `PU2`). Ball i of n, with i from 1, turns by
+  cos(phi) times the fan about up and by sin(phi) times the fan up, with
+  phi = 2 pi (i - 1) / (n - 1). Its speed is up to 30 percent less. The fan
+  is 0.2 rad at no speed and 0.04 rad at the top speed of 200. So Increase
+  throws three balls: ahead, to the left and to the right by the same angle.
+  Each new atom goes to the head of the list, so the first atom of the list
+  is the last ball. For Increase that is the ball to the right.
 
 So the game's velocity of a thrown miracle is the mean of about the last 60
 ms of the motion of the Hand's point, read when the grip opened. A swing that
@@ -1397,18 +1412,23 @@ the real hand, its time before the cast, the time of the opening of the
 grip, the speed and the direction of the game's filter (degrees to the right
 or the left of the real hand), the game's turn of the Hand, and the velocity
 and the turn that the cast got. For a
-Fireball: where its flight starts and how far that is from the Hand's point,
-then its place 0.25, 0.5, 1, 2 and 4 s after the start and its last place.
-Each place has the distance across the land from the start, and how many
-degrees its path goes to the right or the left of the velocity that the cast
-got and of the game's filter.
+Fireball: how many balls it has, where ball 0 starts and how far that is
+from the Hand's point, the direction of ball 0 against the velocity that the
+cast got, the turn of each other ball, and the game's fan for that speed.
+Then the place of ball 0 0.25, 0.5, 1, 2 and 4 s after the start, and the
+last place of each ball. Each place has the distance across the land from
+the start, and how many degrees the path goes to the right or the left of
+the velocity that the cast got and of the game's filter.
 
 ### Checks
 
 `MiracleThrowChecks` in `bwvr/test/controller_math/miracle_throw_checks.h`
 covers the side of a direction in the axes of the game, the game's filter
 (1 - 1/e of a step after 62 ms), the velocity in a turned room at a scale,
-and the curved swing above.
+the curved swing above, and the balls (`FireballSpeed`, `FireballFanRadians`
+and `FireballBallSideDegrees` in `miracle_throw_math.h`): the speed map, the
+fan, and the turn of each ball of Increase for the three speeds of cast that
+the desktop runs measured (7.24, 9.00 and 6.77 degrees).
 
 ### Desktop runs
 
@@ -1417,23 +1437,34 @@ key `miracle_test_seeds`: ahead, to the left, to the right, and on a swing
 that curves to the left. A fifth Fireball stays in the Hand with the grip
 closed while the stick turns the view and zooms (`god-view.md`, section 4).
 The scripted hand steps 6 cm on each of the last two frames of the grip, at
-44.4 units per meter.
+44.4 units per meter. `miracle_run.ps1 -Kind throwspeed` throws four
+Fireballs ahead: with steps of 6 cm and of 2 cm, at 44.4 and at 100 units
+per meter. The seeds of the test key are Fireball Increase, so each cast has
+three balls.
 
 | `miracle_throw` | The cast gets | The flight of the Fireball |
 | --- | --- | --- |
-| 1 | 3.65 to 3.94 m/s of the real hand. The ahead, left and right throws go in three directions 90 degrees apart. The turn is 0 (the game had 5.23 for the curved swing) | 130 to 134 units across the land in 2 s. The path is straight, 6.5 to 8 degrees to the right of the velocity of the cast, also for the curved swing |
-| 2 | The same velocity, and the game's turn | The same, but the Fireball of the curved swing turns to the left: its path is 5, 12.5 and 20 degrees to the left of the cast after 0.3, 0.6 and 1 s |
-| 0 | 0.68 to 0.73 m/s: the game's filter, because the scripted hand stops one frame before the opening | 34 to 60 units across the land in all. 8 to 12 degrees to the right of the cast at first |
+| 1 | 3.65 to 4.36 m/s of the real hand. The ahead, left and right throws go in three directions 90 degrees apart. The turn is 0 (the game had 5.2 for the curved swing) | Ball 0 starts within 0.2 degrees of the direction of the cast, and its path is within 1.3 degrees of it after 1 s and within 2.3 degrees after 2 s, also for the curved swing. The other two balls start 6.5 to 7.4 degrees to the left and to the right, as the game's fan for that speed (6.7 to 7.24 degrees) |
+| 1, `throwspeed` | 3.65 and 1.34 m/s at 44.4 units per meter, 2.64 and 1.34 m/s at 100 | Ball 0 starts within 0.11 degrees of the cast and is within 1.2 degrees of it after 2 s. The fan is 7.24, 9.00, 5.49 and 7.72 degrees, and the two other balls start within 0.2 degrees of it |
+| 2 | The same velocity, and the game's turn | The same, but the balls of the curved swing turn to the left: the ball to the right goes from 7 degrees to the right of the cast at the start to 5, 12.5 and 20 degrees to the left after 0.3, 0.6 and 1 s |
+| 0 | 0.68 to 0.73 m/s: the game's filter, because the scripted hand stops one frame before the opening | 34 to 60 units across the land in all. The ball to the right starts 8 to 12 degrees to the right of the cast: the fan at this low speed is 10 degrees |
+
+The speed of ball 0 across the land is the speed map of the game and the
+elevation of 0.3 rad: a cast of 162 units a second gives a ball of 92 units
+a second, 82 across the land, and the flight makes about 80 units a second.
 
 ### Open
 
-- In each direction a Fireball flies 6.5 to 8 degrees to the right of the
-  velocity that the cast gets, with the turn 0, at 44.4 units per meter and
-  about 3.7 m/s. The cause is in the particle system of the Fireball and is
-  not found. Not measured: other scales and speeds.
-- The horizontal speed of a Fireball in its flight is about 45 percent of
-  the speed that the cast gets (69 of 160 units a second). Its range at each
-  scale of the God view is not measured in a headset (`roadmap.md`, F6).
+- Fireball Increase and Extreme throw a fan of balls, and the fan is wider
+  at a low speed of the cast (0.2 rad at no speed, 0.04 rad at 450 units a
+  second). A throw of 3.7 m/s at 44.4 units per meter gives 7 degrees. The
+  speed of a throw of the mouse in the plain game is not measured. Only a
+  headset shows if the player sees the side balls as a throw that goes
+  wrong.
+- No run throws the plain Fireball (one ball) or Extreme (8 balls). The
+  test seeds are Increase.
+- The range of a Fireball at each scale of the God view is not measured in
+  a headset (`roadmap.md`, F6).
 - The flocks get the same velocity and no turn. No run shows where a flock
   goes.
 - Only a headset shows a real swing: the speed and the turn of the game for

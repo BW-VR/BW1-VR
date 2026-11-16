@@ -20,8 +20,14 @@
 // - The particle system of a Fireball carries a MagicFireBall:
 //   AttatchFireBallToAtom::ModifyAtomCollection (0x00682FD0, thiscall, the
 //   AtomCollection, ret 4) makes it with MagicFireBall::Create at the place
-//   of the first atom of the collection (+0x40), and moves it with that atom
-//   on each update. The atom has its place at +0x80, +0x84 and +0x88.
+//   of each atom of the collection (the list starts at +0x40, the next atom
+//   is at +0x18), and moves it with that atom on each update. The atom has
+//   its place at +0x80, +0x84 and +0x88 and its velocity at +0x34.
+// - The plain Fireball has one ball. Increase has 3 and Extreme 8, in a fan
+//   about the direction of the cast (miracle_throw_math.h, "The balls of a
+//   Fireball"). Ball 0 flies along the cast. The particle system puts each
+//   new atom at the head of its list, so the first atom of the list is the
+//   last ball, which for Increase flies to the right of the cast.
 //
 // WHAT THE MOD DOES (miracle_throw=1). Before the cast reads them, the mod
 // writes the velocity of the throw of an object to CHand+0x48C8: the top
@@ -31,8 +37,9 @@
 // and it flies straight, as a thrown object does. miracle_throw=2 keeps the
 // game's turn, and 0 keeps the game's velocity and turn. The log has a line
 // for each throw (the real hand, the game's filter, the turn, and what the
-// cast got), and the path of the Fireball after it: the hook on
-// ModifyAtomCollection only reads the place of the atom.
+// cast got), the balls and their turn from the cast, the path of ball 0 and
+// the last place of each ball: the hook on ModifyAtomCollection only reads the
+// atoms.
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -69,6 +76,8 @@ const int kHandPlace = 0x78;     // CHand: the Hand's point
 const uintptr_t kModifyFireBall = 0x00682FD0;
 const int kCollectionAtom = 0x40;
 const int kAtomPlace = 0x80;
+const int kAtomNext = 0x18;      // AtomCore: the next atom of the list
+const int kAtomVelocity = 0x34;  // AtomCore: units a second
 
 typedef bool(__fastcall* ModifyFn)(void* self, void* unused, void* collection);
 ModifyFn o_Modify = nullptr;
@@ -103,20 +112,27 @@ Cast g_next = {};
 Cast g_cast = {};
 const double kCastWait = 1.0;
 
-// The flight of a Fireball: the place of its atom over time.
+// The flight of a ball of a Fireball: the place of its atom over time. The
+// plain Fireball has one ball, and its power levels have 3 and 8
+// (miracle_throw_math.h, "The balls of a Fireball").
 struct Track {
   bool active;
   void* atom;
   Cast cast;
+  int ball;    // 0 is the ball on the cast, made first
+  int balls;   // the balls of the cast
   double t0;
   float start[3];
   float last[3];
   double last_time;
   int marks;
 };
-const int kTracks = 4;
+const int kTracks = 16;
 Track g_tracks[kTracks] = {};
-// The times after the start of a flight at which the log has its place.
+// The most balls that the log follows in one collection.
+const int kMostBalls = 8;
+// The times after the start of a flight at which the log has the place of
+// ball 0.
 const double kMarks[] = {0.25, 0.5, 1.0, 2.0, 4.0};
 const int kMarkCount = sizeof(kMarks) / sizeof(kMarks[0]);
 // A flight ends in the log when its atom has no update for this time, or
@@ -157,6 +173,15 @@ float Speed(const float v[3]) {
   return sqrtf(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
 }
 
+bool ReadVector(const uint8_t* base, int offset, float out[3]) {
+  if (base == nullptr || IsBadReadPtr(base + offset, 3 * sizeof(float))) {
+    return false;
+  }
+  const float* p = reinterpret_cast<const float*>(base + offset);
+  for (int i = 0; i < 3; ++i) out[i] = p[i];
+  return true;
+}
+
 // The place of a flight at a mark, with the direction of its path from the
 // start against what the cast got and against the game's filter.
 void LogPlace(const Track& t, const float at[3], double seconds,
@@ -169,14 +194,14 @@ void LogPlace(const Track& t, const float at[3], double seconds,
   const float units = t.cast.units > 0.0f ? t.cast.units : 1.0f;
   const float to_sent = SideDegrees(t.cast.sent, path);
   const float to_game = SideDegrees(t.cast.game, path);
-  ModLog("miracle throw: the %s of frame %llu %s %.1f %.1f %.1f, %.2f s after "
-         "it started, %.1f units (%.2f m of the room) across the land from "
-         "its start and %.1f units up. Its path goes %.1f degrees to the %s "
-         "of the velocity that the cast got, and %.1f degrees to the %s of "
-         "the game's filter of the Hand",
-         t.cast.name, t.cast.frame, what, at[0], at[1], at[2], seconds,
-         across, across / units, path[1], fabsf(to_sent), SideWord(to_sent),
-         fabsf(to_game), SideWord(to_game));
+  ModLog("miracle throw: ball %d of %d of the %s of frame %llu %s %.1f %.1f "
+         "%.1f, %.2f s after it started, %.1f units (%.2f m of the room) "
+         "across the land from its start and %.1f units up. Its path goes "
+         "%.1f degrees to the %s of the velocity that the cast got, and %.1f "
+         "degrees to the %s of the game's filter of the Hand",
+         t.ball, t.balls, t.cast.name, t.cast.frame, what, at[0], at[1], at[2],
+         seconds, across, across / units, path[1], fabsf(to_sent),
+         SideWord(to_sent), fabsf(to_game), SideWord(to_game));
 }
 
 Track* TrackOf(void* atom) {
@@ -195,35 +220,73 @@ Track* FreeTrack() {
   return oldest;
 }
 
-void Follow(void* atom, const float at[3]) {
-  const double now = Now();
-  Track* t = TrackOf(atom);
-  if (t == nullptr) {
-    if (!g_cast.valid || now - g_cast.time > kCastWait) return;
-    t = FreeTrack();
+// The first sight of the balls of a cast. The particle system puts each new
+// atom at the head of its list, so the last atom of the list is ball 0, the
+// ball on the cast. One line gives the start of ball 0 and the turn of each
+// ball from the cast, with the turn of the game's fan for that speed.
+void StartBalls(uint8_t* const* atoms, int count, double now) {
+  const Cast cast = g_cast;
+  g_cast.valid = false;
+  char turns[kMostBalls * 12] = {};
+  size_t used = 0;
+  float start0[3] = {0.0f, 0.0f, 0.0f};
+  float velocity0[3] = {0.0f, 0.0f, 0.0f};
+  for (int k = 0; k < count; ++k) {
+    uint8_t* atom = atoms[k];
+    float at[3], velocity[3] = {0.0f, 0.0f, 0.0f};
+    if (!ReadVector(atom, kAtomPlace, at)) continue;
+    ReadVector(atom, kAtomVelocity, velocity);
+    Track* t = FreeTrack();
     memset(t, 0, sizeof(*t));
     t->active = true;
     t->atom = atom;
-    t->cast = g_cast;
-    g_cast.valid = false;
+    t->cast = cast;
+    t->ball = count - 1 - k;
+    t->balls = count;
     t->t0 = now;
     for (int i = 0; i < 3; ++i) t->start[i] = t->last[i] = at[i];
     t->last_time = now;
-    if (g_path_logs < kMaxPathLogs) {
-      ++g_path_logs;
-      const float units = t->cast.units > 0.0f ? t->cast.units : 1.0f;
-      const float d[3] = {at[0] - t->cast.hand[0], at[1] - t->cast.hand[1],
-                          at[2] - t->cast.hand[2]};
-      ModLog("miracle throw: the %s of frame %llu starts its flight at %.1f "
-             "%.1f %.1f, %.0f ms after the cast and %.1f cm of the room from "
-             "the Hand's point at the cast",
-             t->cast.name, t->cast.frame, at[0], at[1], at[2],
-             (now - t->cast.time) * 1000.0, Speed(d) / units * 100.0f);
+    if (t->ball == 0) {
+      for (int i = 0; i < 3; ++i) {
+        start0[i] = at[i];
+        velocity0[i] = velocity[i];
+      }
+    } else if (used + 12 < sizeof(turns)) {
+      const float side = SideDegrees(cast.sent, velocity);
+      const int wrote = sprintf_s(turns + used, sizeof(turns) - used,
+                                  "%s%d %.2f", used == 0 ? "" : ", ", t->ball,
+                                  side);
+      if (wrote > 0) used += static_cast<size_t>(wrote);
     }
-    return;
   }
+  if (g_path_logs >= kMaxPathLogs) return;
+  ++g_path_logs;
+  const float units = cast.units > 0.0f ? cast.units : 1.0f;
+  const float d[3] = {start0[0] - cast.hand[0], start0[1] - cast.hand[1],
+                      start0[2] - cast.hand[2]};
+  const float side0 = SideDegrees(cast.sent, velocity0);
+  const float fan = miracle_throw_math::FireballFanRadians(
+                        miracle_throw_math::FireballSpeed(Speed(cast.sent))) *
+                    57.29578f;
+  ModLog("miracle throw: the %s of frame %llu has %d balls. Ball 0 starts its "
+         "flight at %.1f %.1f %.1f, %.0f ms after the cast and %.1f cm of the "
+         "room from the Hand's point at the cast. It moves %.2f degrees to the "
+         "%s of the velocity that the cast got and %.1f degrees up. The other "
+         "balls move these degrees to the right of the cast: %s. The game's "
+         "fan for this speed is %.2f degrees",
+         cast.name, cast.frame, count, start0[0], start0[1], start0[2],
+         (now - cast.time) * 1000.0, Speed(d) / units * 100.0f, fabsf(side0),
+         SideWord(side0), UpDegrees(velocity0), used == 0 ? "none" : turns,
+         fan);
+}
+
+void Follow(uint8_t* atom, double now) {
+  Track* t = TrackOf(atom);
+  float at[3];
+  if (t == nullptr || !ReadVector(atom, kAtomPlace, at)) return;
   for (int i = 0; i < 3; ++i) t->last[i] = at[i];
   t->last_time = now;
+  if (t->ball != 0) return;
   while (t->marks < kMarkCount && now - t->t0 >= kMarks[t->marks]) {
     LogPlace(*t, at, now - t->t0, "is at");
     ++t->marks;
@@ -231,15 +294,24 @@ void Follow(void* atom, const float at[3]) {
 }
 
 bool __fastcall h_Modify(void* self, void* unused, void* collection) {
-  if (g_installed && collection != nullptr &&
-      !IsBadReadPtr(static_cast<uint8_t*>(collection) + kCollectionAtom,
-                    sizeof(void*))) {
-    uint8_t* atom = *reinterpret_cast<uint8_t* const*>(
-        static_cast<uint8_t*>(collection) + kCollectionAtom);
-    if (atom != nullptr && !IsBadReadPtr(atom + kAtomPlace, 3 * sizeof(float))) {
-      const float* p = reinterpret_cast<const float*>(atom + kAtomPlace);
-      const float at[3] = {p[0], p[1], p[2]};
-      Follow(atom, at);
+  uint8_t* c = static_cast<uint8_t*>(collection);
+  if (g_installed && c != nullptr &&
+      !IsBadReadPtr(c + kCollectionAtom, sizeof(void*))) {
+    // The atoms of the collection, from the head of its list.
+    uint8_t* atoms[kMostBalls];
+    int count = 0;
+    uint8_t* atom = *reinterpret_cast<uint8_t* const*>(c + kCollectionAtom);
+    while (atom != nullptr && count < kMostBalls &&
+           !IsBadReadPtr(atom + kAtomNext, sizeof(void*))) {
+      atoms[count++] = atom;
+      atom = *reinterpret_cast<uint8_t* const*>(atom + kAtomNext);
+    }
+    const double now = Now();
+    if (count > 0 && TrackOf(atoms[0]) == nullptr && g_cast.valid &&
+        now - g_cast.time <= kCastWait) {
+      StartBalls(atoms, count, now);
+    } else {
+      for (int k = 0; k < count; ++k) Follow(atoms[k], now);
     }
   }
   return o_Modify(self, unused, collection);

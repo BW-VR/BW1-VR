@@ -250,8 +250,9 @@ agents: the log does not tell the item yet.
 - **A Fireball that does not go where it is thrown.** Log: `miracle throw:`
   gives the top speed of the real hand, how many degrees the game's own
   filter of the Hand was to the right or the left of it, what the cast got,
-  and how many degrees the path of the Fireball goes to the side of that
-  (`throw.md`, "A thrown miracle").
+  how many balls the Fireball has, and how many degrees the path of ball 0
+  goes to the side of that. Increase and Extreme throw a fan of balls about
+  ball 0 (`throw.md`, "A thrown miracle").
 - **A miracle that shows nothing** (Storm, a shield, Shrink, Enlarge,
   Invisibility). Log: `miracle watch:` says if the game made the spell, its
   radius in cm of the room and how long it stands, or what a Creature

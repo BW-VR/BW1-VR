@@ -73,4 +73,47 @@ inline float UpDegrees(const float v[3]) {
   return atan2f(v[1], flat) * 57.29578f;
 }
 
+// THE BALLS OF A FIREBALL [V, runblack.exe 1.42]. The particle system of a
+// Fireball makes its balls with CreateWithInitialDirection::ModifyAtomCollection
+// (0x0069E950). For the player's cast it takes the direction of the velocity
+// that the cast got, 0.3 rad (Elevation) higher (fn_0069E6B0), and a speed
+// from the speed of the cast (fn_0069E620, below). Ball 0 has that direction
+// and speed. The power levels have more balls (NumAtoms of
+// SF_FireBallThrowPU: 3 for Increase, PU2: 8 for Extreme). Ball i of n, i from
+// 1, turns by cos(phi) times the fan about up and by sin(phi) times the fan
+// up, with phi = 2 pi (i - 1) / (n - 1), and its speed is up to 30 percent less
+// (SpeedRandomFrac). The fan goes from 0.2 rad at no speed to 0.04 rad at the
+// top speed (HorozScatterAtMinSpeed, AtMaxSpeed, and the same up). So the
+// three balls of Increase fly ahead, to the left and to the right by the same
+// angle. The plain Fireball has one ball.
+
+// fn_0069E620: the speed of a ball from the speed of the cast, in units a
+// second. Up to 50 it is the same, then a line to 200 at 450, and 200 above.
+inline float FireballSpeed(float cast_speed) {
+  if (!(cast_speed > 0.0f)) return 0.0f;
+  if (cast_speed < 50.0f) return cast_speed;
+  if (cast_speed >= 450.0f) return 200.0f;
+  return 50.0f + (cast_speed - 50.0f) * (150.0f / 400.0f);
+}
+
+// The fan of the balls of a power level, in radians, for the speed of a ball:
+// 0.2 at no speed, 0.04 at the top speed of 200.
+inline float FireballFanRadians(float ball_speed) {
+  float part = ball_speed / 200.0f;
+  if (!(part > 0.0f)) part = 0.0f;
+  if (part > 1.0f) part = 1.0f;
+  return 0.2f + (0.04f - 0.2f) * part;
+}
+
+// The turn about up of ball i of n, in degrees, positive to the right (as
+// SideDegrees). The game adds the fan to the angle atan2(z, x), which is a
+// turn to the left, so a positive cos(phi) is a turn to the left.
+inline float FireballBallSideDegrees(int ball, int balls, float cast_speed) {
+  if (ball < 1 || balls < 2) return 0.0f;
+  const float phi = 6.2831853f * static_cast<float>(ball - 1) /
+                    static_cast<float>(balls - 1);
+  return -cosf(phi) * FireballFanRadians(FireballSpeed(cast_speed)) *
+         57.29578f;
+}
+
 }  // namespace miracle_throw_math

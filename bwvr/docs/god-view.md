@@ -533,7 +533,11 @@ the view turns with a miracle in the Hand as it does with an empty Hand. The
 log has a line for a turn that a miracle lets through and for a refused turn
 with its cause (`comfort : the snap turn goes on while a miracle in the Hand
 holds the Action button of the game`, `comfort : the snap turn is refused:
-...`), 30 at most.
+...`), 30 at most. The desktop run `miracle_run.ps1 -Kind throwdir` with
+`snap_turn=4` holds a Fireball with the grip closed: the smooth turn turns
+12 degrees to the left and 12 to the right in 8 frames each at 90 degrees a
+second, `MayTurn` refuses none of the 16 requests, and a zoom step and the
+walk of the other stick also go.
 
 The smooth turn writes as a snap turn writes. A turn alone turns the game
 camera about its own focus (`god_turn_keeps_focus`), and the version of the

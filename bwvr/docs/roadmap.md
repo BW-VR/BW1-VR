@@ -79,7 +79,9 @@ These items come before the other work.
     the miracles of the towns back. The recipe `village_run.ps1 -Kind
     orbsave` waits for the test laptop.
   - The orbs in the cells: only a headset shows how they look in their
-    holes of the page, with the land behind the glass.
+    sockets of the scroll (`spell_book_look=1`), with the land behind the
+    glass, and if the gold of the socket under the hand is clear at arm
+    length.
   - The leash gestures and the scribble are not in the book.
 ### Faults in play
 

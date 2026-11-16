@@ -306,29 +306,35 @@ inline bool SealCell(const Layout& l, int i) {
   return l.shape == kShapeRingPage && (i == kCellBack || i == kCellNext);
 }
 
+// The middle of slot s (0 to 5) of a ring, and with s = -1 the middle of the
+// ring: meters to the right and up from the center of the book. The top row
+// of the ring touches the band of the title.
+inline void RingSlotCenter(const Layout& l, int s, float* x, float* y) {
+  const float mid = 0.5f * l.height_m - kTitleM - 0.5f * l.cell_m -
+                    0.8660254f * l.ring_m;
+  *x = 0.0f;
+  *y = mid;
+  if (s < 0 || s >= kRingMost) return;
+  const float a = (120.0f - 60.0f * s) * 0.017453293f;
+  *x = l.ring_m * cosf(a);
+  *y = mid + l.ring_m * sinf(a);
+}
+
 inline void ItemCenter(const Layout& l, int i, float* x, float* y) {
   *x = 0.0f;
   *y = 0.0f;
   if (l.columns <= 0 || i < 0 || i >= l.count) return;
   if (l.shape != kShapeGrid) {
-    // The middle of the ring: the top row touches the band of the title.
-    const float mid = 0.5f * l.height_m - kTitleM - 0.5f * l.cell_m -
-                      0.8660254f * l.ring_m;
-    *y = mid;
     int slot = -1;
     if (l.shape == kShapeRing) {
       slot = RingSlot(l.count, i, l.order);
     } else if (i < kPageItems) {
       slot = RingSlot(kPageItems, i, l.order);
-    } else if (i == kCellBack) {
-      *x = -kSealOut * l.cell_m;
-    } else if (i == kCellNext) {
-      *x = kSealOut * l.cell_m;
     }
-    if (slot >= 0) {
-      const float a = (120.0f - 60.0f * slot) * 0.017453293f;
-      *x = l.ring_m * cosf(a);
-      *y = mid + l.ring_m * sinf(a);
+    RingSlotCenter(l, slot, x, y);
+    if (slot < 0 && l.shape == kShapeRingPage) {
+      if (i == kCellBack) *x = -kSealOut * l.cell_m;
+      if (i == kCellNext) *x = kSealOut * l.cell_m;
     }
     return;
   }
@@ -340,6 +346,47 @@ inline void ItemCenter(const Layout& l, int i, float* x, float* y) {
   *x = (column - 0.5f * (in_row - 1)) * l.cell_m;
   *y = 0.5f * l.height_m - kTitleM - (row + 0.5f) * l.cell_m;
 }
+
+// THE SOCKETS of a ring (spell_book_look=1): the 6 slots of a ring always
+// show, so each page is even. item[s] is the item that holds slot s, or -1
+// for an empty socket. keys are the keys of the items: a cell of a ring page
+// with kKeyEmpty holds no slot. A ring of 1 item has it in the middle, so
+// its 6 sockets are empty. A grid has no slots: all are -1.
+inline void SlotItems(const Layout& l, const int keys[], int item[kRingMost]) {
+  for (int s = 0; s < kRingMost; ++s) item[s] = -1;
+  if (l.shape == kShapeRing) {
+    for (int i = 0; i < l.count; ++i) {
+      const int s = RingSlot(l.count, i, l.order);
+      if (s >= 0) item[s] = i;
+    }
+  } else if (l.shape == kShapeRingPage) {
+    for (int i = 0; i < kPageItems && i < l.count; ++i) {
+      if (keys[i] == kKeyEmpty) continue;
+      const int s = RingSlot(kPageItems, i, l.order);
+      if (s >= 0) item[s] = i;
+    }
+  }
+}
+
+// THE SCROLL (spell_book_look=1). The picture of the book has room round the
+// layout for a roll of the paper at the top and at the bottom and for the
+// knobs of their rods at the sides. The layout keeps its middle at the middle
+// of the picture, so each item keeps its place on the book, and the pick and
+// the orbs do not change. In pixels of the picture:
+const int kScrollPadX = 44;      // at the left and at the right of the layout
+const int kScrollPadY = 54;      // at the top and at the bottom
+const int kScrollPaperIn = 12;   // the paper is this much inside the layout
+const int kScrollRollTop = 28;   // the middle of the top roll from the top
+const int kScrollRollBottom = 30;  // the middle of the bottom roll from the
+                                   // bottom
+// A socket: the rim and the ring of ink round the hole of the orb go this far
+// out (card_scroll::kSocketOut), and the name starts under them.
+const int kSocketOutPx = 13;
+
+// The size of the picture of a layout in pixels, with the room of the scroll
+// when scroll is true.
+inline int PictureWidth(const Layout& l, bool scroll);
+inline int PictureHeight(const Layout& l, bool scroll);
 
 // THE BUBBLE of a cell: its radius is kBubbleShare of a cell, and its middle
 // is kBubbleRise of a cell above the middle of the cell. The name is under
@@ -362,6 +409,16 @@ inline int PixelsOf(float meters) {
   if (p > kTexture) p = kTexture;
   if (p < 2) p = 2;
   return p;
+}
+
+inline int PictureWidth(const Layout& l, bool scroll) {
+  const int p = PixelsOf(l.width_m) + (scroll ? 2 * kScrollPadX : 0);
+  return p > kTexture ? kTexture : p;
+}
+
+inline int PictureHeight(const Layout& l, bool scroll) {
+  const int p = PixelsOf(l.height_m) + (scroll ? 2 * kScrollPadY : 0);
+  return p > kTexture ? kTexture : p;
 }
 
 // The center of the book, in the same space as the grip pose. left: the

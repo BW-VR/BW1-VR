@@ -133,6 +133,71 @@ void Ink(const Picture& picture, const uint32_t* letters, int x0, int y0,
 void SealInk(const Picture& picture, const uint32_t* letters, int x0, int y0,
              int x1, int y1, int tone);
 
+// THE WAX OF A CHOICE. The ring (radial_menu.cpp) and the spell book use the
+// same seals. Seal gives the red wax. The seal under the hand has the gold wax
+// with dark letters (the tone 2 of SealInk), a gold rim and a soft glow. A
+// seal that cannot act now has a pale wax.
+const int kWaxGold = 0;      // the seal under the hand
+const int kWaxPaleGold = 1;  // the seal under the hand that cannot act now
+const int kWaxPale = 2;      // a seal that cannot act now
+// The edge round a seal for its shadow, its rim and its glow.
+const int kSealEdge = 22;
+// THE ROUND SEAL of an item with an icon: kMedal px across, and kMedalChosen
+// px under the hand. Seal draws a box of at most 102 px high. The icon is
+// kMedalIcon px in a seal of kMedal px, and the ring of the stamp is
+// kStampInset px in from the edge.
+const int kMedal = 96;
+const int kMedalChosen = 102;
+const int kMedalIcon = 56;
+const int kStampInset = 10;
+
+// Gives the red wax of the seal in the picture the wax kWaxGold, kWaxPaleGold
+// or kWaxPale. Each pixel keeps its brightness against the middle brightness
+// of the opaque wax, and a brighter pixel (the lit side, the sheen) goes
+// toward the light of that wax. The picture must hold the seal only.
+void Rewax(const Picture& picture, int wax);
+
+// The gold rim and the glow of the seal under the hand, under the seal: a
+// band of 4 px at 5 px out from the box with round ends, and a glow that ends
+// 20 px out. strength 1 is the full rim, 0.5 the rim of a seal that cannot
+// act now.
+void Rim(const Picture& picture, int x0, int y0, int x1, int y1,
+         float strength);
+
+// The ring of the stamp in a round seal (the edge of the die that pressed the
+// wax) and an icon of ring_icon_math, into a letters picture of GDI: the green
+// of a pixel is its cover, and a pixel keeps the larger cover. SealInk then
+// presses them into the wax as it presses letters.
+void StampLetters(uint32_t* letters, int pitch, int height, float cx, float cy,
+                  float radius);
+void IconLetters(uint32_t* letters, int pitch, int height, int icon, float x0,
+                 float y0, float size);
+
+// THE SCROLL of the spell book (spell_book_look=1). Clears the picture, then
+// draws the drop shadow, the paper from x0 to x1 and from y0 to y1 with a torn
+// and burnt edge at the left and the right, and a roll of the paper at the top
+// and at the bottom. Each roll has its middle on the edge of the paper, is a
+// little longer than the paper is wide, and has a rod of dark wood with a
+// turned knob at each end. kScrollRoll is the thickness of a roll, and the
+// rod and its knobs go kScrollKnobOut px out from each side of the paper.
+const int kScrollRoll = 48;
+const int kScrollKnobOut = 52;
+void Scroll(const Picture& picture, int x0, int y0, int x1, int y1, int seed);
+
+// THE SOCKETS of the spell book. A socket is a round hole in the page with a
+// rim of dull brass and a ring of ink round it. The hole has the radius hole
+// and its middle at cx, cy. The rim and the ring of ink go out to
+// kSocketOut px more than the hole.
+const int kSocketOut = 13;
+const int kSocketFull = 0;   // a socket with a miracle: the hole stays paper
+                             // here, the caller clears it for the orb
+const int kSocketEmpty = 1;  // no miracle: the hole is a dip in the paper with
+                             // a faint star of ink
+const int kSocketLit = 2;    // the socket under the hand: a gold rim and glow
+const int kSocketDim = 4;    // a miracle that the game refuses now: pale brass
+void Socket(const Picture& picture, float cx, float cy, float hole, int look,
+            int seed);
+
 // The looks of a key of the keyboard in the headset (vr_keyboard.cpp).
 const int kKeyPlain = 0;  // a frame of ink round a face pressed into the paper
 const int kKeyHover = 1;  // the key under the ray: a gold face and a gold rim

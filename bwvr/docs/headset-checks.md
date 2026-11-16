@@ -138,8 +138,8 @@ want.
     over the palm. Wrong: a book, a sheet or a row that is hard to read or
     to reach, a seal that is hard to pick, a pull that feels stiff or loose,
     a book that opens by accident, a bubble that looks wrong, a hole in the
-    page beside a pulled orb, or an orb in a cell that is not in its hole of
-    the page. The pointing hand must show whole in front of the page when it
+    page beside a pulled orb, an orb that is not in its socket of the
+    scroll, or a gold socket under the hand that is not clear at arm length. The pointing hand must show whole in front of the page when it
     is in front, with no edge of page over it or band of land beside it.
 17. **A gesture and a cast.** Draw miracles in the air, draw a circle on the
     land with the ray for Storm or a shield, and try the switch "Gesture

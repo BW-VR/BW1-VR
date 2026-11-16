@@ -82,6 +82,78 @@ inline void SpellBookChecks() {
           PixelsOf(0.1234f), 396);
   }
 
+  // THE SCROLL (spell_book_look=1). Each picture with the room of the scroll
+  // fits the texture with no clip, so the layout keeps its middle at the
+  // middle of the picture. A ring shows all 6 sockets: each slot has one item
+  // or none, a ring of n items (2 to 6) holds n slots, a ring of 1 item holds
+  // none (its item is in the middle), and a page holds a slot for each
+  // miracle and none for an empty cell. The slot of an item is at its middle.
+  {
+    bool fits = true;
+    for (int n = 0; n <= kMaxItems; ++n) {
+      const int shapes[3] = {kShapeGrid, kShapeRing, kShapeRingPage};
+      for (int shape : shapes) {
+        const Layout l = LayoutFor(n, shape);
+        if (PixelsOf(l.width_m) + 2 * kScrollPadX > kTexture ||
+            PixelsOf(l.height_m) + 2 * kScrollPadY > kTexture ||
+            PictureWidth(l, true) != PixelsOf(l.width_m) + 2 * kScrollPadX ||
+            PictureHeight(l, false) != PixelsOf(l.height_m)) {
+          fits = false;
+        }
+      }
+    }
+    Check(fits, "the scroll of each book fits the texture with no clip", fits,
+          1);
+    bool held = true, at_middle = true;
+    const int none[kPageCells] = {kKeyEmpty, kKeyEmpty, kKeyEmpty,
+                                  kKeyEmpty, kKeyEmpty, kKeyEmpty,
+                                  kKeyEmpty, kKeyEmpty, kKeyEmpty};
+    for (int order = kOrderClock; order <= kOrderSides; ++order) {
+      for (int n = 1; n <= kRingMost; ++n) {
+        const Layout l = LayoutFor(n, kShapeRing, order);
+        int item[kRingMost];
+        SlotItems(l, none, item);
+        int count = 0;
+        for (int s = 0; s < kRingMost; ++s) {
+          if (item[s] < 0) continue;
+          ++count;
+          float ix = 0.0f, iy = 0.0f, sx = 0.0f, sy = 0.0f;
+          ItemCenter(l, item[s], &ix, &iy);
+          RingSlotCenter(l, s, &sx, &sy);
+          if (fabsf(ix - sx) > 1e-6f || fabsf(iy - sy) > 1e-6f) {
+            at_middle = false;
+          }
+        }
+        if (count != (n == 1 ? 0 : n)) held = false;
+      }
+    }
+    Check(held, "a ring of n items holds n of its 6 sockets (1 item: none)",
+          held, 1);
+    Check(at_middle, "each item of a ring is at the middle of its socket",
+          at_middle, 1);
+    // Page 6 of the book of all miracles: 4 miracles, 2 empty cells.
+    const int page6[kPageCells] = {KeyOf(20, 0), KeyOf(21, 0), KeyOf(22, 0),
+                                   KeyOf(23, 0), kKeyEmpty,    kKeyEmpty,
+                                   kKeyBack,     kKeyEmpty,    kKeyNext};
+    const Layout page = LayoutFor(kPageCells, kShapeRingPage, kOrderRows);
+    int item[kRingMost];
+    SlotItems(page, page6, item);
+    int full = 0;
+    for (int s = 0; s < kRingMost; ++s) full += item[s] >= 0 ? 1 : 0;
+    Check(full == 4, "a page of 4 miracles shows 4 full and 2 empty sockets",
+          full, 4);
+    bool no_seal = true;
+    for (int s = 0; s < kRingMost; ++s) {
+      if (item[s] >= kPageItems) no_seal = false;
+    }
+    Check(no_seal, "no socket holds a seal or the middle cell", no_seal, 1);
+    const Layout grid = LayoutFor(4);
+    SlotItems(grid, page6, item);
+    bool grid_none = true;
+    for (int s = 0; s < kRingMost; ++s) grid_none = grid_none && item[s] < 0;
+    Check(grid_none, "a grid has no sockets of a ring", grid_none, 1);
+  }
+
   // THE RING (spell_book_ring=1). A ring of 1 to 6 items and a ring page fit
   // the texture, each item is inside the book under the title, and two
   // items are a cell apart or more. The first item is at the top, and the

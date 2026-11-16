@@ -93,6 +93,13 @@ int SpellBookTapValue();
 void SpellBookTapChange(const char* by);
 int SpellBookPalmValue();
 void SpellBookPalmChange(const char* by);
+// spell_book_look.
+int SpellBookLookValue();
+void SpellBookLookChange(const char* by);
+// A job of the thread of the warm of the fonts (card_scroll::WarmAdd): with
+// spell_book_look=1 it draws the scroll of a ring one time, so the first
+// open of the book does not draw it on the frame thread.
+void SpellBookWarm();
 
 // miracle.cpp: the game cast the miracle in the Hand (refused false), or
 // refused the cast with the reason. power_up is the power up of the seed

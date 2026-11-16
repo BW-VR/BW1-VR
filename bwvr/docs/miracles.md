@@ -1032,6 +1032,37 @@ bubble, and it is 0.10 of a cell wide or more, so the fill of that bubble
 is a little smaller (`spell_book_math::BubbleRing`). With `hint_card_style=0` the book is the
 dark panel with an alpha of 0.86 and white Segoe UI letters.
 
+**The scroll** (`spell_book_look=1`, the default, with `hint_card_style=1`).
+The page is a hanging scroll of the same parchment (`card_scroll::Scroll`):
+a roll of the paper at the top and at the bottom, each on a rod of dark wood
+with a turned knob at each end, a torn and burnt edge at the left and the
+right, and a soft drop shadow. The picture has 44 px at each side and 54 px
+at the top and the bottom for the rolls and the knobs
+(`spell_book_math::kScrollPadX`, `kScrollPadY`), and the layout keeps its
+middle. So each item, its orb and the pick keep their place, and the page of
+all miracles is 796 by 844 px (24.9 by 26.4 cm, the flat page is 22.1 by
+23.0 cm). Each place of a miracle is a
+socket in the paper (`card_scroll::Socket`): a rim of brass round the hole of
+the orb, and a ring of ink with six dots round the rim. The name starts under
+the ring of ink. A ring always shows its 6 sockets
+(`spell_book_math::SlotItems`): a place with no miracle (page 6 of the book of
+all miracles, a Worship Site with fewer than 6 miracles) is an empty socket, a
+dip in the paper with a faint rose of ink. So each page is even. A thin ring
+of ink and gold goes through the middles of the sockets and fades out before
+each name, as the ring menu has it through its seals. The socket under the
+hand has a gold rim and a gold glow, as a seal of the ring under the hand. A
+miracle that the game refuses now has a pale rim and a veil over its orb, and
+the socket of a bubble that the hand pulls out is empty. "Back" and "Next"
+are the round wax seals of the ring menu (`card_scroll::Seal`, `Rewax`,
+`Rim`, `StampLetters`): red wax, the ring of the stamp and an arrow to the
+left or to the right, and under the hand the gold wax with dark letters, the
+gold rim and the glow. The word is under the seal. A book of all miracles
+with one page has no seals. The wax seals are only for the turn of the
+page: a socket with a miracle always shows the orb of the game. With
+`spell_book_orbs=0` a socket holds the flat picture of the flat page (the
+blue or amber fill with the white gestures). With `spell_book_look=0` the book is the
+flat page above.
+
 **The pick.** The grip point of the pointing hand within 45 percent of a cell
 of the middle of an item, and 6 cm in front of or behind the book, picks it
 (`Pick`). A hand in front of the page shows in front of it, in each eye, and
@@ -1283,9 +1314,11 @@ The cells keep their miracles in each order:
 | 5 | Teleport, Creature Freeze, Creature Small, Creature Big, Creature Weak, Creature Strong |
 | 6 | Creature Invisible, Creature Compassion, Creature Angry, Creature Itchy |
 
-The seals "Back" (cell 6, with "<") and "Next" (cell 8, with ">") are side
-by side in the middle of the ring, 2.2 cm to the left and to the right of
-its middle, with a bubble of 3.1 cm. So the pointing hand reaches both
+The seals "Back" (cell 6, an arrow to the left) and "Next" (cell 8, an arrow
+to the right) are side by side in the middle of the ring, 2.2 cm to the left
+and to the right of its middle. On the scroll each is a round wax seal of 3
+cm, and on the flat page (`spell_book_look=0`) a bubble of 3.1 cm with "<"
+or ">". So the pointing hand reaches both
 without a move past the hand that holds the book. With
 `spell_book_ring=0` the page is 3 columns of 6.5 cm in 2 rows, and a third
 row has "Back" at the left and "Next" at the right. The pointing hand picks a seal
@@ -1955,6 +1988,7 @@ so the plain game has no flat band.
 | `spell_book_pull_cm` | 20 | The pull that takes a miracle out of the book, in cm of hand motion, 3 to 30. 0: the grip takes the miracle at once |
 | `spell_book_ring` | 1 | 1: a book of 1 to 6 miracles has them on a ring, and a page of the book of all miracles is a ring of 6 with the seals "Back" and "Next" in its middle. 0: rows and columns, and the seals in a third row |
 | `spell_book_ring_order` | 1 | 1: the miracles of a ring are in the reading order, and a page with two families of three has one family down each side ("The pages"). 0: the first at the upper left and the next ones clockwise. The switch "Ring order" of the debug page (group Miracles) |
+| `spell_book_look` | 1 | With `hint_card_style=1`. 1: the book is a scroll with a roll at the top and the bottom, each miracle is in a socket, a ring shows all 6 sockets, and "Back" and "Next" are the wax seals of the ring menu ("The scroll"). 0: the flat page with a ring round each bubble and blue seals. The switch "Book look" of the debug page (group Miracles) |
 | `spell_book_b` | 1 | 1: a tap of B (the second face button of the pointing hand, at most `miracle_cancel_ms` and 5 cm) opens and closes the book while no miracle is in the Hand. 0: B does not open the book |
 | `spell_book_palm` | 0 | 1: the palm that turns up opens the book, and the sheet of the gestures does not show at rest. 0: the palm does not open the book |
 | `gesture_sheet` | 1 | 1: the palm that turns up at rest shows the sheet of the gestures. 0: no sheet, and the palm shows the row of the game's pictures |

@@ -131,9 +131,11 @@ typedef void (*WarmJob)();
 void WarmAdd(WarmJob job);
 void WarmStart();
 }
-// places_panel.cpp, debug_window.cpp: the jobs of that thread.
+// places_panel.cpp, debug_window.cpp, spell_book.cpp: the jobs of that
+// thread.
 void PlacesPanelWarm();
 void DebugWindowWarm();
+void SpellBookWarm();
 void ControllersSetOptions(bool on, int left_hand, bool haptics,
                            bool swap_buttons);
 void ControllersSetFake(const FakeControllerSettings& fake);
@@ -2128,6 +2130,7 @@ void StartVrStep() {
     ControllerHintsInstall();
     card_scroll::WarmAdd(&PlacesPanelWarm);
     card_scroll::WarmAdd(&DebugWindowWarm);
+    card_scroll::WarmAdd(&SpellBookWarm);
     card_scroll::WarmStart();
     if (g_controllers) {
       ControllersSetDirect(g_direct_hand);

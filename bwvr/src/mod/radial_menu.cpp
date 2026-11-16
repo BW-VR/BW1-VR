@@ -1637,18 +1637,18 @@ const int kSwitchSealPad = 40;
 const int kSealInside = 14;       // the words stay this far inside a seal
 const int kChosenWider = 12;
 const int kChosenHigher = 8;
-const int kSealEdge = 22;         // round a seal: its shadow, its rim, its glow
+const int kSealEdge = card_scroll::kSealEdge;  // round a seal: its shadow,
+                                               // its rim, its glow
 const int kScrollCardMore = 40;   // the rolls make a card this much wider
 const int kScrollBodyOne = 64;    // the paper of a card with one line
 const int kScrollBodyTwo = 100;   // and with two lines
 const int kDotSeal = 36;          // the seal in the middle with no name
-// THE ROUND SEAL of an item with an icon (ring_icons=1). card_scroll::Seal
-// draws a box of at most 102 px high, so the chosen seal is 102 px.
-const int kMedal = 96;
-const int kMedalChosen = 102;
-const int kMedalIcon = 56;        // the icon in a seal of kMedal px
-const int kStampInset = 10;       // the ring of the stamp, in from the edge
-const float kStampWidth = 4.0f;
+// THE ROUND SEAL of an item with an icon (ring_icons=1), as card_scroll.h
+// gives it. The spell book has the same seals.
+const int kMedal = card_scroll::kMedal;
+const int kMedalChosen = card_scroll::kMedalChosen;
+const int kMedalIcon = card_scroll::kMedalIcon;
+const int kStampInset = card_scroll::kStampInset;
 const int kLabelCap = 19;         // the word under a round seal
 const int kLabelGap = 4;
 const int kLabelHalo = 3;         // the dark edge round its letters
@@ -1667,11 +1667,6 @@ const int kWorkWidth = 640;
 const int kWorkHeight = 360;
 const int kRasterLogs = 40;
 
-const Rgb kGoldWax = {226.0f, 174.0f, 60.0f};
-const Rgb kGoldLight = {255.0f, 246.0f, 210.0f};
-const Rgb kPaleGold = {196.0f, 174.0f, 128.0f};
-const Rgb kPaleWax = {136.0f, 112.0f, 98.0f};
-const Rgb kPaleLight = {214.0f, 200.0f, 184.0f};
 const Rgb kRimGold = {255.0f, 220.0f, 120.0f};
 const Rgb kGlowGold = {255.0f, 196.0f, 80.0f};
 const Rgb kValueGold = {255.0f, 210.0f, 104.0f};
@@ -1904,87 +1899,14 @@ void OverPixel(uint8_t* out, const Rgb& c, float a) {
 
 float Clamp01(float v) { return v < 0.0f ? 0.0f : (v > 1.0f ? 1.0f : v); }
 
-// The signed distance to a box with round ends (as wide as high, or wider):
-// below 0 is inside.
-float PillDistance(float px, float py, float x0, float y0, float x1,
-                   float y1) {
-  const float r = 0.5f * (y1 - y0);
-  const float qx =
-      px < x0 + r ? x0 + r - px : (px > x1 - r ? px - (x1 - r) : 0.0f);
-  const float qy = py - 0.5f * (y0 + y1);
-  return sqrtf(qx * qx + qy * qy) - r;
-}
-
-// Gives the red wax of the seal in the picture the color wax. Each pixel
-// keeps its brightness against the middle brightness of the opaque wax, and
-// a brighter pixel (the lit side, the sheen) goes toward light.
-void Rewax(const card_scroll::Picture& p, const Rgb& wax, const Rgb& light) {
-  int count[256];
-  memset(count, 0, sizeof(count));
-  int total = 0;
-  for (int y = 0; y < p.height; ++y) {
-    const uint8_t* in = p.bgra + static_cast<size_t>(y) * p.pitch * 4;
-    for (int x = 0; x < p.width; ++x, in += 4) {
-      if (in[3] != 255) continue;
-      ++count[(in[2] * 77 + in[1] * 150 + in[0] * 29) >> 8];
-      ++total;
-    }
-  }
-  if (total == 0) return;
-  int middle = 0;
-  for (int sum = 0; middle < 255; ++middle) {
-    sum += count[middle];
-    if (2 * sum >= total) break;
-  }
-  if (middle < 8) middle = 8;
-  const float per_middle = 1.0f / (256.0f * middle);
-  for (int y = 0; y < p.height; ++y) {
-    uint8_t* out = p.bgra + static_cast<size_t>(y) * p.pitch * 4;
-    for (int x = 0; x < p.width; ++x, out += 4) {
-      const int a = out[3];
-      if (a == 0) continue;
-      const float alpha = a * (1.0f / 255.0f);
-      // The brightness of the pixel with no alpha, against the middle.
-      const float k = (out[2] * 77 + out[1] * 150 + out[0] * 29) *
-                      per_middle / alpha;
-      Rgb c;
-      if (k <= 1.0f) {
-        c = {wax.r * k, wax.g * k, wax.b * k};
-      } else {
-        const float t = Clamp01(k - 1.0f);
-        c = {wax.r + (light.r - wax.r) * t, wax.g + (light.g - wax.g) * t,
-             wax.b + (light.b - wax.b) * t};
-      }
-      out[0] = static_cast<uint8_t>(c.b * alpha + 0.5f);
-      out[1] = static_cast<uint8_t>(c.g * alpha + 0.5f);
-      out[2] = static_cast<uint8_t>(c.r * alpha + 0.5f);
-    }
-  }
-}
-
-// The gold rim and the glow of the chosen seal, under the seal: a band of
-// 4 px at 5 px out from the box, and a glow that ends 20 px out.
-void Rim(const card_scroll::Picture& p, int x0, int y0, int x1, int y1,
-         float strength) {
-  for (int y = 0; y < p.height; ++y) {
-    uint8_t* out = p.bgra + static_cast<size_t>(y) * p.pitch * 4;
-    for (int x = 0; x < p.width; ++x, out += 4) {
-      const float d = PillDistance(x + 0.5f, y + 0.5f, static_cast<float>(x0),
-                                   static_cast<float>(y0),
-                                   static_cast<float>(x1),
-                                   static_cast<float>(y1));
-      if (d >= 20.0f || out[3] == 255) continue;
-      const float g = d < 9.0f ? 1.0f : 1.0f - (d - 9.0f) / 11.0f;
-      uint8_t src[4] = {0, 0, 0, 0};
-      OverPixel(src, kGlowGold, 0.42f * strength * g * g);
-      OverPixel(src, kRimGold,
-                0.95f * strength * Clamp01(d - 4.5f) * Clamp01(9.5f - d));
-      // Under the seal: the rim shows only where the seal does not cover.
-      const int k = 255 - out[3];
-      for (int c = 0; c < 4; ++c) {
-        out[c] = static_cast<uint8_t>(out[c] + (src[c] * k + 127) / 255);
-      }
-    }
+// The wax of the chosen seal and of a seal that cannot act now, and the rim
+// of the chosen seal (card_scroll::Rewax and card_scroll::Rim). The spell
+// book uses the same seals.
+void Rewax(const card_scroll::Picture& p, bool lit, bool dim) {
+  if (lit) {
+    card_scroll::Rewax(p, dim ? card_scroll::kWaxPaleGold : card_scroll::kWaxGold);
+  } else if (dim) {
+    card_scroll::Rewax(p, card_scroll::kWaxPale);
   }
 }
 
@@ -2051,12 +1973,8 @@ void DrawSeal(Part* part, int slot, int item, int value, bool dim, bool lit) {
   const card_scroll::Picture picture = {g_work, kWorkWidth, pw, ph};
   const int x0 = kSealEdge, y0 = kSealEdge, x1 = x0 + w, y1 = y0 + h;
   card_scroll::Seal(picture, x0, y0, x1, y1, 0, 11 + slot * 13);
-  if (lit) {
-    Rewax(picture, dim ? kPaleGold : kGoldWax, kGoldLight);
-    Rim(picture, x0, y0, x1, y1, dim ? 0.5f : 1.0f);
-  } else if (dim) {
-    Rewax(picture, kPaleWax, kPaleLight);
-  }
+  Rewax(picture, lit, dim);
+  if (lit) card_scroll::Rim(picture, x0, y0, x1, y1, dim ? 0.5f : 1.0f);
 
   // The letters: one line in the middle, or the word and its value.
   const int left = x0 + kSealInside, right = x1 - kSealInside;
@@ -2174,43 +2092,11 @@ void DrawDot(Part* part) {
 
 // --- the round seals and the sheets ---------------------------------------------
 
-// The icon into the letters of the work picture, as GDI puts a letter there:
-// the green of a pixel is its cover. A pixel keeps the larger cover.
+// The icon into the letters of the work picture, as GDI puts a letter there
+// (card_scroll::IconLetters).
 void IconLetters(int icon, float x0, float y0, float size) {
-  const int left = static_cast<int>(x0) - 1, top = static_cast<int>(y0) - 1;
-  const int right = static_cast<int>(x0 + size) + 2;
-  const int bottom = static_cast<int>(y0 + size) + 2;
-  for (int y = top < 0 ? 0 : top; y < bottom && y < kWorkHeight; ++y) {
-    for (int x = left < 0 ? 0 : left; x < right && x < kWorkWidth; ++x) {
-      const float cover = ring_icon_math::IconCover(icon, x0, y0, size,
-                                                    x + 0.5f, y + 0.5f);
-      if (cover <= 0.0f) continue;
-      uint32_t& out = g_letters[y * kWorkWidth + x];
-      const uint32_t v = static_cast<uint32_t>(cover * 255.0f + 0.5f);
-      if (v > ((out >> 8) & 0xFF)) out = (v << 16) | (v << 8) | v;
-    }
-  }
-}
-
-// The ring of the stamp in a round seal: the edge of the die that pressed the
-// wax, a thin circle in from the edge, in the letters of the work picture.
-void StampLetters(float cx, float cy, float radius) {
-  const int r = static_cast<int>(radius + kStampWidth) + 2;
-  for (int y = static_cast<int>(cy) - r; y <= static_cast<int>(cy) + r; ++y) {
-    if (y < 0 || y >= kWorkHeight) continue;
-    for (int x = static_cast<int>(cx) - r; x <= static_cast<int>(cx) + r;
-         ++x) {
-      if (x < 0 || x >= kWorkWidth) continue;
-      const float dx = x + 0.5f - cx, dy = y + 0.5f - cy;
-      const float d = fabsf(sqrtf(dx * dx + dy * dy) - radius) -
-                      0.5f * kStampWidth;
-      const float cover = Clamp01(0.5f - d);
-      if (cover <= 0.0f) continue;
-      uint32_t& out = g_letters[y * kWorkWidth + x];
-      const uint32_t v = static_cast<uint32_t>(cover * 255.0f + 0.5f);
-      if (v > ((out >> 8) & 0xFF)) out = (v << 16) | (v << 8) | v;
-    }
-  }
+  card_scroll::IconLetters(g_letters, kWorkWidth, kWorkHeight, icon, x0, y0,
+                           size);
 }
 
 // THE WORD UNDER A ROUND SEAL. It shows over the world, with no paper, so
@@ -2284,15 +2170,12 @@ void DrawMedal(Part* part, int cx, int cy, int size, int icon,
   const card_scroll::Picture picture = {g_work, kWorkWidth, pw, ph};
   const int x0 = (pw - d) / 2, y0 = kSealEdge, x1 = x0 + d, y1 = y0 + d;
   card_scroll::Seal(picture, x0, y0, x1, y1, 0, seed);
-  if (lit) {
-    Rewax(picture, dim ? kPaleGold : kGoldWax, kGoldLight);
-    Rim(picture, x0, y0, x1, y1, dim ? 0.5f : 1.0f);
-  } else if (dim) {
-    Rewax(picture, kPaleWax, kPaleLight);
-  }
+  Rewax(picture, lit, dim);
+  if (lit) card_scroll::Rim(picture, x0, y0, x1, y1, dim ? 0.5f : 1.0f);
   // The stamp: its ring and its emblem.
   const float mx = 0.5f * (x0 + x1), my = 0.5f * (y0 + y1);
-  StampLetters(mx, my, 0.5f * d - kStampInset);
+  card_scroll::StampLetters(g_letters, kWorkWidth, kWorkHeight, mx, my,
+                            0.5f * d - kStampInset);
   if (digits != nullptr) {
     WorkLetters(g_digits, digits, x0, x1, y0 + (d + kDigitsCap) / 2);
     GdiFlush();

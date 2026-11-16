@@ -116,6 +116,9 @@
 //   hint_card_style=1        1: the book is a page of parchment with dark
 //                            ink, as the hint cards (card_scroll.h). 0: the
 //                            dark panel with white letters
+//   spell_book_look=1        with hint_card_style=1: the book is a scroll
+//                            with sockets and the wax seals of the ring
+//                            (see "the scroll" below). 0: the flat page
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -145,6 +148,7 @@
 #include "text_fit.h"
 #include "hand_cut.h"
 #include "hand_cut_math.h"
+#include "ring_icon_math.h"
 
 extern void ModLog(const char* format, ...);
 
@@ -469,6 +473,8 @@ bool g_orbs = true;       // spell_book_orbs: the cells show the orbs of the gam
 bool g_point = true;      // spell_book_point: the mark of the point of the pick
 bool g_ring = true;       // spell_book_ring: the items on a ring
 bool g_ring_order = true; // spell_book_ring_order: the reading order
+// spell_book_look: the book is a scroll with a socket for each miracle
+bool g_look = true;
 bool g_game_ok = false;   // the functions of the game have their bytes
 
 bool IniPath(char path[MAX_PATH]) {
@@ -513,6 +519,7 @@ void ReadSettings() {
   g_point = IniKey("spell_book_point", 1) != 0;
   g_ring = IniKey("spell_book_ring", 1) != 0;
   g_ring_order = IniKey("spell_book_ring_order", 1) != 0;
+  g_look = IniKey("spell_book_look", 1) != 0;
   g_game_ok =
       SameBytes(kCanRequest, kCanRequestBytes, sizeof(kCanRequestBytes)) &&
       SameBytes(kSendPacket, kSendPacketBytes, sizeof(kSendPacketBytes)) &&
@@ -572,6 +579,12 @@ void ReadSettings() {
                "has the first family down the left side and the second down "
                "the right side"
              : "the miracles of a ring go clockwise from the upper left");
+  ModLog("spell book   : spell_book_look=%d: %s", g_look ? 1 : 0,
+         g_look ? "the book is a scroll with a roll at the top and the "
+                  "bottom, each miracle is in a socket, an empty place shows "
+                  "an empty socket, and Back and Next are the wax seals of the "
+                  "ring"
+                : "the book is a flat page with a ring round each miracle");
   ModLog("spell book   : spell_book_b=%d: %s", g_tap_b ? 1 : 0,
          g_tap_b ? "a tap of B (the second face button of the pointing hand, "
                    "at most miracle_cancel_ms and 5 cm) opens and closes the "
@@ -824,6 +837,11 @@ void BuildAllList(const GameNow& g) {
   }
   int cells[kPageCells];
   PageCells(keys, starts, g_pages, g_all_page, cells);
+  // With spell_book_look=1 a book of one page has no seal to turn it.
+  if (g_look && g_pages <= 1) {
+    cells[kCellBack] = kKeyEmpty;
+    cells[kCellNext] = kKeyEmpty;
+  }
   const int last = *reinterpret_cast<const int32_t*>(g.status + kStatusLast);
   const bool ready = TakeReady(g);
   g_now_ready = g.hand_ready;
@@ -1027,6 +1045,7 @@ struct Look {
   bool orbs;         // the cells have holes for the orbs of the game
   int shape;         // spell_book_math::kShapeGrid, kShapeRing or kShapeRingPage
   int order;         // spell_book_math::kOrderClock, kOrderRows or kOrderSides
+  bool scroll;       // spell_book_look=1: the scroll with sockets
   wchar_t title[48];
   wchar_t note[64];
 };
@@ -1184,7 +1203,9 @@ const float kOrbVeilClear = 0.55f;
 
 // The boxes of the words, in pixels of a picture w by h: the band at the
 // top (or the upper half of a book with no item), the note of a book with no
-// item, and the name under the bubble of item i.
+// item, and the name under the bubble of item i. With the scroll
+// (spell_book_look=1) the name of a miracle starts under the rim of its
+// socket.
 void TitleBox(int count, int w, int h, RECT* out) {
   const int title_px = static_cast<int>(kTitleM * kPixelsPerMeter);
   *out = {16, 2, w - 16, count == 0 ? h / 2 + 4 : title_px};
@@ -1192,7 +1213,7 @@ void TitleBox(int count, int w, int h, RECT* out) {
 
 void EmptyNoteBox(int w, int h, RECT* out) { *out = {16, h / 2, w - 16, h - 6}; }
 
-void NameBox(const Layout& l, int i, RECT* out) {
+void NameBox(const Layout& l, int i, RECT* out, bool scroll = false) {
   float bx = 0.0f, by = 0.0f, br = 0.0f;
   Bubble(l, i, &bx, &by, &br);
   float cx = 0.0f, cy = 0.0f;
@@ -1200,9 +1221,12 @@ void NameBox(const Layout& l, int i, RECT* out) {
   const float cell = static_cast<float>(CellSize(l));
   const float half = HalfCell(l, i);
   *out = {static_cast<LONG>(cx - half + 4),
-          static_cast<LONG>(by + br + 2),
+          static_cast<LONG>(by + br +
+                            (scroll && !SealCell(l, i) ? kSocketOutPx : 2)),
           static_cast<LONG>(cx + half - 4),
           static_cast<LONG>(cy + 0.5f * cell - 2)};
+  // On the scroll the word of a seal is just under the seal, as on the ring.
+  if (scroll && SealCell(l, i)) out->bottom = out->top + static_cast<LONG>(0.2f * cell);
 }
 
 // The picture of one gesture type in a box of side `side` at x, y (its
@@ -1245,12 +1269,261 @@ bool SameLook(const Look& a, const Look& b) {
   return memcmp(&a, &b, sizeof(Look)) == 0;
 }
 
+// --- the scroll (spell_book_look=1) ----------------------------------------------
+//
+// The page is a scroll of the paper of the hint cards (card_scroll::Scroll):
+// a roll at the top and at the bottom, each on a rod with a knob at each end.
+// Each place of a miracle is a socket in the paper (card_scroll::Socket): a
+// rim of brass round the hole of the orb and a ring of ink with six dots. A
+// ring always shows its 6 sockets, and a socket with no miracle is an empty
+// dip in the paper. A thin ring of ink and gold goes through the sockets, as
+// the ring menu has it through its seals. The socket under the hand has a gold
+// rim and a glow. Back and Next are the round wax seals of the ring menu
+// (radial_menu.cpp): red wax, the ring of the stamp and an arrow, and under
+// the hand the gold wax with the gold rim and glow.
+static_assert(kSocketOutPx == card_scroll::kSocketOut,
+              "the name under a socket starts under its rim");
+
+// The scroll with no item on it, for the size of the picture now. Scroll
+// takes some ms, so the book keeps it and copies it for each new picture.
+uint8_t g_frame[kTexture * kTexture * 4];
+int g_frame_w = 0, g_frame_h = 0;
+
+void ScrollFrame(int w, int h) {
+  // The thread of the warm draws the scroll of a ring (SpellBookWarm).
+  card_scroll::WarmWait();
+  if (g_frame_w != w || g_frame_h != h) {
+    const card_scroll::Picture frame = {g_frame, kTexture, w, h};
+    card_scroll::Scroll(frame, kScrollPadX + kScrollPaperIn, kScrollRollTop,
+                        w - kScrollPadX - kScrollPaperIn,
+                        h - kScrollRollBottom, 5);
+    g_frame_w = w;
+    g_frame_h = h;
+  }
+  for (int y = 0; y < h; ++y) {
+    memcpy(g_base + static_cast<size_t>(y) * kTexture * 4,
+           g_frame + static_cast<size_t>(y) * kTexture * 4,
+           static_cast<size_t>(w) * 4);
+  }
+}
+
+// A picture over the book, with its color times its alpha.
+void PutOver(const uint8_t* in, int pitch, int x0, int y0, int w, int h) {
+  for (int row = 0; row < h; ++row) {
+    const int y = y0 + row;
+    if (y < 0 || y >= g_height_px) continue;
+    const uint8_t* src = in + static_cast<size_t>(row) * pitch * 4;
+    uint8_t* out = g_base + static_cast<size_t>(y) * kTexture * 4;
+    for (int col = 0; col < w; ++col, src += 4) {
+      const int x = x0 + col;
+      const int a = src[3];
+      if (a == 0 || x < 0 || x >= g_width_px) continue;
+      uint8_t* o = out + x * 4;
+      const int k = 255 - a;
+      for (int c = 0; c < 4; ++c) {
+        o[c] = static_cast<uint8_t>(src[c] + (o[c] * k + 127) / 255);
+      }
+    }
+  }
+}
+
+// THE SEAL of Back or Next: the round seal of the ring menu with its middle
+// at cx, cy. It is drawn in a picture of its own, so the gold wax of the seal
+// under the hand changes only the wax.
+const int kSealWork = 160;
+uint8_t g_seal_px[kSealWork * kSealWork * 4];
+uint32_t g_seal_letters[kSealWork * kSealWork];
+
+void ScrollSeal(float cx, float cy, bool next, bool lit) {
+  memset(g_seal_px, 0, sizeof(g_seal_px));
+  memset(g_seal_letters, 0, sizeof(g_seal_letters));
+  const int d = lit ? card_scroll::kMedalChosen : card_scroll::kMedal;
+  const card_scroll::Picture p = {g_seal_px, kSealWork, kSealWork, kSealWork};
+  const int x0 = (kSealWork - d) / 2, y0 = (kSealWork - d) / 2;
+  card_scroll::Seal(p, x0, y0, x0 + d, y0 + d, 0, next ? 23 : 17);
+  if (lit) {
+    card_scroll::Rewax(p, card_scroll::kWaxGold);
+    card_scroll::Rim(p, x0, y0, x0 + d, y0 + d, 1.0f);
+  }
+  const float m = 0.5f * (2 * x0 + d);
+  card_scroll::StampLetters(g_seal_letters, kSealWork, kSealWork, m, m,
+                            0.5f * d - card_scroll::kStampInset);
+  const float is =
+      static_cast<float>(card_scroll::kMedalIcon) * d / card_scroll::kMedal;
+  card_scroll::IconLetters(
+      g_seal_letters, kSealWork, kSealWork,
+      next ? ring_icon_math::kIconPageNext : ring_icon_math::kIconPageBack,
+      m - 0.5f * is, m - 0.5f * is, is);
+  // The gold wax has dark letters, as on the ring.
+  card_scroll::SealInk(p, g_seal_letters, x0, y0, x0 + d, y0 + d, lit ? 2 : 0);
+  PutOver(g_seal_px, kSealWork, static_cast<int>(cx - m + 0.5f),
+          static_cast<int>(cy - m + 0.5f), kSealWork, kSealWork);
+}
+
+// The thin ring of ink and gold through the middles of the sockets of a
+// ring. It goes under the sockets, and it fades out in kLineFade px before
+// the name of a miracle.
+const float kLineFade = 14.0f;
+
+void ScrollRingLine(const Layout& l, const Look& look, float hole) {
+  const float cell = static_cast<float>(CellSize(l));
+  float mx = 0.0f, my = 0.0f;
+  RingSlotCenter(l, -1, &mx, &my);
+  const float cx = 0.5f * g_width_px + mx * kPixelsPerMeter;
+  const float cy = 0.5f * g_height_px - my * kPixelsPerMeter -
+                   kBubbleRise * cell;
+  const float r = l.ring_m * kPixelsPerMeter;
+  float socket[kRingMost][2];
+  for (int s = 0; s < kRingMost; ++s) {
+    float sx = 0.0f, sy = 0.0f;
+    RingSlotCenter(l, s, &sx, &sy);
+    socket[s][0] = 0.5f * g_width_px + sx * kPixelsPerMeter;
+    socket[s][1] = 0.5f * g_height_px - sy * kPixelsPerMeter -
+                   kBubbleRise * cell;
+  }
+  RECT names[kMaxItems];
+  int name_count = 0;
+  for (int i = 0; i < look.count; ++i) {
+    if (look.type[i] == kKeyEmpty || IsNavKey(look.type[i])) continue;
+    NameBox(l, i, &names[name_count++], true);
+  }
+  const Rgb kLineInk = {70.0f, 40.0f, 18.0f};
+  const Rgb kLineGold = {214.0f, 170.0f, 78.0f};
+  const float inside = hole + 8.0f;
+  const float outer = r + 6.0f, hollow = r - 6.0f;
+  const int y0 = static_cast<int>(cy - outer), y1 = static_cast<int>(cy + outer);
+  for (int y = y0 < 0 ? 0 : y0; y <= y1 && y < g_height_px; ++y) {
+    const float py = y + 0.5f;
+    const float dy = py - cy;
+    if (dy * dy >= outer * outer) continue;
+    // The left span and the right span of the row, not the inside.
+    const float reach = sqrtf(outer * outer - dy * dy) + 1.0f;
+    const float in = hollow * hollow > dy * dy
+                         ? sqrtf(hollow * hollow - dy * dy) - 1.0f
+                         : 0.0f;
+    // A row with no inside is one span.
+    const int left_end =
+        in > 0.0f ? static_cast<int>(cx - in) + 1 : static_cast<int>(cx + reach) + 1;
+    const int spans[2][2] = {
+        {static_cast<int>(cx - reach), left_end},
+        {in > 0.0f ? static_cast<int>(cx + in) : 0,
+         in > 0.0f ? static_cast<int>(cx + reach) + 1 : -1}};
+    uint8_t* row = g_base + static_cast<size_t>(y) * kTexture * 4;
+    const auto pixel = [&](int x) {
+      const float px = x + 0.5f;
+      const float d = fabsf(sqrtf((px - cx) * (px - cx) + dy * dy) - r);
+      if (d >= 5.5f) return;
+      for (int s = 0; s < kRingMost; ++s) {
+        const float ex = px - socket[s][0], ey = py - socket[s][1];
+        if (ex * ex + ey * ey < inside * inside) return;
+      }
+      float keep = 1.0f;
+      for (int n = 0; n < name_count; ++n) {
+        const RECT& b = names[n];
+        const float ox =
+            px < b.left ? b.left - px : (px > b.right ? px - b.right : 0.0f);
+        const float oy =
+            py < b.top ? b.top - py : (py > b.bottom ? py - b.bottom : 0.0f);
+        const float k = Clamp01(sqrtf(ox * ox + oy * oy) / kLineFade);
+        if (k < keep) keep = k;
+      }
+      if (keep <= 0.0f) return;
+      Over(row + x * 4, kLineInk, 0.5f * keep * Clamp01(5.5f - d));
+      Over(row + x * 4, kLineGold, 0.9f * keep * Clamp01(2.5f - d));
+    };
+    for (const auto& span : spans) {
+      for (int x = span[0] < 0 ? 0 : span[0]; x <= span[1] && x < g_width_px;
+           ++x) {
+        pixel(x);
+      }
+    }
+  }
+}
+
+// The cells of the scroll: the ring line, the sockets, the seals and the
+// holes of the orbs.
+void ScrollCells(const Look& look, const Layout& l) {
+  const float cell = static_cast<float>(CellSize(l));
+  const float hole = kBubbleShare * cell;
+  const bool ring = l.shape != kShapeGrid;
+  if (ring) ScrollRingLine(l, look, hole);
+  const card_scroll::Picture page = {g_base, kTexture, g_width_px, g_height_px};
+  // The empty sockets of a ring.
+  if (ring) {
+    int item[kRingMost];
+    SlotItems(l, look.type, item);
+    for (int s = 0; s < kRingMost; ++s) {
+      if (item[s] >= 0) continue;
+      float sx = 0.0f, sy = 0.0f;
+      RingSlotCenter(l, s, &sx, &sy);
+      card_scroll::Socket(page, 0.5f * g_width_px + sx * kPixelsPerMeter,
+                          0.5f * g_height_px - sy * kPixelsPerMeter -
+                              kBubbleRise * cell,
+                          hole, card_scroll::kSocketEmpty, s);
+    }
+  }
+  for (int i = 0; i < look.count; ++i) {
+    if (look.type[i] == kKeyEmpty) continue;
+    float bx = 0.0f, by = 0.0f, br = 0.0f;
+    Bubble(l, i, &bx, &by, &br);
+    if (IsNavKey(look.type[i])) {
+      ScrollSeal(bx, by, look.type[i] == kKeyNext, i == look.hover);
+      continue;
+    }
+    const bool pulled = i == look.pulled;
+    int socket = pulled ? card_scroll::kSocketEmpty : card_scroll::kSocketFull;
+    if (i == look.hover) socket |= card_scroll::kSocketLit;
+    if (!look.can[i]) socket |= card_scroll::kSocketDim;
+    card_scroll::Socket(page, bx, by, hole, socket, i);
+    if (pulled) continue;
+    const int x0 = static_cast<int>(bx - hole) - 1;
+    const int x1 = static_cast<int>(bx + hole) + 2;
+    const int y0 = static_cast<int>(by - hole) - 1;
+    const int y1 = static_cast<int>(by + hole) + 2;
+    // With no orb of the game (spell_book_orbs=0, or a check of the code of
+    // the bubble failed), the socket holds the flat picture of the flat page:
+    // the blue or amber fill, and the white gestures of the ink pass.
+    const Rgb& fill =
+        !look.can[i] ? kDimFill
+        : IsCreatureType(TypeOfKey(look.type[i])) ? kCreatureFill
+                                                  : kGod;
+    for (int y = y0 < 0 ? 0 : y0; y < y1 && y < g_height_px; ++y) {
+      const float py = y + 0.5f;
+      uint8_t* row = g_base + static_cast<size_t>(y) * kTexture * 4;
+      for (int x = x0 < 0 ? 0 : x0; x < x1 && x < g_width_px; ++x) {
+        const float px = x + 0.5f;
+        const float d = sqrtf((px - bx) * (px - bx) + (py - by) * (py - by));
+        const float in = Clamp01(hole + 0.5f - d);
+        if (in <= 0.0f) continue;
+        uint8_t* out = row + x * 4;
+        if (!look.orbs) {
+          Over(out, fill, (look.can[i] ? 0.95f : 0.6f) * in);
+          continue;
+        }
+        // The hole of the orb. The game draws the orb in the eye picture
+        // under the page. A miracle that the game refuses now keeps a veil of
+        // the page over its orb.
+        const float clear = in * (look.can[i] ? 1.0f : kOrbVeilClear);
+        const float keep = 1.0f - clear;
+        for (int k = 0; k < 4; ++k) {
+          out[k] = static_cast<uint8_t>(out[k] * keep + 0.5f);
+        }
+      }
+    }
+  }
+}
+
 void Raster(const Look& look) {
   if (!RasterStart()) return;
   const double start = NowSeconds();
   const Layout l = LayoutFor(look.count, look.shape, look.order);
-  g_width_px = PixelsOf(l.width_m);
-  g_height_px = PixelsOf(l.height_m);
+  // The scroll (spell_book_look=1) has room round the layout for its rolls
+  // and knobs, and the layout keeps its middle.
+  const bool scroll = look.scroll && g_page;
+  const int pad_x = scroll ? kScrollPadX : 0;
+  const int pad_y = scroll ? kScrollPadY : 0;
+  g_width_px = PictureWidth(l, scroll);
+  g_height_px = PictureHeight(l, scroll);
   const int w = g_width_px, h = g_height_px;
   // The ink first, white on black: the green of a pixel is its cover.
   for (int y = 0; y < h; ++y) {
@@ -1264,7 +1537,8 @@ void Raster(const Look& look) {
   const bool note_in_band = look.count > 0 && look.note[0] != 0;
   {
     RECT band;
-    TitleBox(look.count, w, h, &band);
+    TitleBox(look.count, w - 2 * pad_x, h - 2 * pad_y, &band);
+    OffsetRect(&band, pad_x, pad_y);
     SelectObject(g_dc, note_in_band ? g_note_font : g_title_font);
     text_fit::Draw(g_dc, note_in_band ? look.note : look.title, band,
                    DT_CENTER | DT_VCENTER, look.count == 0 ? 2 : 1,
@@ -1272,7 +1546,8 @@ void Raster(const Look& look) {
   }
   if (look.count == 0 && look.note[0] != 0) {
     RECT note;
-    EmptyNoteBox(w, h, &note);
+    EmptyNoteBox(w - 2 * pad_x, h - 2 * pad_y, &note);
+    OffsetRect(&note, pad_x, pad_y);
     SelectObject(g_dc, g_note_font);
     text_fit::Draw(g_dc, look.note, note, DT_CENTER | DT_VCENTER, 2,
                    "spell book note");
@@ -1285,7 +1560,9 @@ void Raster(const Look& look) {
     if (look.type[i] == kKeyEmpty) continue;
     float bx = 0.0f, by = 0.0f, br = 0.0f;
     Bubble(l, i, &bx, &by, &br);
-    if (IsNavKey(look.type[i])) {
+    if (IsNavKey(look.type[i]) && scroll) {
+      // The round seal of the scroll has its arrow (ScrollSeal).
+    } else if (IsNavKey(look.type[i])) {
       // The seal of a turn of the page: an arrow in its bubble.
       RECT seal = {static_cast<LONG>(bx - br), static_cast<LONG>(by - br),
                    static_cast<LONG>(bx + br), static_cast<LONG>(by + br)};
@@ -1301,7 +1578,7 @@ void Raster(const Look& look) {
       DrawBubbleShapes(TypeOfKey(look.type[i]), bx, by, br);
     }
     RECT name;
-    NameBox(l, i, &name);
+    NameBox(l, i, &name, scroll);
     SelectObject(g_dc, g_name_font[size]);
     text_fit::Draw(g_dc, BadgeName(look.type[i]), name, DT_CENTER | DT_VCENTER,
                    1, "spell book name");
@@ -1310,7 +1587,9 @@ void Raster(const Look& look) {
   const double t_text = NowSeconds();
 
   // The shapes, then the ink over them.
-  if (g_page) {
+  if (scroll) {
+    ScrollFrame(w, h);
+  } else if (g_page) {
     // The page fills the picture, with its torn edge 4 px inside, so the
     // cells keep their place.
     const card_scroll::Picture page = {g_base, kTexture, w, h};
@@ -1332,13 +1611,14 @@ void Raster(const Look& look) {
     }
   }
   const double t_page = NowSeconds();
+  if (scroll) ScrollCells(look, l);
   const Rgb& cell_lit = g_page ? kPageCellLit : kCellLit;
   const float cell_lit_alpha = g_page ? 0.55f : 0.9f;
   const Rgb& halo_color = g_page ? kPageHalo : kHalo;
   const Rgb& ring_color = g_page ? kPageRing : kWhite;
   const float ring_alpha = g_page ? 0.4f : 0.25f;
   const float socket_alpha = g_page ? 0.45f : 0.30f;
-  for (int i = 0; i < look.count; ++i) {
+  for (int i = 0; !scroll && i < look.count; ++i) {
     if (look.type[i] == kKeyEmpty) continue;
     const bool nav = IsNavKey(look.type[i]);
     float bx = 0.0f, by = 0.0f, br = 0.0f;
@@ -1422,7 +1702,7 @@ void Raster(const Look& look) {
       const Rgb* note_ink = g_page ? &kPageNoteInk : &kNoteInk;
       if (look.count == 0) {
         if (y >= h / 2) ink = note_ink;
-      } else if (y < title_px) {
+      } else if (y < pad_y + title_px) {
         if (note_in_band) ink = note_ink;
       } else {
         // The letters of a cell: dim for an item that the game refuses now.
@@ -1572,6 +1852,7 @@ void BuildLook(Look* look) {
   look->orbs = g_orbs && !BookBubbleFailed();
   look->shape = BookShape();
   look->order = BookOrder();
+  look->scroll = g_look;
   for (int i = 0; i < g_count; ++i) {
     look->type[i] = g_items[i].type;
     look->can[i] = g_items[i].can;
@@ -2348,6 +2629,37 @@ void SpellBookRingOrderChange(const char* by) {
          g_ring_order ? 1 : 0,
          g_ring_order ? "The miracles of a ring are in the reading order"
                       : "The miracles of a ring go clockwise");
+}
+
+void SpellBookWarm() {
+  // The keys only: the settings of the book belong to the frame thread.
+  if (IniKey("spell_book_look", 1) == 0 || IniKey("hint_card_style", 1) == 0) {
+    return;
+  }
+  // A ring of 1 to 6 items and a page of the book of all miracles have the
+  // same size.
+  const Layout l = LayoutFor(kPageCells, kShapeRingPage);
+  const int w = PictureWidth(l, true), h = PictureHeight(l, true);
+  const card_scroll::Picture frame = {g_frame, kTexture, w, h};
+  card_scroll::Scroll(frame, kScrollPadX + kScrollPaperIn, kScrollRollTop,
+                      w - kScrollPadX - kScrollPaperIn, h - kScrollRollBottom,
+                      5);
+  g_frame_w = w;
+  g_frame_h = h;
+}
+
+int SpellBookLookValue() {
+  ReadSettings();
+  return g_look ? 1 : 0;
+}
+
+void SpellBookLookChange(const char* by) {
+  ReadSettings();
+  g_look = !g_look;
+  g_have_drawn = false;
+  ModLog("spell book   : %s: spell_book_look=%d. %s", by, g_look ? 1 : 0,
+         g_look ? "The book is a scroll with sockets"
+                : "The book is a flat page");
 }
 
 int SpellBookPalmValue() {
@@ -3229,7 +3541,7 @@ void SpellBookTextFitTest() {
       check(g_note_font, why, band, 1, "spell book note");
     }
     RECT name;
-    NameBox(l, 0, &name);
+    NameBox(l, 0, &name, g_look && g_page);
     for (int k = 0; k < key_count; ++k) {
       check(g_name_font[SizeIndex(l)], BadgeName(keys[k]), name, 1,
             "spell book name");

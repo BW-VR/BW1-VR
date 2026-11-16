@@ -59,6 +59,8 @@ enum Icon {
   kIconChallenge,
   kIconLibrary,
   kIconTick,
+  kIconPageBack,
+  kIconPageNext,
   kIcons
 };
 
@@ -444,6 +446,19 @@ RING_ICON_SHAPES(kShapesTick){
     {kSegment, kAdd, {40, 78, 86, 22, 8}},
 };
 
+RING_ICON_SHAPES(kShapesPageBack){
+    // An arrow to the left: the page before.
+    {kSegment, kAdd, {84, 50, 22, 50, 6}},
+    {kSegment, kAdd, {44, 26, 20, 50, 6}},
+    {kSegment, kAdd, {44, 74, 20, 50, 6}},
+};
+RING_ICON_SHAPES(kShapesPageNext){
+    // An arrow to the right: the next page.
+    {kSegment, kAdd, {16, 50, 78, 50, 6}},
+    {kSegment, kAdd, {56, 26, 80, 50, 6}},
+    {kSegment, kAdd, {56, 74, 80, 50, 6}},
+};
+
 #undef RING_ICON_SHAPES
 
 struct IconShapes {
@@ -492,6 +507,8 @@ inline IconShapes ShapesOf(int icon) {
       RING_ICON_ENTRY(kShapesChallenge),
       RING_ICON_ENTRY(kShapesLibrary),
       RING_ICON_ENTRY(kShapesTick),
+      RING_ICON_ENTRY(kShapesPageBack),
+      RING_ICON_ENTRY(kShapesPageNext),
   };
   if (icon < 0 || icon >= kIcons) return kTable[0];
   return kTable[icon];

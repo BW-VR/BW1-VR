@@ -372,6 +372,8 @@ int SpellBookRingOrderValue();
 void SpellBookRingOrderChange(const char* by);
 int SpellBookPalmValue();
 void SpellBookPalmChange(const char* by);
+int SpellBookLookValue();
+void SpellBookLookChange(const char* by);
 // The sheet of the gestures over the palm (gesture_sheet.cpp).
 int GestureSheetValue();
 void GestureSheetChange(const char* by);
@@ -945,6 +947,9 @@ const Switch kSwitches[] = {
     {kGroupMiracles, L"Ring order", L"Order of the miracles on the ring",
      "spell_book_ring_order", SpellBookRingOrderValue,
      SpellBookRingOrderChange, L"clockwise|reading"},
+    {kGroupMiracles, L"Book look", L"The spell book as a scroll with sockets",
+     "spell_book_look", SpellBookLookValue, SpellBookLookChange,
+     L"page|scroll"},
     {kGroupMiracles, L"Book orbs", L"The game's orbs in the spell book",
      "spell_book_orbs", SpellBookOrbsValue, SpellBookOrbsChange,
      L"pictures|orbs"},
@@ -1546,6 +1551,10 @@ const wchar_t* const kTips[] = {
     L"Reading: the miracles of the ring go left to right and from the top. A "
     L"page with two families of three has one family down each side. "
     L"Clockwise: from the upper left, clockwise.",
+    // Book look
+    L"Scroll: the spell book is a scroll with rolls. Each miracle is in a "
+    L"socket, an empty place shows an empty socket, and Back and Next are the "
+    L"wax seals of the ring. Page: the flat page with blue seals.",
     // Book orbs
     L"Orbs: each cell of the spell book shows the orb of the game, the glass "
     L"ball with the miracle in it. Pictures: a flat picture with the gestures.",

@@ -2,6 +2,8 @@
 
 #include "card_scroll.h"
 
+#include "ring_icon_math.h"
+
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -1020,6 +1022,497 @@ void Key(const Picture& picture, int x0, int y0, int x1, int y1, int look,
       const float ink = Clamp01(0.5f - d) * Clamp01(d + frame + 0.5f);
       const float strength = 0.9f + 0.1f * Tile(g_mid, x + ox, y + oy);
       Over(out, kFrame[look], kFrameAlpha[look] * ink * strength);
+    }
+  }
+}
+
+// --- the wax of a choice -----------------------------------------------------
+
+namespace {
+
+const Rgb kGoldWax = {226.0f, 174.0f, 60.0f};
+const Rgb kGoldLight = {255.0f, 246.0f, 210.0f};
+const Rgb kPaleGold = {196.0f, 174.0f, 128.0f};
+const Rgb kPaleWax = {136.0f, 112.0f, 98.0f};
+const Rgb kPaleLight = {214.0f, 200.0f, 184.0f};
+const Rgb kRimGold = {255.0f, 220.0f, 120.0f};
+const Rgb kGlowGold = {255.0f, 196.0f, 80.0f};
+
+// The signed distance to a box with round ends (as wide as high, or wider):
+// below 0 is inside.
+float PillDistance(float px, float py, float x0, float y0, float x1,
+                   float y1) {
+  const float r = 0.5f * (y1 - y0);
+  const float qx =
+      px < x0 + r ? x0 + r - px : (px > x1 - r ? px - (x1 - r) : 0.0f);
+  const float qy = py - 0.5f * (y0 + y1);
+  return sqrtf(qx * qx + qy * qy) - r;
+}
+
+// A cover into a letters picture: a pixel keeps the larger cover.
+inline void KeepCover(uint32_t& out, float cover) {
+  const uint32_t v = static_cast<uint32_t>(cover * 255.0f + 0.5f);
+  if (v > ((out >> 8) & 0xFF)) out = (v << 16) | (v << 8) | v;
+}
+
+}  // namespace
+
+void Rewax(const Picture& p, int look) {
+  const Rgb& wax = look == kWaxPaleGold ? kPaleGold
+                   : look == kWaxPale   ? kPaleWax
+                                        : kGoldWax;
+  const Rgb& light = look == kWaxPale ? kPaleLight : kGoldLight;
+  int count[256];
+  memset(count, 0, sizeof(count));
+  int total = 0;
+  for (int y = 0; y < p.height; ++y) {
+    const uint8_t* in = p.bgra + static_cast<size_t>(y) * p.pitch * 4;
+    for (int x = 0; x < p.width; ++x, in += 4) {
+      if (in[3] != 255) continue;
+      ++count[(in[2] * 77 + in[1] * 150 + in[0] * 29) >> 8];
+      ++total;
+    }
+  }
+  if (total == 0) return;
+  int middle = 0;
+  for (int sum = 0; middle < 255; ++middle) {
+    sum += count[middle];
+    if (2 * sum >= total) break;
+  }
+  if (middle < 8) middle = 8;
+  const float per_middle = 1.0f / (256.0f * middle);
+  for (int y = 0; y < p.height; ++y) {
+    uint8_t* out = p.bgra + static_cast<size_t>(y) * p.pitch * 4;
+    for (int x = 0; x < p.width; ++x, out += 4) {
+      const int a = out[3];
+      if (a == 0) continue;
+      const float alpha = a * (1.0f / 255.0f);
+      // The brightness of the pixel with no alpha, against the middle.
+      const float k = (out[2] * 77 + out[1] * 150 + out[0] * 29) *
+                      per_middle / alpha;
+      Rgb c;
+      if (k <= 1.0f) {
+        c = {wax.r * k, wax.g * k, wax.b * k};
+      } else {
+        const float t = Clamp01(k - 1.0f);
+        c = {wax.r + (light.r - wax.r) * t, wax.g + (light.g - wax.g) * t,
+             wax.b + (light.b - wax.b) * t};
+      }
+      out[0] = static_cast<uint8_t>(c.b * alpha + 0.5f);
+      out[1] = static_cast<uint8_t>(c.g * alpha + 0.5f);
+      out[2] = static_cast<uint8_t>(c.r * alpha + 0.5f);
+    }
+  }
+}
+
+void Rim(const Picture& p, int x0, int y0, int x1, int y1, float strength) {
+  for (int y = 0; y < p.height; ++y) {
+    uint8_t* out = p.bgra + static_cast<size_t>(y) * p.pitch * 4;
+    for (int x = 0; x < p.width; ++x, out += 4) {
+      const float d = PillDistance(x + 0.5f, y + 0.5f, static_cast<float>(x0),
+                                   static_cast<float>(y0),
+                                   static_cast<float>(x1),
+                                   static_cast<float>(y1));
+      if (d >= 20.0f || out[3] == 255) continue;
+      const float g = d < 9.0f ? 1.0f : 1.0f - (d - 9.0f) / 11.0f;
+      uint8_t src[4] = {0, 0, 0, 0};
+      Over(src, kGlowGold, 0.42f * strength * g * g);
+      Over(src, kRimGold,
+           0.95f * strength * Clamp01(d - 4.5f) * Clamp01(9.5f - d));
+      // Under the seal: the rim shows only where the seal does not cover.
+      const int k = 255 - out[3];
+      for (int c = 0; c < 4; ++c) {
+        out[c] = static_cast<uint8_t>(out[c] + (src[c] * k + 127) / 255);
+      }
+    }
+  }
+}
+
+void StampLetters(uint32_t* letters, int pitch, int height, float cx, float cy,
+                  float radius) {
+  const float width = 4.0f;
+  const int r = static_cast<int>(radius + width) + 2;
+  for (int y = static_cast<int>(cy) - r; y <= static_cast<int>(cy) + r; ++y) {
+    if (y < 0 || y >= height) continue;
+    for (int x = static_cast<int>(cx) - r; x <= static_cast<int>(cx) + r;
+         ++x) {
+      if (x < 0 || x >= pitch) continue;
+      const float dx = x + 0.5f - cx, dy = y + 0.5f - cy;
+      const float d = fabsf(sqrtf(dx * dx + dy * dy) - radius) - 0.5f * width;
+      const float cover = Clamp01(0.5f - d);
+      if (cover <= 0.0f) continue;
+      KeepCover(letters[y * pitch + x], cover);
+    }
+  }
+}
+
+void IconLetters(uint32_t* letters, int pitch, int height, int icon, float x0,
+                 float y0, float size) {
+  const int left = static_cast<int>(x0) - 1, top = static_cast<int>(y0) - 1;
+  const int right = static_cast<int>(x0 + size) + 2;
+  const int bottom = static_cast<int>(y0 + size) + 2;
+  for (int y = top < 0 ? 0 : top; y < bottom && y < height; ++y) {
+    for (int x = left < 0 ? 0 : left; x < right && x < pitch; ++x) {
+      const float cover =
+          ring_icon_math::IconCover(icon, x0, y0, size, x + 0.5f, y + 0.5f);
+      if (cover <= 0.0f) continue;
+      KeepCover(letters[y * pitch + x], cover);
+    }
+  }
+}
+
+// --- the scroll of the spell book --------------------------------------------
+
+namespace {
+
+const Rgb kWood = {104.0f, 60.0f, 30.0f};
+const Rgb kBrass = {170.0f, 128.0f, 62.0f};
+
+// The light of a round part: a normal (nx, ny, nz) with y down against a
+// light from the upper left and the front. diffuse and the sheen.
+inline void Light(float nx, float ny, float nz, float* diffuse, float* sheen) {
+  const float lx = -0.42f, ly = -0.58f, lz = 0.70f;
+  const float d = nx * lx + ny * ly + nz * lz;
+  // A wrap of the light round the part, so its dark side is not flat.
+  const float wrap = (d + 0.5f) / 1.5f;
+  *diffuse = wrap > 0.0f ? wrap : 0.0f;
+  // The half vector between the light and the eye (0, 0, 1).
+  const float hx = lx, hy = ly, hz = lz + 1.0f;
+  const float hl = sqrtf(hx * hx + hy * hy + hz * hz);
+  float s = (nx * hx + ny * hy + nz * hz) / hl;
+  s = s > 0.0f ? s : 0.0f;
+  s = s * s;
+  s = s * s;
+  s = s * s;
+  *sheen = s * s;
+}
+
+}  // namespace
+
+void Scroll(const Picture& picture, int x0, int y0, int x1, int y1, int seed) {
+  const int w = picture.width;
+  const int h = picture.height;
+  for (int y = 0; y < h; ++y) {
+    memset(picture.bgra + static_cast<size_t>(y) * picture.pitch * 4, 0,
+           static_cast<size_t>(w) * 4);
+  }
+  const int kMaxSide = 2048;
+  if (w > kMaxSide || h > kMaxSide || w <= 0 || h <= 0) return;
+  const int ox = seed * 71, oy = seed * 53;
+  const float fx0 = static_cast<float>(x0), fx1 = static_cast<float>(x1);
+  const float fy0 = static_cast<float>(y0), fy1 = static_cast<float>(y1);
+  const float radius = 0.5f * kScrollRoll;
+  // A roll is a little longer than the paper is wide.
+  const float roll_x0 = fx0 - 7.0f, roll_x1 = fx1 + 7.0f;
+  // The rod and its knob at each end.
+  const float rod_radius = 7.0f;
+  const float knob_radius = 18.0f;
+  const float knob_l = fx0 - kScrollKnobOut + knob_radius;
+  const float knob_r = fx1 + kScrollKnobOut - knob_radius;
+  // The collar between the roll and the knob.
+  const float collar_radius = 12.0f, collar_half = 3.5f;
+  const float collar_l = knob_l + knob_radius + 3.0f;
+  const float collar_r = knob_r - knob_radius - 3.0f;
+
+  // The torn sides of the paper, for each row.
+  static float edge_left[kMaxSide], edge_right[kMaxSide];
+  for (int y = 0; y < h; ++y) {
+    edge_left[y] = fx0 + 4.5f * (Tile(g_mid, 61 + ox, y + oy) - 0.5f) +
+                   1.4f * (Tile(g_fine, 83 + ox, y + oy) - 0.5f);
+    edge_right[y] = fx1 + 4.5f * (Tile(g_mid, 157 + ox, y + oy) - 0.5f) +
+                    1.4f * (Tile(g_fine, 179 + ox, y + oy) - 0.5f);
+  }
+  const float shadow_dx = 4.0f, shadow_dy = 7.0f, shadow_soft = 7.0f;
+  const float shadow_alpha = 0.45f;
+
+  // The signed distance to the whole shape, for the drop shadow.
+  const auto shape = [&](float px, float py) {
+    float d = RoundRect(px, py, fx0, fy0, fx1, fy1, 2.0f);
+    const float rolls[2] = {fy0, fy1};
+    for (float cy : rolls) {
+      const float r = RoundRect(px, py, roll_x0, cy - radius, roll_x1,
+                                cy + radius, 6.0f);
+      if (r < d) d = r;
+      const float rod = RoundRect(px, py, knob_l, cy - rod_radius, knob_r,
+                                  cy + rod_radius, rod_radius);
+      if (rod < d) d = rod;
+      const float knobs[2] = {knob_l, knob_r};
+      for (float kx : knobs) {
+        const float k = sqrtf((px - kx) * (px - kx) + (py - cy) * (py - cy)) -
+                        knob_radius;
+        if (k < d) d = k;
+      }
+    }
+    return d;
+  };
+
+  for (int y = 0; y < h; ++y) {
+    const float py = y + 0.5f;
+    uint8_t* out = picture.bgra + static_cast<size_t>(y) * picture.pitch * 4;
+    // The roll of this row, if any: the nearer one.
+    const float roll_cy = fabsf(py - fy0) < fabsf(py - fy1) ? fy0 : fy1;
+    const float ry = py - roll_cy;
+    const bool roll_row = fabsf(ry) < knob_radius + 1.0f ||
+                          fabsf(ry) < radius + 1.0f;
+    const bool top_roll = roll_cy == fy0;
+    for (int x = 0; x < w; ++x, out += 4) {
+      const float px = x + 0.5f;
+      // The paper: from the middle of the top roll to the middle of the
+      // bottom roll, with the torn sides.
+      float d = edge_left[y] - px;
+      if (px - edge_right[y] > d) d = px - edge_right[y];
+      if (fy0 - py > d) d = fy0 - py;
+      if (py - fy1 > d) d = py - fy1;
+      const float cover_paper = Clamp01(0.5f - d);
+      const int t = TileIndex(x + ox, y + oy);
+      // The shade that a roll gives the paper next to it.
+      const float near_roll = top_roll ? py - (fy0 + radius)
+                                       : (fy1 - radius) - py;
+      const bool shaded = near_roll < 14.0f;
+      if (cover_paper >= 1.0f && d <= -kDeep && !shaded && !roll_row) {
+        memcpy(out, &g_deep[t], 4);
+        continue;
+      }
+      // The drop shadow, where the paper does not cover.
+      if (cover_paper < 1.0f) {
+        const float s = shape(px - shadow_dx, py - shadow_dy);
+        if (s < shadow_soft) {
+          Over(out, kBlack, shadow_alpha * Smooth(-shadow_soft, shadow_soft, -s));
+        }
+      }
+      if (cover_paper > 0.0f) {
+        // The burn of the sides only: the top and the bottom go into the
+        // rolls.
+        float side = edge_left[y] - px;
+        if (px - edge_right[y] > side) side = px - edge_right[y];
+        const int step = BurnStep(-side);
+        const float burn = g_burn_near[step] + g_burn_far[step] * g_mid[t];
+        Rgb color = Mix(g_paper[t], kBurnt, Clamp01(burn));
+        if (shaded) {
+          // Under the top roll the paper is in its shadow, and over the
+          // bottom roll it bends into the roll.
+          const float k = near_roll < 0.0f ? 0.0f : near_roll;
+          color = Scale(color, 1.0f - (top_roll ? 0.30f : 0.18f) *
+                                          expf(-k / (top_roll ? 5.0f : 4.0f)));
+        }
+        if (cover_paper >= 1.0f) {
+          Opaque(out, color);
+        } else {
+          Over(out, color, cover_paper);
+        }
+      }
+      if (!roll_row) continue;
+      // The rod and its knobs, under the roll.
+      if (px < roll_x0 + 2.0f || px > roll_x1 - 2.0f) {
+        // The rod: a cylinder of wood.
+        const float rod_d = fabsf(ry) - rod_radius;
+        const bool in_rod = px > knob_l && px < knob_r && rod_d < 0.5f;
+        if (in_rod) {
+          const float ny = Clamp01(fabsf(ry) / rod_radius) * (ry < 0 ? -1.0f : 1.0f);
+          float diffuse, sheen;
+          Light(0.0f, ny, sqrtf(1.0f - ny * ny > 0.0f ? 1.0f - ny * ny : 0.0f),
+                &diffuse, &sheen);
+          const float grain = (Tile(g_fine, (x + ox) / 3, y + oy) - 0.5f) * 0.18f;
+          Rgb c = Scale(kWood, (0.40f + 0.85f * diffuse) * (1.0f + grain));
+          c = Mix(c, kSheen, 0.35f * sheen);
+          Over(out, c, Clamp01(0.5f - rod_d));
+        }
+        // The collar and the knob: round parts of the same wood.
+        for (int side_i = 0; side_i < 2; ++side_i) {
+          const float kx = side_i == 0 ? knob_l : knob_r;
+          const float cx = side_i == 0 ? collar_l : collar_r;
+          // The collar: a short disc, a little thicker than the rod.
+          const float qx = fabsf(px - cx) - collar_half;
+          const float collar_d = (qx > fabsf(ry) - collar_radius ? qx
+                                  : fabsf(ry) - collar_radius);
+          if (collar_d < 0.5f) {
+            const float ny = Clamp01(fabsf(ry) / collar_radius) *
+                             (ry < 0 ? -1.0f : 1.0f);
+            float diffuse, sheen;
+            Light(0.0f, ny, sqrtf(1.0f - ny * ny), &diffuse, &sheen);
+            Rgb c = Scale(kWood, 0.36f + 0.80f * diffuse);
+            c = Mix(c, kSheen, 0.30f * sheen);
+            Over(out, c, Clamp01(0.5f - collar_d));
+          }
+          const float dx = px - kx;
+          const float r = sqrtf(dx * dx + ry * ry);
+          if (r < knob_radius + 0.5f) {
+            const float k = r / knob_radius;
+            const float nz = k < 1.0f ? sqrtf(1.0f - k * k) : 0.0f;
+            float diffuse, sheen;
+            Light(dx / knob_radius, ry / knob_radius, nz, &diffuse, &sheen);
+            const float grain =
+                (Tile(g_mid, x + ox + 40, (y + oy) * 3) - 0.5f) * 0.16f;
+            Rgb c = Scale(kWood, (0.34f + 0.95f * diffuse) * (1.0f + grain));
+            c = Mix(c, kSheen, 0.45f * sheen);
+            Over(out, c, Clamp01(knob_radius + 0.5f - r));
+          }
+        }
+      }
+      // The roll: a cylinder of the same paper, along x.
+      const float roll_d = RoundRect(px, py, roll_x0, roll_cy - radius, roll_x1,
+                                     roll_cy + radius, 3.0f);
+      const float cover_roll = Clamp01(0.5f - roll_d);
+      if (cover_roll > 0.0f) {
+        const float ny = ry / radius > 1.0f    ? 1.0f
+                         : ry / radius < -1.0f ? -1.0f
+                                               : ry / radius;
+        const float nz = sqrtf(1.0f - ny * ny);
+        float diffuse, sheen;
+        Light(0.0f, ny, nz, &diffuse, &sheen);
+        const float grain =
+            (Tile(g_fine, x + ox, (y + oy) / 4) - 0.5f) * 0.10f;
+        Rgb color = Scale(Mix(g_paper[t], kRoll, 0.7f),
+                          (0.36f + 0.72f * diffuse) * (1.0f + grain));
+        color = Mix(color, kSheen, 0.22f * sheen);
+        // The edge of the outer turn of the paper: a thin dark line along
+        // the roll, on the side that the page leaves from.
+        const float lip = top_roll ? ry - 0.62f * radius : -ry - 0.62f * radius;
+        color = Scale(color, 1.0f - 0.25f * Gauss(lip, 1.1f));
+        // The ends of the roll are burnt as the paper, and show the turns of
+        // the paper round the rod.
+        const float end = px - roll_x0 < roll_x1 - px ? px - roll_x0
+                                                      : roll_x1 - px;
+        color = Mix(color, kBurnt,
+                    Clamp01(g_burn_roll[BurnStep(end)] +
+                            0.10f * g_mid[t]));
+        if (end < 5.0f) {
+          const float e = sqrtf(ry * ry + 4.0f * (5.0f - end) * (5.0f - end));
+          const float turns = 0.5f + 0.5f * cosf(e * 1.7f);
+          color = Mix(color, kRollHollow, 0.35f * turns * Clamp01(5.0f - end));
+          if (e < rod_radius + 1.0f) {
+            color = Mix(color, kWood, Clamp01(rod_radius + 1.0f - e));
+          }
+        }
+        Over(out, color, cover_roll);
+      }
+    }
+  }
+}
+
+void Socket(const Picture& p, float cx, float cy, float hole, int look,
+            int seed) {
+  const bool empty = (look & kSocketEmpty) != 0;
+  const bool lit = (look & kSocketLit) != 0;
+  const bool dim = (look & kSocketDim) != 0;
+  const float rim_mid = hole + 3.5f, rim_half = 3.5f;
+  const float line_r = hole + 10.5f;
+  const float reach = lit ? hole + 7.0f + 20.0f : hole + kSocketOut + 2.0f;
+  const int x0 = static_cast<int>(cx - reach) - 1;
+  const int x1 = static_cast<int>(cx + reach) + 2;
+  const int y0 = static_cast<int>(cy - reach) - 1;
+  const int y1 = static_cast<int>(cy + reach) + 2;
+  const Rgb metal = lit ? kGoldWax : (dim ? kPaleGold : kBrass);
+  const int ox = seed * 37 + 3, oy = seed * 41 + 9;
+  // The six dots on the ring of ink, and the six dots of the rose in an empty
+  // socket, from the middle.
+  float line_dot[6][2], rose_dot[6][2];
+  for (int k = 0; k < 6; ++k) {
+    const float a = (30.0f + 60.0f * k) * 0.01745329f;
+    line_dot[k][0] = line_r * cosf(a);
+    line_dot[k][1] = line_r * sinf(a);
+    const float b = (-90.0f + 60.0f * k) * 0.01745329f;
+    rose_dot[k][0] = 0.40f * hole * cosf(b);
+    rose_dot[k][1] = 0.40f * hole * sinf(b);
+  }
+  // A socket with a miracle has nothing to draw inside its hole: the caller
+  // clears it. So each row draws only the band round the hole.
+  const float skip = empty ? 0.0f : hole - 1.0f;
+  for (int y = y0 < 0 ? 0 : y0; y < y1 && y < p.height; ++y) {
+    const float py = y + 0.5f;
+    const float dy = py - cy;
+    if (dy * dy > reach * reach) continue;
+    const float span = sqrtf(reach * reach - dy * dy) + 1.0f;
+    const float inner =
+        skip * skip > dy * dy ? sqrtf(skip * skip - dy * dy) - 1.0f : -1.0f;
+    uint8_t* row = p.bgra + static_cast<size_t>(y) * p.pitch * 4;
+    int first = static_cast<int>(cx - span);
+    int last = static_cast<int>(cx + span) + 1;
+    if (first < (x0 < 0 ? 0 : x0)) first = x0 < 0 ? 0 : x0;
+    if (last > x1) last = x1;
+    for (int x = first; x < last && x < p.width; ++x) {
+      const float px = x + 0.5f;
+      const float dx = px - cx;
+      if (inner > 0.0f && fabsf(dx) < inner) {
+        // Jump over the inside of the hole.
+        const int to = static_cast<int>(cx + inner);
+        if (to > x) {
+          x = to - 1;
+          continue;
+        }
+      }
+      uint8_t* out = row + x * 4;
+      const float r = sqrtf(dx * dx + dy * dy);
+      if (r > reach) continue;
+      // The glow round the socket under the hand, as the rim of a seal.
+      if (lit) {
+        const float d = r - (hole + 7.0f);
+        if (d > 0.0f && d < 20.0f) {
+          const float g = d < 9.0f ? 1.0f : 1.0f - (d - 9.0f) / 11.0f;
+          Over(out, kGlowGold, 0.42f * g * g);
+          Over(out, kRimGold, 0.95f * Clamp01(d - 4.5f) * Clamp01(9.5f - d));
+        }
+      } else {
+        // The ring of ink round the socket, with six dots.
+        const float line = Clamp01(1.2f - fabsf(r - line_r));
+        const float strength = 0.9f + 0.1f * Tile(g_mid, x + ox, y + oy);
+        Over(out, kInk, (dim ? 0.25f : 0.5f) * line * strength);
+        for (int k = 0; k < 6 && fabsf(r - line_r) < 3.5f; ++k) {
+          const float ddx = dx - line_dot[k][0];
+          const float ddy = dy - line_dot[k][1];
+          const float dot = Clamp01(2.9f - sqrtf(ddx * ddx + ddy * ddy));
+          if (dot > 0.0f) Over(out, kInk, (dim ? 0.35f : 0.75f) * dot);
+        }
+      }
+      // The shadow of the rim on the paper, down and to the right.
+      {
+        const float sx = px - 1.5f - cx, sy = py - 2.5f - cy;
+        const float sr = sqrtf(sx * sx + sy * sy);
+        const float sd = fabsf(sr - rim_mid) - rim_half;
+        if (sd < 2.5f && r > hole + 6.5f) {
+          Over(out, kBlack, 0.35f * Smooth(-2.5f, 2.5f, -sd));
+        }
+      }
+      if (r < hole + 0.5f) {
+        if (empty) {
+          // The dip in the paper: darker, with the shadow of its upper left
+          // edge inside it.
+          const float ex = dx - 4.0f, ey = dy - 5.5f;
+          const float er = sqrtf(ex * ex + ey * ey);
+          const float shade =
+              0.16f + 0.50f * Smooth(hole - 14.0f, hole + 1.0f, er);
+          Over(out, kRollHollow, shade * Clamp01(hole + 0.5f - r));
+          // The light on the lower right wall of the dip.
+          const float lx = dx + 4.0f, ly = dy + 5.5f;
+          const float lr = sqrtf(lx * lx + ly * ly);
+          Over(out, kSheen,
+               0.30f * Smooth(hole - 8.0f, hole + 1.0f, lr) *
+                   Clamp01(hole + 0.5f - r) * Clamp01((dx + dy) / hole));
+          // A faint rose of ink in the middle: a small ring and six dots.
+          const float ring = Clamp01(1.4f - fabsf(r - 0.18f * hole));
+          float dot = 0.0f;
+          for (int k = 0; k < 6; ++k) {
+            const float qx = dx - rose_dot[k][0];
+            const float qy = dy - rose_dot[k][1];
+            const float e = Clamp01(3.2f - sqrtf(qx * qx + qy * qy));
+            if (e > dot) dot = e;
+          }
+          Over(out, kInk, 0.28f * (ring > dot ? ring : dot));
+        }
+      }
+      // The rim of brass: a ring with a round profile.
+      const float rd = fabsf(r - rim_mid) - rim_half;
+      if (rd < 0.5f) {
+        const float t = Clamp01((r - (hole)) / (2.0f * rim_half)) * 2.0f - 1.0f;
+        const float nz = sqrtf(1.0f - t * t > 0.0f ? 1.0f - t * t : 0.0f);
+        const float ux = r > 0.0f ? dx / r : 0.0f, uy = r > 0.0f ? dy / r : 0.0f;
+        float diffuse, sheen;
+        Light(ux * t, uy * t, nz, &diffuse, &sheen);
+        const float grain = (Tile(g_fine, x + ox, y + oy) - 0.5f) * 0.10f;
+        Rgb c = Scale(metal, (0.42f + 0.80f * diffuse) * (1.0f + grain));
+        c = Mix(c, lit ? kGoldLight : kSheen, (lit ? 0.6f : 0.45f) * sheen);
+        Over(out, c, Clamp01(0.5f - rd));
+      }
     }
   }
 }

@@ -56,6 +56,13 @@
 #             hand_angle=1 and 0, then with the right hand on its side, with
 #             hand_two_sided=1 and 0. Give it
 #             -Set "backend=dxwrapper\ddraw.dll;test_frame_rate=60".
+#   hintdepth The hand and the controller of a hint in depth
+#             (controller-hints.md, "The hand and the controller in depth"):
+#             the hands of the kind angle, the right hand from three sides
+#             (as a player holds it, on its side, and turned to show the
+#             thumb side), each with an eye picture with hint_hand_first=1
+#             and one with 0 (the word orderkey). Give it
+#             -Set "backend=dxwrapper\ddraw.dll;test_frame_rate=60".
 #
 # THE START. The run starts in a test save (README.md, "A fast start"): the
 # save "pen" for the kinds one and fixed (the Creature pens of Land 1 after
@@ -238,6 +245,22 @@ if ($Kind -eq 'one') {
     $Steps = 'point@4600+1 lpoint@4600+1 rot@4600+1 lrot@4600+1 shot@4700+1 ' +
              'anglekey@4720+1 shot@4760+1 anglekey@4780+1 rot@4800+1 ' +
              'shot@4840+1 sideskey@4860+1 shot@4900+1 sideskey@4920+1'
+} elseif ($Kind -eq 'hintdepth') {
+    # The hand and the controller of a hint in depth: the hands of the kind
+    # angle. The land prompt shows the controllers from about frame 4700 to
+    # about 4950. Three sides of the right hand, each with hint_hand_first=1
+    # and then 0 (the word orderkey), and the word again so the next side
+    # starts with 1.
+    $extra.fake_head_pitch = -25
+    $extra.grip_fit_test = 1
+    $extra.fake_controller_points = "$first 18,-25,40"
+    $extra.fake_controller_left_points = '-18,-25,40'
+    $extra.fake_controller_rots = '10,60,0 10,10,90 40,30,-60'
+    $extra.fake_controller_left_rots = '-10,60,0'
+    $Steps = 'point@4600+1 lpoint@4600+1 rot@4600+1 lrot@4600+1 ' +
+             'shot@4760+1 orderkey@4770+1 shot@4790+1 orderkey@4800+1 ' +
+             'rot@4810+1 shot@4830+1 orderkey@4840+1 shot@4860+1 orderkey@4870+1 ' +
+             'rot@4880+1 shot@4900+1 orderkey@4910+1 shot@4930+1 orderkey@4940+1'
 } elseif ($Kind -eq 'glow') {
     # The glow at the Hand's point (hand-model.md, "The glow at the Hand's
     # point"). With hand_land_stop=0 the hand goes into the land, and the

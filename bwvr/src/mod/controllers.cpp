@@ -221,6 +221,8 @@ void TeleportSwitchToggle(const char* by);
 void HintCardMovesToggle(const char* by);
 // hand_model.cpp: the switch of hand_two_sided (the word sideskey).
 void HandModelTwoSidedChange(const char* by);
+// hint_model.cpp: the switch of hint_hand_first (the word orderkey).
+void HintModelHandFirstChange(const char* by);
 
 void ControllersPump();
 bool ControllersFarAllowed(const char** why);
@@ -347,10 +349,12 @@ enum FakeInput {
   // The stick of the left hand forward at half of a full push: a push under
   // the threshold of the speed ramp (move_stick_ramp).
   kLStickHalf,
-  // The switches of hand_angle (grip_fit.cpp) and of hand_two_sided
-  // (hand_model.cpp) act on the first frame of the word.
+  // The switches of hand_angle (grip_fit.cpp), of hand_two_sided
+  // (hand_model.cpp) and of hint_hand_first (hint_model.cpp) act on the
+  // first frame of the word.
   kAngleKey,
   kSidesKey,
+  kOrderKey,
   kInputCount
 };
 
@@ -366,7 +370,8 @@ const char* const kInputName[kInputCount] = {
     "aimtemple",  "gripdip",    "exit",       "bench",
     "lmenu",      "layoutkey",  "movekey",    "teleportkey", "promptkey",
     "book",       "lrot",       "aimplaces",  "lstick_click",
-    "aimdebug",   "aimmark",    "lstick_half", "anglekey",  "sideskey"};
+    "aimdebug",   "aimmark",    "lstick_half", "anglekey",  "sideskey",
+    "orderkey"};
 
 // The fake hand positions for the word "point", in cm from the head center.
 // A value can have decimals.
@@ -1440,6 +1445,9 @@ void UpdateScript() {
     if (step.input == kSidesKey && t == step.start) {
       HandModelTwoSidedChange("The word sideskey");
     }
+    if (step.input == kOrderKey && t == step.start) {
+      HintModelHandFirstChange("The word orderkey");
+    }
     if (step.input == kBook && t == step.start) {
       float local[3];
       if (SpellBookTestItem(local)) {
@@ -1481,7 +1489,7 @@ void UpdateScript() {
         i == kAimCommand || i == kAimTurn || i == kDeactivate ||
         i == kAimTemple || i == kExit || i == kBench || i == kLayoutKey ||
         i == kMoveKey || i == kBook || i == kAimPlaces || i == kAimDebug ||
-        i == kAimMark || i == kAngleKey || i == kSidesKey) {
+        i == kAimMark || i == kAngleKey || i == kSidesKey || i == kOrderKey) {
       continue;
     }
     if (i == kPose2) {

@@ -1677,7 +1677,7 @@ of a hand that would hide the other hand does not show. A card of the other
 hand that would overlap a card of the hand that points does not show.
 
 **The depth.** The controller, the diamond and the lines draw in the eye
-pictures, after the opaque meshes of the overlay and before the mesh of the
+pictures, after the opaque meshes of the overlay and after the mesh of the
 hands, with the depth of the scene (`overlay.cpp`). So the land can hide
 them. Each eye has three draws: the lit parts and the lines, then the front
 faces of the body (faint, with the depth write), then the outline: the back
@@ -1685,9 +1685,29 @@ faces again, each corner pushed out 1.2 mm along its normal, in ink. Inside
 the silhouette the front faces are nearer and hide the outline, so only a
 thin edge round the body shows. The back faces of the body do not draw.
 
-So the body writes the depth of its front faces, and the faint hand, which
-draws after the controller, does not show behind the body. The cards are
-quad layers, as each hint card is (9.2), so the Hand cannot
+**The hand and the controller in depth** (`hint_hand_first=1`). The
+controller is in the real hand, so the hand and the controller are in the
+same place, and their surfaces cross each other. The hand draws first, and
+then the controller:
+
+- A faint hand (68 percent) writes no depth. So the controller tests only
+  the depth of the scene, and its faint body, its outline and its lit
+  buttons go over the hand. The controller shows through the hand in a
+  fixed order: no part of the hand is lost, and no pixel changes between the
+  hand and the land from one frame to the next.
+- A solid hand writes depth: a hand in front of the page of the book
+  (`card_hand_solid=1`, `ui-layer.md` 28), and a hand at 90 percent of its
+  opacity or more while its controller fades in or out. It hides the part
+  of the controller in it, as a real hand does, and the part out of it
+  shows.
+
+With `hint_hand_first=0` the controller draws first. The front faces of its
+faint body write depth, so each part of the hand behind the body or in it
+fails the depth test, and the land shows there through the faint body.
+Where the surfaces of the hand and of the controller meet, the depth test
+gives the hand in one frame and the land in the next.
+
+The cards are quad layers, as each hint card is (9.2), so the Hand cannot
 hide them. A real hand in the land is drawn on the land (`hand-model.md`,
 "The Hand stops at the land"), and its controller goes with the drawn hand.
 The line still ends at the edge of its card.
@@ -1703,6 +1723,7 @@ shows each card. The controller and the lines are in the eye pictures.
 | `hint_style` | from `hint_controller` | 2 the controller in the hand, with a card for each lit button. 1 the cards at the wrists (9.3). The default is 2 with `hint_controller=1` and 1 with `hint_controller=0`. Not in the launcher: a save of the launcher removes it, and a test can write it |
 | `hint_hand_opacity_pct` | 68 | The opacity of the hand while its controller shows, in percent. 35 is the fainter hand |
 | `hint_pulse` | 1 | 1 the lit buttons pulse, one beat a second from 35 percent of the light to full light. 0 a steady light |
+| `hint_hand_first` | 1 | 1 the hand draws before its controller, so the faint body of the controller does not hide a part of the hand ("The hand and the controller in depth"). 0 the controller draws first, with the depth of its body. The switch "Hint order" of the debug page (group Hand) and the script word `orderkey` change it live |
 | `view_check` | 1 | 1 the check of the view (9.15) and the scale check (9.16) run in the God view and write their log lines. 0 no check |
 | `hint_body_fine` | 1 | 1 the simpler body of a heavy model has cells of 3.4 mm at most and a cell for each side of the normal, so the ink outline of a thin part (a ring, a strap) does not break. 0 the cells grow until the body has 2500 triangles, with one cell for all the normals |
 | `hint_model_test` | empty | Test key. The folder of a model for both hands, for example `valve-index`, in place of the model of the profile |
@@ -1715,7 +1736,9 @@ live comparison.
 
 - `hint model   : hint_controller=1, hint_style=2, ...` once, with the folder of the models,
   and `hint model   : hint_hand_opacity_pct=68, ... hint_pulse=1, ...` with
-  the opacity of the hand and the light of the lit buttons.
+  the opacity of the hand and the light of the lit buttons, and
+  `hint model   : hint_hand_first=1: the hand draws before its controller,
+  ...` with the order of the two.
 - `hint model   : the right hand reports the profile "oculus/touch_controller"
   and the headset "Meta Quest 3", so the model is meta-quest-touch-plus`:
   once for each hand, and again when the model changes.

@@ -2324,11 +2324,14 @@ void OverlayDraw() {
     PutStatesBack(device);
   }
   if (g_teleport_triangles > 0) TeleportCountDraw(1, drawn);
-  // The controllers of the hints: their lit buttons write depth, and their
-  // faint bodies blend. The faint hands draw over them, so a controller
-  // shows through its hand.
+  // The controllers of the hints: their lit buttons and their faint bodies
+  // write depth. With hint_hand_first=1 they draw after the mesh of the
+  // hands, so the body of a controller hides no part of a faint hand (which
+  // writes no depth), and a solid hand hides the part of its controller in
+  // it. With hint_hand_first=0 they draw before the hands.
+  const bool hand_first = HintModelHandFirst();
   int model_drawn = 0;
-  if (HintModelHasDraw()) {
+  if (!hand_first && HintModelHasDraw()) {
     model_drawn = HintModelDraw(device, m, near_plane, hx, hy);
     if (model_drawn > 0) drawn += model_drawn;
   }
@@ -2342,6 +2345,10 @@ void OverlayDraw() {
     HandModelSetFlow(HandExactFlow(&flow) ? g_pointing : -1, &flow);
     mesh_drawn = HandModelDraw(device, m, near_plane, hx, hy);
     if (mesh_drawn > 0) drawn += mesh_drawn;
+  }
+  if (hand_first && HintModelHasDraw()) {
+    model_drawn = HintModelDraw(device, m, near_plane, hx, hy);
+    if (model_drawn > 0) drawn += model_drawn;
   }
   // The glow, last: the depth of the hands hides the part of a ribbon behind
   // them, and the light of a ribbon in front of them adds to them.

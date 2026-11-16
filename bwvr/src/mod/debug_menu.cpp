@@ -382,6 +382,9 @@ int HandCutBallValue();
 void HandCutBallChange(const char* by);
 int HandCutSolidValue();
 void HandCutSolidChange(const char* by);
+// The order of the hand and of the controller of a hint (hint_model.cpp).
+int HintModelHandFirstValue();
+void HintModelHandFirstChange(const char* by);
 // The draw of a gesture (controllers.cpp, overlay.cpp).
 int ControllersGesturePointValue();
 void ControllersGesturePointChange(const char* by);
@@ -818,6 +821,9 @@ const Switch kSwitches[] = {
     {kGroupHand, L"Hand sides", L"Both sides of each hand triangle",
      "hand_two_sided", HandModelTwoSidedValue, HandModelTwoSidedChange,
      L"front|both"},
+    {kGroupHand, L"Hint order", L"Hand drawn before the hint controller",
+     "hint_hand_first", HintModelHandFirstValue, HintModelHandFirstChange,
+     L"model first|hand first"},
 
     // Throw
     {kGroupThrow, L"Fast release", L"Release at once", "release_at_once",
@@ -1392,6 +1398,11 @@ const wchar_t* const kTips[] = {
     L"Both: the hands draw each triangle, also one that faces away, so no "
     L"triangle is missing at an edge of the hand. Front: only the triangles "
     L"that face the eye.",
+    // Hint order
+    L"Hand first: the hand draws before the controller of a hint, so the "
+    L"faint body of the controller does not hide a part of the hand. Model "
+    L"first: the controller draws first, and the hand can lose triangles in "
+    L"it.",
     // Fast release
     L"On: a game turn runs on the frame after a release of the Hand, or after "
     L"the grip opens in a take. Off: the mod waits up to 100 ms for the game "

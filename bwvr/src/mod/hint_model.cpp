@@ -37,19 +37,31 @@
 // motion that the player did not make.
 //
 // THE DRAW. In each eye pass, after the opaque meshes of the overlay and
-// before the mesh of the hands, with the depth of the scene, so the land can
-// hide the controller. The CPU puts each corner on the screen as the
-// overlay does (overlay_math.h, Project). The draws: the lit buttons and
-// the lines with the depth write on, the back faces of the body with an
-// alpha, the depth of its front faces, the ink outline (the shell of the back
-// faces, pushed out along the normals, which the front faces hide inside the
-// silhouette), and the front faces with an alpha. So the faint body reads as
-// a shape on bright land. A triangle with a corner in front of the near
-// plane is not drawn: the controller is at the length of an arm.
+// after the mesh of the hands (hint_hand_first=1), with the depth of the
+// scene, so the land can hide the controller. The CPU puts each corner on
+// the screen as the overlay does (overlay_math.h, Project). The draws: the
+// lit buttons and the lines with the depth write on, the front faces of the
+// body, faint, with the depth write on, and the ink outline (the shell of
+// the back faces, pushed out along the normals, which the front faces hide
+// inside the silhouette). So the faint body reads as a shape on bright land.
+// A triangle with a corner in front of the near plane is not drawn: the
+// controller is at the length of an arm.
 //
 // THE HAND goes faint (hint_model_math.h, HandOpacity) while its controller
 // shows. It stays, so the player still sees where the Hand touches, and the
 // controller shows through it.
+//
+// THE HAND AND THE CONTROLLER IN DEPTH (hint_hand_first=1). The hand and the
+// controller are in the same place: the controller is in the real hand. The
+// hand draws first. A faint hand writes no depth, so the controller tests
+// only the depth of the scene, and its faint body and its outline go over
+// the hand in a fixed order: no part of the hand is lost, and no pixel
+// flickers between the two. A solid hand (in front of the page of the book,
+// or while its controller fades) writes depth, so it hides the part of the
+// controller in it, as a real hand does. hint_hand_first=0 draws the
+// controller first: its faint body writes depth, so each part of the hand
+// behind or in the body fails the depth test, and where the two surfaces
+// meet, the pixels flicker between the hand and the land.
 //
 // THE KEYS of bwvr.ini:
 //
@@ -73,6 +85,9 @@
 //                         shows, in percent. 35 is the fainter hand
 //   hint_pulse=1          1 the lit buttons pulse, one slow beat a second
 //                         from dim to full light. 0 a steady light
+//   hint_hand_first=1     1 the hand draws before the controller, so the
+//                         faint body of the controller does not hide a part
+//                         of the hand. 0 the controller draws first
 //   hint_model_test       a test key: the folder of a model (for example
 //                         valve-index) for both hands, in place of the one of
 //                         the profile
@@ -133,6 +148,7 @@ bool g_test_keys = false;
 bool g_body_fine = true;  // hint_body_fine
 int g_hand_opacity_pct = hint_model::kHandOpacityPct;  // hint_hand_opacity_pct
 bool g_pulse = true;      // hint_pulse
+bool g_hand_first = true; // hint_hand_first
 char g_test_model[64] = "";
 char g_dir[MAX_PATH] = "";
 
@@ -169,6 +185,7 @@ void ReadSettings() {
   if (g_hand_opacity_pct < 0) g_hand_opacity_pct = 0;
   if (g_hand_opacity_pct > 100) g_hand_opacity_pct = 100;
   g_pulse = GetPrivateProfileIntA("bwvr", "hint_pulse", 1, ini) != 0;
+  g_hand_first = GetPrivateProfileIntA("bwvr", "hint_hand_first", 1, ini) != 0;
   GetPrivateProfileStringA("bwvr", "hint_model_test", "", g_test_model,
                            sizeof(g_test_model), ini);
   char dir[MAX_PATH] = "";
@@ -199,6 +216,12 @@ void ReadSettings() {
          g_pulse ? "the lit buttons pulse from dim to full light, one beat a "
                    "second"
                  : "the lit buttons have a steady light");
+  ModLog("hint model   : hint_hand_first=%d: %s", g_hand_first ? 1 : 0,
+         g_hand_first
+             ? "the hand draws before its controller, so the faint body of "
+               "the controller does not hide a part of the hand"
+             : "the controller draws before the hand, and its faint body "
+               "writes depth");
 }
 
 // --- the model -----------------------------------------------------------------------
@@ -2093,6 +2116,23 @@ float HintModelHandOpacity(int side) {
     return 1.0f;
   }
   return hm::HandOpacity(g_side[side].fade, g_hand_opacity_pct);
+}
+
+bool HintModelHandFirst() {
+  ReadSettings();
+  return g_hand_first;
+}
+
+int HintModelHandFirstValue() { return HintModelHandFirst() ? 1 : 0; }
+
+void HintModelHandFirstChange(const char* by) {
+  ReadSettings();
+  g_hand_first = !g_hand_first;
+  ModLog("hint model   : %s: hint_hand_first=%d. %s, frame %llu", by,
+         g_hand_first ? 1 : 0,
+         g_hand_first ? "The hand draws before its controller"
+                      : "The controller draws before the hand",
+         ControllersFrameCount());
 }
 
 int HintModelDraw(IDirect3DDevice7* device, const float camera[12],

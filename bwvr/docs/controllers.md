@@ -933,6 +933,7 @@ The words that act on the first frame of the word only:
 | `promptkey` | The test key of `prompt_moves` acts (`controller-hints.md`, 9.5) |
 | `anglekey` | The switch of `hand_angle` acts (`hand.md`, "The angle of the hand") |
 | `sideskey` | The switch of `hand_two_sided` acts (`hand-model.md`, "Both sides of each triangle") |
+| `orderkey` | The switch of `hint_hand_first` acts (`controller-hints.md`, "The hand and the controller in depth") |
 | `book` | Steps the right hand to the middle of the next item of the open spell book (`miracles.md`, "The spell book") |
 | `lrot` | Turns the left hand to the next of `fake_controller_left_rots`. After the last one the list starts again. The palm that turns up (`miracles.md`, "The gesture row over the palm" and "The book on the palm") |
 

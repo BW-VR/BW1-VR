@@ -55,10 +55,16 @@ bool HintModelHasDraw();
 // The share of the opacity of a hand (0 the left hand, 1 the right hand)
 // while its controller shows.
 float HintModelHandOpacity(int side);
-// In an eye pass, after the opaque meshes of the overlay and before the
-// mesh of the hands. Returns the count of triangles, or -1 on a failure.
+// In an eye pass, after the opaque meshes of the overlay, and after the mesh
+// of the hands when HintModelHandFirst is true (hint_hand_first=1), else
+// before it. Returns the count of triangles, or -1 on a failure.
 int HintModelDraw(IDirect3DDevice7* device, const float camera[12],
                   float near_plane, float half_x, float half_y);
+// hint_hand_first: true when the hands draw before the controllers. The
+// switch "Hint order" of the debug page and the script word orderkey.
+bool HintModelHandFirst();
+int HintModelHandFirstValue();
+void HintModelHandFirstChange(const char* by);
 
 // THE MODEL FOR A PICTURE of a panel (the page Controls of the settings
 // window, controls_page.cpp): the mesh of the controller of one hand (0 the

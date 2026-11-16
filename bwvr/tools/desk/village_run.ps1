@@ -43,7 +43,7 @@
 #                gesture_panel=1 and the book on the palm.
 # The other kinds (charge, store, neartake, land, job, tree, throw,
 # throwlive, throwhouse, throwhouselow, throwpile, probe, workshop, site, build, scaffold,
-# turn, fartake, fartotem, choice, look, book, bookhand, unlock, allbook, bookring, orbsave, controls, rayover, walk, wall,
+# turn, fartake, fartotem, choice, look, book, bookhand, bookcross, unlock, allbook, bookring, orbsave, controls, rayover, walk, wall,
 # housestop, headhouse, pinch, small,
 # aimsign, aimmiracle, aimpast, tglow, tooltip) have a comment at their steps
 # below.
@@ -244,6 +244,45 @@ if ($Kind -eq 'totem') {
                  'book@1130+1 shot@1150+1 pull@1170+10 shot@1200+1 pull@1220+10 x@1300+4'
     }
     $keys = "$keys;spell_book_test_depths=0 5 -8;hand_cut_test_save=6;spell_book_test_save=8;video_view=1;test_frame_rate=60"
+} elseif ($Kind -eq 'bookcross') {
+    # The pointing hand through the plane of the page of the spell book
+    # (bwvr/docs/ui-layer.md, "A hand through the page"). X opens the book.
+    # Each word "book" puts the grip of the right hand at item 1, at the next
+    # distance of spell_book_test_depths in front of the page: the hand is
+    # about 18 cm long round its grip, so at 2, 0 and -3 cm the plane of the
+    # page goes through the hand. Each word "rot" turns the hand to the next
+    # pose of fake_controller_rots: A points ahead and down (the fingers
+    # behind the page, the palm in front), B is A with a roll of 90 degrees,
+    # and C points back at the head (the fingers in front, the wrist behind).
+    # The run starts with card_hand_cross=0: A at 2, 0 and -3 cm, B and C at
+    # 0 cm, each with a shot. The word "cutkey" goes to card_hand_cross=1,
+    # and the same five poses come again. Then A at -5 cm, and the word
+    # "pull" moves the hand 10 cm toward the head over 60 frames, a step each
+    # frame, through the page, with four shots on the way. The word "cutkey"
+    # goes to card_hand_cross=2 (the whole hand), A at 0 cm and a shot. X
+    # closes the book. With the renderer Vulkan and video_view=1 each shot
+    # writes bwvr-vk-video-N.bmp: the left eye with the book over it, as the
+    # headset composes it. bwvr-handcut-left-N and bwvr-handcut-right-N are
+    # the page that each eye gets, with the holes (hand_cut_test_save). With
+    # -Set "backend=dxwrapper\ddraw.dll" the shots are eye pictures of both
+    # eyes, with no book in them. The lines "hand cut" give each value of the
+    # key and the time of the cut.
+    if ($Plan -eq '') { $Plan = 'gosite' }
+    if ($Census -eq '') { $Census = '890' }
+    if ($Seconds -eq 0) { $Seconds = 50 }
+    if ($Steps -eq '') {
+        $Steps = $pre + 'seek@920+1 x@1000+4 ' +
+                 'rot@1020+1 book@1030+1 shot@1050+1 book@1070+1 shot@1090+1 book@1110+1 shot@1130+1 ' +
+                 'rot@1150+1 book@1160+1 shot@1180+1 rot@1200+1 book@1210+1 shot@1230+1 ' +
+                 'cutkey@1250+1 rot@1260+1 book@1270+1 shot@1290+1 book@1310+1 shot@1330+1 book@1350+1 shot@1370+1 ' +
+                 'rot@1390+1 book@1400+1 shot@1420+1 rot@1440+1 book@1450+1 shot@1470+1 ' +
+                 'rot@1490+1 book@1500+1 pull@1520+60 shot@1530+1 shot@1545+1 shot@1560+1 shot@1575+1 ' +
+                 'cutkey@1600+1 pull@1610+1 book@1620+1 shot@1640+1 x@1700+4'
+    }
+    $keys = "$keys;card_hand_cross=0;spell_book_test_items=1;" +
+            "spell_book_test_depths=2 0 -3 0 0 2 0 -3 0 0 -5 0;" +
+            "fake_controller_rots=0,-30,0 0,-30,90 180,-20,0;fake_controller_pull_cm=10;" +
+            "hand_cut_test_save=16;video_view=1;test_frame_rate=60"
 } elseif ($Kind -eq 'unlock') {
     # The switch "Unlock all miracles" of the debug window, with no keyboard
     # (bwvr/docs/miracles.md, "The debug switch"). Y and the left hand choose

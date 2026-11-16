@@ -59,6 +59,10 @@ int HandCutSidesValue();
 void HandCutSidesChange(const char* by);
 int HandCutBallValue();
 void HandCutBallChange(const char* by);
+// card_hand_cross: 1 cut at the plane, 2 the whole hand, 0 the strict test.
+// The cycle goes 1, 2, 0, 1.
+int HandCutCrossValue();
+void HandCutCrossCycle(const char* by);
 
 // Once a report window.
 void HandCutReport();

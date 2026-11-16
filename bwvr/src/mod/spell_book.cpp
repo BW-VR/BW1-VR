@@ -109,7 +109,8 @@
 //   spell_book_test_depths   a test key: for each word "book" of the
 //                            scripted controller in turn, the distance of
 //                            the hand in front of the page in cm, for
-//                            example "0 5 -5" (below 0 behind the page)
+//                            example "0 5 -2.5" (below 0 behind the page),
+//                            16 values at most
 //   spell_book_test_save=0   a test key: the mod saves the first N pictures
 //                            of the book as bwvr-book-NNNNN.bmp
 //   hint_card_style=1        1: the book is a page of parchment with dark
@@ -2881,7 +2882,7 @@ bool SpellBookTestItem(float out[3]) {
   if (!g_open || !g_have_plane || g_count == 0) return false;
   // spell_book_test_depths: for each word "book" in turn, the distance of
   // the hand in front of the page in cm (below 0 behind it), a test key.
-  static int depths[8] = {0};
+  static float depths[16] = {0.0f};
   static int depth_count = -1;
   static int depth_next = 0;
   if (depth_count < 0) {
@@ -2893,13 +2894,13 @@ bool SpellBookTestItem(float out[3]) {
     }
     char* context = nullptr;
     for (char* word = strtok_s(text, " ,", &context);
-         word != nullptr && depth_count < 8;
+         word != nullptr && depth_count < 16;
          word = strtok_s(nullptr, " ,", &context)) {
-      depths[depth_count++] = atoi(word);
+      depths[depth_count++] = static_cast<float>(atof(word));
     }
   }
-  const int depth_cm =
-      depth_count > 0 ? depths[depth_next++ % depth_count] : 0;
+  const float depth_cm =
+      depth_count > 0 ? depths[depth_next++ % depth_count] : 0.0f;
   // spell_book_test_items: for each word "book" in turn, the item, a test
   // key. With no key the word steps to the next item.
   static int items[16] = {0};
@@ -2928,7 +2929,7 @@ bool SpellBookTestItem(float out[3]) {
   PointOn(g_plane, x, y, out);
   for (int k = 0; k < 3; ++k) out[k] += g_plane.normal[k] * depth_cm * 0.01f;
   ModLog("spell book   : test: the word \"book\" steps the pointing hand to "
-         "item %d (%s) of the book, %d cm in front of the page, frame %llu",
+         "item %d (%s) of the book, %.1f cm in front of the page, frame %llu",
          i, NarrowName(g_items[i].type), depth_cm, ControllersFrameCount());
   return true;
 }

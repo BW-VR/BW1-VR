@@ -325,11 +325,13 @@ keeps the mod as it is.
 
 - **F27. The hand in front of a page.** The page of the spell book and of
   the ring has a hole for each eye where a hand or the bubble of a pull is
-  in front of it (`card_hand_front=1`, `card_hand_both_sides=1`,
-  `card_ball_cut=1`, `ui-layer.md` 28). Open: the cost. In the recipe
-  `village_run.ps1 -Kind bookring` on the PC of the owner (3600 by 2880),
-  the cut takes 0.46 ms a frame on average while a hand is at the page,
-  0.93 to 0.98 ms in a frame with a new cut, and 1.4 to 1.7 ms at most.
+  in front of it, and a hand through the page shows up to the line where
+  it crosses the page (`card_hand_front=1`, `card_hand_both_sides=1`,
+  `card_hand_cross=1`, `card_ball_cut=1`, `ui-layer.md` 28). Open: the
+  cost. In the recipe `village_run.ps1 -Kind bookring` on the PC of the
+  owner (3600 by 2880), the cut takes 0.49 to 0.51 ms a frame on average
+  while a hand is at the page, 1.0 to 1.06 ms in a frame with a new cut,
+  and 1.5 to 1.6 ms at most.
   The fill of the masks is half of it: each row of each triangle of both
   hands, on both of its sides, for each eye. Where the texture of the game
   makes the palm almost clear, the land shows in the hole beside the arm.

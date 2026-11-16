@@ -355,6 +355,8 @@ enum FakeInput {
   kAngleKey,
   kSidesKey,
   kOrderKey,
+  // The word cutkey: the next value of card_hand_cross (hand_cut.cpp).
+  kCutKey,
   kInputCount
 };
 
@@ -371,7 +373,7 @@ const char* const kInputName[kInputCount] = {
     "lmenu",      "layoutkey",  "movekey",    "teleportkey", "promptkey",
     "book",       "lrot",       "aimplaces",  "lstick_click",
     "aimdebug",   "aimmark",    "lstick_half", "anglekey",  "sideskey",
-    "orderkey"};
+    "orderkey",   "cutkey"};
 
 // The fake hand positions for the word "point", in cm from the head center.
 // A value can have decimals.
@@ -1448,6 +1450,9 @@ void UpdateScript() {
     if (step.input == kOrderKey && t == step.start) {
       HintModelHandFirstChange("The word orderkey");
     }
+    if (step.input == kCutKey && t == step.start) {
+      HandCutCrossCycle("The word cutkey");
+    }
     if (step.input == kBook && t == step.start) {
       float local[3];
       if (SpellBookTestItem(local)) {
@@ -1489,7 +1494,8 @@ void UpdateScript() {
         i == kAimCommand || i == kAimTurn || i == kDeactivate ||
         i == kAimTemple || i == kExit || i == kBench || i == kLayoutKey ||
         i == kMoveKey || i == kBook || i == kAimPlaces || i == kAimDebug ||
-        i == kAimMark || i == kAngleKey || i == kSidesKey || i == kOrderKey) {
+        i == kAimMark || i == kAngleKey || i == kSidesKey || i == kOrderKey ||
+        i == kCutKey) {
       continue;
     }
     if (i == kPose2) {

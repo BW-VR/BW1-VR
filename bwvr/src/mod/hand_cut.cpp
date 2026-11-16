@@ -17,7 +17,9 @@
 // of its eye picture. The two eyes see the hand at two places of the page,
 // so the card goes out as two quads in one place: kCardRing for the left
 // eye and kCardRingRight for the right eye, each with its own holes. A part
-// of the hand behind the page makes no hole, so the page stays over it. The
+// of the hand behind the page makes no hole, so the page stays over it. A
+// hand through the page shows to the line where it crosses the plane: each
+// point of the cut of a triangle is on that line (card_hand_cross=1). The
 // text of the page stays sharp: it is still a quad layer. When no hand is in
 // front of the page, the card goes out as one quad for both eyes.
 //
@@ -62,6 +64,13 @@
 //                       the hint
 //   card_hand_both_sides=1  0: only the triangles that face the eye make a
 //                       hole, with one side for the whole hand
+//   card_hand_cross=1   a hand through the plane of the page. 1: each
+//                       triangle is cut at the plane, and the edge of the
+//                       hole is the line where the hand crosses the page.
+//                       2: the whole hand shows over the page while a part
+//                       of it is in front. 0: a point of the cut must be in
+//                       front of the page, so the page covers most of the
+//                       triangles at the plane
 //   card_ball_cut=1     0: the book makes one round hole for both eyes where
 //                       the bubble of a pull is in front of the page
 //   hand_cut_test_save=0  N: saves the pictures of both eyes of the first N
@@ -109,6 +118,14 @@ bool g_on = true;
 bool g_solid = true;
 bool g_both_sides = true;  // card_hand_both_sides: each triangle cuts
 bool g_ball_cut = true;    // card_ball_cut: the bubble of a pull cuts
+// card_hand_cross: a hand through the plane of the page. 1: each triangle is
+// cut at the plane (kCrossCut). 2: the whole hand shows while a part of it is
+// in front (kCrossWhole). 0: the points of the cut must be in front of the
+// page (kCrossStrict).
+const int kCrossStrict = 0;
+const int kCrossCut = 1;
+const int kCrossWhole = 2;
+int g_cross = kCrossCut;
 int g_save = 0;
 // The game's bubble of a pull of the spell book in this frame
 // (HandCutBall): its middle in the LOCAL space and its radius in meters.
@@ -194,6 +211,18 @@ double g_new_ms = 0.0;
 bool g_said_no_view = false;
 bool g_said_no_mesh = false;
 
+const char* CrossText(int cross) {
+  return cross == kCrossCut
+             ? "each triangle of a hand through the page is cut at the plane "
+               "of the page: the part in front shows over the page, and the "
+               "page hides the part behind it"
+         : cross == kCrossWhole
+             ? "the whole hand shows over the page while a part of it is in "
+               "front of the page"
+             : "each point of the cut of a triangle must be in front of the "
+               "page. The page covers most triangles at the plane";
+}
+
 void ReadSettings() {
   if (g_read) return;
   g_read = true;
@@ -209,8 +238,12 @@ void ReadSettings() {
     g_both_sides =
         GetPrivateProfileIntA("bwvr", "card_hand_both_sides", 1, path) != 0;
     g_ball_cut = GetPrivateProfileIntA("bwvr", "card_ball_cut", 1, path) != 0;
+    g_cross = static_cast<int>(
+        GetPrivateProfileIntA("bwvr", "card_hand_cross", kCrossCut, path));
+    if (g_cross < kCrossStrict || g_cross > kCrossWhole) g_cross = kCrossCut;
     g_save = GetPrivateProfileIntA("bwvr", "hand_cut_test_save", 0, path);
   }
+  ModLog("hand cut     : card_hand_cross=%d: %s", g_cross, CrossText(g_cross));
   ModLog("hand cut     : card_hand_both_sides=%d: %s. card_ball_cut=%d: %s",
          g_both_sides ? 1 : 0,
          g_both_sides ? "each opaque triangle of a hand in front of the page "
@@ -393,14 +426,26 @@ uint64_t EyeMask(int eye, const float eye_at[3], const hc::Page& page,
           Cross3Dot(tri[0], tri[1], tri[2], eye_at) * front <= 0.0f) {
         continue;
       }
+      // The part of the triangle that makes a hole. A point of the cut is on
+      // the plane, and the float math puts it a little behind the page or
+      // in front of it at random: kOnPlane takes it as on the page.
       float in_front[4][3];
-      const int n = hc::ClipFront(tri, page, in_front);
+      int n = 0;
+      float behind = 0.0f;
+      if (g_cross == kCrossWhole) {
+        memcpy(in_front, tri, sizeof(tri));
+        n = 3;
+        behind = 1e30f;
+      } else {
+        n = hc::ClipFront(tri, page, in_front);
+        behind = g_cross == kCrossCut ? hc::kOnPlane : 0.0f;
+      }
       if (n == 0) continue;
       float px[4][2];
       bool on = true;
       for (int k = 0; k < n && on; ++k) {
         float x = 0.0f, y = 0.0f;
-        on = hc::OntoPage(eye_at, page, in_front[k], &x, &y);
+        on = hc::OntoPage(eye_at, page, in_front[k], &x, &y, behind);
         px[k][0] = mid_x + x * ppm_x;
         px[k][1] = mid_y - y * ppm_y;
       }
@@ -895,6 +940,21 @@ void HandCutSidesChange(const char* by) {
   g_seen.valid = false;
   ModLog("hand cut     : %s: card_hand_both_sides=%d, frame %llu", by,
          g_both_sides ? 1 : 0, ControllersFrameCount());
+}
+
+int HandCutCrossValue() {
+  ReadSettings();
+  return g_cross;
+}
+
+void HandCutCrossCycle(const char* by) {
+  ReadSettings();
+  g_cross = g_cross == kCrossCut     ? kCrossWhole
+            : g_cross == kCrossWhole ? kCrossStrict
+                                     : kCrossCut;
+  g_seen.valid = false;
+  ModLog("hand cut     : %s: card_hand_cross=%d: %s, frame %llu", by, g_cross,
+         CrossText(g_cross), ControllersFrameCount());
 }
 
 int HandCutBallValue() {

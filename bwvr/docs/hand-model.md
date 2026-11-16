@@ -509,8 +509,9 @@ only when the counts are those of the file of the Hand (1 primitive, 22
 bones, 141 vertices). The hook is there only with `hand_hide_game=1`.
 
 The cut at a page (`hand_cut.cpp`, `card_hand_front=1`) makes the hole in the
-page from the triangles that face the eye. A triangle that faces away and is
-in front of the page makes no hole.
+page from each triangle of the hand on both of its sides
+(`card_hand_both_sides=1`), cut at the plane of the page
+(`card_hand_cross=1`, `ui-layer.md`, "A hand in front of a card").
 
 The log: `hand model   : drawn in N eye passes, N triangles a pass, N
 triangles that face away (drawn too, hand_two_sided=1)` once a report

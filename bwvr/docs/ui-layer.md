@@ -3234,6 +3234,22 @@ built and before the eye passes, for each eye:
    (`OntoPage`). The eye is the view that the projection layer of that eye
    declares (`StereoDeclaredView`), so the hole is where that eye picture
    has the hand.
+
+**A hand through the page** (`card_hand_cross=1`). A triangle across the
+plane of the page is cut at the plane, and its part in front makes the
+hole. The points of the cut are on the plane, but the float math puts each
+one some micrometers in front of the page or behind it, at random.
+`OntoPage` takes a point at most `kOnPlane` (0.5 mm) behind the page as on
+the page. So the edge of the hole is the line where the hand crosses the
+page: the part of the hand in front shows whole over the page, and the page
+hides the part behind it. With `card_hand_cross=0` each point of the cut
+must be in front of the page, and a triangle with a point that the float
+math puts behind makes no hole. That is about 3 of 4 triangles across the
+page. The page then covers their part in front, so the hand loses
+triangles along the line where it goes through the page. With
+`card_hand_cross=2` each triangle of a hand makes a hole, also behind the
+page, while a vertex of that hand is in front: the whole hand shows over
+the page.
 3. The parts fill a mask of the page with half of its pixels each way,
    with 2 by 2 samples in each pixel (`FillConvex`). Each row of samples
    takes the span of the part on its line. The mask grows by 1 of its
@@ -3283,10 +3299,10 @@ each part, how many times the picture of the right eye was copied whole and
 in boxes, and the mean of the frames with a new cut.
 
 In the recipe `village_run.ps1 -Kind bookring` on a PC with a render of
-3600 by 2880, a report window with a hand at the page has the cut at 0.46
-ms a frame on average (0.95 ms in a frame with a new cut) and 1.4 to 1.7
-ms at most. The fill of the masks takes 0.27 ms of it, the holes 0.1 ms,
-the copies 0.05 ms and the growth 0.02 ms.
+3600 by 2880, a report window with a hand at the page has the cut at 0.49
+to 0.51 ms a frame on average (1.0 to 1.06 ms in a frame with a new cut)
+and 1.5 to 1.6 ms at most. The fill of the masks takes 0.28 to 0.29 ms of
+it, the holes 0.1 ms, the copies 0.06 ms and the growth 0.02 ms.
 
 The page gets a hole where the mask is, and the eye sees its eye picture,
 with the hand, through it. A part of the hand behind the page makes no
@@ -3331,6 +3347,7 @@ hand cut     : this window the cut ran in 103 frames, 0.472 ms on average and 1.
 | `card_hand_front` | 1 | 0: the page of the spell book and of the ring is over the hands, also where a hand is in front of it. The switch "Hand in front" of the debug page (group Interface) |
 | `card_hand_solid` | 1 | 0: a hand in front of the page keeps the faint opacity of a hint. The switch "Hand solid" of the debug page (group Interface) |
 | `card_hand_both_sides` | 1 | 0: only the triangles on the side that faces the eye make a hole, with one side for the whole hand. The switch "Hand cut sides" of the debug page (group Interface) |
+| `card_hand_cross` | 1 | A hand through the plane of the page. 1: each triangle is cut at the plane, and the hand shows over the page up to the line where it crosses the page. 2: the whole hand shows over the page while a part of it is in front. 0: each point of the cut must be in front of the page, so the page covers most of the triangles at that line. The switch "Hand through page" of the debug page (group Interface) |
 | `card_ball_cut` | 1 | 0: the book makes one round hole for both eyes where the bubble of a pull is in front of the page. The switch "Orb cut" of the debug page (group Interface) |
 | `hand_cut_test_save` | 0 | Test key. N: saves the pictures of both eyes of the first N frames with a cut, at most one each 30 frames, as `bwvr-handcut-left-<frame>.bmp` and `bwvr-handcut-right-<frame>.bmp` |
 
@@ -3342,8 +3359,17 @@ cover of a half pixel, the same mask and box as a count of the samples of
 each pixel for 3000 triangles and 4-gons (also across the edges of the mask
 and out of it), the span from the slopes of the edges within 0.001 px of
 the span of each edge, no pixel for a triangle out of the mask, and the
-growth in steps of 16 against the growth of each pixel. The recipe `village_run.ps1 -Kind bookhand`
-puts the hand on the page, 5 cm in front of it and 8 cm behind it. Its
-picture `bwvr-book-N` is the page before the cut and the mark of the pick,
-and `bwvr-handcut-left-N` and `bwvr-handcut-right-N` are the page that each
-eye gets.
+growth in steps of 16 against the growth of each pixel. They also put
+20000 small triangles at random across a tilted page in the LOCAL space:
+with `kOnPlane` the part in front of each one goes onto the page with all
+of its points, and each point of the cut goes onto the page where it is
+(within 0.01 mm), so the edge of the hole is the line where the triangle
+crosses the page. With no room behind the page, the check prints how many
+of those triangles lose their hole (about 74 percent). The recipe
+`village_run.ps1 -Kind bookhand` puts the hand on the page, 5 cm in front
+of it and 8 cm behind it. Its picture `bwvr-book-N` is the page before the
+cut and the mark of the pick, and `bwvr-handcut-left-N` and
+`bwvr-handcut-right-N` are the page that each eye gets. The recipe
+`-Kind bookcross` puts the hand through the page at three depths and in
+three turns, with each value of `card_hand_cross`, and moves it through the
+page with a step each frame.

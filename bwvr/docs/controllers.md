@@ -934,6 +934,7 @@ The words that act on the first frame of the word only:
 | `anglekey` | The switch of `hand_angle` acts (`hand.md`, "The angle of the hand") |
 | `sideskey` | The switch of `hand_two_sided` acts (`hand-model.md`, "Both sides of each triangle") |
 | `orderkey` | The switch of `hint_hand_first` acts (`controller-hints.md`, "The hand and the controller in depth") |
+| `cutkey` | The switch of `card_hand_cross` goes to its next value: 1, 2, 0, 1 (`ui-layer.md`, "A hand in front of a card") |
 | `book` | Steps the right hand to the middle of the next item of the open spell book (`miracles.md`, "The spell book") |
 | `lrot` | Turns the left hand to the next of `fake_controller_left_rots`. After the last one the list starts again. The palm that turns up (`miracles.md`, "The gesture row over the palm" and "The book on the palm") |
 

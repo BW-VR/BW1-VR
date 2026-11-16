@@ -382,6 +382,8 @@ int HandCutSidesValue();
 void HandCutSidesChange(const char* by);
 int HandCutBallValue();
 void HandCutBallChange(const char* by);
+int HandCutCrossValue();
+void HandCutCrossCycle(const char* by);
 int HandCutSolidValue();
 void HandCutSolidChange(const char* by);
 // The order of the hand and of the controller of a hint (hint_model.cpp).
@@ -720,6 +722,10 @@ const Switch kSwitches[] = {
     {kGroupInterface, L"Hand cut sides", L"Both sides of the hand cut the page",
      "card_hand_both_sides", HandCutSidesValue, HandCutSidesChange,
      L"facing|both"},
+    {kGroupInterface, L"Hand through page",
+     L"A hand through the page is cut at the page",
+     "card_hand_cross", HandCutCrossValue, HandCutCrossCycle,
+     L"strict|cut at page|whole hand"},
     {kGroupInterface, L"Orb cut", L"A pulled orb cuts the page for each eye",
      "card_ball_cut", HandCutBallValue, HandCutBallChange,
      L"round hole|each eye"},
@@ -1283,6 +1289,11 @@ const wchar_t* const kTips[] = {
     // Hand cut sides
     L"Both: each part of a hand in front of the page cuts the page, on both "
     L"sides. Facing: only the parts that face the eye.",
+    // Hand through page
+    L"Cut at page: a hand that goes through the page shows in front of it up "
+    L"to the line where it crosses the page. Whole hand: all of the hand "
+    L"shows while a part of it is in front. Strict: the page covers most "
+    L"parts of the hand at that line.",
     // Orb cut
     L"Each eye: an orb that you pull out of the book cuts the page only where "
     L"each eye sees the orb. Round hole: one larger hole for both eyes.",

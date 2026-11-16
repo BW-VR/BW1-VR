@@ -107,6 +107,100 @@ inline void HandCutChecks() {
           "an eye behind the page sees no hole", 0, 0);
   }
 
+  // A HAND THROUGH THE PAGE. A page as the spell book has it in the LOCAL
+  // space: 1.1 m up, 40 cm before the head and 15 cm to the left, turned 35
+  // degrees up and 20 degrees to the side. Small triangles of a hand (1 to 2
+  // cm) across its plane, at random places of the page. The part of each in
+  // front of the page goes onto the page from the eye with all of its
+  // points, so a triangle across the page makes the hole of its part in
+  // front. With no room behind the page (behind = 0), the float math of a
+  // point of the cut puts it behind the page at random, and the part makes
+  // no hole: the page covers the part of the triangle in front of it.
+  {
+    Page tilted;
+    const float c[3] = {-0.15f, 1.10f, -0.40f};
+    const float pitch = 35.0f * 3.14159265f / 180.0f;
+    const float yaw = 20.0f * 3.14159265f / 180.0f;
+    // The normal: toward the head, turned up by the pitch and to the side by
+    // the yaw. Right: level. Up: normal x right.
+    const float n[3] = {sinf(yaw) * cosf(pitch), sinf(pitch),
+                        cosf(yaw) * cosf(pitch)};
+    const float r[3] = {cosf(yaw), 0.0f, -sinf(yaw)};
+    const float u[3] = {n[1] * r[2] - n[2] * r[1], n[2] * r[0] - n[0] * r[2],
+                        n[0] * r[1] - n[1] * r[0]};
+    memcpy(tilted.center, c, sizeof(c));
+    memcpy(tilted.right, r, sizeof(r));
+    memcpy(tilted.up, u, sizeof(u));
+    memcpy(tilted.normal, n, sizeof(n));
+    const float eye[3] = {0.032f, 1.45f, 0.0f};
+    uint32_t seed = 777u;
+    auto next = [&seed]() {
+      seed = seed * 1664525u + 1013904223u;
+      return static_cast<float>((seed >> 8) & 0xFFFF) / 65535.0f;
+    };
+    const int kTriangles = 20000;
+    int across = 0, lost_flat = 0, lost_cut = 0, off_line = 0;
+    for (int t = 0; t < kTriangles; ++t) {
+      // A middle on the page, and three points round it, at -1 to 1 cm
+      // from the plane: some across, some in front, some behind.
+      const float px = -0.10f + 0.20f * next(), py = -0.08f + 0.16f * next();
+      float tri[3][3];
+      for (int k = 0; k < 3; ++k) {
+        const float a = 6.2831853f * (k + 0.7f * next()) / 3.0f;
+        const float size = 0.01f + 0.01f * next();
+        const float x = px + size * cosf(a), y = py + size * sinf(a);
+        const float z = -0.01f + 0.02f * next();
+        for (int i = 0; i < 3; ++i) {
+          tri[k][i] = c[i] + r[i] * x + u[i] * y + n[i] * z;
+        }
+      }
+      int in = 0;
+      for (int k = 0; k < 3; ++k) in += Front(tilted, tri[k]) > 0.0f ? 1 : 0;
+      if (in == 0 || in == 3) continue;
+      ++across;
+      float part[4][3];
+      const int m = ClipFront(tri, tilted, part);
+      if (m == 0) continue;
+      bool flat = true, cut = true;
+      for (int k = 0; k < m; ++k) {
+        float x = 0.0f, y = 0.0f;
+        flat = flat && OntoPage(eye, tilted, part[k], &x, &y);
+        const bool on = OntoPage(eye, tilted, part[k], &x, &y, kOnPlane);
+        cut = cut && on;
+        // A point of the cut is on the plane: it goes onto the page where
+        // it is, so the edge of the hole is the line where the triangle
+        // crosses the plane.
+        const float f = Front(tilted, part[k]);
+        if (on && fabsf(f) < 1e-5f) {
+          float d[3];
+          for (int i = 0; i < 3; ++i) d[i] = part[k][i] - c[i];
+          if (fabsf(Dot(d, r) - x) > 1e-5f || fabsf(Dot(d, u) - y) > 1e-5f) {
+            ++off_line;
+          }
+        }
+      }
+      if (!flat) ++lost_flat;
+      if (!cut) ++lost_cut;
+    }
+    printf("  info  %d of %d triangles across the page lose their hole with no "
+           "room behind the page (%.0f percent)\n", lost_flat, across,
+           across > 0 ? 100.0 * lost_flat / across : 0.0);
+    Check(across > 5000, "the random triangles cross the page", across, 5000);
+    Check(lost_cut == 0, "with kOnPlane each triangle across the page makes "
+          "the hole of its part in front", lost_cut, 0);
+    Check(off_line == 0, "and the edge of the hole is the line where the "
+          "triangle crosses the page, within 0.01 mm", off_line, 0);
+    // A WHOLE HAND (card_hand_cross=2): a point 5 cm behind the page goes onto
+    // the page along the line from the eye.
+    const float back[3] = {c[0] - n[0] * 0.05f, c[1] - n[1] * 0.05f,
+                           c[2] - n[2] * 0.05f};
+    float bx = 0.0f, by = 0.0f;
+    Check(!OntoPage(eye, tilted, back, &bx, &by, kOnPlane),
+          "a point 5 cm behind the page makes no hole of a cut", 0, 0);
+    Check(OntoPage(eye, tilted, back, &bx, &by, 1e30f),
+          "and a hole of a whole hand", 1, 1);
+  }
+
   // THE FILL of a polygon into a mask.
   {
     static uint8_t mask[64 * 64];

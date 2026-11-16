@@ -65,15 +65,22 @@ inline int ClipFront(const float tri[3][3], const Page& p, float out[4][3]) {
   return n >= 3 ? n : 0;
 }
 
+// A point of the cut of ClipFront is on the plane of the page, but the float
+// math puts it up to some micrometers in front of the page or behind it, at
+// random. A point that far behind the page counts as on the page.
+const float kOnPlane = 0.0005f;
+
 // A point in front of the page goes onto the page along the line from the
 // eye: x to the right and y up, in meters from the middle of the page.
 // False when the eye is not in front of the page, or the point is not
-// between the eye and the page.
+// between the eye and the page. A point at most `behind` meters behind the
+// page also goes onto the page along the line from the eye: kOnPlane for
+// the points of a cut, a large value for a whole hand.
 inline bool OntoPage(const float eye[3], const Page& p, const float point[3],
-                     float* x, float* y) {
+                     float* x, float* y, float behind = 0.0f) {
   const float fe = Front(p, eye);
   const float fp = Front(p, point);
-  if (!(fe > 0.01f) || fp < 0.0f || fp >= fe - 0.001f) return false;
+  if (!(fe > 0.01f) || fp < -behind || fp >= fe - 0.001f) return false;
   const float k = fe / (fe - fp);
   float on[3];
   for (int i = 0; i < 3; ++i) {

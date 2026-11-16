@@ -1034,6 +1034,13 @@ bool g_have_drawn = false;
 bool g_staged_new = false;
 // The number of the staged picture (bwvr::CardLayer::serial).
 uint32_t g_staged_serial = 0;
+// The box of the mark in the staged picture. When only the mark moved, the
+// staged picture differs from the picture of g_staged_changed_from only in
+// g_staged_changed (g_staged_part).
+int g_mark_box[4] = {0, 0, 0, 0};
+bool g_staged_part = false;
+int g_staged_changed[4] = {0, 0, 0, 0};
+uint32_t g_staged_changed_from = 0;
 // The hole of the game's bubble in the page in this frame, and whether the
 // staged picture has a hole now.
 spell_book_math::Hole g_hole = {};
@@ -2003,6 +2010,22 @@ bool MarkShows() {
          fabsf(g_point_at[1]) <= 0.5f * l.height_m + kMarkMargin;
 }
 
+// The box of the pixels of the mark at the point of this frame: x0, y0, x1,
+// y1, inside the picture.
+void MarkBox(int box[4]) {
+  const float cx = 0.5f * g_width_px + g_point_at[0] * kPixelsPerMeter;
+  const float cy = 0.5f * g_height_px - g_point_at[1] * kPixelsPerMeter;
+  const float outer = kMarkRadiusM * kPixelsPerMeter;
+  box[0] = static_cast<int>(floorf(cx - outer - 1.0f));
+  box[1] = static_cast<int>(floorf(cy - outer - 1.0f));
+  box[2] = static_cast<int>(ceilf(cx + outer + 1.0f));
+  box[3] = static_cast<int>(ceilf(cy + outer + 1.0f));
+  if (box[0] < 0) box[0] = 0;
+  if (box[1] < 0) box[1] = 0;
+  if (box[2] > g_width_px) box[2] = g_width_px;
+  if (box[3] > g_height_px) box[3] = g_height_px;
+}
+
 void DrawMark() {
   const float cx = 0.5f * g_width_px + g_point_at[0] * kPixelsPerMeter;
   const float cy = 0.5f * g_height_px - g_point_at[1] * kPixelsPerMeter;
@@ -2013,13 +2036,11 @@ void DrawMark() {
   if (a < 0.35f) a = 0.35f;
   const Rgb& ring = g_page ? kPageInk : kWhite;
   const Rgb& middle = g_page ? kPageHalo : kHalo;
-  const int x0 = static_cast<int>(floorf(cx - outer - 1.0f));
-  const int x1 = static_cast<int>(ceilf(cx + outer + 1.0f));
-  const int y0 = static_cast<int>(floorf(cy - outer - 1.0f));
-  const int y1 = static_cast<int>(ceilf(cy + outer + 1.0f));
-  for (int y = y0 < 0 ? 0 : y0; y < y1 && y < g_height_px; ++y) {
+  int box[4];
+  MarkBox(box);
+  for (int y = box[1]; y < box[3]; ++y) {
     uint8_t* row = g_staged + static_cast<size_t>(y) * kTexture * 4;
-    for (int x = x0 < 0 ? 0 : x0; x < x1 && x < g_width_px; ++x) {
+    for (int x = box[0]; x < box[2]; ++x) {
       const float dx = x + 0.5f - cx, dy = y + 0.5f - cy;
       const float r = sqrtf(dx * dx + dy * dy);
       const float band = hand_cut_math::MarkCover(r, outer) *
@@ -2049,18 +2070,57 @@ void StagePicture(uint64_t frame) {
                                       mark[2] != g_mark_drawn[2]));
   const bool recopy = g_staged_new || holed || g_staged_holed || mark_moved;
   if (recopy) {
+    // Only the mark moved: the clean page goes back only in the box of the
+    // old mark, of the new mark and of the holes of the hand cut, and the
+    // cut gets that box (HandCutOffer). Else the whole page.
+    const bool part = !g_staged_new && !holed && !g_staged_holed;
+    int box[4] = {0, 0, g_width_px, g_height_px};
+    if (part) {
+      box[0] = g_width_px;
+      box[1] = g_height_px;
+      box[2] = 0;
+      box[3] = 0;
+      int add[3][4];
+      int n = 0;
+      if (g_staged_marked) {
+        for (int k = 0; k < 4; ++k) add[n][k] = g_mark_box[k];
+        ++n;
+      }
+      if (marked) MarkBox(add[n++]);
+      if (HandCutHoles(g_staged, add[n])) ++n;
+      for (int i = 0; i < n; ++i) {
+        if (add[i][0] >= add[i][2] || add[i][1] >= add[i][3]) continue;
+        if (add[i][0] < box[0]) box[0] = add[i][0];
+        if (add[i][1] < box[1]) box[1] = add[i][1];
+        if (add[i][2] > box[2]) box[2] = add[i][2];
+        if (add[i][3] > box[3]) box[3] = add[i][3];
+      }
+      if (box[0] < 0) box[0] = 0;
+      if (box[1] < 0) box[1] = 0;
+      if (box[2] > g_width_px) box[2] = g_width_px;
+      if (box[3] > g_height_px) box[3] = g_height_px;
+      if (box[0] >= box[2] || box[1] >= box[3]) {
+        box[0] = box[1] = box[2] = box[3] = 0;
+      }
+    }
+    g_staged_changed_from = g_staged_serial;
+    g_staged_part = part;
+    for (int k = 0; k < 4; ++k) g_staged_changed[k] = box[k];
     g_staged_new = false;
     g_staged_serial = bwvr::XrScreen::NewCardSerial();
-    for (int y = 0; y < g_height_px; ++y) {
-      memcpy(g_staged + static_cast<size_t>(y) * kTexture * 4,
-             g_base + static_cast<size_t>(y) * kTexture * 4,
-             static_cast<size_t>(g_width_px) * 4);
+    for (int y = box[1]; y < box[3]; ++y) {
+      memcpy(g_staged + (static_cast<size_t>(y) * kTexture + box[0]) * 4,
+             g_base + (static_cast<size_t>(y) * kTexture + box[0]) * 4,
+             static_cast<size_t>(box[2] - box[0]) * 4);
     }
   }
   g_staged_holed = holed;
   g_staged_marked = marked;
   for (int k = 0; k < 3; ++k) g_mark_drawn[k] = mark[k];
-  if (recopy && marked) DrawMark();
+  if (recopy && marked) {
+    DrawMark();
+    MarkBox(g_mark_box);
+  }
   if (!holed) return;
   const float cx = 0.5f * g_width_px + g_hole.x * kPixelsPerMeter;
   const float cy = 0.5f * g_height_px - g_hole.y * kPixelsPerMeter;
@@ -2608,7 +2668,9 @@ void SpellBookFrame() {
   layer.height = g_height_px / kPixelsPerMeter;
   layer.serial = g_staged_serial;
   bwvr::XrScreen::StageCard(bwvr::kCardRing, layer);
-  HandCutOffer(layer, g_staged_right, "spell book");
+  HandCutOffer(layer, g_staged_right, "spell book",
+               g_staged_part ? g_staged_changed : nullptr,
+               g_staged_changed_from);
 }
 
 bool SpellBookHidesGlow() { return g_open && g_point; }

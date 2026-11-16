@@ -14,10 +14,21 @@
 // the page, HandCutFrame cuts holes into the pixels of the layer and into
 // `right`. While the owner gives the same pixels with the same serial,
 // HandCutFrame puts the clean pixels of its last cut back first, so the
-// owner keeps its picture. A new picture of the owner needs a new serial.
-// `who` names the card in the log.
+// owner keeps its picture. A new picture of the owner needs a new serial,
+// and it must be clean: no hole of the cut in it. `who` names the card in
+// the log. `changed` is the box (x0, y0, x1, y1, in pixels of the texture)
+// out of which the picture of the serial `changed_from` and this picture
+// have the same pixels, or null. With it, the right picture gets only that
+// box again, not the whole picture.
 void HandCutOffer(const bwvr::CardLayer& layer, uint8_t* right,
-                  const char* who);
+                  const char* who, const int changed[4] = nullptr,
+                  uint32_t changed_from = 0);
+
+// spell_book.cpp: the box of the holes that the last cut made in `pixels`,
+// the picture of an owner. False when that picture has no hole now. An
+// owner that changes only a part of its picture also puts its clean pixels
+// back in this box, so the new picture is clean.
+bool HandCutHoles(const uint8_t* pixels, int box[4]);
 
 // spell_book.cpp, in each frame that the game's bubble of a pull shows: its
 // middle in the LOCAL space and its radius, in meters. With card_ball_cut=1

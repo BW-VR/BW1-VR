@@ -3257,18 +3257,28 @@ in front of the page, it has its full opacity, so the player sees a solid
 hand and fingertip over the page. The texture still fades the wrist and the
 forearm. The rule takes the hands of the cut of the frame before.
 
-**The cost.** Only the box of the holes of the last frame is cleared. The
-picture of the owner (the book or the ring) keeps its pixels: the cut keeps
-a copy of the box that it cut and puts it back in the next frame, while the
-owner gives the same pixels with the same serial. The picture of the right
-eye is copied whole only for a new picture of the owner, and else only in
-the box of its last holes. When the eyes, the page, 12 points spread over
-each hand and the bubble of a pull moved 0.3 mm or less, the cut of the
-frame before stays, with no work. The spell book
-draws its picture again for the mark of the pick only when the mark moves a
-pixel. The holes scale each pixel with two 32 bit products. The report line
-has the mean and the longest time of the cut, with no save of a test
-picture in it, and the mean of each part.
+**The cost.** Only the box of the holes of the last frame is cleared. A
+hand with no vertex in front of the page fills nothing, and a triangle with
+its box out of the mask costs no row of the mask. In each row of a
+triangle, the pixels with all 4 samples inside it are one fill, and only
+the pixels at the two ends of the row count their samples
+(`FillConvex`). The picture of the owner (the book or the ring) keeps its
+pixels: the cut keeps a copy of the box that it cut and puts it back in the
+next frame, while the owner gives the same pixels with the same serial.
+The spell book draws its picture again for the mark of the pick only when
+the mark moves a pixel. Then it puts its clean page back only in the box of
+the old mark, of the new mark and of the holes of the last cut
+(`HandCutHoles`), and it gives that box to the cut. So the picture of the
+right eye gets only that box and the box of its last holes. Any other new
+picture of the owner is copied whole. When the eyes, the page, 12 points
+spread over each hand and the bubble of a pull moved 0.3 mm or less, the
+cut of the frame before stays, with no work. The masks, the copy of the
+clean pixels and the picture of the right eye get their pages of memory at
+the first offer of the card, not at the first hole. The holes scale each
+pixel with two 32 bit products. The report line has the mean and the
+longest time of the cut, with no save of a test picture in it, the mean of
+each part, and how many times the picture of the right eye was copied
+whole and in boxes.
 
 The page gets a hole where the mask is, and the eye sees its eye picture,
 with the hand, through it. A part of the hand behind the page makes no
@@ -3305,7 +3315,7 @@ the hand.
 ```
 hand cut     : frame N, a hand is in front of the page of the spell book: 4210 px of holes for the left eye and 3986 px for the right eye. The card goes out as one quad for each eye
 hand cut     : frame N, no hand is in front of the page of the spell book now. The card goes out as one quad for both eyes
-hand cut     : this window the cut ran in 450 frames, 0.120 ms on average and 0.400 ms at the most (with no save of a test picture). On average: the hands into the room 0.010 ms, the masks 0.040 ms, the copies 0.030 ms, the holes 0.040 ms. In 300 frames nothing moved and the cut of the frame before stayed. A hand was in front of a page in 120 frames: the card went out as one quad for each eye. The largest hole of an eye had 5120 px
+hand cut     : this window the cut ran in 450 frames, 0.120 ms on average and 0.400 ms at the most (with no save of a test picture). On average: the hands into the room 0.010 ms, the masks 0.040 ms, the copies 0.030 ms, the holes 0.040 ms. In 300 frames nothing moved and the cut of the frame before stayed. A hand was in front of a page in 120 frames: the card went out as one quad for each eye. The largest hole of an eye had 5120 px. The picture of the right eye was copied whole 2 times, and in boxes 118 times
 ```
 
 | Key | Default | Meaning |
@@ -3319,8 +3329,10 @@ hand cut     : this window the cut ran in 450 frames, 0.120 ms on average and 0.
 The math checks are in `test/controller_math/hand_cut_checks.h`: the cut of
 a triangle at the plane, the place on the page from each eye (4 mm apart
 for a point 5 cm in front of a page 45 cm away), no hole for a point behind
-the page or for an eye behind it, the fill of a polygon and its box, and
-the cover of a half pixel. The recipe `village_run.ps1 -Kind bookhand`
+the page or for an eye behind it, the fill of a polygon and its box, the
+cover of a half pixel, the same mask and box as a count of the samples of
+each pixel for 3000 triangles and 4-gons (also across the edges of the mask
+and out of it), and no pixel for a triangle out of the mask. The recipe `village_run.ps1 -Kind bookhand`
 puts the hand on the page, 5 cm in front of it and 8 cm behind it. Its
 picture `bwvr-book-N` is the page before the cut and the mark of the pick,
 and `bwvr-handcut-left-N` and `bwvr-handcut-right-N` are the page that each

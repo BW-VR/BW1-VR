@@ -38,13 +38,20 @@
 // draw has it) makes no hole: there the page stays, behind the clear part.
 //
 // THE COST. The mask has half of the pixels of the card each way, and the
-// cut scales it up with a soft edge of one pixel of the mask. Only the
-// triangles that face the eye fill it, by spans of rows. Only the box of the
-// holes of the last frame is cleared. The picture of the owner keeps its
-// pixels: this file keeps a copy of the box that it cut, and puts it back in
-// the next frame while the owner gives the same picture (the same pixels and
-// the same serial). When the eyes, the page and the hands did not move more
-// than kStill, the cut of the last frame stays, with no work.
+// cut scales it up with a soft edge of one pixel of the mask. The triangles
+// fill it by spans of rows (hand_cut_math::FillConvex): a triangle with its
+// box out of the mask costs no row, and the pixels inside both spans of a
+// row are one fill. A hand with no vertex in front of the page fills
+// nothing. Only the box of the holes of the last frame is cleared. The
+// picture of the owner keeps its pixels: this file keeps a copy of the box
+// that it cut, and puts it back in the next frame while the owner gives the
+// same picture (the same pixels and the same serial). A new picture of the
+// owner can come with the box that changed (HandCutOffer, changed): then the
+// right picture gets only that box and the box of its last holes, not the
+// whole picture. When the eyes, the page and the hands did not move more
+// than kStill, the cut of the last frame stays, with no work. The masks,
+// the copy of the clean pixels and the right picture of each owner get
+// their pages of memory at the first offer, not at the first hole.
 //
 // THE KEYS of bwvr.ini:
 //
@@ -117,6 +124,9 @@ struct Offer {
   bwvr::CardLayer layer;
   uint8_t* right;
   const char* who;
+  bool has_changed;    // the owner gave the box that changed
+  int changed[4];      // x0, y0, x1, y1 in pixels of the card
+  uint32_t changed_from;  // the serial that the box changed from
 };
 Offer g_offer = {};
 
@@ -144,7 +154,13 @@ int g_left_box[4] = {};
 uint8_t g_clean[kMostSide * kMostSide * 4];
 const uint8_t* g_right_for = nullptr;
 int g_right_box[4] = {};
+// The serial of the picture of the owner that the right picture is a copy
+// of, outside its holes.
+uint32_t g_right_from = 0;
 uint32_t g_left_serial = 0, g_right_serial = 0;
+// The pictures for the right eye that have their pages of memory.
+const uint8_t* g_touched[4] = {nullptr, nullptr, nullptr, nullptr};
+bool g_touched_own = false;
 
 // What the last cut saw: the eyes, the page, some points of the hands and
 // the bubble of a pull.
@@ -164,6 +180,7 @@ bool g_split_before = false;
 int g_logs = 0;
 const int kMostLogs = 60;
 uint64_t g_split_frames = 0, g_still_frames = 0;
+uint64_t g_right_whole = 0, g_right_boxes = 0;  // the copies of the right
 uint64_t g_most_pixels = 0;
 uint64_t g_timed = 0;
 double g_sum_ms = 0.0, g_most_ms = 0.0;
@@ -262,7 +279,15 @@ struct Hands {
   int vertices[2];
   const uint32_t* index[2];
   const uint8_t* alpha[2];
+  bool front[2];  // a vertex of the hand is in front of the page
 };
+
+// Writes one byte in each page of memory of a buffer, so the first real use
+// of the buffer does not wait for the system to give it its pages.
+void TouchPages(uint8_t* p, size_t size) {
+  for (size_t at = 0; at < size; at += 4096) p[at] = 0;
+  if (size > 0) p[size - 1] = 0;
+}
 
 // Copies the rows of a box from one picture to another of the same pitch.
 void CopyBox(uint8_t* to, const uint8_t* from, int pitch_px, const int b[4]) {
@@ -339,6 +364,7 @@ uint64_t EyeMask(int eye, const float eye_at[3], const hc::Page& page,
   const float mid_x = 0.5f * (layer.rect[0] + 0.5f * layer.rect[2]);
   const float mid_y = 0.5f * (layer.rect[1] + 0.5f * layer.rect[3]);
   for (int hand = 0; hand < 2; ++hand) {
+    if (!hands.front[hand]) continue;
     // With card_hand_both_sides=1 the side of a triangle does not count: the
     // hand draws with no culling, and a test of one side for the whole hand
     // takes the wrong side when the nearest triangle turns away.
@@ -550,13 +576,45 @@ void Count(double start, const double part[4]) {
 }  // namespace
 
 void HandCutOffer(const bwvr::CardLayer& layer, uint8_t* right,
-                  const char* who) {
+                  const char* who, const int changed[4],
+                  uint32_t changed_from) {
   ReadSettings();
   if (!g_on || right == nullptr || layer.pixels == nullptr) return;
+  // The pages of memory of the buffers of the cut, at the first offer of
+  // each picture, so the first hole does not wait for them.
+  if (!g_touched_own) {
+    g_touched_own = true;
+    TouchPages(g_clean, sizeof(g_clean));
+    TouchPages(g_mask[0], sizeof(g_mask));
+    TouchPages(g_grown, sizeof(g_grown));
+  }
+  bool touched = false;
+  for (int i = 0; i < 4 && !touched; ++i) touched = g_touched[i] == right;
+  if (!touched && layer.texture_width <= static_cast<uint32_t>(kMostSide) &&
+      layer.texture_height <= static_cast<uint32_t>(kMostSide)) {
+    for (int i = 0; i < 4; ++i) {
+      if (g_touched[i] != nullptr) continue;
+      g_touched[i] = right;
+      TouchPages(right, static_cast<size_t>(layer.texture_width) *
+                            layer.texture_height * 4);
+      break;
+    }
+  }
   g_offer.frame = ControllersFrameCount();
   g_offer.layer = layer;
   g_offer.right = right;
   g_offer.who = who;
+  g_offer.has_changed = changed != nullptr;
+  for (int k = 0; k < 4; ++k) g_offer.changed[k] = changed ? changed[k] : 0;
+  g_offer.changed_from = changed_from;
+}
+
+bool HandCutHoles(const uint8_t* pixels, int box[4]) {
+  if (!g_left_cut || pixels == nullptr || pixels != g_last_pixels) {
+    return false;
+  }
+  for (int k = 0; k < 4; ++k) box[k] = g_left_box[k];
+  return true;
 }
 
 bool HandCutSolid(int hand) {
@@ -667,6 +725,9 @@ void HandCutFrame() {
                               inverse[r * 3 + 1] * d[1] +
                               inverse[r * 3 + 2] * d[2];
       }
+      if (!hands.front[hand] && hc::Front(page, g_local[hand][v]) > 0.0f) {
+        hands.front[hand] = true;
+      }
     }
   }
   part[0] = NowMs() - start;
@@ -718,18 +779,40 @@ void HandCutFrame() {
   }
 
   // The right picture: the clean picture of the owner with the holes of the
-  // right eye. Copied whole for a new picture, and else only where the
-  // holes of the last frame were.
+  // right eye. Where the holes of the last frame were, it gets the clean
+  // pixels again. A new picture of the owner with the box that changed
+  // since the picture of the right one also gives that box. Any other new
+  // picture is copied whole.
   t = NowMs();
-  if (!same || g_right_for != g_offer.right) {
+  const bool right_ok = g_right_for == g_offer.right;
+  const bool right_same = right_ok && g_right_from == layer.serial;
+  const bool right_changed = right_ok && !right_same && g_offer.has_changed &&
+                             g_offer.changed_from == g_right_from;
+  if (!right_same && !right_changed) {
     const int all[4] = {layer.rect[0], layer.rect[1],
                         layer.rect[0] + layer.rect[2],
                         layer.rect[1] + layer.rect[3]};
     CopyBox(g_offer.right, left, w, all);
     g_right_for = g_offer.right;
+    ++g_right_whole;
   } else {
     CopyBox(g_offer.right, left, w, g_right_box);
+    if (right_changed) {
+      int c[4];
+      for (int k = 0; k < 4; ++k) c[k] = g_offer.changed[k];
+      if (c[0] < layer.rect[0]) c[0] = layer.rect[0];
+      if (c[1] < layer.rect[1]) c[1] = layer.rect[1];
+      if (c[2] > layer.rect[0] + layer.rect[2]) {
+        c[2] = layer.rect[0] + layer.rect[2];
+      }
+      if (c[3] > layer.rect[1] + layer.rect[3]) {
+        c[3] = layer.rect[1] + layer.rect[3];
+      }
+      CopyBox(g_offer.right, left, w, c);
+    }
+    ++g_right_boxes;
   }
+  g_right_from = layer.serial;
   for (int k = 0; k < 4; ++k) g_left_box[k] = g_cut_box[0][k];
   CopyBox(g_clean, left, w, g_left_box);
   part[2] = NowMs() - t;
@@ -833,10 +916,14 @@ void HandCutReport() {
          "the copies %.3f ms, the holes %.3f ms. In %llu frames nothing "
          "moved and the cut of the frame before stayed. A hand was in front "
          "of a page in %llu frames: the card went out as one quad for each "
-         "eye. The largest hole of an eye had %llu px",
+         "eye. The largest hole of an eye had %llu px. The picture of the "
+         "right eye was copied whole %llu times, and in boxes %llu times",
          g_timed, g_sum_ms / n, g_most_ms, g_part_ms[0] / n,
          g_part_ms[1] / n, g_part_ms[2] / n, g_part_ms[3] / n,
-         g_still_frames, g_split_frames, g_most_pixels);
+         g_still_frames, g_split_frames, g_most_pixels, g_right_whole,
+         g_right_boxes);
+  g_right_whole = 0;
+  g_right_boxes = 0;
   g_timed = 0;
   g_sum_ms = 0.0;
   g_most_ms = 0.0;

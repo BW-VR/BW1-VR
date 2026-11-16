@@ -131,7 +131,7 @@ slot 6 on it [V].
 | `+0x48C0`, `+0x48C4` | its velocity. A spring with `0.03^dt` decay, clamped to 80 px from the point | [V] |
 | `+0x48C8..+0x48D0` | **throw velocity**, world units per second | [V] section 3 |
 | `+0x48D4..+0x48DC` | a point on the held object, in its local space | [V] used by the release, meaning [I] |
-| `+0x48F8`, `+0x48FC` | a timer and the last thrown object | [V] |
+| `+0x48F8`, `+0x48FC` | the time to packet `0x40` (180 ms from the last frame of a hold) and the last thrown object. The packet gives that object the torque of the flick (`throw.md`, "The turn of a thrown object") | [V] |
 | `+0x4904` | the held `Object*` | [V] ThrowObject, GetRequiredState |
 | `+0x4908` | nonzero: tug state | [V] GetRequiredState |
 | `+0x490C` | hold mode (switch in HandStateHolding::Update) | [V] |
@@ -472,8 +472,10 @@ in `src/mod/hand_direct.cpp`, with the grip point, the reach and the pixel in
 
 ### The rule
 
-The Hand is the real hand, one to one in place and size, always. There is no
-Go-Go reach and no growth with distance. Reach comes from the world: the God
+The Hand is the real hand, one to one in place and size, over the land. A
+real hand in the land is drawn on the land, straight over the real hand
+(hand-model.md, "The Hand stops at the land"). There is no Go-Go reach and no
+growth with distance. Reach comes from the world: the God
 view puts the land at about waist height (see [god-view.md](god-view.md)).
 
 ### When it acts
@@ -603,7 +605,8 @@ section 7 for the size of the exact Hand.
 | `hand_reach_anchor_down_cm` | 20 | The reach anchor is the head center at the last recenter, this far down (0 to 100) |
 | `hand_real_cm` | 19 | The length of the real hand, from the wrist to the finger tips. The launcher row "Your hand length", 14 to 26 cm |
 | `hand_scale_pct` | 100 | The Hand's size in percent of the real hand |
-| `left_hand` | -1 | Which controller is the Hand (section 8). -1 follows the left handed option of the game, 0 the right controller, 1 the left controller |
+| `hand_follow_game` | 1 | 1: the left handed option of the game always chooses the Hand, and `left_hand` does not act (`controllers.md`, 5.6) |
+| `left_hand` | -1 | With `hand_follow_game=0`: which controller is the Hand (section 8). -1 follows the left handed option of the game, 0 the right controller, 1 the left controller |
 | `fake_controller_points` | | Test key. A list of `right,up,forward` in cm |
 
 Test script words (with the fake controller): `point@frame+frames` steps the
@@ -648,6 +651,11 @@ moves that the player did not move. The glow follows the point. The grab
 radius of the pick still measures from the point. On a real table the
 controller's grip is about 5 cm over the top when the fingers touch it.
 
+The drawn hand stops at the land too (`hand_land_stop=1`, hand-model.md,
+"The Hand stops at the land"). While the land holds the drawn hand up, the
+point goes up by the same lift in `HandDirectFrame`, before this test, so
+the point is the tip of the hand that the player sees.
+
 The game does not hold the point up. Its distance step ends the ray half a
 Hand before the land, but the depth hook and the pose hook replace both. The
 math test checks the clearance for the three scales.
@@ -655,8 +663,8 @@ math test checks the clearance for the three scales.
 The tag `hand` logs, 20 frames after the target stops, the point's height
 over the land and how far the controller is under it, in cm of the room.
 
-Needs the headset: whether the glow and the game's Hand reach the land and a
-villager in the God view, and whether the Hand's mesh in the land looks wrong.
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ## 6. The pose builder and the drawn Hand
 
@@ -744,12 +752,14 @@ and a spell on a bone follow the exact root. The seam reaches every state, the
 Creature state too, so the pose builder hook of `hand_direct.cpp` needs no
 change.
 
-**The root** (`ExactRoot` in `hand_exact_math.h`). From the pointing grip's
-axes in the world `R = L * M_grip`, of the frame of `controllers.cpp`:
+**The root** (`ExactRoot` in `hand_exact_math.h`). From the axes of the
+pointing hand in the world `R = L * M_hand`, of the frame of
+`controllers.cpp`. `M_hand` is the grip with the angle of the hand ("The
+angle of the hand" below):
 
 ```
-f = R (-y_grip)                   the open fingers
-b = R (+x_grip), -x for the left hand     the back of the hand
+f = R (-y_hand)                   the open fingers
+b = R (+x_hand), -x for the left hand     the back of the hand
 F = [b x f, f, -b]                columns
 M = diag(s, 1, 1)                 s = -1 while +0x484C is set
 row j = k F M Q e_j,  row 3 = the point
@@ -815,15 +825,29 @@ its vtable is `0x009A3068`, and `+0x108` there is `fn_00813BA0`, thiscall
 with no arguments and a plain `ret`. No other vtable points at it.
 
 A MinHook hook on `fn_00813BA0` skips the draw when three things are true:
-the return address is `0x0046D25E` or `0x0046D282`, the object is the Hand's
-mesh, and the controller places the Hand in an exact state while the overlay
-drew the pointing hand in this frame. So one hand is always there, each other
-part of `CHand::Draw` still runs, and the mouse player sees the game's Hand as
-the game draws it. MinHook puts the bytes back when the mod unloads. The hook
-is made only when the first bytes of the function, the two call sites and the
-vtable slot are as the disassembly gave them. In the states Invisible, Totem,
-MultiPickUp and Citadel the game's Hand is not exact, so its mesh stays drawn.
-The overlay then draws both of the mod's hands (see
+the call is one that the mod knows, the object is the Hand's mesh, and the
+controller places the Hand while the overlay drew the pointing hand in this
+frame. So one hand is always there, each other part of `CHand::Draw` still
+runs, and the mouse player sees the game's Hand as the game draws it. MinHook
+puts the bytes back when the mod unloads. The hook is made only when the
+first bytes of the function, the call sites and the vtable slot are as the
+disassembly gave them.
+
+**The rule** (`hand_hide_all`, default 1). The mod's pointing hand stands
+for the game's Hand in each state, and each draw of the mesh hides: the two
+calls of `CHand::Draw` (return addresses `0x0046D25E` and `0x0046D282`) and
+the flow of a miracle (`0x0068D57E`, below). The states that this covers past
+the exact states are Totem (state 5: the game puts its Hand on the top of the
+pole while the real hand moves the pole, `village.md`) and Invisible (state
+0, where the game draws its mesh only with `+0x47BC` set). MultiPickUp
+(state 6) never comes. With `hand_hide_all=0` only the exact states hide
+(Normal, Camera, Tug, Holding, Creature, Grain and PlayAnim), only the calls
+of `CHand::Draw` hide, and the game draws its Hand on the pole and its flow.
+In the state Citadel, in a room of the Temple, the hook skips the draw while
+the ray of the pointing hand is on and the overlay drew that hand
+(`temple_hide_hand`, `controllers.md`, 11.1), with both values. A call of
+`fn_00813BA0` for the Hand's mesh from another place is not hidden, and the
+log names it (below). The overlay draws both of the mod's hands (see
 [hand-model.md](hand-model.md)). The shadow of the game's Hand on the land
 still draws, with the game's fingers.
 
@@ -870,6 +894,35 @@ the object at `+0x8C` and the Creature (`0x005E4ACB`, the color
 
 The ring of the leash has no reflection in the game. It is a sorted object of
 `CitadelHeart::DrawNow`, and no draw of the reflection pass reads it.
+
+**The flow of a miracle on the Hand** (`hand_flow_glow`, default 1) [V].
+`CHand::Draw` calls `PHandFX::Draw` `0x0068D0C0` through `CHand+0x4948`
+(vtable `0x00936C1C`, slot `+0x10`, `PHandFX::DrawHandFX`). When the first
+object in the Hand is a spell seed (vtable `+0x4C4`), or an object of type 3
+or 10, the alpha `+0x54` is 0.8. Then it draws the Hand's mesh a second time
+at `0x0068D578`, with the material of `data\textures\S_Hand_Flow.raw` (type
+`0xD`, `fn_0082ECD0`: alpha blend with the source alpha and one, no depth
+write, stage 0 the texture times the diffuse color). Before the draw it
+scales each texture point of the mesh by 0.125 and moves it to one cell of
+an atlas of 8 by 8: the frame `+0x58` (it moves with the time at the speed
+`+0x5C`) modulo the count `+0x60` gives the cell, `cell % 8` the column and
+`cell / 8` the row. The color of the mesh is `alpha * 255` and the color of
+the player (`GPlayer::GetPlayerColour`), so the flow of the first player is
+red. In the plain game the copy lies exactly on the Hand, and the Hand seems
+to glow. With the controller the mesh of the game has the fingers of its own
+animation and not the fingers of the mod's hand. So with `hand_hide_all=0`
+the copy is a second, red Hand beside the mod's hand while a miracle is in
+the Hand (Water and Food while they pour, each miracle that the Hand holds).
+
+With `hand_hide_all=1` the hook skips that draw. With `hand_flow_glow=1` it
+first keeps the texture on stage 0 of the device (`GetTexture`), the color
+of the mesh and the cell of the frame. In the same frame the mod's pointing
+hand draws a second time with them (`hand_model.cpp`): the same triangles at
+the same depth, each texture point moved into the cell, the color of the
+flow times the light of the game at each vertex, the texture times that
+color added with the source alpha, and no depth write. So one hand shows, at
+the real hand, with the game's own flow on it. With `hand_flow_glow=0` the
+mod's hand has no flow. The low poly hands have no flow.
 
 **The held object in the palm** (`hand_hold_palm`, `hand_hold_turn`). After
 `CHand::PrepareForDrawing` wrote the object's translation (`0x0046CA50` to
@@ -949,12 +1002,105 @@ the palm. So the defaults are a yaw of 11.0 and a pitch of -0.58. Then that
 line goes along the controller's finger axis. The palm and the knuckle line
 lie flat in the stored mesh, so the roll is 0.
 
+So the rest turn adds no turn to the hand: the line of the mesh is the
+finger axis `-y` of the hand frame. The angle of the hand on the controller
+comes from the hand frame itself (below).
+
 In the Normal state the drawn bones, taken back into the stored mesh frame
 through the inverse of the exact root, are the bones of the file: only the
 middle, ring and little fingers bend toward the palm. In the Camera state (the
 land drag) the game's grip animation curls the fingers, and the wrist moves up
 to 6 cm from the index tip. The fingers of the game's animations are the
 game's own: the trigger and the grip do not bend the game's fingers.
+
+### The angle of the hand
+
+The drawn hand, the exact Hand and the point of the Hand turn with one hand
+frame. The model of the controller turns with the grip. The code is in
+`grip_fit.cpp` (the keys and the log), with the pure math in
+`hand_angle_math.h` and the checks in `hand_angle_checks.h`.
+
+**The real hand on a controller.** The grip pose of OpenXR has `-z` through
+the tube of the closed fingers, from the little finger to the thumb. A real
+hand does not hold a handle at a right angle to its fingers: the handle lies
+across the palm at a slant, from the heel of the hand to the root of the
+index finger. The Oculus runtime gives the real hand as its palm pose
+(`XR_EXT_palm_pose`: `-z` along the straight index finger, `+x` the normal of
+the palm). Virtual Desktop has the constants of the Oculus runtime
+(`rebindControllerActions` in `action.cpp` of VirtualDesktop-OpenXR, the
+poses `oculusGripPose` and `oculusPalmPose`). From them:
+
+- The palm pose is the grip pose turned 70.0 degrees about `-x` of the grip.
+- So the open fingers of the real hand are 20.0 degrees from `-y` of the
+  grip, toward `-z`, the thumb end of the handle.
+- The palm normal of the palm pose is `x` of the grip.
+
+**The turns on the way to the drawn hand.** For the right hand of a Touch
+Plus on Virtual Desktop:
+
+| Step | The turn | About |
+| --- | --- | --- |
+| The grip pose of the runtime | 0 | |
+| The fit of the controller model (`grip_fit=1`, controller-hints.md, 9.15) | 18.0 degrees: -17.9 about `x`, 0.1 about `y`, 1.9 about `z` | Mostly the palm normal. The fingers go toward `+z`, the bottom of the handle |
+| The hand frame on the frame of the model (`hand_angle=0`) | 0: the fingers along `-y`, the back along `+x` | |
+| The rest turn of the mesh | 0 for the line of the hand (above) | |
+
+So with `hand_angle=0` the fingers of the drawn hand are 37.9 degrees from
+the fingers of the palm pose, about the palm normal, toward the little
+finger. The palm normal is 1.9 degrees from the palm normal of the palm
+pose. With no fit (`grip_fit=0`) the fingers are 20.0 degrees from them.
+
+**What the mod does** (`hand_angle=1`, the default). The hand frame is the
+grip pose of the runtime turned 20 degrees about `x`: the palm pose. Its
+place is the grip point of the frame of the model, so the knuckles stay at
+the handle: the knuckle of the middle finger moves 0.6 cm, and the middle
+of the palm comes 2.5 cm nearer to the palm centroid of the Oculus runtime
+(from 5.1 to 2.6 cm). The hand turns 37.9 degrees from the frame of the
+model, about an axis within 3 degrees of the palm normal. The model of the
+controller does not move. The same turn is in each hand of the frame
+(`GripFitFrame` gives the orientation of each hand), so these use it: the
+mesh of the mod's hands and the low poly hands, the exact Hand (its root and
+the spell on a bone), the index tip that is the point of the Hand and of
+the draw of a gesture, the held object in the palm, the stop at the land,
+the fingers that react to the world, and the cards beside the hand (the
+outline of the hand). These keep the grip or the aim: the model of the
+controller and its cards, the ray and its tip (the aim pose), the grab of
+the world and the throw (the motion of the grip point), and the look at the
+palm (the palm normal changes by less than 2 degrees).
+
+The left hand is the mirror image, so it has the same turn. A runtime with
+no fit gets the palm turn from its own grip pose. A hand with no grip pose
+(the aim pose in its place) gets only the trim.
+
+**The trim of the player.** Three keys turn the hand after that, in the hand
+frame, from -45 to 45 degrees in steps of 5 degrees:
+
+- `hand_trim_yaw_deg`: about the palm normal. Plus turns the fingers toward
+  the thumb.
+- `hand_trim_pitch_deg`: about the line of the knuckles. Plus turns the
+  fingers toward the palm.
+- `hand_trim_roll_deg`: about the fingers. Plus turns the palm toward the
+  thumb.
+
+The debug page (group Hand) has the rows "Hand yaw", "Hand pitch" and "Hand
+roll". A step acts at the next frame and writes the key into `bwvr.ini`, so
+the trim stays.
+
+**The log.**
+
+- `hand angle   : hand_angle=1. The hand has the angle of the palm pose of
+  the runtime ... The trim of the hand is N degrees of yaw, N of pitch and N
+  of roll` once.
+- `hand angle   : the right hand turns 37.9 degrees from the frame of the
+  model of the controller, about 1.00 -0.01 -0.05 of that frame (37.9, -0.5
+  and -1.9 degrees about x, y and z). Its fingers are 37.9 degrees from the
+  fingers on that frame` for each hand, and again at a change of the switch
+  or of a trim (16 lines at most).
+- `hand angle   : <by>: hand_angle is N now` and `hand angle   : <by>: the
+  trim of the hand is ...` at each change.
+
+Only a headset shows whether the drawn hand now lies as the real hand lies
+on the controller (`headset-checks.md`).
 
 ### Keys
 
@@ -964,10 +1110,16 @@ game's own: the trigger and the grip do not bend the game's fingers.
 | `hand_mesh_yaw_deg` | 11.0 | The rest turn of the mesh about its palm normal, in degrees |
 | `hand_mesh_pitch_deg` | -0.58 | The rest turn about its thumb axis |
 | `hand_mesh_roll_deg` | 0 | The rest turn about its fingers |
+| `hand_angle` | 1 | 1 gives the hands the angle of the palm pose of the runtime: the grip pose turned 20 degrees about the palm normal ("The angle of the hand"). 0 puts the hands on the frame of the model of the controller. The switch "Hand angle" of the debug page and the script word `anglekey` change it live |
+| `hand_trim_yaw_deg` | 0 | The trim of the hand about the palm normal, -45 to 45 degrees. Plus turns the fingers toward the thumb. The row "Hand yaw" of the debug page writes it |
+| `hand_trim_pitch_deg` | 0 | The trim about the line of the knuckles. Plus turns the fingers toward the palm. The row "Hand pitch" |
+| `hand_trim_roll_deg` | 0 | The trim about the fingers. Plus turns the palm toward the thumb. The row "Hand roll" |
 | `hand_wrist_lock` | 1 | 1 keeps the wrist bone of the game's Hand at the real wrist in each animation |
 | `hand_hide_game` | 1 | 1 hides the mesh of the game's Hand while the controller places it, and the overlay draws both hands. 0 draws the game's Hand too |
 | `hand_reflection` | 2 | With the mesh hidden, what the water shows: 2 both hands of the mod, mirrored at the sea in the color of the game's reflection. 1 no hand. 0 the game's Hand, a pale Hand under the pointing hand only |
 | `hand_reflection_test` | | Test key. Frame numbers. At each one `hand_reflection` takes the next value, as Ctrl, Shift and D do |
+| `hand_hide_all` | 1 | 1 hides the mesh of the game's Hand in each state (the Totem state too) and its flow of a miracle. 0 hides it only in the exact states, and the game draws its flow as a second Hand |
+| `hand_flow_glow` | 1 | 1 puts the game's flow of a miracle on the mod's pointing hand, while the game draws it. 0 no flow on the mod's hand. It needs `hand_hide_all=1` |
 | `hand_hold_palm` | 1 | 1 puts the held object in the palm of the mod's hand. 0 leaves it at the Hand's point |
 | `hand_hold_turn` | 1 | 1 turns the held object with the hand |
 | `hand_pinch` | 1 | 1 holds a small object between the thumb and the index finger (hand-model.md). 0 puts each object in the palm |
@@ -975,6 +1127,7 @@ game's own: the trigger and the grip do not bend the game's fingers.
 | `fake_controller_rots` | | Test key. `yaw,pitch,roll` in degrees, separated by spaces. The script word `rot` turns the fake right hand to the next one |
 
 The keys are read from `bwvr.ini` at the start. They are not in the launcher.
+The debug page writes the three trims into `bwvr.ini`.
 With `test_keys=1`, the minus key of the number pad shows and hides the mesh
 of the game's Hand while the game runs. The pointing controller gives a long
 pulse for hidden and a short pulse for shown. Ctrl, Shift and D step
@@ -982,6 +1135,8 @@ pulse for hidden and a short pulse for shown. Ctrl, Shift and D step
 short pulse for 0 and a pulse of middle length for 1. The log line names the
 key, the new value and the count of the draws of the game's reflection that
 the hook took.
+The debug page has the three switches "Game Hand" (`hand_hide_game`), "Hide
+rule" (`hand_hide_all`, exact or all) and "Hand flow" (`hand_flow_glow`).
 
 ### The log
 
@@ -1002,6 +1157,21 @@ place in the palm and the distance between them. The report window counts the
 exact composes, the composes as the game made them, the old poses moved to the
 new root, the composes with the lock, the hidden draws, the frames with an
 object in the palm, and the frames with the wrist moved more than 0.5 cm.
+
+The rule of the hide and the flow, at the start, and in a window with one of
+them:
+
+```
+hand exact   : hand_hide_all=1: the mesh of the game's Hand hides in each state (the Totem state too), and also its flow of a miracle. hand_flow_glow=1: the flow of a miracle shows on the mod's pointing hand
+hand exact   : the game draws the flow on its Hand (PHandFX::Draw, the call from 0x0068D578). The mod does not draw that copy of the Hand, and its pointing hand takes the flow: a texture of <w> by <h>, the color 0x<argb>, cell <c> of <n> (frame <f>), frame <frame>
+hand model   : the flow of a miracle is drawn on the right hand, frame <frame>: <t> triangles, the color 0x<argb>, the cell at <du> <dv>
+hand exact   : this window <a> draws of the mesh in the Totem state hidden, <b> draws of the flow of a miracle hidden (<c> went to the mod's hand), and <d> draws by other calls
+hand model   : the flow of a miracle was on the pointing hand in <n> eye passes
+hand exact   : the mesh of the game's Hand is also drawn by the call before 0x<address>, which the mod does not hide. Hand state <s>, frame <frame>
+```
+
+The last line comes once for each other call (4 at most). A play with no
+such line has no other draw of the Hand's mesh.
 
 ### Tests
 
@@ -1047,10 +1217,8 @@ palm in 0.12 s and turns with the hand.
 Not reached on the desktop: the PlayAnim state. Not shown on the desktop: the
 poses with a real controller.
 
-Needs the headset: whether the Hand sits on the real hand with each runtime's
-grip pose, the rest turn, whether the Hand in the land drag, the Tug and the
-Grain state looks right at the controller, and for which object the place or
-the opening of the hand in the palm looks wrong.
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ## 8. The two real hands and which one is the Hand
 

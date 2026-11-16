@@ -13,12 +13,24 @@ file. The game keeps it in the registry, under
 as `ScreenW` and `ScreenH`. If a person edits one and forgets the other, the
 result looks like a bug in the mod.
 
-The window has these buttons: "Play in VR", "Play, new game" (starts the game
-with `-NEWGAME`, on the first island, with no menu), "Play, no VR" (see "The
-game without VR"), "Save Config" (writes the settings and does not start the
-game) and "Support". The buttons are a block below the table. "Play in VR"
-and "Play, new game" are in the first row, "Save Config" and "Play, no VR" in
-the second row, and "Support" has the third row to itself.
+The window has these buttons: "Play in VR", a second play button, "Play,
+no VR" (see "The game without VR"), "Save Config" (writes the settings and
+does not start the game) and "Support". The buttons are a block below the
+table. "Play in VR" and the second play button are in the first row, "Save
+Config" and "Play, no VR" in the second row, and "Support" has the third row
+to itself.
+
+"Play in VR" starts the game with no word on the command line. The second
+play button follows `start_new_game` (`backend.md`, "The start of the
+game"):
+
+| `start_new_game` | "Play in VR" | The second play button |
+| --- | --- | --- |
+| 0 (the default) | The game loads the save of the exit and opens its Main Menu | "Play, new game": the word `-NEWGAME`. A new game, and the start dialog of the fan patch is the first menu |
+| 1 | A new game. The start dialog is the first menu | "Play, continue": the word `-CONTINUE`. The game loads the save of the exit and opens its Main Menu |
+
+With no save of the exit, each of the two starts a new game. The launcher
+reads the key when it opens. It has no row for the key.
 
 The launcher asks Windows for version 6 of the common controls (a manifest
 line at the top of `launcher.cpp`). The controls then have the visual styles
@@ -62,6 +74,18 @@ There are eight kinds of row:
 | `kSlider` | A slider with a value of its own. Its spec is the low value, the high value, the step and the unit, with a bar between them. Its label says the value and the unit. | The value, on the step. |
 | `kRenderer` | A list: Vulkan, Direct3D 9. | `backend` as text: `vulkan` or `dxwrapper\ddraw.dll` (see "Performance"). |
 
+## The settings window in the headset
+
+The mod has a window of the most used settings in the headset
+(`ui-layer.md`, 24). It writes the same keys into `bwvr.ini` in the same
+form: the value as a number, in the section `[bwvr]`. So the launcher shows
+a change of the headset the next time it opens, and a save of the launcher
+keeps the keys that it does not offer (`recenter_hold`, `teleport`,
+`move_stick_speed_cm`, `subtitle_card`, `welcome_done`, and the map of the
+buttons of the page Controls: `button_map_hand`, `button_map_other`). The test keys
+`welcome_test_save` and `welcome_test_parts` go with each save, as the other
+test keys do.
+
 ## What it does besides editing
 
 Every save also writes these:
@@ -87,6 +111,13 @@ Every save also writes these:
 
 If Windows refuses the write (an unelevated write to `bwvr.ini` in Program
 Files fails), the status line says so and not "Saved.".
+
+Each start of the game ("Play in VR", the second play button, "Play, no
+VR") first sets the flag `LARGE_ADDRESS_AWARE` in `runblack.exe` as the row "Use 4 GB of
+memory" asks (`large_address`, 1 is the default). With the flag, the game
+has 4 GB of address space and not 2 GB. With 0 the launcher clears the flag,
+and the file is the original again. If Windows refuses the change, the game
+starts with the file as it is. See `backend.md`, "The address space".
 
 ## The game without VR
 
@@ -114,7 +145,8 @@ A setting that only breaks the game when a person changes it is not a choice.
 The launcher does not offer these keys, and each save deletes them from
 `bwvr.ini`, so an old ini cannot keep a wrong value. The default of the mod is
 the right answer for each key. The keys still work when a person writes them by
-hand, for tests.
+hand, for tests. Each start from the launcher saves first, so a game that the
+launcher starts never reads a retired key from an old ini.
 
 | Key | The value the mod uses |
 | --- | --- |
@@ -133,6 +165,13 @@ hand, for tests.
 | `instant_jumps` | 1: a double click on the land takes the player there in one frame |
 | `camera_glide` | 0: the camera stops when the player releases the land |
 | `head_units_per_meter_x10` | 75: 7.5 game units for each meter, the life size scale |
+| `play_mode` | 4: the God view (`god-view.md`). 1 (the stereoscopic window) and 3 (the tabletop, `tabletop.md`) stay for tests |
+| `intro_vr` | 1: the Lionhead logo in 3D around the player (`intro.md`). 0, the flat intro, is for the desktop tests |
+| `head_blinder` | 1: a cover fills the view when the head goes into the land, a house or a rock (`god-view.md`, section 5.9) |
+| `gesture_trail` | 1: a gold ribbon follows the tip of the index finger while the player draws a gesture (`miracles.md`, "The trail at the fingertip") |
+| `ray_glow` | 1: the ray of the menu, the tether of the far grab and the arc of the teleport have a glow (`hand-model.md`, "The glow ribbons") |
+| `hint_style`, `hint_card_pictures` | The values that the row "Show 3D controller for hints" (`hint_controller`) gives: 2 and 1 when it is on, 1 and 0 when it is off (see "Controllers") |
+| `update_check` | None: the launcher asks for updates each time it opens and does not read the key (see "The update check") |
 
 The list `kRetiredKeys` also holds the keys of earlier modes (`head_tracking`,
 `immersive`) and the keys of the desktop test tools: `fake_head*`,
@@ -157,6 +196,7 @@ does not delete them, so a value that a person writes in `bwvr.ini` is kept.
 | `ui_shift_px`, `ui_adaptive` | 8, 1 | How far the interface sits in front of the player, and whether it comes nearer when the world in front of it is nearer |
 | `hint_scale_pct`, `hint_flat` | 20, 1 | The size and the depth of the game's hint beside the Hand in the eye pictures. With controllers the hints are on the hint cards (`controller-hints.md`) |
 | `zoom_step` | 2 | The step of one wheel click on the camera of the game (`backend.md`, "Zoom in steps"). The God view has its own zoom steps |
+| `test_keys` | 0 | 1 turns on the keys for tests (`backend.md`, "Keys for v1.0"). The desktop tests write it, and a tester can write it by hand. The debug menu has switches for the same rules |
 
 ## Settings
 
@@ -165,7 +205,7 @@ does not delete them, so a value that a person writes in `bwvr.ini` is kept.
 | Setting | Default | What it does |
 | --- | --- | --- |
 | One scene walk for both eyes (prototype) | On | Key `one_walk`. On also makes the render a quarter wider (`one_walk_guard_pct`, 25), see `backend.md`, "One walk for both eyes". It is before the resolution in the table, because a save writes the rows in order and the size reads it |
-| Margin around the view | None | Key `fov_margin_pct`, 0 to 30 in steps of 5. The game draws that many percent more on each side of the view of the headset, and the render has that many percent more pixels each way, so a degree keeps its pixels (`backend.md`, "A margin around the view"). It is before the resolution in the table for the same reason as the row above |
+| Margin around the view | 0% | A slider from 0 to 30 in steps of 5. Key `fov_margin_pct`. The game draws that many percent more on each side of the view of the headset, and the render has that many percent more pixels each way, so a degree keeps its pixels (`backend.md`, "A margin around the view"). It is before the resolution in the table for the same reason as the row above |
 | Resolution scale | 100% | A slider from 50 to 200 in steps of 5. Key `resolution_pct`. See "The resolution comes from the headset". |
 | Anisotropic filtering | 16x | A list: off, 2x, 4x, 8x, 16x. Key `anisotropy` (1, 2, 4, 8, 16). With the renderer Direct3D 9 the launcher also writes the level to `AnisotropicFiltering` in `dxwrapper\dxwrapper.ini`, because dxwrapper applies its own level to the Direct3D 9 device. A fixed 16 there would make "off" do nothing. dxwrapper reads 0 as "leave it to the game". The renderer Vulkan takes the level that the game sets on its textures, so it needs no other file. |
 | Enable texture mipmaps | on | Uses smaller copies of each texture in the distance. Key `force_mips`. |
@@ -174,6 +214,7 @@ does not delete them, so a value that a person writes in `bwvr.ini` is kept.
 | 2x detail at | 60 units/m | The detail comes to 2x at this size. Key `detail_scale_2x` |
 | 3x detail at | 10 units/m | The detail comes to 3x at this size. Key `detail_scale_3x` |
 | Model detail distance | 5x | How far out models keep their full detail, and the highest detail of the curve. Key `detail_distance`, index 0 to 3: the game's own, 2x, 3x, 5x. |
+| Model cull distance | 5x | How far out trees, villagers and buildings are drawn at all. The game draws them to 700 units. The fog moves out as far as the models do (`cull_fog`, not in the launcher). At the scales of a normal play the God view has no fog, and the God view already draws the models to 8000 units when it is zoomed out. Key `cull_distance`, index 0 to 4: the game's own, 2x, 3x, 5x, 10x. See `backend.md`, "Models are drawn further out". |
 
 ### Performance
 
@@ -212,11 +253,16 @@ where the parts are.
 
 ### View
 
+The mod plays in the God view (`god-view.md`), and the launcher has no row
+for the play mode (see "Retired keys"). The intro is in stereo
+(`intro.md`): the key `intro_motion` chooses its motion, and the launcher has
+no row for it.
+
 | Setting | Default | What it does |
 | --- | --- | --- |
-| Play mode | God view | Key `play_mode`, a value and not an index. 4 God view: the land is at your waist, so your hands can reach it, with motion controllers or with the mouse (see `god-view.md`). 1 Stereoscopic window: a 3D screen in front of you, and your head does not move the camera. 3 Tabletop (test): the island is a model on a table in front of you (see `tabletop.md`). A window that follows the head is mode 2, which the launcher does not offer. An ini with `play_mode=0` gets the God view. |
-| Intro in stereo | off | The Lionhead logo at the start shows in 3D around you. The view goes along the camera path of the game and does not turn. The menu button skips it. It is a test: no headset session has checked it. Key `intro_vr`. The key `intro_motion` chooses the motion, and the launcher has no row for it. See `intro.md`. |
-| Cut scenes | In a window | Key `cutscene_immersive`, a value. 0 In a window: a cut scene plays on the screen of the cut scene window (`cutscene-window.md`). 1 Around you: no window, and the camera of the game moves the player with all its motion (`script_camera=0`). |
+| Video Capture Mode | off | Key `video_view`. The game window on the PC is the capture window: it shows a 16:9 part of the left eye, for a capture with OBS while the headset plays. The capture window has a smoothed head, and faint corner marks in the headset show its part. The cards, the subtitles, the ring and the panels of the headset are in the video, where the left eye sees them (`video_view_layers`). It needs the Vulkan renderer (`backend.md`, "The view for videos") |
+| Lower capture window | 20% | A slider from 0 to 40 in steps of 5. Key `video_view_down_pct`: how far the middle of the capture window is below the middle of the view, in percent of the height of the view |
+| Cut scenes | In a window | Key `cutscene_immersive`, a value. 0 In a window: a cut scene plays on the screen of the cut scene window (`cutscene-window.md`). 1 Around you: no window, and the camera of the game moves the player with all its motion (`script_camera=0`). A video of the game still plays on the screen (`cutscene_video_window`). |
 
 ### Moving around
 
@@ -226,12 +272,13 @@ move the camera in steps.
 
 | Setting | Default | What it does |
 | --- | --- | --- |
-| Turn in steps | 45 degrees | Key `snap_turn`, index 0 to 3: off, 30, 45, 90 degrees. A push of the right stick to the left or the right, a drag sideways with the middle mouse button, or a turn key, turns you in one step. You stay where you are. The middle mouse button does not tilt the camera. Off gives the smooth turn and tilt of the game. |
-| Stick forward | Zooms out | Key `god_zoom_forward_in`, a value. 0 Zooms out: the right stick forward makes the world smaller, and back makes it larger. 1 Zooms in: the other way (`god-view.md`, section 2). |
+| Turn | 45 degrees | Key `snap_turn`, a value. 4 Smooth, 1 30 degrees, 2 45 degrees, 3 90 degrees. The row has no value 0 (no turn): the mod still takes 0 from bwvr.ini for a test, the row shows the default for it, and a save writes the default. A push of the right stick to the left or the right, a drag sideways with the middle mouse button, or a turn key, turns you. You stay where you are. 30, 45 or 90 degrees: you turn in one step. Smooth: in the God view you turn while you hold the stick or the turn key, and a larger push turns faster. The middle mouse button then turns in steps of 45 degrees. The key `smooth_turn_speed` sets the speed of a full push (90 degrees a second), and the launcher has no row for it (`god-view.md`, section 4). The middle mouse button does not tilt the camera. |
+| Invert zoom direction | Off | Key `god_zoom_forward_in`, a checkbox. 0 Off: the right stick forward makes the world smaller, and back makes it larger. 1 On: the other way (`god-view.md`, section 2). |
 | Zoom with the stick | In steps | Key `god_zoom_smooth`, a value. 0 In steps: one push of the right stick forward or back is one zoom step. 1 Smooth: the zoom changes while the stick is held, and it stops when the stick is let go (`god-view.md`, section 2). |
 | Center of the zoom | The land you look at | Key `god_zoom_about`, a value. The point that stays where it is in a zoom with the stick. 1 The land that the head looks at. 0 The land under the head. 2 The Hand's point (`god-view.md`, section 2). |
-| Move with the other stick | Head direction | Key `move_stick`, a value. In the God view the stick of the other hand (the left stick, or the right stick of a left handed player) moves you over the land while you push it, and you stop when you let it go. 1 Head direction: forward is where the head faces. 2 Controller direction: forward is where that controller points. 0 Off: the stick does not move you. A walk with a stick makes some players ill, so the row has Off (`god-view.md`, section 5.7). The key `move_stick_speed_cm` sets the speed, and the launcher has no row for it. |
-| Walk follows the land | On | Key `move_stick_follow_land`, a value. 1 On: while you move with the left stick, the height of the view follows the land under the head through a smooth filter, so the land stays at the same height below the hands. A long hill moves the view, a small bump does not, and the view moves only while the stick is pushed. 0 Off: the view keeps its height (`god-view.md`, section 5.7). |
+| Movement type | Walk | Key `move_type`, a value. In the God view the stick of the other hand (the left stick, or the right stick of a left handed player) moves you while you push it, and you stop when you let it go. 0 Walk: you move over the land, and the height of the view follows the land under the head through a smooth filter, so the land stays at the same height below the hands. A long hill moves the view, and a small bump does not. 1 Fly: you move along the direction of "Movement direction" in 3D, so a look or a point down goes down. The view does not follow the land. The land under the head stays 10 cm or more below the head, and the head goes up to 10000 units over the land, so a player at the scale of a villager can fly high over the island (`god-view.md`, section 5.7). A full push of the stick gets faster the longer it is held, in the walk and in the fly (`move_stick_ramp`, not in the launcher). The row replaces the key `move_stick_follow_land`: a save removes that key, so Walk always follows the land. The key `move_stick_speed_cm` sets the speed, and the launcher has no row for it. |
+| Movement direction | Head direction | Key `move_stick`, a value. 1 Head direction: forward is where the head faces. 2 Controller direction: forward is where that controller points, so with Fly the player flies where the controller points. The row has no value 0 (no walk): the mod still takes 0 from bwvr.ini for a test, the row shows the default for it, and a save writes the default (`god-view.md`, section 5.7). |
+| Comfort vignette | Off | Key `comfort_vignette`, a value. 0 Off. 1 Gentle. 2 Strong. The edges of the view go dark while the player moves with a control: the walk with the stick, a zoom, a snap turn, a teleport and the grab of the world. A faster move gives a darker edge. Gentle is clear to 35 degrees from the middle of the eye, and strong is clear only to 22 degrees and black from 45 degrees (`god-view.md`, section 5.8). |
 | Blink when you jump or turn | off | Key `blink`, index 0 to 2: off, short (0.1 seconds), long (0.2 seconds). Black after a jump, a turn and a story camera cut. |
 
 ### Controllers
@@ -245,8 +292,20 @@ move the camera in steps.
 | Finger tracking | Real fingers | Key `finger_tracking`, a value. 1 Real fingers: on a controller that sees the fingers (Steam Frame, Valve Index), each finger of the hands bends as the real finger bends. 2 Around the controller: the same, and a closed hand closes around the controller. 0 Off: the trigger and the grip bend the fingers. A controller that does not see the fingers always uses the trigger and the grip (`hand-model.md`, "Finger tracking") |
 | Glow at the Hand's point | off | Key `hand_glow`. A small glow at the tip of the index finger shows the point of the Hand that picks up and clicks. It shows while a press of the grip acts on something (`hand-model.md`). |
 | Grab the world | Grip of the other hand | Key `grab_hand`, a value. 1 Hold the grip of your other hand and move that hand to pull the world. Hold both grips to turn the world and to zoom. 2 Either grip: the grip of the pointing hand also grabs the world when the Hand is empty and not over an object. 0 Off. |
-| Hand | Follow the game | Key `left_hand`, a value. -1 Follow the game: the left hand option of the game (`HAND_ORIENTATION` of the profile) chooses the controller of the Hand. 0 Right: the right controller is the Hand. 1 Left: the left controller is the Hand, and the two controllers swap each job (`controllers.md`, section 5.6). |
-| Hints | Until learned | Key `hint_learn`, a value. 1 Until learned: a line of a hint card that teaches an action goes away after you did the action 3 times, and comes back after 10 minutes of play with no use of it. In a lesson of the tutorial each line shows. 0 Always: each line always shows. The counts are in `bwvr-hint-counts.ini` beside `bwvr.ini`. Delete that file to show each line again (`controller-hints.md`, 9.10). |
+| Show 3D controller for hints | on | Key `hint_controller`. 1: while a hand has a hint, a faint model of its controller shows in that hand, each button of the hint is lit in gold, and each lit button has its own small scroll card with a line of ink to the button (`controller-hints.md`, 9.14). A controller with no model has the cards at the wrists, with a small picture of each button (9.13). 0: the cards at the wrists with the button words only, with no model and no pictures. The mod reads the row as the defaults of two keys: 1 gives `hint_style=2` and `hint_card_pictures=1`, 0 gives `hint_style=1` and `hint_card_pictures=0` (`hint_model_math.h`, `StyleOfSwitch`). A test that writes one of the two keys still sets it. |
+
+These settings have no row in the launcher and none in the VR Settings
+window. Their keys still act, with the default of the table of their area:
+
+| Key | Default | Why it has no row |
+| --- | --- | --- |
+| `hand_follow_game`, `left_hand` | 1, -1 | The left handed option of the game chooses the Hand (`controllers.md`, 5.6) |
+| `hints_follow_game`, `hint_learn` | 1, 1 | The ToolTips option of the game chooses whether a line of a hint card goes away when you know it (`controller-hints.md`, 9.10) |
+| `hint_card_style` | 1 | Each player has the scroll look |
+| `creature_stroke_open` | 1 | Each player has the stroke with the open hand (`creature.md`, section 2.10) |
+
+No tooltip of the launcher names a key, a file or a part of the program: a
+player needs none of them.
 
 See `controllers.md` for the full controls.
 
@@ -254,16 +313,22 @@ See `controllers.md` for the full controls.
 
 | Setting | Default | What it does |
 | --- | --- | --- |
-| Check for updates | on | Key `update_check`. 1: each time the launcher opens, it asks GitHub for the latest version, and the status line says when a newer version is out. 0: the launcher does not ask. See "The update check" |
+| Use 4 GB of memory | on | Key `large_address`. See "What it does besides editing" and `backend.md`, "The address space" |
+
+The launcher asks GitHub for updates each time it opens. It has no row for
+the ask (see "The update check").
 
 ### Testing
 
 | Setting | Default | What it does |
 | --- | --- | --- |
 | Tell the game that there is no internet | on | Key `net_check_skip`. After the logos the game checks for an internet connection. In the headset this check can stop the game on the loading screen. On: the mod tells the game at once that there is no connection. Off: the game does its own check (`intro.md`, "The internet check"). |
-| Test keys | off | Key `test_keys`. Turns on the keys for tests. Each key changes one rule of the mod while the game runs, for a comparison. `backend.md` ("Keys for v1.0") and the player readme list them. F12 saves a picture of each eye in the game folder. A player does not need this. |
 | SSE paths of the game (bits) | 0 | Key `game_sse_parts`. A test of the speed. 0: the game chooses its SSE paths by the CPU. Another number is a sum of bits: each part of the game with its bit takes the SSE code of the game, each other part the x87 code (`backend.md`, "The SSE paths of the game, one at a time"). A player does not need this. |
-| Debug menu | off | Key `debug_menu`. The ring of the left hand gets the item Debug, with pages of the switches of the test keys. A choice changes a switch at once, so a comparison needs no keyboard (`controllers.md`, 10.8). It does not need "Test keys". A player does not need this. |
+| Debug menu | off | Key `debug_menu`. The ring of the left hand gets the item Debug. It opens the debug window with its switches. Each switch changes one rule of the mod at once, and the ray and the trigger of the right hand change a switch, so a comparison needs no keyboard (`controllers.md`, 10.8). It does not need `test_keys`. A player does not need this. |
+
+The launcher has no row for `test_keys`. A save keeps the key, so a tester
+can write `test_keys=1` in `bwvr.ini` by hand (see "Settings that are not
+offered and that stay in the ini").
 
 F11 makes the direction of your head straight ahead. This key is always on.
 
@@ -378,10 +443,8 @@ in `src/common/update_check.h`, with checks in the math test.
   gives the cause, for example "Updates: no answer from ... (WinHTTP error
   12007 at the step send: no network, or no name server)."
 
-The row "Check for updates" in the group "Launcher" is the key
-`update_check`: 1 (the default) asks at each start, 0 does not ask. The
-launcher reads the key when it opens, so a change counts from the next
-start.
+The launcher asks each time it opens. It has no row and reads no key for the
+ask. A save removes `update_check` from `bwvr.ini` (see "Retired keys").
 
 A picture for a test (`-shot`, `--picture`) asks only with one of the
 words of a test before `-shot`: `-update-tag <tag>` takes the place of

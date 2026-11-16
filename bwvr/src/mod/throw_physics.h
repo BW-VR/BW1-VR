@@ -35,6 +35,12 @@ void ThrowPhysicsSetLanding(int land, int rate_x10, int bounce_pct,
 // the land and is slow (docs/throw.md, "The landing of a tree"). 0 keeps the
 // game's turn.
 void ThrowPhysicsSetSettle(bool settle);
+// throw_turn: 1 lets a thrown object turn as fast as the game turns it: the
+// momentum of the release is divided by the steps of the game in a substep
+// of the flight, and the picture turns at the game's cap of 1.5 turns a
+// second at most (docs/throw.md, "The turn of a thrown object"). 0 keeps the
+// game's momentum.
+void ThrowPhysicsSetTurn(bool turn);
 // throw_land_rest: how a thrown object comes to rest after its landing
 // (docs/throw.md, "The rest after a landing"). 1: a turn in place wears off
 // fast, the brake of the land is off on land that is steeper than the brake
@@ -79,6 +85,17 @@ bool ThrowPhysicsCatchFrom(void* object, float matrix[12]);
 // back after a wait. 0: each substep has its time of the flight. With
 // test_keys=1, Ctrl with Scroll Lock goes between the two.
 void ThrowPhysicsSetDraw(int rule);
+// throw_arc_objects: 1 stops the real arc of a thrown object where it goes
+// into the box of the mesh of an object near the Hand, in the time before
+// the game's physics has the object (docs/throw.md, "The objects on the
+// arc"). 0 stops it at the land only.
+void ThrowPhysicsSetArcObjects(bool on);
+// throw_shield: 1 stops the real arc where it goes into the ball of the body
+// of a Physical Shield, and the flight takes only the game's own step in a
+// substep while the ball of the object is near that ball, so the game's
+// test of the pair finds the faces of the dome (docs/throw.md, "A Physical
+// Shield on the arc"). 0 tests the shield only in the game's steps.
+void ThrowPhysicsSetShield(bool on);
 // release_fall_cm: a hand that is still at the opening of the grip sets the
 // object down only when its point is this many cm of the room over the land
 // or less. Higher up the object falls. 0 sets it down at each height. With

@@ -3,8 +3,9 @@
 The tabletop mode shows the island as a model on a table in the room, about
 1.5 m across. The player walks around it and leans over it with full head
 tracking. With the Virtual Desktop passthrough mask, everything past the table
-is one key color, so the island stands on the real desk. The launcher offers it
-as "Tabletop (test)". The mode is a test and it is not complete.
+is one key color, so the island stands on the real desk. The mode is a test and
+it is not complete. The launcher has no row for it: a test writes `play_mode=3`
+in `bwvr.ini`, and a save of the launcher removes the key.
 
 The God view (play mode 4, `god-view.md`) uses the same camera and the same
 code, with the land at the player's waist and no edge. This file has the math
@@ -292,7 +293,7 @@ lean brings the eye to 400 units or less. The game was tuned for a camera
 | Block cull `fn_00877210` | Rejects a block only when all 8 corners are behind the near plane or outside one side of the screen [V] | The whole island passes | The radius test of "Land blocks past a radius" |
 | Landscape detail | Two lines on the ground in front of `0x00EA1DB8` along `0x00EA1DD4`, at depths 1600 (`0x00E9C4FC`) and 2500 (`0x00E9C4D4`), band 275. `LH3DIsland::Create` writes them at `0x00803E1B` and `0x00803E7B` [V]. Stride 1, 2 or 4 cells from `[block+0x930]` in `fn_00874AA0` [V] | Most of the island draws at stride 2 or 4 [I] | Writes 1e6 to both. Every block then gets stride 1 [V logic, I result] |
 | Landscape textures | A third line at `0x00E9C508`, depth at `0x00E9C524`, 400 to 800 set in `Create`, band 85. Blocks past it use the low resolution atlas of the `.lnd` (`+0x938 = 1`). `TextureUpdateThread` `0x00871F00` builds 6 tiles per call, nearest to `0x00EA1DB8` first [V] | The whole island shows the low resolution atlas | Writes 1e6 to `0x00E9C524` unless `table_textures=0`. Every block then gets a 128 or 256 pixel texture, 16 to 64 MB for Land5 [I]. The first frames build them 6 at a time |
-| Map objects | `fn_005E5CD0` fills `GLandscape::DrawObjects` from the visible blocks, near to far, and stops at a block distance of `[0x00C37200]` = 700 [V at `0x005E5DE6`]. The same 700 is used at `0x005E4A99` and in the shadow fade `fn_00874600` [V]. Scripts change it through `SetVanishObjectDist` `0x0087FD40` [V] | No trees, houses or villagers at all | Writes 8000 to `0x00C37200` every frame |
+| Map objects | `fn_005E5CD0` fills `GLandscape::DrawObjects` from the visible blocks, near to far, and stops at a block distance of `[0x00C37200]` = 700 [V at `0x005E5DE6`]. The same 700 is used at `0x005E4A99` and in the shadow fade `fn_00874600` [V]. Scripts change it through `SetVanishObjectDist` `0x0087FD40` [V] | No trees, houses or villagers at all | Writes 8000 to `0x00C37200` while the table owns the frame, and the game's value times the factor of `cull_distance` in the other frames (`backend.md`, "Models are drawn further out") |
 | Object list size | At most 2999 entries in the array of 3000 at `0x00D1D28C` (tests at `0x005E5E21`, `0x005E5E71`, `0x006E690F`). Rebuilt when the stored camera moves more than 1 unit, or every 10 turns [V] | A whole island can pass 2999 and lose the far objects. At the table scale 1 unit is 0.5 mm, so the list is rebuilt on almost every frame [I] | The mod counts the list once in each eye pass. A full list gets a log line. Growing the array means moving it [I] |
 | Model detail | `LH3DObject::AddForDrawing` `0x00815A70` compares depth against 23.3, 66.7, 86.7 and 173.3 times a size figure [M, `sky_detail.cpp`]. The size figure is (`obj[4]` + 1) times the radius times the detail slider `0x00C3813C`, capped at 5.0 by `0x00C37EC8` [V]. Alpha fades from 86.7 to 173.3 times the size | The test is an angle, so small things correctly drop out. But the cap removes every mesh past 173.3 * 5 * 3 = 2600 units, with `detail_distance=3` | Writes 30 to `0x00C37EC8` |
 | Transparent objects | `LH3DZSorter::NewZObject` `0x0083F310` has 2048 entries a frame and drops the rest silently [V] | Smoke, water effects and foliage over a whole island may pass it [I] | The mod counts the sorter once in each eye pass. A full list gets a log line |
@@ -304,7 +305,7 @@ The values that the table writes while it owns the frame:
 | Value | Address | The game | The table |
 | --- | --- | --- | --- |
 | Fog | `0x00C37204` | 1 | 0 |
-| Map objects stop | `0x00C37200` | 700 | 8000 |
+| Map objects stop | `0x00C37200` | 700 | 8000, and 700 times the factor of `cull_distance` while the table does not own the frame |
 | Size cap of the model detail | `0x00C37EC8` | 5 | 30 |
 | Land detail lines | `0x00E9C4FC`, `0x00E9C4D4` | 1600, 2500 | 1e6 |
 | Land texture line | `0x00E9C524` | 400 to 800 | 1e6, unless `table_textures=0` |
@@ -388,7 +389,7 @@ and `table_center_x` and `table_center_z` replace the fit.
 | Source | Evidence |
 | --- | --- |
 | The sky dome, `LH3DSky::Draw` `0x0086B010`, placed once at (2560, 0, 2560) with scale 5, a sphere with a radius of about 240000 units. It sets `ZFUNC` to `ALWAYS` and draws the moon, the dome and the sun disc | [V]. Its only caller is a tail `jmp` at `0x005E2233` [V] |
-| The sea, drawn first as a background with `ZFUNC ALWAYS` and no depth write | `0x005E4E8C` calls the water before the land at `0x005E4E96` [V] |
+| The sea, drawn first as a background with `ZFUNC ALWAYS` and no depth write. With `sea_depth=1` the land of the sea goes under it and fades into it (backend.md, "The sea with depth") | `0x005E4E8C` calls the water before the land at `0x005E4E96` [V] |
 | Blocks past the radius, and the flat part of blocks on the edge. Cells with an altitude byte of 3 or less draw flat at y 0 | [V] |
 | Map objects on those blocks | they come from the listed blocks [V] |
 | Clouds and ground mist, `GWeather::DrawClouds` `0x0083FC90` and `LH3DMist::Draw` `0x007FA300`. They hang 300 to 500 units up, which is 15 to 25 cm over the table | [V] for the functions, [M, `sky_detail.cpp`] for the height |
@@ -574,8 +575,10 @@ The spirits are not at eye level. In a desktop run of the God view, with the
 head 30 cm right and 40 cm forward of the recenter place, the good spirit at
 its usual place was 83 cm below the head and 1.27 m from it, which is about
 40 degrees below eye level [M]. The room camera does not look down, so the
-screen point of the game is that far below the middle of the view [I]. No
-headset session has checked where the spirits are for a real head.
+screen point of the game is that far below the middle of the view [I].
+
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 A grab of the table moves `P0` with the land, so the spirits stay where they
 are in the room. On the table the jumps and turns of the game camera are not
@@ -955,7 +958,7 @@ haptics. The throw with the slap of 12 cm (237 units) tests a longer swing.
 
 ## Keys
 
-All in `[bwvr]`. Only the play mode is in the launcher.
+All in `[bwvr]`. None is in the launcher.
 
 | Key | Default | Meaning |
 | --- | --- | --- |
@@ -996,7 +999,7 @@ with the mouse at rest is safe.
 | `src/mod/world_grab.cpp` | The grips move the table |
 | `src/mod/audio_listener.cpp` | The ears on the table |
 | `src/mod/spirit_anchor.cpp` | The spirits beside the table |
-| `src/mod/mod_main.cpp`, `src/launcher/launcher.cpp` | The keys, and the play mode row |
+| `src/mod/mod_main.cpp` | The keys |
 | `test/controller_math/main.cpp` | The checks of the table map, the hand, the throw, the grab and the ears |
 
 ## Known limits and open questions

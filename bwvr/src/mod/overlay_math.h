@@ -39,9 +39,9 @@ inline void Cross(const float a[3], const float b[3], float out[3]) {
 
 // --- the test hand -----------------------------------------------------------
 
-// THE HAND FRAME is the frame of the grip pose, after head_pose.cpp turns the
-// runtime's axes into the game's left handed frame (a flip of z). For the
-// right hand:
+// THE HAND FRAME is the frame of the grip pose with the angle of the hand
+// (hand_angle_math.h), after head_pose.cpp turns the runtime's axes into the
+// game's left handed frame (a flip of z). For the right hand:
 //
 //   +x  out of the back of the hand, so the palm faces -x
 //   -y  along the open fingers, from the wrist to the finger tips
@@ -591,11 +591,12 @@ inline int BuildTube(const float (*points)[3], int count, float radius,
 // ground(x, z) + lift, from inner to outer from the target. A valid target
 // has a disc of a third of the inner radius in the middle. An invalid one has
 // a cross of two bars, from corner to corner of the inner circle. The
-// normals are straight up.
+// normals are straight up. With mark false a valid ring has no disc: the ring
+// around an object, whose middle is under the object.
 template <typename Ground>
 inline int BuildLandRing(float cx, float cz, float inner, float outer,
                          float lift, bool valid, Ground ground, Triangle* out,
-                         int most) {
+                         int most, bool mark = true) {
   if (!(inner > 0.0f) || !(outer > inner)) return 0;
   MeshOut mesh = {out, 0, most};
   const float up[3] = {0.0f, 1.0f, 0.0f};
@@ -616,6 +617,7 @@ inline int BuildLandRing(float cx, float cz, float inner, float outer,
     Add(&mesh, in_p[i], out_p[j], in_p[j], up, up, up);
   }
   const float middle[3] = {cx, ground(cx, cz) + lift, cz};
+  if (valid && !mark) return mesh.count;
   if (valid) {
     float rim[kRingPoints][3];
     const float r = inner / 3.0f;

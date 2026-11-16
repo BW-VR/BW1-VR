@@ -19,8 +19,8 @@ inline void RingChecks() {
       if (a.id == nullptr || a.id[0] == 0 || a.word[0] == 0 || a.name[0] == 0) {
         words = false;
       }
-      // A word of 10 letters fits the badge, and a name of 23 fits the card.
-      if (wcslen(a.word) > 10 || wcslen(a.name) > 23) fit = false;
+      // A word of 11 letters fits the badge, and a name of 23 fits the card.
+      if (wcslen(a.word) > 11 || wcslen(a.name) > 23) fit = false;
       for (int k = i + 1; k < kItems; ++k) {
         if (strcmp(a.id, kItemInfo[k].id) == 0) unique = false;
       }
@@ -69,9 +69,26 @@ inline void RingChecks() {
     bad = ParseItems(kDefaultPage2, items, unknown, sizeof(unknown));
     Check(bad == 0 && items[4] == kItemMore,
           "the second page is known too, with More in the same slot", bad, 0);
+    Check(items[0] == kItemPlaces && items[1] == kItemSnapshot &&
+              items[2] == kItemRecenter && items[3] == kItemPause,
+          "page 2 has the panel of places at the top, the snapshot beside it "
+          "and the recenter", items[0], kItemPlaces);
+    bad = ParseItems(kDefaultPage2Marks, items, unknown, sizeof(unknown));
+    Check(bad == 0 && items[0] == kItemMarkSet && items[1] == kItemMarkGo &&
+              items[2] == kItemMarkBack && items[4] == kItemMore,
+          "page 2 of places_panel=0 has the three bookmark items", bad, 0);
+    Check(kItemInfo[kItemPlaces].how == kHowPanel &&
+              kItemInfo[kItemSnapshot].how == kHowSnapshot &&
+              !IsLinkItem(kItemPlaces) && !IsLinkItem(kItemSnapshot),
+          "the items places and snapshot act on a release, as other items do",
+          1, 1);
     bad = ParseItems(kDefaultTemple, items, unknown, sizeof(unknown));
     Check(bad == 0 && items[4] == kItemLeave && items[7] == kItemNone,
           "the ring of the Temple has the way out at the bottom", bad, 0);
+    bad = ParseItems("recenter", items, unknown, sizeof(unknown));
+    Check(bad == 0 && items[0] == kItemRecenter &&
+              kItemInfo[kItemRecenter].how == kHowRecenter,
+          "the item recenter is known, and it is no key of the game", bad, 0);
     bad = ParseItems(" pause , ,help,nonsense,,", items, unknown,
                      sizeof(unknown));
     Check(bad == 1 && strcmp(unknown, "nonsense") == 0,
@@ -209,7 +226,8 @@ inline void RingChecks() {
   int pages[kPages][kSlots];
   char unknown[16];
   ParseItems(kDefaultPage1, pages[0], unknown, sizeof(unknown));
-  ParseItems(kDefaultPage2, pages[1], unknown, sizeof(unknown));
+  // A page 2 with no empty slot (places_panel=0).
+  ParseItems(kDefaultPage2Marks, pages[1], unknown, sizeof(unknown));
   const Settings set = DefaultSettings();
   {
     State st;

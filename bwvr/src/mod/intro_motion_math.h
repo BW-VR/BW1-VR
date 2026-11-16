@@ -334,6 +334,26 @@ inline bool Invert3(const float m[9], float out[9]) {
   return true;
 }
 
+// A HAND THAT IS STILL IN THE ROOM (intro_push_room). before and now are the
+// poses of the hand in the room, the position in meters. The pose against
+// the camera of the orbs also changes when the camera turns, the head moves
+// or the scale of the room changes, and that is no motion of the hand. The
+// limits are far below a motion that the eye sees, and over the rounding of
+// a change of the scale.
+const float kStillMeters = 0.0001f;
+const float kStillTurn = 0.00001f;
+inline bool HandStill(const HandPose& before, const HandPose& now) {
+  for (int k = 0; k < 3; ++k) {
+    if (fabsf(now.position[k] - before.position[k]) > kStillMeters) {
+      return false;
+    }
+  }
+  for (int k = 0; k < 9; ++k) {
+    if (fabsf(now.rotation[k] - before.rotation[k]) > kStillTurn) return false;
+  }
+  return true;
+}
+
 inline float DragWeight(float distance, float radius) {
   if (!(radius > 0.0f) || !(distance < radius)) return 0.0f;
   const float inner = 0.5f * radius;

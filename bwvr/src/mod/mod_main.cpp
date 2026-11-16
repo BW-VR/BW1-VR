@@ -18,6 +18,7 @@
 #include <string.h>
 
 #include "one_walk.h"
+#include "address_space.h"
 #include "MinHook.h"
 #include "../common/bw_addresses.h"
 #include "../common/exe_check.h"
@@ -27,6 +28,7 @@
 #include "controllers.h"
 #include "debug_menu.h"
 #include "frame_profile.h"
+#include "hint_card.h"
 #include "d3d7_count.h"
 #include "d3d7_thread.h"
 #include "fast_transform.h"
@@ -58,6 +60,7 @@
 #include "target_glow.h"
 #include "throw_physics.h"
 #include "teleport.h"
+#include "menu_room.h"
 #include "ui_panel.h"
 #include "vr_start.h"
 #include "vr_start_math.h"
@@ -116,6 +119,8 @@ void IntroSetTests(int motion_seconds, int push_pixels);
 void IntroSetHandPush(int percent, bool hand_point);
 void IntroSetHands(bool push_3d, int radius_cm, int hand_show,
                    bool hand_depth);
+void IntroSetPushRoom(bool on);
+void IntroSetKeepTurn(bool on);
 void IntroSetScreen(bwvr::XrScreen* screen);
 void IntroInstall();
 bool IntroFinishFrame();
@@ -149,6 +154,17 @@ void BlockWatchInstall();
 // controllers.cpp
 void ControllerHintsSetOptions(bool on, const char* forced_profile);
 bool ControllerHintsInstall();
+// card_scroll.cpp: the thread that draws the letters of the fonts of the
+// cards one time at the start (font_warm), and then the page and the parts
+// of the panels (panel_warm).
+namespace card_scroll {
+typedef void (*WarmJob)();
+void WarmAdd(WarmJob job);
+void WarmStart();
+}
+// places_panel.cpp, debug_window.cpp: the jobs of that thread.
+void PlacesPanelWarm();
+void DebugWindowWarm();
 void ControllersSetOptions(bool on, int left_hand, bool haptics,
                            bool swap_buttons);
 void ControllersSetFake(const FakeControllerSettings& fake);
@@ -172,11 +188,18 @@ void HandDirectInstall();
 void MiracleInstall();
 void VillageInstall();
 void HandDirectInstallTable();
+// influence_edge.cpp
+void InfluenceEdgeInstall();
 void HandDirectInstallCreatureCamera(int mode);
 // hand_glow.cpp: the glow at the Hand's point.
 void HandGlowSetEnabled(bool on);
 // overlay.cpp: the mod's own meshes, a test hand at each controller.
 void OverlaySetEnabled(bool on);
+void OverlaySetGlow(bool rays, bool trail);
+void OverlaySetRayGlowOnly(bool on);
+void OverlaySetRayTip(bool on);
+// ray_card.cpp: ray_over_panels and the test key ray_card_test_save.
+void RayCardSetOptions(bool on, int test_save);
 void PresentWatchSetEnabled(bool on);
 void PresentWatchInstall();
 void PresentWatchSkipDesktop(bool on);
@@ -191,6 +214,8 @@ void InputWatchInstall();
 void HeadCameraInstall();
 void SnapshotGuardInstall();
 void SnapshotGuardSetSkip(bool on);
+void SnapshotGuardSetPicture(bool on, bool dump);
+void SnapshotGuardSetFit(bool on);
 void WaterModeSetSimple(bool on);
 void HeadCameraSetRoll(bool on);
 void StereoSetImmersive(bool on);
@@ -216,16 +241,25 @@ void CursorTraceFrame(uint64_t frame);
 // comfort_camera.cpp
 void ComfortCameraSetOptions(int snap_degrees, bool instant_jumps, bool glide,
                              int blink_ms);
+void ComfortCameraSetSmoothTurn(bool smooth, int degrees_per_second);
 void ComfortCameraSetZoomStep(int step);
 void ComfortCameraSetTurnHelp(int degrees_per_event, bool keeps_focus,
                               int tilt_degrees);
 void ComfortCameraSetSpawnTests(int temple_update, int x, int z, int flag,
                                 int toggle_update);
 void ComfortCameraInstall();
+// vignette.cpp: comfort_vignette.
+void VignetteSetMode(int mode);
+// video_view.cpp: the view for videos (video_view.h).
+void VideoViewSetOptions(int on, int down_pct, int fov_deg, int smooth_ms,
+                         int marks, int layers, int copy_changed);
+// head_blinder.cpp: head_blinder and head_blinder_objects.
+void HeadBlinderSetOn(bool on, bool objects);
 void ScriptCameraSetOptions(int variant, int min_distance, int min_height,
                             int close_distance, int close_zoom_pct,
                             int cut_degrees, int cut_percent,
                             bool hold_follow);
+void ScriptCameraSetMiracleCamera(bool still, bool head_tracking);
 void ScriptCameraInstall();
 void SkyDetailInstall();
 void SkyDetailRelease();
@@ -248,6 +282,8 @@ void UiBarsEnd(float saved);
 void SpiritAnchorInstall();
 // fight_marks.cpp: the marks of a fight of Creatures at their depth.
 void FightMarksInstall();
+// job_icon.cpp: the size of the job icon and of the name over a villager.
+void JobIconInstall();
 void AudioSetRoom(bool room, int units_per_meter, bool places);
 void AudioSetRange(bool by_ears, bool keep_loops, int test_tag,
                    int test_tag_bank);
@@ -259,6 +295,7 @@ void SpiritAnchorSetWorldSize(bool on, bool test_keys, int test_frame,
 void DetailDistanceSet(float factor);
 void DetailScaleInstall(float most);
 void RemoteControlInstall();
+void CullDistanceInstall();
 void ComfortCameraRelease();
 void PointerMapInstall();
 void HeadCameraSetHandAnchored(bool on);
@@ -267,6 +304,9 @@ void StereoSetHeadTracking(bool on);
 void StereoSetHeadFov(float degrees);
 void StereoSetFovMargin(int percent);
 void StereoSetFakeFov(bool on);
+void StereoSetEyeCant(int mode);
+void StereoSetHeadPoseFrame(int mode);
+void HeadPoseSetFakeCant(float degrees);
 void HeadPoseSetScale(float units_per_meter);
 void HeadPoseSetEnabled(bool on);
 void HeadPoseSetFake(bool on, float yaw_degrees, float pitch_degrees,
@@ -287,6 +327,7 @@ void UiDepthSetAccounting(bool on);
 void UiDepthSetHintMode(int mode);
 void UiDepthSetHintSelfTest(int mode);
 void UiDepthSetHintHandDepth(int on, int test_frame);
+void UiDepthSetHintHandTip(int on);
 void UiDepthSetHintScale(float scale);
 DWORD TextureFilterInstall(int requested_anisotropy);
 void TextureFilterReport();
@@ -302,9 +343,14 @@ void NetCheckSkipInstall(bool skip);
 void DxCheckInstall(bool own_answer);
 // file_read_ahead.cpp: the read ahead of the files of LHFile.
 void FileReadAheadInstall(bool on, bool test_keys);
+// save_store.cpp: the calls of a save in the VirtualStore of the user.
+void SaveStoreInstall(bool on);
+// game_start.cpp: a new game or the save of the exit at the start.
+void GameStartChoose();
 // near_plane.cpp: the near plane of the game camera.
 void NearPlaneSetOptions(int cm_24, int cm_16);
 void NearPlaneInstall();
+void GesturePanelInstall();
 // proxy/ddraw_proxy.cpp
 void ProxyForceSystemDDraw();
 bool ProxyVulkanStrict();
@@ -335,6 +381,15 @@ void CrashReportInstall(const char* ini);
 void CrashReportFrame(uint64_t frame);
 
 void ModLog(const char* format, ...);
+// eye_capture.cpp: a picture of the mod as a BMP.
+void EyeCaptureSaveUi(const char* name, uint64_t frame, int style,
+                      const void* pixels, int pitch, uint32_t width,
+                      uint32_t height);
+// miracle.cpp and spell_book.cpp: no test of the mod in a save (see
+// h_SaveAllGame).
+void MiracleBeforeSave();
+void SpellBookBeforeSave();
+void SpellBookAfterSave();
 
 namespace {
 
@@ -434,8 +489,22 @@ TabletopSettings g_table;
 float g_head_fov_deg = 0.0f;
 // The margin of the render past the view of the headset, in percent.
 int g_fov_margin_pct = 0;
+// eye_cant: each eye of a headset with canted views draws with the turn of
+// its own view. fake_eye_cant_deg: a cant for the invented head.
+int g_eye_cant = 1;
+// head_pose_frame: the main camera call locates the head for the display
+// time of its frame (stereo.cpp, StereoHeadForCamera).
+int g_head_pose_frame = 1;
+float g_fake_eye_cant_deg = 0.0f;
 float g_fov_absolute_deg = 0.0f;
 bool g_skip_snapshot = true;
+// save_picture: 1 the game makes a save picture in VR from a surface of the
+// mod with the eye picture (snapshot_guard.cpp). 0 no save picture in VR.
+bool g_save_picture = true;
+bool g_save_picture_dump = false;
+// save_picture_fit: 1 the surface has the size of the read of the game, so each
+// pixel of a save picture is the mean of its box. 0 a surface of 512 by 384.
+bool g_save_picture_fit = true;
 bool g_water_simple = true;
 bool g_head_roll = true;
 
@@ -461,9 +530,21 @@ int g_window_h = 0;
 bool g_hand_anchored = true;
 // Moving around. The launcher stores the two choices as an index.
 int g_snap_turn_deg = 45;
+bool g_smooth_turn = false;
+int g_smooth_turn_speed = 90;
 bool g_instant_jumps = true;
 bool g_camera_glide = false;
 int g_blink_ms = 0;
+// The comfort vignette: 0 off, 1 gentle, 2 strong (vignette.cpp).
+int g_comfort_vignette = 0;
+// The view for videos (video_view.cpp): video_view, video_view_down_pct,
+// video_view_fov_deg, video_view_smooth_ms, video_view_marks,
+// video_view_layers and video_view_copy_changed.
+int g_video_view[7] = {0, 20, 90, 150, 1, 1, 1};
+// The overlay of a head under the land, and in a house, a rock or a tree
+// trunk (head_blinder.cpp).
+bool g_head_blinder = true;
+bool g_head_blinder_objects = true;
 int g_zoom_step = 2;  // 0 the game's own, 1 small, 2 medium, 3 large
 // The turn events of a snap turn for the tutorial, and the turn of the game
 // camera about its own focus (comfort_camera.cpp).
@@ -473,6 +554,9 @@ bool g_god_turn_keeps_focus = true;
 // The camera the story moves, see script_camera.cpp. 0 as the game moves it,
 // 1 a cut at the start of each move, 2 a cut at the end of each move.
 int g_script_camera = 2;
+// 1 starts no camera path of a particle effect of the game, for example the
+// Forest miracle, while the head carries the camera (script_camera.cpp).
+bool g_miracle_camera_still = true;
 float g_detail_distance = 5.0f;  // how far out models keep their detail
 // Below 0 keeps the default in script_camera.cpp.
 int g_script_min_distance = -1;
@@ -544,8 +628,10 @@ float g_fake_roll = 0.0f;
 bool g_fake_sweep = false;
 // The player key "controllers" turns the whole controller path off.
 bool g_controllers = true;
-// The player key "left_hand": -1 follows the game's own option, 0 makes the
-// right controller the Hand, 1 the left controller.
+// The key "left_hand": -1 follows the game's own option, 0 makes the right
+// controller the Hand, 1 the left controller. With hand_follow_game=1 (the
+// default) the game's own option always chooses the Hand, and left_hand
+// does not act: the window and the launcher have no row for it.
 int g_left_hand = -1;
 bool g_controller_swap_buttons = false;
 bool g_controller_hints = true;
@@ -554,6 +640,10 @@ int g_hint_selftest = 0;
 // Hand (draw_hooks.cpp, HandHintMove), and its test key with a frame.
 int g_hint_hand_depth = 1;
 int g_hint_hand_depth_test_frame = 0;
+// hint_hand_tip: 1 puts a tooltip at the Hand beyond the fingertip, on the
+// side away from the palm (docs/ui-layer.md, 15.3). 0 puts it 6 cm to the
+// right of the place of the game.
+int g_hint_hand_tip = 1;
 char g_hint_profile[64] = {0};
 bool g_controller_haptics = true;
 FakeControllerSettings g_fake_controller;
@@ -565,6 +655,16 @@ bool g_hand_glow = false;
 TargetGlowSettings g_target_glow;
 // The mod draws its own test hand at each controller (overlay.cpp).
 bool g_overlay = false;
+// The glow of the rays (ray_glow), the glow alone (ray_glow_only) and the
+// trail of a gesture (gesture_trail), all drawn by overlay.cpp. The ray over
+// the panels in the room (ray_over_panels, ray_card.cpp). The glow at the end
+// of the menu ray (ray_tip, overlay.cpp and ray_card.cpp).
+bool g_ray_glow = true;
+bool g_ray_glow_only = true;
+bool g_ray_tip = true;
+bool g_gesture_trail = true;
+bool g_ray_over_panels = true;
+int g_ray_card_test_save = 0;
 // The teleport with a visible arc (teleport.cpp). See docs/god-view.md.
 TeleportSettings g_teleport;
 // The grab from a distance (far_grab.cpp), and the square root law of the
@@ -573,6 +673,9 @@ FarGrabSettings g_far_grab;
 // take_stream: the stream of a take at a distance goes on a curve from the
 // source to the Hand (take_stream.cpp).
 int g_take_stream = 1;
+// take_stream_hand: a take with the Hand at the source has the curve too.
+int g_take_stream_hand = 1;
+int g_take_stream_trace = 0;
 // The law of a throw and its log (throw_physics.cpp).
 int g_throw_law = 2;
 int g_throw_slow_x10 = 20;
@@ -585,8 +688,11 @@ int g_throw_land_rate_x10 = 10;
 int g_throw_bounce_pct = 50;
 int g_throw_land_brake_pct = 60;
 int g_throw_tree_settle = 1;
+int g_throw_turn = 1;
 int g_throw_land_rest = 1;
 int g_throw_draw = 1;
+int g_throw_arc_objects = 1;
+int g_throw_shield = 1;
 // The take of an object that comes to rest (throw_physics.cpp).
 int g_catch_rest_guard = 1;
 int g_catch_rest_test = 0;
@@ -626,7 +732,7 @@ XrLayersOptions g_xr_layers;
 
 // The Lionhead intro in stereo. Off by default while it is tested. See
 // intro_vr.cpp and docs/intro.md.
-bool g_intro_vr = false;
+bool g_intro_vr = true;
 // 0 the camera stays at the rest pose, 1 it goes along the path of the game
 // and does not turn, 2 the orbs are a model in front of the player, 3 the
 // camera of the game with its turns.
@@ -635,6 +741,8 @@ int g_intro_speed_pct = 100;
 int g_intro_distance_cm = 300;
 int g_intro_model_distance_cm = 200;
 bool g_intro_eye_trails = true;
+// intro_keep_turn: the kept picture of each eye moves with a turn of the head.
+bool g_intro_keep_turn = true;
 // The frame before of each eye in the scene (eye_clean.cpp), and its test
 // keys for desktop runs.
 int g_eye_clean = 1;
@@ -700,6 +808,8 @@ int g_vk_upload_queue = 1;
 int g_vk_present_late = 1;
 int g_vk_equal_depth = 1;
 int g_vk_texture_reuse = 1;
+int g_vk_texture_forget = 1;
+int g_vk_upload_keep = 1;
 int g_vk_keep_picture = 1;
 int g_vk_black_check = 1;
 int g_vk_untextured = 1;
@@ -816,6 +926,8 @@ bool g_intro_push_3d = true;
 int g_intro_push_radius_cm = 30;
 int g_intro_hand_show = 1;
 bool g_intro_hand_depth = true;
+// In the intro a hand moves orbs only when the player moved it in the room.
+bool g_intro_push_room = true;
 bool g_intro_probe = false;
 // Tests of the desktop runs.
 int g_intro_motion_test_seconds = 0;
@@ -876,6 +988,15 @@ double g_vr_code_ms = 0.0;
 const int kVrRetryMs = 3000;
 const int kMaxVrTries = 40;
 uint64_t g_frame = 0;
+
+// THE TEST PICTURES OF THE CARDS (card_send_test_save,
+// XrScreen::SetCardTestSave): the levels over a checkerboard, the views as
+// they are.
+void SaveCardTest(const char* name, const uint8_t* bgra, int pitch,
+                  uint32_t width, uint32_t height, bool over_checker) {
+  EyeCaptureSaveUi(name, g_frame, over_checker ? 1 : 2, bgra, pitch, width,
+                   height);
+}
 
 typedef void(__cdecl* FinishFrameFn)();
 FinishFrameFn o_FinishFrame = nullptr;
@@ -986,7 +1107,7 @@ void ReadSettings() {
     g_tabletop = chosen.tabletop;
     g_table.god = chosen.god;
   }
-  // THE TABLE. Not in the launcher, except the play mode. All sizes are in
+  // THE TABLE. Not in the launcher. All sizes are in
   // the room. A scale of 0 fits the land to the table, and a center of -1 is
   // the middle of the land. table_key_color is a hex color such as FF00FF,
   // and empty or 0 leaves the sky as it is.
@@ -1015,10 +1136,11 @@ void ReadSettings() {
     const unsigned long rgb = strtoul(key, nullptr, 16) & 0xFFFFFFul;
     t.key = key[0] != 0 && rgb != 0;
     t.key_color = 0xFF000000u | static_cast<uint32_t>(rgb);
-    // THE GOD VIEW (play_mode=4). Not in the launcher, except the play mode.
+    // THE GOD VIEW (play_mode=4, the default). The launcher has no row for
+    // the play mode.
     // The ground is god_ground_down_cm below the head at the last recenter.
     // The view starts at god_units_per_meter, and a zoom step changes the
-    // scale by god_zoom_step_pct, from the life size scale up to
+    // scale by god_zoom_step_pct, from god_near_units_per_meter_x10 up to
     // god_far_units_per_meter. A ground step is god_ground_step_cm.
     t.god_down_cm = number("god_ground_down_cm", 60);
     t.god_units_per_meter = number("god_units_per_meter", 100);
@@ -1046,6 +1168,14 @@ void ReadSettings() {
     t.god_zoom_about_test = number("god_zoom_about_test", 0);
     t.god_step_cm = number("god_ground_step_cm", 5);
     t.god_most_units = number("god_far_units_per_meter", 4000);
+    // The nearest zoom, in tenths: 10 is 1 unit for each meter, where a
+    // villager is as high as the player. 75 is the life size scale.
+    t.god_least_tenths = number("god_near_units_per_meter_x10", 10);
+    // 1: a zoom step stops 30 cm before the head goes into a house, a rock or
+    // a tree trunk. 0: the zoom does not look at the solids.
+    t.god_zoom_solid_stop = number("god_zoom_solid_stop", 1);
+    // The head stays this far out of the solid, in cm of the room.
+    t.god_zoom_solid_cm = number("god_zoom_solid_cm", 30);
     // Where the player goes when the game puts its own camera at a place:
     // 1 follows the game, with the land point that the camera looks at
     // god_spawn_ahead_cm in front of the head. 0 builds the view only at the
@@ -1057,6 +1187,13 @@ void ReadSettings() {
     // 0 over the recenter place. With test_keys=1, Ctrl and Numpad 1 change
     // it.
     t.god_camera_at = number("god_camera_at", 1);
+    // The camera zone of a script of the game: 1 keeps the game camera in
+    // the zone, so the game does not push it back and shake the view, and
+    // the player's place goes at most god_zone_margin world units past the
+    // zone. 0 is the game's own push and shake (docs/god-view.md, "The
+    // camera zone").
+    t.god_zone = number("god_zone", 1);
+    t.god_zone_margin = number("god_zone_margin", 50);
     // The walk with the stick of the hand that does not point: 1 moves the
     // player over the land along the direction of the head, 2 along the
     // direction in which that controller points, and 0 is off. A full push
@@ -1077,6 +1214,32 @@ void ReadSettings() {
     // a desktop run.
     t.move_stick_follow_land = number("move_stick_follow_land", 1);
     t.move_stick_trace = number("move_stick_trace", 0);
+    // 1: the filter of the land starts again after each move of the view, a
+    // place at a camera of the game and a recenter, and a turn keeps it. 0:
+    // it starts again after each change of the version of the view only.
+    t.move_stick_follow_place = number("move_stick_follow_place", 1);
+    // 1: a zoom in over a land more than 2.5 m below the head keeps the land
+    // at its height in the room. 0: it zooms about a level 2.5 m below the
+    // head, and the land goes farther down.
+    t.god_zoom_far_level = number("god_zoom_far_level", 1);
+    // How the stick moves the player: 0 walks over the land, and 1 flies
+    // along the forward direction of the head or of the controller in 3D.
+    t.move_type = number("move_type", 0);
+    // While the stick is pushed to 90 percent or more, the speed of the walk
+    // and of the fly grows with the time of the push, up to
+    // move_stick_ramp_most times. 0 keeps the speed of the push.
+    t.move_stick_ramp = number("move_stick_ramp", 1);
+    t.move_stick_ramp_most = number("move_stick_ramp_most", 32);
+    // 1: the speed of the stick is times (ref / scale) ^ power, between low
+    // and high, so the walk and the fly are faster at a small scale and a
+    // little slower at a large one. 0: move_stick_speed_cm at each scale.
+    t.move_stick_scale = number("move_stick_scale", 1);
+    t.move_stick_scale_ref_x10 = number("move_stick_scale_ref_x10", 160);
+    t.move_stick_scale_power_pct = number("move_stick_scale_power_pct", 50);
+    t.move_stick_scale_low_pct = number("move_stick_scale_low_pct", 60);
+    t.move_stick_scale_high_pct = number("move_stick_scale_high_pct", 400);
+    // A fly at a house, a rock or a tree trunk: 1 slides past it, 0 stops.
+    t.fly_solid_slide = number("fly_solid_slide", 1);
     t.test_keys = number("test_keys", 0) != 0;
     // Tests with no key press, for a desktop run: the game's zoom to the
     // Temple at an update of the camera mode, and the test key of god_spawn.
@@ -1113,6 +1276,12 @@ void ReadSettings() {
       GetPrivateProfileIntA("bwvr", "fov_absolute_deg", 0, path));
   g_skip_snapshot =
       GetPrivateProfileIntA("bwvr", "skip_snapshot", 1, path) != 0;
+  g_save_picture =
+      GetPrivateProfileIntA("bwvr", "save_picture", 1, path) != 0;
+  g_save_picture_dump =
+      GetPrivateProfileIntA("bwvr", "save_picture_test_dump", 0, path) != 0;
+  g_save_picture_fit =
+      GetPrivateProfileIntA("bwvr", "save_picture_fit", 1, path) != 0;
   // HEAD ROLL IS ON, AND IT DECIDES THE SEA.
   //
   // Without roll the world tilts with the player's head instead of staying
@@ -1164,6 +1333,24 @@ void ReadSettings() {
     // The Creature panel: 0 off, 1 fixed in the room, 2 near the Creature.
     u.creature_panel = static_cast<int>(
         GetPrivateProfileIntA("bwvr", "creature_panel", 2, path));
+    // The panel with no press, and its stay after the Hand left. 0: only
+    // while a press holds the Creature.
+    u.creature_panel_linger = static_cast<int>(
+        GetPrivateProfileIntA("bwvr", "creature_panel_linger", 1, path));
+    // The Creature panel over the head of the Creature, on its own card. 0:
+    // on the subtitle card with ui_panel=0, and beside the Creature with
+    // ui_panel=1.
+    u.creature_panel_over = static_cast<int>(
+        GetPrivateProfileIntA("bwvr", "creature_panel_over", 1, path));
+    // The menus on a panel that is fixed in the room, with ui_panel=0, and
+    // the keyboard in the headset under it. 0 keeps the menus in the eye
+    // pictures, fixed to the head. docs/ui-layer.md, "The menus in the room".
+    u.menu_room = static_cast<int>(
+        GetPrivateProfileIntA("bwvr", "menu_room", 1, path));
+    u.menu_room_test = static_cast<int>(
+        GetPrivateProfileIntA("bwvr", "menu_room_test", 0, path));
+    u.vr_keyboard = static_cast<int>(
+        GetPrivateProfileIntA("bwvr", "vr_keyboard", 1, path));
     // A rect is "x y w h" in render pixels. 0 or a bad value takes the
     // default of ui_panel.cpp.
     const char* const rect_keys[2] = {"ui_menu_rect", "ui_help_rect"};
@@ -1196,6 +1383,19 @@ void ReadSettings() {
   g_cursor_trace = GetPrivateProfileIntA("bwvr", "cursor_trace", 0, path) != 0;
   g_window_w = GetPrivateProfileIntA("bwvr", "window_width", 0, path);
   g_window_h = GetPrivateProfileIntA("bwvr", "window_height", 0, path);
+  // THE VIEW FOR VIDEOS (docs/backend.md, "The view for videos"): a 16:9
+  // area of the left eye in the window of the game, for a capture on the PC.
+  {
+    const char* const keys[7] = {"video_view",          "video_view_down_pct",
+                                 "video_view_fov_deg",  "video_view_smooth_ms",
+                                 "video_view_marks",    "video_view_layers",
+                                 "video_view_copy_changed"};
+    const int defaults[7] = {0, 20, 90, 150, 1, 1, 1};
+    for (int i = 0; i < 7; ++i) {
+      g_video_view[i] = static_cast<int>(
+          GetPrivateProfileIntA("bwvr", keys[i], defaults[i], path));
+    }
+  }
   // Off is the control for the anchor test: the Hand should then move
   // when the head turns, which is what makes the test mean something.
   g_hand_anchored =
@@ -1204,14 +1404,31 @@ void ReadSettings() {
   // makes a headset uncomfortable, so the camera turns in steps, jumps land
   // at once, and nothing glides. See comfort_camera.cpp.
   {
-    static const int kSnapSteps[] = {0, 30, 45, 90};
+    // snap_turn 4 is the smooth turn of the God view. The turns that have
+    // no smooth turn then go in steps of 45 degrees (docs/god-view.md,
+    // section 4).
+    static const int kSnapSteps[] = {0, 30, 45, 90, 45};
     static const int kBlinkSteps[] = {0, 100, 200};
     const int snap = static_cast<int>(
         GetPrivateProfileIntA("bwvr", "snap_turn", 2, path));
-    g_snap_turn_deg = (snap >= 0 && snap < 4) ? kSnapSteps[snap] : 45;
+    g_snap_turn_deg = (snap >= 0 && snap < 5) ? kSnapSteps[snap] : 45;
+    g_smooth_turn = snap == 4;
+    g_smooth_turn_speed = static_cast<int>(
+        GetPrivateProfileIntA("bwvr", "smooth_turn_speed", 90, path));
     const int blink =
         static_cast<int>(GetPrivateProfileIntA("bwvr", "blink", 0, path));
     g_blink_ms = (blink >= 0 && blink < 3) ? kBlinkSteps[blink] : 0;
+    // The edges of the view go dark in a move that the player makes with a
+    // control (docs/god-view.md, "The comfort of a move").
+    g_comfort_vignette = static_cast<int>(
+        GetPrivateProfileIntA("bwvr", "comfort_vignette", 0, path));
+    // An opaque overlay when the head goes into the land (docs/god-view.md,
+    // "The head under the land").
+    g_head_blinder =
+        GetPrivateProfileIntA("bwvr", "head_blinder", 1, path) != 0;
+    // The solids count too: a house, a rock and a tree trunk.
+    g_head_blinder_objects =
+        GetPrivateProfileIntA("bwvr", "head_blinder_objects", 1, path) != 0;
   }
   g_instant_jumps =
       GetPrivateProfileIntA("bwvr", "instant_jumps", 1, path) != 0;
@@ -1240,6 +1457,8 @@ void ReadSettings() {
     if (GetPrivateProfileIntA("bwvr", "cutscene_immersive", 0, path) != 0) {
       g_script_camera = 0;
     }
+    g_miracle_camera_still =
+        GetPrivateProfileIntA("bwvr", "miracle_camera_still", 1, path) != 0;
   }
   // How far out models keep their detail: the game's own, 2, 3 or 5 times.
   {
@@ -1341,8 +1560,9 @@ void ReadSettings() {
       GetPrivateProfileIntA("bwvr", "audio_test_tag", 0, path));
   g_audio_test_tag_bank = static_cast<int>(
       GetPrivateProfileIntA("bwvr", "audio_test_tag_bank", 1, path));
-  // The launcher's "Test keys" box. F12 saves both eye pictures and
-  // Shift F12 steps the subtitles. Off for players.
+  // The keys for tests: a desktop run or a tester writes test_keys=1. F12
+  // saves both eye pictures and Shift F12 steps the subtitles. Off for
+  // players.
   g_test_keys = GetPrivateProfileIntA("bwvr", "test_keys", 0, path) != 0;
   const bool xr_bridge_key =
       GetPrivateProfileIntA("bwvr", "xr_bridge", 0, path) == 1;
@@ -1367,6 +1587,12 @@ void ReadSettings() {
       GetPrivateProfileIntA("bwvr", "head_fov_deg", 0, path));
   g_fov_margin_pct = static_cast<int>(
       GetPrivateProfileIntA("bwvr", "fov_margin_pct", 0, path));
+  // Not in the launcher. 0 only to test the fault that it fixes.
+  g_eye_cant = GetPrivateProfileIntA("bwvr", "eye_cant", 1, path) != 0 ? 1 : 0;
+  g_head_pose_frame =
+      GetPrivateProfileIntA("bwvr", "head_pose_frame", 1, path) != 0 ? 1 : 0;
+  g_fake_eye_cant_deg = static_cast<float>(static_cast<int>(
+      GetPrivateProfileIntA("bwvr", "fake_eye_cant_deg", 0, path)));
   // An invented head, for testing on the desktop with no headset.
   g_fake_head = GetPrivateProfileIntA("bwvr", "fake_head", 0, path) != 0;
   // fake_head_fov=1 (a test aid): the eyes of the invented head have the
@@ -1393,6 +1619,14 @@ void ReadSettings() {
   // Player keys: which hand points, which trigger is which button, pulses.
   g_left_hand = GetPrivateProfileIntA("bwvr", "left_hand", -1, path);
   if (g_left_hand < -1 || g_left_hand > 1) g_left_hand = -1;
+  if (GetPrivateProfileIntA("bwvr", "hand_follow_game", 1, path) != 0) {
+    if (g_left_hand != -1) {
+      ModLog("controllers  : hand_follow_game=1, so the left hand option of "
+             "the game chooses the Hand, and left_hand=%d does not act",
+             g_left_hand);
+    }
+    g_left_hand = -1;
+  }
   g_controller_swap_buttons =
       GetPrivateProfileIntA("bwvr", "controller_swap_buttons", 0, path) != 0;
   g_controller_haptics =
@@ -1410,6 +1644,8 @@ void ReadSettings() {
       GetPrivateProfileIntA("bwvr", "hint_hand_depth", 1, path) != 0 ? 1 : 0;
   g_hint_hand_depth_test_frame = static_cast<int>(
       GetPrivateProfileIntA("bwvr", "hint_hand_depth_test_frame", 0, path));
+  g_hint_hand_tip =
+      GetPrivateProfileIntA("bwvr", "hint_hand_tip", 1, path) != 0 ? 1 : 0;
   {
     FakeControllerSettings& f = g_fake_controller;
     const auto number = [&](const char* key, int fallback) {
@@ -1537,6 +1773,12 @@ void ReadSettings() {
     // throw_tree_settle: 1 lets a tree that falls turn down fast while it
     // touches the land and is slow. 0 keeps the game's turn.
     g_throw_tree_settle = number("throw_tree_settle", 1);
+    // throw_turn: 1 lets a thrown object turn as fast as the game turns it,
+    // and cuts the turn of the picture to 1.5 turns a second before each
+    // substep. 0 keeps the game's momentum, and the
+    // picture turns as many times faster as the flight runs steps of the
+    // game.
+    g_throw_turn = number("throw_turn", 1);
     // throw_land_rest: 1 lets a turn in place of a thrown object wear off
     // fast after its landing, turns the brake of the land off on land that
     // is steeper than the brake holds, and gives an object that lies still
@@ -1559,6 +1801,11 @@ void ReadSettings() {
     // the picture of a thrown object, and the picture does not go back to a
     // place behind a guess. 0 gives each substep its time of the flight.
     g_throw_draw = number("throw_draw", 1);
+    // throw_arc_objects: 1 stops the real arc of a thrown object at the box
+    // of the mesh of an object near the Hand, before the game's physics has
+    // the object. 0 stops it at the land only.
+    g_throw_arc_objects = number("throw_arc_objects", 1);
+    g_throw_shield = number("throw_shield", 1);
     g_far_grab.throw_law = g_throw_law != 0;
     // far_grab_max_m: a far target is at most this many meters of the room
     // from the head, along the floor. 0 gives no limit.
@@ -1613,6 +1860,12 @@ void ReadSettings() {
     // the game, from the land under the Hand (docs/grab.md, "The stream of a
     // take at a distance").
     g_take_stream = number("take_stream", 1);
+    // take_stream_hand: 1 a take with the Hand at the source (the direct
+    // grab) has that curve too, from the source of the game's take, so the
+    // pieces stay at the pile when the hand or the view moves. 0 the line of
+    // the game. take_stream_test_trace=1: a line for each frame of a stream.
+    g_take_stream_hand = number("take_stream_hand", 1);
+    g_take_stream_trace = number("take_stream_test_trace", 0);
 
     // Moving around by grabbing the world. See docs/god-view.md, "Moving
     // around: the grab and the mouse".
@@ -1630,6 +1883,12 @@ void ReadSettings() {
     g.vertical_pct = number("grab_vertical_pct", 100);
     g.smoothing_ms = number("grab_smoothing_ms", 35);
     g.max_speed = number("grab_max_speed", 0);
+    // The gain of a grab with one hand in the God view: land far below the
+    // hand comes up faster than the hand, and at a small scale the land
+    // moves across faster than the hand. 0 keeps the grab 1:1.
+    g.boost = number("grab_boost", 1) != 0;
+    g.boost_reach_cm = number("grab_boost_reach_cm", 50);
+    g.boost_most = number("grab_boost_most", 50);
     // The grip levels and the limits.
     g.press_pct = number("grab_press_pct", 70);
     g.release_pct = number("grab_release_pct", 50);
@@ -1641,6 +1900,17 @@ void ReadSettings() {
     // Drawing a gesture in the air. See docs/miracles.md.
     g_gesture.button = number("gesture_button", 1);
     g_gesture.size_cm = number("gesture_size_cm", 30);
+    g_gesture.point = number("gesture_point", 1);
+    // The glow of the rays and the trail of a gesture. See docs/hand-model.md,
+    // "The glow ribbons".
+    g_ray_glow = number("ray_glow", 1) != 0;
+    g_ray_glow_only = number("ray_glow_only", 1) != 0;
+    g_ray_tip = number("ray_tip", 1) != 0;
+    g_gesture_trail = number("gesture_trail", 1) != 0;
+    // The ray over the panels in the room. See docs/ui-layer.md, "The ray
+    // over the panels".
+    g_ray_over_panels = number("ray_over_panels", 1) != 0;
+    g_ray_card_test_save = number("ray_card_test_save", 0);
   }
   // How many game units a metre is worth. The default keeps the neck and
   // the eyes agreeing: the mod renders with eye_separation world units for
@@ -1725,7 +1995,7 @@ void ReadSettings() {
       GetPrivateProfileIntA("bwvr", "fake_head_layers", 0, path) != 0 ? 1 : 0;
   g_xr_layers.record_frames = static_cast<int>(
       GetPrivateProfileIntA("bwvr", "xr_layer_record", 0, path));
-  g_intro_vr = GetPrivateProfileIntA("bwvr", "intro_vr", 0, path) != 0;
+  g_intro_vr = GetPrivateProfileIntA("bwvr", "intro_vr", 1, path) != 0;
   g_intro_motion = GetPrivateProfileIntA("bwvr", "intro_motion", 1, path);
   g_intro_speed_pct =
       GetPrivateProfileIntA("bwvr", "intro_speed_pct", 100, path);
@@ -1735,6 +2005,8 @@ void ReadSettings() {
       GetPrivateProfileIntA("bwvr", "intro_model_distance_cm", 200, path);
   g_intro_eye_trails =
       GetPrivateProfileIntA("bwvr", "intro_eye_trails", 1, path) != 0;
+  g_intro_keep_turn =
+      GetPrivateProfileIntA("bwvr", "intro_keep_turn", 1, path) != 0;
   g_eye_clean = GetPrivateProfileIntA("bwvr", "eye_clean", 1, path) != 0 ? 1 : 0;
   g_eye_clean_test =
       static_cast<int>(GetPrivateProfileIntA("bwvr", "eye_clean_test", 0, path));
@@ -1867,6 +2139,10 @@ void ReadSettings() {
       GetPrivateProfileIntA("bwvr", "vk_equal_depth", 1, path) != 0 ? 1 : 0;
   g_vk_texture_reuse =
       GetPrivateProfileIntA("bwvr", "vk_texture_reuse", 1, path) != 0 ? 1 : 0;
+  g_vk_texture_forget =
+      GetPrivateProfileIntA("bwvr", "vk_texture_forget", 1, path) != 0 ? 1 : 0;
+  g_vk_upload_keep =
+      GetPrivateProfileIntA("bwvr", "vk_upload_keep", 1, path) != 0 ? 1 : 0;
   g_vk_keep_picture =
       GetPrivateProfileIntA("bwvr", "vk_keep_picture", 1, path) != 0 ? 1 : 0;
   g_vk_black_check =
@@ -1912,6 +2188,15 @@ void ReadSettings() {
   g_vk_eyes = GetPrivateProfileIntA("bwvr", "vk_eyes", 1, path) != 0 ? 1 : 0;
   g_xr_vulkan_upload =
       GetPrivateProfileIntA("bwvr", "xr_vulkan_upload", 1, path) != 0 ? 1 : 0;
+  // How a card goes into its swapchain (docs/ui-layer.md, "The edge and the
+  // mip levels of a card").
+  bwvr::XrScreen::SetCardSending(
+      GetPrivateProfileIntA("bwvr", "card_edge_clear", 1, path) != 0,
+      GetPrivateProfileIntA("bwvr", "card_mips", 1, path) != 0);
+  bwvr::XrScreen::SetCardTestSave(
+      static_cast<int>(
+          GetPrivateProfileIntA("bwvr", "card_send_test_save", 0, path)),
+      &SaveCardTest, &ModLog);
   g_xr_hold_ms = static_cast<int>(
       GetPrivateProfileIntA("bwvr", "xr_hold_ms", 30, path));
   g_refresh_rate_hz = static_cast<int>(
@@ -1974,6 +2259,8 @@ void ReadSettings() {
       GetPrivateProfileIntA("bwvr", "intro_hand_show", 1, path));
   g_intro_hand_depth =
       GetPrivateProfileIntA("bwvr", "intro_hand_depth", 1, path) != 0;
+  g_intro_push_room =
+      GetPrivateProfileIntA("bwvr", "intro_push_room", 1, path) != 0;
   g_intro_probe = GetPrivateProfileIntA("bwvr", "intro_probe", 0, path) != 0;
   g_fix_unscaled =
       GetPrivateProfileIntA("bwvr", "fix_unscaled", 1, path) != 0;
@@ -2097,16 +2384,23 @@ void StartVrStep() {
     PointerMapInstall();
     HeadCameraInstall();
     PointerMapSetRebuild(g_game_camera_rebuild);
+    ComfortCameraSetSmoothTurn(g_smooth_turn, g_smooth_turn_speed);
     ComfortCameraSetOptions(g_snap_turn_deg, g_instant_jumps, g_camera_glide,
                             g_blink_ms);
     ComfortCameraSetZoomStep(g_zoom_step);
     ComfortCameraSetTurnHelp(g_turn_help_degrees, g_god_turn_keeps_focus,
                              g_tilt_help_degrees);
     ComfortCameraInstall();
+    VignetteSetMode(g_comfort_vignette);
+    VideoViewSetOptions(g_video_view[0], g_video_view[1], g_video_view[2],
+                        g_video_view[3], g_video_view[4], g_video_view[5],
+                        g_video_view[6]);
+    HeadBlinderSetOn(g_head_blinder, g_head_blinder_objects);
     ScriptCameraSetOptions(g_script_camera, g_script_min_distance,
                            g_script_min_height, g_script_close_distance,
                            g_script_close_zoom, g_script_cut_degrees,
                            g_script_cut_percent, g_script_follow);
+    ScriptCameraSetMiracleCamera(g_miracle_camera_still, g_head_tracking);
     ScriptCameraInstall();
     StoryStartSetOptions(g_story_start_at_head);
     StoryStartInstall();
@@ -2129,6 +2423,7 @@ void StartVrStep() {
                              g_spirit_point_world_test);
     SpiritAnchorInstall();
     FightMarksInstall();
+    JobIconInstall();
     AudioSetRoom(g_audio_room, g_audio_units_per_meter,
                  g_audio_flat_places);
     AudioSetRange(g_audio_range, g_audio_loops_keep, g_audio_test_tag,
@@ -2156,6 +2451,7 @@ void StartVrStep() {
     UiDepthSetHintScale(g_hint_scale);
     UiDepthSetHintFlat(g_hint_flat);
     UiDepthSetHintHandDepth(g_hint_hand_depth, g_hint_hand_depth_test_frame);
+    UiDepthSetHintHandTip(g_hint_hand_tip);
     UiDepthSetSubtitleLift(g_subtitle_lift);
     UiDepthSetSubtitleDegrees(g_subtitle_degrees);
     // After UiDepthInstall, and before GpuBridgeStart below.
@@ -2182,7 +2478,10 @@ void StartVrStep() {
       g_fake_head = false;
       g_fake_controller.mode = 0;
     }
+    StereoSetEyeCant(g_eye_cant);
+    StereoSetHeadPoseFrame(g_head_pose_frame);
     HeadPoseSetFake(g_fake_head, g_fake_yaw, g_fake_pitch, g_fake_roll);
+    HeadPoseSetFakeCant(g_fake_head ? g_fake_eye_cant_deg : 0.0f);
     HeadPoseFakeSweep(g_fake_sweep);
     if (g_fake_head) {
       HeadPoseSetFakeLean(g_fake_lean_cm[0], g_fake_lean_cm[1],
@@ -2194,6 +2493,9 @@ void StartVrStep() {
     ControllersInstall();
     ControllerHintsSetOptions(g_controller_hints, g_hint_profile);
     ControllerHintsInstall();
+    card_scroll::WarmAdd(&PlacesPanelWarm);
+    card_scroll::WarmAdd(&DebugWindowWarm);
+    card_scroll::WarmStart();
     if (g_controllers) {
       ControllersSetDirect(g_direct_hand);
       if (g_direct_hand.mode == 1) {
@@ -2207,14 +2509,18 @@ void StartVrStep() {
         ThrowPhysicsSetLanding(g_throw_land, g_throw_land_rate_x10,
                                g_throw_bounce_pct, g_throw_land_brake_pct);
         ThrowPhysicsSetSettle(g_throw_tree_settle != 0);
+        ThrowPhysicsSetTurn(g_throw_turn != 0);
         ThrowPhysicsSetRest(g_throw_land_rest);
         ThrowPhysicsSetTake(g_catch_rest_guard != 0, g_catch_rest_test);
         ThrowPhysicsSetCatch(g_catch_at_once);
         ThrowPhysicsSetDraw(g_throw_draw);
+        ThrowPhysicsSetArcObjects(g_throw_arc_objects != 0);
+        ThrowPhysicsSetShield(g_throw_shield != 0);
         ThrowPhysicsInstallEarly();
         FarGrabInstall();
         LeftHoldInstall();
         TakeStreamSetOptions(g_take_stream, g_test_keys);
+        TakeStreamSetHand(g_take_stream_hand, g_take_stream_trace);
         TakeStreamInstall();
         ThrowPhysicsInstall();
         HandGlowSetEnabled(g_hand_glow);
@@ -2226,6 +2532,10 @@ void StartVrStep() {
       WorldGrabSetOptions(g_grab);
       PointerMapSetGrabProbe(g_grab.probe);
       ControllersSetGesture(g_gesture);
+      OverlaySetGlow(g_ray_glow, g_gesture_trail);
+      OverlaySetRayGlowOnly(g_ray_glow_only);
+      OverlaySetRayTip(g_ray_tip);
+      RayCardSetOptions(g_ray_over_panels, g_ray_card_test_save);
       if (g_gesture.button != 0) GestureAirInstall();
       if (g_overlay) OverlaySetEnabled(true);
     }
@@ -2247,9 +2557,14 @@ void StartVrStep() {
     if (g_tabletop) {
       TabletopSetOptions(g_table);
       TabletopInstall();
+      // The model cull distance and the fog that follows it.
+      CullDistanceInstall();
       // The pick of the direct hand on the table (docs/tabletop.md, "The hand on the table").
       // The God view needs it too: zoomed out, a villager is a few pixels.
       if (g_controllers && g_direct_hand.mode == 1) HandDirectInstallTable();
+      // The influence at the real hand: the fade, the stream and the wall
+      // (influence_edge.cpp).
+      if (g_controllers) InfluenceEdgeInstall();
     }
     // The near plane of the game camera. Only where the head moves the
     // camera (play modes 0, 3 and 4), because there the real hand is in the
@@ -2257,8 +2572,15 @@ void StartVrStep() {
     if (g_head_tracking && g_immersive) {
       NearPlaneSetOptions(g_near_plane_cm, g_near_plane_cm_16);
       NearPlaneInstall();
+      // The game's gesture pictures over the palm (gesture_panel=1) need
+      // the real hand in the world.
+      if (g_controllers) GesturePanelInstall();
     }
-    // The thumbnail reads past the end of a square window, so it goes.
+    // The save picture: the screen of the game in VR is not the picture
+    // that the player sees, and the game reads past the end of a square
+    // window.
+    SnapshotGuardSetPicture(g_save_picture, g_save_picture_dump);
+    SnapshotGuardSetFit(g_save_picture_fit);
     SnapshotGuardSetSkip(g_skip_snapshot);
     WaterModeSetSimple(g_water_simple);
     HeadCameraSetRoll(g_head_roll);
@@ -2300,6 +2622,8 @@ void StartVrStep() {
     IntroSetHandPush(g_intro_hand_push_pct, g_intro_hand_point);
     IntroSetHands(g_intro_push_3d, g_intro_push_radius_cm, g_intro_hand_show,
                   g_intro_hand_depth);
+    IntroSetPushRoom(g_intro_push_room);
+    IntroSetKeepTurn(g_intro_keep_turn);
     IntroInstall();
     EyeCleanSetOptions(g_eye_clean, g_eye_clean_test, g_eye_clean_test_frame);
     EyeCleanInstall();
@@ -2366,6 +2690,8 @@ void StartVrStep() {
     VkSceneSetPresentLate(g_vk_present_late);
     VkSceneSetEqualDepth(g_vk_equal_depth);
     VkSceneSetTextureReuse(g_vk_texture_reuse);
+    VkSceneSetTextureForget(g_vk_texture_forget);
+    VkSceneSetUploadKeep(g_vk_upload_keep);
     VkSceneSetKeepPicture(g_vk_keep_picture);
     VkSceneSetBlackCheck(g_vk_black_check);
     VkSceneSetUntextured(g_vk_untextured);
@@ -2468,7 +2794,7 @@ void StartVrStep() {
   PrepareScreen(screen);
   screen->SetRefreshRate(g_refresh_rate_hz);
   screen->SetPlacement(g_distance, g_width);
-  screen->EnablePanel(g_stereo && g_ui_panel.mode == kUiPanelLayer);
+  screen->EnablePanel(g_stereo && UiPanelWantsSwapchain(g_ui_panel));
   // Only the first failure and every tenth after it reach the log. A message
   // every three seconds for two minutes buries everything else.
   const bool quiet =
@@ -2594,7 +2920,7 @@ void StartVrFromThread() {
     screen->SetHoldMs(g_xr_hold_ms);
     screen->SetRefreshRate(g_refresh_rate_hz);
     screen->SetPlacement(g_distance, g_width);
-    screen->EnablePanel(g_stereo && g_ui_panel.mode == kUiPanelLayer);
+    screen->EnablePanel(g_stereo && UiPanelWantsSwapchain(g_ui_panel));
     screen->SetLog(&ModLog);
     if (!screen->StartSession(width, height, g_stereo ? 2 : 1)) {
       failed = "StartSession (the openxr line before names the call)";
@@ -2687,6 +3013,7 @@ void VrSessionRuns(bwvr::XrScreen* screen, uint32_t width, uint32_t height) {
   FrameSendSetScreen(g_screen);
   IntroSetScreen(g_screen);
   ControllersSetScreen(g_screen);
+  MenuRoomSetScreen(g_screen);
 
   if (g_vulkan_only) {
     ModLog("vr           : running, the frame reaches the headset with Vulkan, "
@@ -2895,6 +3222,10 @@ void __cdecl h_FinishFrame() {
   // headset would hold the last scene frame and show nothing else.
   if (g_stereo && g_screen->eyes() > 1 && !StereoIdle()) return;
 
+  // THE MENUS IN THE ROOM (menu_room.cpp). A frame with no scene that shows
+  // a menu goes out as a screen at the place of the menu panel.
+  const bool menu_screen = MenuRoomFlatFrame(g_frame);
+
   // The same GPU path the stereo passes use. Without it a menu at 2560x1440
   // costs 18.98 ms a frame just to read the picture back, and the readback is
   // worse on this backend than on system DirectDraw, because the render
@@ -2911,6 +3242,7 @@ void __cdecl h_FinishFrame() {
       LARGE_INTEGER t0, t1;
       QueryPerformanceCounter(&t0);
       if (!g_screen->SubmitVulkan(image, layer)) {
+        if (menu_screen) bwvr::XrScreen::DropStagedWindow();
         ModLog("vr           : the session ended at frame %llu", g_frame);
       }
       QueryPerformanceCounter(&t1);
@@ -2922,6 +3254,7 @@ void __cdecl h_FinishFrame() {
     void* texture = GpuBridgeCaptureEye(0);
     if (texture != nullptr) {
       if (!g_screen->SubmitTexture(texture)) {
+        if (menu_screen) bwvr::XrScreen::DropStagedWindow();
         ModLog("vr           : the session ended at frame %llu", g_frame);
       }
       if ((g_frame % 900) == 0) {
@@ -2946,9 +3279,13 @@ void __cdecl h_FinishFrame() {
   }
   int pitch = 0;
   const void* pixels = FrameSourceGrab(&pitch);
-  if (pixels == nullptr) return;
+  if (pixels == nullptr) {
+    if (menu_screen) bwvr::XrScreen::DropStagedWindow();
+    return;
+  }
 
   if (!g_screen->SubmitBgra(pixels, pitch)) {
+    if (menu_screen) bwvr::XrScreen::DropStagedWindow();
     ModLog("vr           : the session ended at frame %llu", g_frame);
   }
 
@@ -2988,8 +3325,30 @@ bool CheckGameBuild() {
           : 0.0;
 
   if (report.verdict == bwvr::ExeVerdict::kSupported) {
-    ModLog("game         : runblack.exe is the v1.42 build, checked in %.0f ms",
-           ms);
+    SYSTEM_INFO info;
+    GetSystemInfo(&info);
+    const double space_mb =
+        (static_cast<double>(reinterpret_cast<uintptr_t>(
+             info.lpMaximumApplicationAddress)) +
+         1.0) /
+        1048576.0;
+    ModLog("game         : runblack.exe is the v1.42 build, checked in %.0f ms. "
+           "%s, so the game has %.0f MB of address space",
+           ms,
+           report.large_address
+               ? "It has the flag LARGE_ADDRESS_AWARE (large_address=1)"
+               : "It has no flag LARGE_ADDRESS_AWARE (large_address=0)",
+           space_mb);
+    // What the launcher did with the flag before this start.
+    char ini[MAX_PATH];
+    char result[160] = {0};
+    _snprintf_s(ini, MAX_PATH, _TRUNCATE, "%sbwvr.ini", g_dir);
+    GetPrivateProfileStringA("launcher", "large_address_result", "", result,
+                             sizeof(result), ini);
+    if (result[0] != 0) {
+      ModLog("game         : the launcher and the flag before this start: %s",
+             result);
+    }
     return true;
   }
   if (report.verdict == bwvr::ExeVerdict::kUnreadable) {
@@ -3131,6 +3490,10 @@ void EarlyHooks() {
   FileReadAheadInstall(
       GetPrivateProfileIntA("bwvr", "file_read_ahead", 1, path) != 0,
       TestSwitchesOn());
+  // Before the game opens its first file with LHOSFile. It works with vr
+  // turned off too.
+  SaveStoreInstall(
+      GetPrivateProfileIntA("bwvr", "save_virtual_store", 1, path) != 0);
   // On by default from version 1.1.0. Read here because the device hooks of
   // the bridge need it.
   Depth24SetWanted(GetPrivateProfileIntA("bwvr", "depth24", 1, path) != 0);
@@ -3215,6 +3578,70 @@ void EarlyHooks() {
 
 void ExitPathInstall();
 
+// THE CARD OF A SAVE (hint_card_saving, docs/controller-hints.md, "The card
+// of a save"). GameOSFile::SaveAllGame (0x00558160, cdecl, the path, an int)
+// writes each save. It draws the save box of the game in one frame with no
+// scene (GameSavingBox 0x00557FC0), writes the files on the game thread, and
+// gives no frame until it returns. So the headset shows the layers of the
+// last frame for all that time, from the hold (xr_hold_ms). Before the save
+// starts, the card of the pointing hand says "Saving...", and HoldCard puts
+// it into those layers.
+typedef int(__cdecl* SaveAllGameFn)(char* path);
+const uintptr_t kSaveAllGame = 0x00558160;
+SaveAllGameFn o_SaveAllGame = nullptr;
+bool g_save_hooked = false;
+int g_save_logs = 0;
+const int kMaxSaveLogs = 20;
+
+// NO TEST OF THE MOD IN A SAVE (docs/miracles.md, "What a save keeps"). Before
+// each save the game deletes the orbs of all miracles that lie on the land
+// (miracle.cpp), and each Worship Site gets back its limit of prayer power
+// (spell_book.cpp). After the save the switch "Unlock all" sets the limit off
+// again.
+int __cdecl h_SaveAllGame(char* path) {
+  MiracleBeforeSave();
+  SpellBookBeforeSave();
+  LARGE_INTEGER t0, t1, hz;
+  QueryPerformanceFrequency(&hz);
+  QueryPerformanceCounter(&t0);
+  bwvr::CardLayer layer = {};
+  const bool card = HintCardSavingLayer(&layer);
+  const bool session = g_screen != nullptr && g_screen->running();
+  const bool held =
+      card && session && g_screen->HoldCard(bwvr::kCardHintPointing, layer);
+  const int result = o_SaveAllGame(path);
+  SpellBookAfterSave();
+  QueryPerformanceCounter(&t1);
+  if (g_save_logs < kMaxSaveLogs) {
+    ++g_save_logs;
+    ModLog("save card    : the game saved in %.0f ms (result %d), frame %llu. "
+           "%s", (t1.QuadPart - t0.QuadPart) * 1000.0 /
+                     static_cast<double>(hz.QuadPart),
+           result, g_frame,
+           held ? "The card \"Saving...\" was in the layers that the hold "
+                  "sent again in that time"
+                : !card ? "No card: the cards did not show in the last frame, "
+                          "or hint_card_saving=0"
+                        : !session ? "The card has no headset session to go to"
+                                   : "The hold did not take the card (no "
+                                     "hold, or no world in the last frame)");
+  }
+  return result;
+}
+
+void SaveCardInstall() {
+  void* target = reinterpret_cast<void*>(kSaveAllGame);
+  MH_STATUS status =
+      MH_CreateHook(target, reinterpret_cast<void*>(&h_SaveAllGame),
+                    reinterpret_cast<void**>(&o_SaveAllGame));
+  if (status == MH_OK) status = MH_EnableHook(target);
+  g_save_hooked = status == MH_OK;
+  ModLog("hooks        : GameOSFile::SaveAllGame at 0x%08X %s (the card of "
+         "a save, and no test of the mod in a save)",
+         static_cast<unsigned>(kSaveAllGame),
+         status == MH_OK ? "ok" : "FAILED");
+}
+
 void Startup() {
   ModLog("%s", ProxyBackendNote());
   ModLog("");
@@ -3230,6 +3657,8 @@ void Startup() {
     return;
   }
   if (!VerifyTarget()) return;
+  // Before WinMain, because pc_main reads the word -NEWGAME one time.
+  GameStartChoose();
 
   const MH_STATUS started = MH_Initialize();
   if (started != MH_OK && started != MH_ERROR_ALREADY_INITIALIZED) {
@@ -3261,6 +3690,7 @@ void Startup() {
   Depth24Install();
   BlockWatchInstall();
   MemoryWatchInstall();
+  SaveCardInstall();
 }
 
 // THE END OF THE MOD.
@@ -3351,6 +3781,7 @@ void Shutdown(const char* path) {
       FrameSendSetScreen(nullptr);
       IntroSetScreen(nullptr);
       ControllersSetScreen(nullptr);
+      MenuRoomSetScreen(nullptr);
       bwvr::XrScreen* screen = g_screen;
       g_screen = nullptr;
       screen->Stop();
@@ -3464,6 +3895,9 @@ void GazeSourceToggle(const char* keys) {
          "fovea is %s",
          keys, g_foveation_gaze, GazeSourceText(g_foveation_gaze));
 }
+// miracle.cpp: the mod sees each save, so it can keep its test objects out
+// of it.
+bool ModSaveHooked() { return g_save_hooked; }
 
 // The test key of xr_vulkan_upload (stereo.cpp, Shift Z). It changes the
 // key for the next session too.
@@ -3577,6 +4011,13 @@ BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID reserved) {
     // Before any hook goes in, and before a backend loads.
     const bool game_ok = CheckGameBuild();
     if (game_ok) {
+      // A test key, before the game and the drivers make their large blocks.
+      char ini[MAX_PATH];
+      lstrcpynA(ini, g_dir, MAX_PATH);
+      lstrcatA(ini, "bwvr.ini");
+      if (GetPrivateProfileIntA("bwvr", "test_high_memory", 0, ini) != 0) {
+        ReserveLowAddressSpace();
+      }
       EarlyHooks();
     } else {
       ProxyForceSystemDDraw();
@@ -3596,8 +4037,14 @@ BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID reserved) {
       // objects of another backend, so it does not run then.
       const bool vulkan = ProxyBackendVulkan();
       if (vulkan) {
-        VkDdrawInstall(static_cast<int>(
-            GetPrivateProfileIntA("bwvr", "vk_lines", 1, ini)));
+        VkDdrawInstall(
+            static_cast<int>(GetPrivateProfileIntA("bwvr", "vk_lines", 1, ini)),
+            static_cast<int>(
+                GetPrivateProfileIntA("bwvr", "vk_surface_heap", 1, ini)));
+        VkDdrawSetBlocks(static_cast<int>(
+            GetPrivateProfileIntA("bwvr", "vk_blt_blocks", 1, ini)));
+        VkDdrawSetBlockFit(static_cast<int>(
+            GetPrivateProfileIntA("bwvr", "vk_dxt_fit", 1, ini)));
         // Before the first present of the game.
         VkWindowSetOptions(static_cast<int>(
             GetPrivateProfileIntA("bwvr", "vk_window", 1, ini)));

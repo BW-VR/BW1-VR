@@ -17,8 +17,7 @@ from the code and not confirmed by a run.
 - With `intro_vr=1`, the mod runs `RunAlexFX` one time for each eye, with the
   head tracked. The view goes along the camera path of the game and does not
   turn (`intro_motion=1`). Each eye has its own trails, and the mark beside the
-  logo has the depth of the logo. `intro_vr` is off by default: no headset
-  session has checked this state.
+  logo has the depth of the logo. `intro_vr` is on by default.
 - In the logo in stereo, each hand takes the orbs in its reach with its own
   motion, one to one, in 3D (`intro_push_3d`). The hand models of the game
   show while a hand moves (`intro_hand_show`).
@@ -246,7 +245,7 @@ device: the place of the pointer alone moves no orb.
 
 ## The intro in stereo
 
-The key `intro_vr` turns it on. The default is 0, and with 0 nothing is hooked.
+The key `intro_vr` turns it on. The default is 1. With 0 nothing is hooked.
 The core idea is to run the `RunAlexFX` of the game twice per frame, one time for
 each eye, with the clock and the simulation frozen on the second call. It is the
 same rule that `stereo.cpp` uses for `Process3dEngine`. The mod does not rebuild
@@ -387,16 +386,71 @@ keeps need the Direct3D 9 device of the backend (`gpu_bridge=1`, the default).
 With no keep the log has one line that says so.
 
 With `backend=vulkan` the Vulkan renderer keeps the trails: the walk of eye 0
-draws into target 0 and the walk of eye 1 into target 1, over the last
-picture of that eye (`IntroPassEye`, `vk_keep_picture=1`, `backend.md`, "The
-picture of the walk before"). The depth starts at the far plane in each walk.
-The game also plays this effect while it loads a saved game. A desktop run of
-the logo with `backend=vulkan` shows the trails in both eyes. Only a headset
-can show that no eye flickers.
+draws into target 0 and the walk of eye 1 into target 1, over the last picture
+of that eye (`IntroPassEye`, `vk_keep_picture=1`, `backend.md`, "The picture
+of the walk before"). The depth starts at the far plane in each walk. The game
+also plays this effect while it loads a saved game. A desktop run of the logo
+with `backend=vulkan` shows the trails in both eyes. The checks in a headset
+are in `headset-checks.md`, and the checks that a desktop run can prove are in
+`roadmap.md`, R12.
 
 The scene has the same rule for each frame of play that keeps the picture of
 the frame before (`eye_clean`, `stereo-artifacts.md`, "The frame before of
 each eye"). It uses the same keeps. The logo frees them when it ends.
+
+### The trails and a turn of the head
+
+A kept picture is in the pixels of the view that drew it. When the head
+turns, the same pixels are a different direction in the room. So with no
+help, the trail of each orb shows as a second, weaker orb (37 percent, then
+14 percent) that goes with the head, at the turn of the head in one frame
+from the orb: about 2 degrees at a turn of 200 degrees each second. A fast
+turn of the head shows a doubled picture that lags.
+
+With `intro_keep_turn=1` (the default) the kept picture of each eye moves by
+the turn of the view of that eye since the keep, before the effect draws over
+it (`RunEye`, `head_lag_math.h`, `KeptPictureShift`). Each thing of the trail
+is then in its direction in the room again. The move is the move of the middle
+of the view, in whole pixels: the roll of the head and the edges of a large
+turn are not corrected. The strip that the move leaves keeps the picture as it
+was. With `backend=vulkan` the renderer copies the target of the eye to a
+second image and back with the move (`MoveKeptPicture` in `vk_scene.cpp`).
+With the keeps of `gpu_bridge.cpp` it is a second `StretchRect` with the move
+(`GpuBridgeKeepGiveShifted`).
+
+The frame order of the logo is not the cause: `RunPair` begins the frame of
+the headset before the head, so each pair draws with the pose of its own
+display time and declares that pose. The logo runs at the pace of the headset
+(10.1 ms for a pair in a session at 120 Hz with Virtual Desktop), and both
+eyes are of the same moment. The camera on the path of the game moves
+(`intro_motion=1`), and the runtime turns a picture only by the turn of the
+head. That gives a small judder of the path on a frame that the runtime shows
+two times, and no second picture.
+
+A known limit: the moved picture has faint straight seams in the background
+at the edges of the copied blocks (the edge of the strip, and some lines
+across the picture). They are of low contrast, and they go in a few frames
+with the trails.
+
+The log line at the end of the logo. The count is of each eye pass with a
+change of the view, not of the turns of the head:
+
+```
+intro        : the kept picture moved with a turn of the head in 683 eye passes, by 0.0016 of the half width or height in the mean and 0.5466 at the most (intro_keep_turn=1)
+```
+
+With the invented head of a desktop run, a turn of the head (the word `look`
+of the fake controller) gives one line, and with `test_keys=1` a picture of
+each eye of that pair:
+
+```
+intro        : the invented head turned 35.9 degrees at pair 702. The kept picture of each eye is moved by -0.404 of the half width and -0.368 of the half height (intro_keep_turn=1, intro_eye_trails=1). The pictures of this pair are saved
+```
+
+In that pair, with `intro_keep_turn=0`, each eye picture has a second cloud
+of orbs at 25 to 35 percent of the contrast of the orbs, 20 percent of the
+width to the left and lower. With `intro_keep_turn=1` it has one cloud. The
+logo of a desktop run ends after about 1044 pairs.
 
 ### The flat text and the boxes in stereo
 
@@ -454,6 +508,16 @@ one to one and it has one hand only.
    falls to 0 at the reach.
 3. The spring of the effect then pulls each orb back to its home, and the
    orbs draw. The second eye pass moves no orb.
+
+**Only a motion of the player** (`intro_push_room=1`). The pose of a hand
+against the camera also changes when the camera turns along the path, when
+the head moves, or when the scale of the room changes, and the player did not
+move the hand then. So `HandsFrame` also keeps the pose of each hand in the
+room (`ControllersOverlayHandsRoom`, the position in meters), and a hand
+moves orbs only when that pose changed since the pair before
+(`intro_motion::HandStill`: 0.1 mm and 0.00001 of a row of the turn). A hand
+that is still in the room moves no orb. `intro_push_room=0` lets each change
+of the pose against the camera move orbs.
 
 A hand reaches an orb only when the orb is in the reach of the arm. With
 `intro_distance_cm=300` the formed logo is 2.1 m to 3.9 m from the head, and
@@ -560,17 +624,19 @@ the intro" is cleared when mode 2 runs.
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `intro_vr` | 0 | The intro in stereo |
+| `intro_vr` | 1 | The intro in stereo. 0: the flat intro, for the desktop tests. Not in the launcher: each player has the intro in stereo, and a save of the launcher removes the key |
 | `intro_motion` | 1 | 0: the camera stays at the rest pose. 1: the camera goes along the path of the game and does not turn. 2: the orbs are a model in front of the player, and the room stays still. 3: the camera of the game, with its turns |
 | `intro_speed_pct` | 100 | The speed of the effect clock in percent, 10 to 100 |
 | `intro_distance_cm` | 300 | The distance from the head to the plane of the logo at the rest pose, for `intro_motion` 0, 1 and 3 |
 | `intro_model_distance_cm` | 200 | The same distance for the model of `intro_motion=2` |
 | `intro_eye_trails` | 1 | 1: each eye pass draws over the last picture of the same eye. 0: each eye pass draws over the last picture in the render target, which is the picture of the other eye |
+| `intro_keep_turn` | 1 | 1: the kept picture of each eye moves by the turn of the head since that picture, so a trail stays in its direction in the room. 0: the kept picture stays in its pixels, and a fast turn of the head shows a second picture of each orb that goes with the head. See "The trails and a turn of the head" |
 | `intro_text_place` | 1 | 1: the text and the boxes of the effect are on the plane of the logo. 0: they have the same pixel in each eye |
 | `intro_push_once` | 1 | 1: only the first eye pass pushes the orbs. 0: each eye pass pushes them |
 | `intro_controller` | 1 | Run the controller frame, so the aim moves the pointer |
 | `intro_push_3d` | 1 | 1: each hand takes the orbs in its reach in 3D, and the hands give the mouse no motion. 0: the pointing hand pushes through the pointer, with the two keys below |
 | `intro_push_radius_cm` | 30 | The reach of a hand for the push in 3D, in cm of the room, 2 to 100 |
+| `intro_push_room` | 1 | 1: a hand moves orbs in 3D only when its pose in the room changed. 0: each change of its pose against the camera moves orbs |
 | `intro_hand_depth` | 1 | 1: the hands draw after the sky and before the orbs, so an orb in front of a hand draws over it. 0: the hands draw after the orbs, over each orb |
 | `intro_hand_show` | 1 | 0: no hand models. 1: a hand shows while it moves. 2: a hand shows while it is tracked |
 | `intro_hand_push_pct` | 100 | With `intro_push_3d=0`: the motion of the pixel of the hand, in percent, that goes to the motion of the mouse, so the hand pushes the orbs. 0 to 400. 0: only a mouse pushes the orbs |
@@ -648,6 +714,11 @@ The tag is `intro`:
 - The first frame in which a hand moves orbs in 3D, with the reach in units.
   At the end: the frames in which the hands moved orbs, the orbs in all, the
   most in one frame, and the frames in which a hand showed.
+- With `intro_push_room=1`: the first pair in which a hand that is still in
+  the room moves no orb (`the right hand is still in the room, so it moves
+  no orb`), with the move of its pose against the camera in cm and the scale
+  of the room in this pair and in the pair before. At the end: the count of
+  such pairs.
 - With `intro_probe=1`, each 100 pairs: the pointer, the pointer that the
   push of the game read, and the count of orbs more than 1 unit from their
   home. Also the place of the right hand against the camera, its speed and
@@ -660,7 +731,7 @@ The tag is `intro`:
 
 ### The math test
 
-`intro_motion_checks.h` (89 checks) covers the camera path against the camera
+`intro_motion_checks.h` (93 checks) covers the camera path against the camera
 that the game asked for in a run, the ease, the fixed heading, the cameras of
 each value of `intro_motion` (the place of the game with no turn, the room
 that stays still, the model that stays in front of the head), the step of the
@@ -668,7 +739,8 @@ test key, the scale and the speed, the pixel of a flat corner on the plane of
 the logo for each eye, the motion of the mouse from the motion of the hand
 (the percent, the fraction of a slow hand, and no motion after a gap), the
 push in 3D (one to one, the soft edge, the reach, a turn of the hand, a hand
-that does not move), and the show of the hands (the shake of the tracking
+that does not move, a hand that is still in the room through a change of the
+scale), and the show of the hands (the shake of the tracking
 of a hand at rest, the times to come and to go, a hand that is not
 tracked).
 
@@ -697,35 +769,32 @@ asks for -25.8 px), and the sky is on the same sphere. In the orbit the orbs
 are at the pixels of the camera of the orbs, and the sky is the sky of the
 rest pose.
 
+The header of `intro_run.ps1` has the keys of scripted hands. A run with
+them (Direct3D 9, `intro_distance_cm=60`, six steps of the right hand from
+40 to 70 cm in front of the head) has a reach of 30 cm (50.0 units). The
+hands move orbs in 3D in 497 frames, at most 2742 orbs in one frame. After
+the last step the orbs go home: 400 stereo frames later no orb is more than
+1 unit from its home, and the logo forms. The still hand has the opacity
+0.00 at each probe. The log has no count of the changes of the show of a
+hand, so a flicker of one frame does not show.
+
 ### What only a headset can show
 
-No headset session has seen this state, so `intro_vr` stays 0.
+`intro_vr` is 1 for each player, and the launcher has no row to turn it off.
 
-- Whether the doubling is gone for the eye. The orbs are 3.6 cm apart on a
-  grid, and the cloud is 1.8 m deep at 3 m. Two orbs that are neighbors in the
-  picture can be far apart in depth, and the eye can then see one of them
-  double. That is the geometry of the scene, not a fault of a draw. A larger
-  `intro_distance_cm` makes each eye difference smaller.
-- Whether the motion of `intro_motion=1` is comfortable, and if not, whether
-  `intro_motion=2` is. Which value is the default.
-- Orbs that pass near the eyes with `intro_motion=1`: an orb a few cm from one
-  eye shows large in that eye only.
-- The size of the logo. The effect builds the logo in mode 0, before the mod
-  sets the view of the headset at the first stereo frame. So in a headset the
-  logo can be smaller than in a desktop run, which has its view from the
-  start [I]. The log has the width.
-- The frame rate with two effect calls and four copies of the picture for the
-  keeps. On the desktop each call includes a `Flip` that waits for the
+- Two orbs that are neighbors in the picture can be far apart in depth, and
+  the eye can then see one of them double. That is the geometry of the scene,
+  not a fault of a draw.
+- The effect builds the logo in mode 0, before the mod sets the view of the
+  headset at the first stereo frame. So in a headset the logo can be smaller
+  than in a desktop run, which has its view from the start [I].
+- On the desktop each effect call includes a `Flip` that waits for the
   display. With a headset `PresentWatchSkipDesktop` skips them.
-- The menu button skip, and the pulses of the test keys.
-- The push in 3D: whether the orbs move with the real hands, and whether the
-  reach is right (`intro_push_radius_cm`). The scripted hands of a desktop
-  run move in steps, and a real hand moves a little in each frame.
-- The show of the hands: whether the shake of the tracking of a hand at rest
-  stays below the speed of a motion, and whether the times to come and to go
-  feel right.
-- Which `intro_distance_cm` puts the logo in the reach of the arms and still
-  shows it well.
+- The scripted hands of a desktop run move in steps, and a real hand moves a
+  little in each frame.
+
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ## The skip
 
@@ -835,9 +904,9 @@ Each run of the scripts in `bwvr/tools/desk` has `intro_skip_test_frame=5`, so
 a run does not wait for the logos (`tools/desk/README.md`, "A fast start"). A
 run that tests the logos gives the key the value 0, or a frame of its own.
 
-**Needs the headset:** a press of a real controller. The hands come from
-`XrScreen` there, and no desktop run has them. Also how early in the first logo
-screen the runtime gives input.
+In a headset the hands come from `XrScreen`, and no desktop run has them. The
+checks in a headset are in `headset-checks.md`, and the checks that a desktop
+run can prove are in `roadmap.md`, R12.
 
 ## The internet check
 
@@ -955,8 +1024,8 @@ dx check     : the game asked DSETUP.dll for the version of DirectX. The mod ans
   is an easy extra.
 - With `intro_motion=3` the camera of the game turns, and the room of the
   head turns with it. The push in 3D takes that turn as a turn of the hand.
-- The headset check of the stereo intro (see "What only a headset can
-  show").
+- The headset check of the stereo intro (`headset-checks.md`, "The intro in
+  stereo").
 - Not verified: the exact particle count and array strides (the `0xC000` bound
   and the strides `0x34` and 12 suggest 4096 particles [I]), and that
   `0x00E85304` holds the mouse button bits.

@@ -2,13 +2,15 @@
 
 The original Black & White (2001) in VR. This is a mod for the real game, not
 a remake: the villagers, the Creature, the quests and the advisors are the
-game's own. Your hands are the Hand. The land is at the height of your waist,
-and you reach in.
+game's own, and you play with motion controllers.
 
 [![Support the mod on Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/buckzor)
 
 The mod is free. If you like it, you can support the work on
 [Ko-fi](https://ko-fi.com/buckzor).
+
+Below is an introduction video to the game and the mod. Check it out!
+https://www.youtube.com/watch?v=6LNpu24--G8
 
 **Status: alpha.** Expect faults, and please report them (see
 [Report a problem](#report-a-problem)). Talk with other players and with the
@@ -88,14 +90,16 @@ entry. Virtual Desktop and SteamVR have one.
 1. Start your VR software and connect the headset.
 2. Open the shortcut "Black & White VR Mod". The launcher names the runtime
    that it found.
-3. Select "Play in VR". "Play, new game" starts a new game.
+3. Select "Play in VR" to continue the game that you played last. Select
+   "Play, new game" to start a new game. The start dialog of the game then
+   opens first.
 4. In the headset, press a trigger or A to skip the logos. Press F11 on the
    keyboard if the view is not in front of you.
 
 **Skip the tutorial.** You can play the tutorial of the game in VR, but it
 is made for the mouse and the keyboard of the original game. We recommend
-that you skip it. When you start a new game, select "Skip straight to the
-Creature select" in the start dialog.
+that you skip it. In the start dialog, select "Skip straight to the
+Creature select". To keep your Creature, select "Keep your old Creature".
 
 ### The right controller
 
@@ -113,8 +117,8 @@ Creature select" in the start dialog.
 | Control | What it does |
 | --- | --- |
 | Grip | Grab the land and pull to move. With both grips: turn and zoom |
-| Stick | Move over the land, in the direction of your head |
-| Y | Hold for a ring menu: Temple, Creature, town, leashes, save |
+| Stick | Move over the land, in the direction of your head. "Movement type" in the launcher chooses Walk or Fly |
+| Y | Hold for a ring menu: leashes, places and bookmarks, recenter, quick save, VR Settings |
 | Menu button | The game menu. In a menu, point with the line and click with the trigger |
 
 The full list is in "Black & White VR Mod readme.txt" in your game folder.
@@ -125,12 +129,11 @@ The full list is in "Black & White VR Mod readme.txt" in your game folder.
   down, or when the world is not where you expect it.
 - A thing that your Hand can act on glows gold. A red glow means that the
   thing is outside your influence.
-- Save the game before you start a quest. Quick save is in the ring menu,
-  under "More".
+- Save the game before you start a quest. Quick save is on the first page
+  of the ring menu.
 - If the frame rate is low, lower "Resolution scale" in the launcher.
-- A walk with the left stick makes some people ill. If it makes you ill, turn
-  off "Move with the other stick" in the launcher. Then move with the left
-  grip and with A.
+- A walk or a fly with the left stick makes some people ill. If it makes you
+  ill, do not push the left stick. Move with the left grip and with A.
 - If you see no hints and no subtitles, open the options of the game, then
   "Help Options". Set "Intelligent ToolTips", "All Text" and "Medium Help" or
   more.
@@ -171,7 +174,13 @@ Thank you for playing. If you like the mod, you can support the work here:
 
 The code and the documents of the mod have the MIT license, see
 [`LICENSE`](LICENSE). The code of other projects in `third_party/` keeps its
-own license, see [`third_party/README.md`](third_party/README.md).
+own license, see [`third_party/README.md`](third_party/README.md). The cards
+use the fonts Alegreya and Alegreya SC by The Alegreya Project Authors, under
+the SIL Open Font License 1.1. The controller models of the hints come from
+the WebXR Input Profiles (Copyright 2019 Amazon, MIT license), see
+[`bwvr/assets/controllers/README.md`](bwvr/assets/controllers/README.md). Some
+models show the trademarks of the makers of the controllers. The license does
+not give a right to use these trademarks.
 
 This is an unofficial mod, made by a fan. Electronic Arts and Lionhead
 Studios did not make it, do not endorse it, and have no connection with it.

@@ -64,6 +64,17 @@ void VkSceneClear(uint32_t count, const void* rects, uint32_t flags,
 // draw_merge.cpp, on the frame thread: the game writes this surface (a Lock
 // or a Blt to it). Its copy in Vulkan is read again at its next use.
 void VkSceneSurfaceWritten(void* surface);
+// vk_ddraw.cpp: the game released this surface, and its memory can hold a
+// new surface. With vk_texture_forget=1 the table forgets its texture.
+void VkSceneSurfaceGone(void* surface);
+// vk_texture_forget of bwvr.ini: 1 (the default) the table of the textures
+// forgets the texture of a surface that the game releases, so a new surface
+// at the same address gets a new texture. 0: the entry stays with its image.
+void VkSceneSetTextureForget(int on);
+// vk_upload_keep of bwvr.ini: 1 (the default) a texture that the game wrote
+// keeps its old image until the new image has its pixels, so a failed upload
+// does not make it white. 0: the old image goes first.
+void VkSceneSetUploadKeep(int on);
 
 void VkSceneReport(uint64_t frames);
 
@@ -399,6 +410,17 @@ bool VkScenePresentWindow(void* window, uint32_t width, uint32_t height);
 // change of the size.
 const uint8_t* VkScenePresentPixels(uint32_t width, uint32_t height,
                                     int* pitch);
+// THE SAVE PICTURE (snapshot_guard.cpp, docs/backend.md, "The save
+// picture"), on the frame thread. The size of the picture of the window
+// (the last walk of the left eye, or of a scene with no eye pass), and a
+// part of it for the CPU. `take` gets the pixels of the part: 4 bytes a
+// pixel, rows of w pixels, the red first when red_first is true. The read
+// waits for the GPU. False when there is no picture or a step failed.
+bool VkScenePictureSize(uint32_t* width, uint32_t* height);
+typedef void (*VkScenePictureFn)(const uint8_t* pixels, int pitch, uint32_t w,
+                                 uint32_t h, bool red_first, void* context);
+bool VkSceneReadPicture(int32_t x, int32_t y, uint32_t w, uint32_t h,
+                        VkScenePictureFn take, void* context);
 // FOVEATED RENDERING (foveation of bwvr.ini, docs/backend.md, "Foveated
 // rendering"). level: 0 (the default) each pixel of the eye pictures has the
 // full rate. 1 light, 2 medium, 3 strong: the part around the centre of the

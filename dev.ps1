@@ -73,13 +73,24 @@ function Get-ExpectedSha1 {
     return $m.Matches[0].Groups[1].Value
 }
 
+# The SHA-1 of the same file with the flag LARGE_ADDRESS_AWARE. The launcher
+# and the desktop runs set that flag (large_address=1), so the game folder
+# has this file after a start.
+function Get-ExpectedSha1LargeAddress {
+    $header = Join-Path $Bwvr 'src\common\bw_addresses.h'
+    $text = Get-Content -LiteralPath $header -Raw
+    $m = [regex]::Match($text, 'kExpectedSha1LargeAddress\[\]\s*=\s*"([0-9a-f]{40})"')
+    if (-not $m.Success) { Stop-Dev "Cannot read kExpectedSha1LargeAddress from:`n$header" }
+    return $m.Groups[1].Value
+}
+
 # Empty when the folder holds the right game. Else the reason.
 function Test-GameFolder([string]$Dir) {
     $exe = Join-Path $Dir 'runblack.exe'
     if (-not (Test-Path -LiteralPath $exe)) { return "There is no runblack.exe in:`n$Dir" }
     $have = (Get-FileHash -Algorithm SHA1 -LiteralPath $exe).Hash.ToLowerInvariant()
     $want = Get-ExpectedSha1
-    if ($have -ne $want) {
+    if ($have -ne $want -and $have -ne (Get-ExpectedSha1LargeAddress)) {
         return ("runblack.exe in this folder is not the file of the unofficial patch v1.42:`n$Dir`n" +
             "  its SHA-1 is  $have`n  the mod fits  $want`n" +
             "Install the game, then the official patches 1.10 and 1.20, then the`n" +
@@ -184,6 +195,27 @@ function Invoke-Install {
         foreach ($ini in @('dxwrapper\dxwrapper.ini', 'dxwrapper\ddraw.ini')) {
             [void][BwvrDev.Ini]::WritePrivateProfileString('General', 'RealDllPath', $system, (Join-Path $game $ini))
         }
+        # A file of the last install that this build does not ship goes, so an
+        # old controller model does not stay in the game folder.
+        $markerPath = Join-Path $game $Marker
+        if (Test-Path -LiteralPath $markerPath) {
+            $old = @(Get-Content -LiteralPath $markerPath | Select-Object -Skip 3 | Where-Object { $_.Trim() -ne '' })
+            $gone = 0
+            foreach ($rel in $old) {
+                if ($done -contains $rel) { continue }
+                $path = Join-Path $game $rel
+                if (Test-Path -LiteralPath $path -PathType Leaf) { [System.IO.File]::Delete($path); $gone++ }
+            }
+            $models = Join-Path $game 'bwvr-controllers'
+            if (Test-Path -LiteralPath $models) {
+                foreach ($sub in @(Get-ChildItem -LiteralPath $models -Directory -Force)) {
+                    if (@(Get-ChildItem -LiteralPath $sub.FullName -Force).Count -eq 0) {
+                        [System.IO.Directory]::Delete($sub.FullName, $false)
+                    }
+                }
+            }
+            if ($gone -gt 0) { Note "removed $gone files of the last install that this build does not ship" }
+        }
         $id = (& git -C $Repo rev-parse --short=7 HEAD 2>$null)
         @("Put here by dev.ps1 of the Black & White VR Mod repo.", "build $id, $(Get-Date -Format s)", '') + $done |
             Set-Content -LiteralPath (Join-Path $game $Marker) -Encoding ascii
@@ -210,9 +242,19 @@ function Invoke-Uninstall {
         $path = Join-Path $game $rel
         if (Test-Path -LiteralPath $path) { [System.IO.File]::Delete($path) }
     }
-    $wrapper = Join-Path $game 'dxwrapper'
-    if ((Test-Path -LiteralPath $wrapper) -and @(Get-ChildItem -LiteralPath $wrapper -Force).Count -eq 0) {
-        [System.IO.Directory]::Delete($wrapper, $false)
+    $models = Join-Path $game 'bwvr-controllers'
+    if (Test-Path -LiteralPath $models) {
+        foreach ($sub in @(Get-ChildItem -LiteralPath $models -Directory -Force)) {
+            if (@(Get-ChildItem -LiteralPath $sub.FullName -Force).Count -eq 0) {
+                [System.IO.Directory]::Delete($sub.FullName, $false)
+            }
+        }
+    }
+    foreach ($folder in @('dxwrapper', 'bwvr-fonts', 'bwvr-controllers')) {
+        $sub = Join-Path $game $folder
+        if ((Test-Path -LiteralPath $sub) -and @(Get-ChildItem -LiteralPath $sub -Force).Count -eq 0) {
+            [System.IO.Directory]::Delete($sub, $false)
+        }
     }
     $kept = Join-Path $game $Backup
     if (Test-Path -LiteralPath $kept) {

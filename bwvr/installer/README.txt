@@ -63,7 +63,10 @@ HOW TO START
 4. Press "Play in VR".
 
 The launcher saves your settings, starts the game in the headset,
-and closes. "Play, new game" does the same and starts a new game.
+and closes. The game loads the game that you played last (the save
+that the game made when you quit) and opens its Main Menu. Select
+Continue Game to play. "Play, new game" does the same, but it starts
+a new game, and the start dialog of the game opens first.
 "Save Config" keeps your settings and does not start the game.
 
 If the headset is not connected when the game starts, the game plays
@@ -79,8 +82,15 @@ of the mod. When a newer version is out and the PC is ready, the line
 at the bottom is blue and says so. Click the line to open the page of
 the new version in your browser. With no network, the launcher says
 nothing about updates. The ask sends only the version of the
-launcher. To stop the ask, clear "Check for updates" in the group
-Launcher, or set update_check=0 in bwvr.ini.
+launcher.
+
+Before each start, the launcher sets a flag in runblack.exe that
+gives the game 4 GB of memory space, not 2 GB. Without it, a large
+render can fill the memory space, and the game can crash. The first
+change keeps a copy of the original file as runblack.exe.before-bwvr.
+To use the original file, clear "Use 4 GB of memory" in the group
+Launcher. The launcher then puts the original file back. The
+uninstaller puts it back too.
 
 If a start with the renderer Vulkan fails, the next start uses
 Direct3D 9. The launcher then shows "Direct3D 9" in the row
@@ -102,11 +112,10 @@ The game shows its logos when it starts. To skip them, press a
 trigger or A, B, X or Y on a controller. Esc and a mouse click skip
 them too.
 
-The setting "Intro in stereo" is off at first. With it, the Lionhead
-logo is in 3D around you. Your view goes between the orbs on the path
-of the game, and then back to the place from which the logo shows.
-The view does not turn: you look where your head looks. The menu
-button skips the logo. This setting is a test. If the motion is not
+The Lionhead logo is in 3D around you. Your view goes between the
+orbs on the path of the game, and then back to the place from which
+the logo shows. The view does not turn: you look where your head
+looks. The menu button skips the logo. If the motion is not
 comfortable, set intro_motion=2 in bwvr.ini: the orbs are then a model
 in front of you, and the room stays still. intro_motion=0 gives a
 still view of the logo.
@@ -118,28 +127,35 @@ THE SETTINGS
 These are some of the groups of the launcher.
 
   Picture         How big a picture each eye gets, a margin around
-                  the view, how sharp the textures are, and how far
-                  out models keep their full detail.
+                  the view, how sharp the textures are, how far out
+                  models keep their full detail, and how far out
+                  models are drawn at all. The fog moves out with the
+                  cull distance, so far models go into the fog.
 
-  View            The play mode, the intro in stereo, and the cut
-                  scenes. The default play mode is the God view (see
-                  below). A cut scene plays on a screen in front of
-                  you. "Around you" plays it all around you, with the
-                  motion of the camera of the game.
+  View            The cut scenes, and the Video Capture Mode. A cut
+                  scene plays on a screen in front of you. "Around
+                  you" plays it all around you, with the motion of the
+                  camera of the game. A video of the game always plays
+                  on the screen. With "Video Capture Mode", the game
+                  window on the PC is a capture window: a 16:9 part of
+                  the view of your left eye, for OBS or a different
+                  capture tool. "Lower capture window" moves that part
+                  down from the middle of your view.
 
   Moving around   Turns in steps, the zoom with the stick, the walk
                   with the left stick, and a blink when you jump or
                   turn.
 
-  Controllers     The glow at the Hand, the grab of the world, and the
-                  lines of the hint cards.
+  Controllers     The glow at the Hand, the grab of the world, and
+                  "Show 3D controller for hints" (see HINTS AND
+                  SUBTITLES).
 
-  Launcher        "Check for updates": the launcher asks GitHub for
-                  the latest version each time it opens (see HOW TO
+  Launcher        "Use 4 GB of memory": the launcher gives the game
+                  4 GB of memory space before each start (see HOW TO
                   START).
 
-  Testing         One box, which turns on keys for tests. The box
-                  is off, and a player does not need it.
+  Testing         "Debug menu" puts the item Debug on the ring (see
+                  THE RING). It is off, and a player does not need it.
 
 Every setting has a tooltip. Hold the pointer over a setting, and
 the tooltip tells you what the setting does.
@@ -156,9 +172,9 @@ when you save.
 THE GOD VIEW
 ------------
 
-The God view is the default play mode. The land is at your waist, so
-your hands can reach it. It works with motion controllers and with
-the mouse.
+The mod plays in the God view. The land is at your waist, so your
+hands can reach it. It works with motion controllers and with the
+mouse.
 
 When you move with the left stick, the view goes up and down
 smoothly with the hills, so the land stays below your hands. When you
@@ -180,10 +196,14 @@ the game does. Set hand_model=0 in bwvr.ini for plain hands.
 The fingers also react to the world. When you put a hand down on the
 land, each finger bends until it rests on it. A finger tip that meets
 the land or a wall bends at its outer joints, and a flat hand on the
-land spreads its fingers a little. The fingers also rest on a house,
-a tree, a rock, a villager, an animal and your Creature, and a
-villager that walks into your hand bends your fingers. Your fingers
-go into the sea. When your finger tip comes to a thing that the grip
+land spreads its fingers a little. The fingers also rest on a house
+and the other buildings, a tree, a rock, a villager, an animal and
+your Creature, with each hand, and a villager that walks into your
+hand bends your fingers. Your fingers go into the sea. The part of
+your hand under the water takes the color of the sea, and a ring
+starts on the water where a finger tip goes in. Set
+hand_feel_water_look=0 and hand_feel_ripple=0 in bwvr.ini to turn
+these off. When your finger tip comes to a thing that the grip
 can take, the hand takes the form of the thing: a claw for a
 villager, an open hand for a tree. In your hand the fingers close on
 the thing, the thumb goes round it, and a tree lies with its trunk on
@@ -194,9 +214,9 @@ hand_feel_bodies=0 for fingers that do not react to things, and
 hand_feel=0 for fingers that follow the trigger and the grip only.
 
   Stick up, down      Zoom out or in one step: up makes the world
-                      smaller, down makes it larger. "Stick forward"
-                      in the launcher turns the direction (key
-                      god_zoom_forward_in). Push again for the
+                      smaller, down makes it larger. "Invert zoom
+                      direction" in the launcher turns the direction
+                      (key god_zoom_forward_in). Push again for the
                       next step. The land that you look at stays where
                       it is, and its size changes. In the launcher,
                       "Center of the zoom" chooses a different point
@@ -211,12 +231,13 @@ hand_feel=0 for fingers that follow the trigger and the grip only.
                       to turn and zoom.
   Left stick          Push it to move over the land. You go where
                       your head faces, and you stop when you let the
-                      stick go. In the launcher, "Move with the left
-                      stick" makes forward the direction of the left
-                      controller, or turns the walk off (key
-                      move_stick). A walk with a stick makes some
-                      people ill. If it makes you ill, turn it off,
-                      and move with the left grip and with A.
+                      stick go. In the launcher, "Movement direction"
+                      makes forward the direction of the left
+                      controller (key move_stick), and "Movement
+                      type" chooses Walk or Fly (key move_type). A
+                      move with a stick makes some people ill. If it
+                      makes you ill, move with the left grip and
+                      with A.
   Left menu button    Open the game menu.
   Y (left hand)       Hold it for the ring: the Temple, your Creature,
                       the leashes and more. See MOTION CONTROLLERS.
@@ -253,6 +274,15 @@ up and down is the tilt, and a zoom with the right stick is the zoom.
 The lessons of the Gods' Playground count them the same way. Set
 script_camera_moves=0 in bwvr.ini if a lesson must see only the
 buttons of the mouse.
+
+In some places of Land 1 the game keeps its camera in an area, for
+example at the Creature select. There you can turn and zoom as you
+like, and you can move about 50 cm past the edge of the area. At that
+limit you stop, the game plays its sound of the block, and the view
+does not shake. Set god_zone_margin in bwvr.ini to change how far you
+can go past the edge, in units of the world (the default 50 is 50 cm
+at the start scale). Set god_zone=0 to let the game push its camera back, with its
+shake of the view.
 
 Ctrl F11 turns the God view off and on. Off gives the immersive
 view, which is for tests only.
@@ -305,8 +335,8 @@ THE KEYS
 The game keys and the mouse work as they always do. In the God
 view, the tilt keys move the ground (see THE GOD VIEW).
 
-With "Test keys" on, these keys work. Press them with the mouse
-still:
+With test_keys=1 in bwvr.ini, these keys work. They are for testers.
+Press them with the mouse still:
 
   F12                 Save a picture of each eye in the game folder.
   Shift F12           Move the subtitles down one step. After the
@@ -462,27 +492,47 @@ you let go of both grips.
                       close the ring with no choice. With the left
                       hand as the pointing hand, B opens the ring at
                       your right hand.
-  X (left hand)       No job.
+  X (left hand)       Open or close the spell book: the miracles that
+                      you can ask for now. See MIRACLES.
+  Palm up             The sheet of the gestures: how to draw each
+                      miracle of your Worship Sites.
 
 To change the grab of the world, set "Grab the world" in the
 launcher (key grab_hand). 1 uses the grip of your other hand. 2 also
 uses the grip of the pointing hand when the Hand is empty and not
 over an object. 0 turns the grab off.
 
-To change the walk with the left stick, set "Move with the other
-stick" in the launcher (key move_stick). 1 moves you where your head
-faces. 2 moves you where the left controller points. 0 turns the walk
-off. A full push moves you 150 cm of your room each second, at each
-zoom (key move_stick_speed_cm in bwvr.ini). The stick does not move
-you while a grip holds the land, in a menu, in a cut scene and in the
-Temple.
+When the land is far below your hand, a pull up with one grip brings
+the land up faster than your hand: land 20 m below comes near in
+three pulls. Land near your hand moves with your hand. When you are
+as small as a villager, a pull to the side also moves the land
+farther, up to 4 times. Set grab_boost=0 in bwvr.ini to move the land
+exactly with your hand.
 
-While you move with the left stick, the height of your view follows
-the land under your head. A long hill moves the view up or down, and
-a small bump does not. The height that you set with the left grip
-stays your height above the land. To keep the view at one height, set
-"Walk follows the land" to Off in the launcher (key
-move_stick_follow_land=0).
+To change the direction of the left stick, set "Movement direction"
+in the launcher (key move_stick). Head direction moves you where your
+head faces. Controller direction moves you where the left controller
+points. A full push moves you 150 cm of your room each second (key
+move_stick_speed_cm in bwvr.ini), times a factor of the zoom: up to 4
+times faster when you are as small as a villager, and 0.6 times as
+fast when the land is small. Set move_stick_scale=0 in bwvr.ini to
+keep one speed at each zoom. The stick does not move you while a grip
+holds the land, in a menu, in a cut scene and in the Temple.
+
+To walk or to fly, set "Movement type" in the launcher (key
+move_type). Walk (the default): while you move with the left stick,
+the height of your view follows the land under your head. A long hill
+moves the view up or down, and a small bump does not. The height that
+you set with the left grip stays your height above the land. Fly: you
+move where your head faces or where the controller points, also up
+and down. Look or point down and push the stick forward to go down.
+The view does not follow the land. It stops just above the land, and
+you can fly up high, also when you are as small as a villager.
+
+When you hold the left stick all the way, the walk and the fly get
+faster: after 1 second the speed doubles each 2 seconds, up to 32
+times. A smaller push goes back to its own speed at once. Set
+move_stick_ramp=0 in bwvr.ini to keep one speed.
 
 Set button_layout=0 in bwvr.ini for a different layout of the left
 controller: Y opens the game menu, X opens the ring, and the left
@@ -493,6 +543,18 @@ While a menu or a dialog box is open, the Hand steps aside. The
 pointing controller then points like a mouse: a thin line shows where
 it points, and the trigger clicks. Close the game menu with "Continue
 Game". The Hand comes back when the menu closes.
+
+A menu shows on a panel in the room, 1.4 m in front of you, in the
+direction that you look when the menu opens. The panel does not
+follow your head, so you can look at it and around it. If you do not
+see it, press F11, and it comes in front of you. To keep the menus in
+front of your view, set menu_room=0 in bwvr.ini.
+
+When a box of the game asks for text, for example the name of your
+god or of a saved game, a keyboard shows below the menu. Point at a
+key and pull the trigger. Shift makes the next letter a capital. The
+first letter is a capital. To turn the keyboard off, set
+vr_keyboard=0 in bwvr.ini.
 
 
 THE RING
@@ -541,7 +603,7 @@ switch shows its value now, for example "One walk" with "on" under
 it. Choose a switch, and it changes at once, as its test key does.
 For 30 seconds after a choice, the ring opens on the same page again.
 Back goes to the page before. A switch that cannot change now is not
-on the page. The debug page does not need "Test keys".
+on the page. The debug page does not need test_keys=1.
 
 
 THE TEMPLE
@@ -570,8 +632,14 @@ bwvr.ini, and the value 0 turns the rule off: temple_view,
 temple_camera_screen and temple_fade_eyes.
 
 To save in the Save Game Room, click an empty picture two times and
-then click OK. The save has no message, because the text line needs
-a keyboard. To load, click the picture of the save and then Yes.
+then click OK. To give the save a message, type it on the keyboard
+below the menu. To load, click the picture of the save and then Yes.
+
+When the game is in Program Files, Windows keeps your saved games in
+AppData\Local\VirtualStore. There Windows refuses two steps of each
+save of the game, and the save does not show in the Save Game Room.
+The mod does these two steps in the VirtualStore, so each save is
+complete. Set save_virtual_store=0 in bwvr.ini to turn this off.
 
 At the Temple on the land, a short press of the grip on the door goes
 into the Temple, and a short press on one of the three leash posts
@@ -603,6 +671,21 @@ hide it. A hint that is not true with the controllers does not show.
 For example, in the God view the trigger does not move the land, so the
 card does not say "Trigger Move". Set hint_card=0 in bwvr.ini to draw
 the hints in the view. Set controller_hints=0 to keep the mouse hints.
+
+"Show 3D controller for hints" in the launcher is on at first. While
+a hand has a hint, a faint model of your controller then shows in
+that hand. Each button of the hint is lit in gold, and each lit
+button has its own small card with a line to the button. A controller
+with no model has the cards beside the wrists, with a small picture
+of each button. Clear the box for the cards beside the wrists with
+the button words only, for example Trigger, Grip, A or X.
+
+A card is a small parchment scroll with dark letters. The button word
+is on a wax seal: green for the trigger, amber for the grip and red
+for the other buttons. The spell book and the keyboard for a name are
+pages of the same parchment, and each item of the ring menu is a wax
+seal. Set hint_card_style=0 in bwvr.ini for dark cards with white
+letters.
 
 Some lines of the game wait for a click. The text stays, and the card
 says "Trigger Continue" as its first line. Press the trigger. Until
@@ -638,10 +721,11 @@ A prompt that you know goes away. After you did its action 3 times
 After 10 minutes of play without that action, the line comes back,
 and your next use takes it away again. In a lesson of the tutorial,
 each line shows. The hints of the game stay: its own help options
-control them. In the launcher, "Hints" is "Until learned" (the
-default) or "Always" (key hint_learn, 0 shows each line always). The
-counts are in the file bwvr-hint-counts.ini in the game folder. To
-show each line again, delete that file.
+control them. The ToolTips option of the game (Help Options) chooses
+this rule: with "All ToolTips" each line always shows, and with each
+other value a line goes away. The counts are in the file
+bwvr-hint-counts.ini in the game folder. To show each line again,
+delete that file.
 
 With a tree in your Hand, the card says "Grip Plant" only when opening
 the grip plants the tree. If your Hand is more than 15 cm over the land,
@@ -793,8 +877,8 @@ is red when the object is outside your influence, and then the Hand
 cannot take it. A hill in front of an object hides it, so you cannot
 pick it. The sea does not hide an object. An object that rolls, flies
 or floats on the sea is a target too: the line follows it, and the pull
-brings it from the place where it is then. This works in the God view
-and in the Tabletop play mode, and not in a multiplayer game. Set
+brings it from the place where it is then. This works in the God view,
+and not in a multiplayer game. Set
 far_grab=0 in bwvr.ini to turn it off.
 
 When two objects are near the line of your hand, the choice follows
@@ -837,8 +921,10 @@ distance. Open the grip to stop. When the pile is used up while the
 grip is closed, the grip carries the bundle, and the next opening of
 the grip puts it down. With far_take_carry=0 in bwvr.ini the Hand
 lets the bundle go when such a pile is used up. To collect fish, put
-your Hand in the water where the fish are, or point at them. With
-fish_take=0 in bwvr.ini the fish are no target.
+your Hand in the water where the fish are, or point at them. The
+halo shows on the fish and moves with them. With fish_take=0 in
+bwvr.ini the fish are no target. With fish_school=0 the target is
+a point near the fish, not the fish.
 
 While you collect from a distance, the pieces of food or wood go up
 out of the pile and along a curve into your Hand. With take_stream=0
@@ -895,8 +981,7 @@ game then drops the object at once, and does not wait for its next
 game turn. Set release_at_once=0 in bwvr.ini to make the game wait
 for its next game turn.
 
-In the God view and in the Tabletop play mode, an object that you
-throw flies as a real object flies in your room: as fast as your hand
+In the God view, an object that you throw flies as a real object flies in your room: as fast as your hand
 moved, on the same arc, for the same time. Swing your hand and open
 the grip in the swing. A hard throw can kill a villager, as in the
 game. Open the grip with a still hand to put an object down. If your
@@ -914,6 +999,10 @@ the flight. An object that lies on the land does not turn in place,
 and on a steep slope it goes down to flatter land. Set
 throw_land_rest=0 in bwvr.ini for a comparison.
 
+A thrown object turns in the air at about the pace of the game, not
+at the speed of the flight. Set throw_turn=0 in bwvr.ini for
+the faster turn of the physics of the game at the speed of the flight.
+
 The mod draws a thrown object between the game turns. While the
 object touches a different object, it moves at the pace of the game,
 and its picture does not stop and jump. Set throw_draw=0 in bwvr.ini
@@ -926,6 +1015,42 @@ MIRACLES
 To cast a miracle, hold B and draw its gesture in the air: the same
 shape that you draw with the mouse. Draw it in front of you, as you
 see it, about 30 cm across. Moves of the Hand without B do not draw.
+
+The spell book is the other way. Tap B on your right hand, or press
+X on your left hand: a book opens over your left hand with each miracle that your Worship Sites can
+give you now, each in its orb of the game. Put your right hand
+on a miracle: a gold halo shows on it, the controller ticks, and the
+card on your hand names it. Close the grip to take the miracle. The
+game takes the prayer power as for the gestures, and the Miracle
+comes into your Hand. A grey miracle is one that the game refuses
+now, and the card says why. Tap B or press X again to close the book.
+A tap is short, with a still hand: a longer press of B draws a
+gesture. With the left hand as the pointing hand, Y or A opens the
+book at your right hand. Set spell_book=0 in bwvr.ini to give X no
+job, and spell_book_b=0 to give the tap of B no job.
+
+Turn the palm of your left hand up to see the sheet of the gestures:
+for each miracle of your Worship Sites, the gesture pictures of the
+game and its name. The flat game shows these pictures at the lower
+right of the screen. While you draw a gesture, the palm shows the
+pictures of the game for the next gesture. Set gesture_sheet=0 in
+bwvr.ini to turn the sheet off, and spell_book_palm=1 to open the book
+with the palm.
+
+To test each miracle, use "All miracles in the book" in the group
+Miracles of the debug window (the item "debug" of the ring), or set
+debug_all_book=1 in bwvr.ini. Then the book shows all 34 miracles of
+the game, with the Increase and Extreme forms, 6 on a page. Grip the
+seal "Next" or "Back" under them to turn the page. A miracle from
+this book costs no prayer power, and your towns learn nothing. Take a
+miracle while one is in your Hand to change it.
+
+The row "Unlock all miracles" of the same group gives your towns
+every miracle of the game, and your Worship Sites no limit of prayer
+power. Warning: each save after that, also the save at the exit, keeps
+the miracles of the towns. The row "Spawn all miracle orbs" puts one
+bubble of each miracle on the land in front of you. The mod removes
+these bubbles before each save.
 
 A miracle from a reward or a dispenser is a bubble on the land. Close
 the grip on the bubble to carry it. Then press the trigger to use it.
@@ -1112,22 +1237,11 @@ pulse of a new target or a lock. Set world_haptics=0 in bwvr.ini to
 turn them off.
 
 
-TABLETOP
---------
-
-In the play mode "Tabletop (test)", the island is a model on a
-table. The Hand is where your hand is on the model, with no long
-reach. The left grip moves the land on the table: pull to slide it.
-Hold both grips, then turn your hands to turn the land, or spread
-them to zoom in. The table stays where it is, and the land stops
-when you let go.
-
-
 TEST KEYS OF THE NUMBER PAD
 ---------------------------
 
-With "Test keys" on in the launcher, some keys of the number pad
-switch between two ways of one behavior while you play. The
+With test_keys=1 in bwvr.ini, some keys of the number pad switch
+between two ways of one behavior while you play. The
 controller gives a long pulse for the way that is the default, and a
 short pulse for the other way. These keys are for testers. A player
 does not need them.
@@ -1222,8 +1336,8 @@ and level, whatever the camera of the game does. This keeps the
 world still when you tilt your head. The cost is that you look down
 at the land, as you would from a real place above an island.
 
-The interface stays in front of your view. Menus, subtitles, help
-text and tooltips follow your head. They do not hang in the world.
+The interface stays in front of your view. Subtitles, help text and
+tooltips follow your head. They do not hang in the world.
 
 Smoke and other particles shimmer. The game asks for new random
 numbers for each eye, so each eye gets a different jitter.
@@ -1236,7 +1350,8 @@ the edge of a step can get a different shape in the two eyes, and
 the two pictures then do not join.
 
 The frame rate drops in busy scenes. If it gets too low, lower the
-resolution scale, or bring the model detail distance in.
+resolution scale, or bring the model detail distance or the model
+cull distance in.
 
 The mod uses the refresh rate that you set for the headset. To ask
 the headset for a different rate, set refresh_rate_hz in bwvr.ini to
@@ -1315,5 +1430,15 @@ This is an unofficial mod, made by a fan. Electronic Arts and
 Lionhead Studios did not make it, do not endorse it, and have no
 connection with it. Black & White is a trademark of its owner. The
 mod contains no game files. You must have your own copy of the game.
+
+The cards use the fonts Alegreya and Alegreya SC by The Alegreya
+Project Authors, under the SIL Open Font License 1.1. The license is
+in the notices file and in the bwvr-fonts folder.
+
+The controller models of the hints come from the WebXR Input
+Profiles, Copyright 2019 Amazon, under the MIT license. The license
+is in the notices file and in the bwvr-controllers folder. Some
+models show the trademarks of the makers of the controllers. The
+license does not give a right to use these trademarks.
 
 Copyright (C) 2026 Buck.

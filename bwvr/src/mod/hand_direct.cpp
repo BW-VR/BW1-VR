@@ -64,7 +64,8 @@
 // shows the throw spring. See docs/grab.md, "The grip holds".
 //
 // THE LAND. The point stops 5 mm of the room over the land, so it touches
-// the land and the objects on it at every scale (ResolveLand).
+// the land and the objects on it at every scale (ResolveLand). While the land
+// holds the drawn hand up (hand_land.cpp), the point goes up with it.
 //
 // THE CREATURE BY TOUCH (docs/creature.md, "The Creature by touch"). A press on
 // the Creature puts the Hand in the Creature state (7). There the game moves
@@ -131,19 +132,27 @@
 #include "creature_look.h"
 #include "creature_head.h"
 #include "creature_stay.h"
+#include "creature_touch_math.h"
 #include "debug_menu.h"
 #include "far_choice_math.h"
 #include "far_grab.h"
+#include "fish_math.h"
 #include "fight_math.h"
 #include "take_stream.h"
 #include "forest_take.h"
+#include "hand_feel.h"
 #include "hand_feel_math.h"
+#include "hand_land.h"
 #include "haptics.h"
+#include "bookmark_aim.h"
 #include "miracle.h"
+#include "spell_book.h"
 #include "village.h"
 #include "village_math.h"
 #include "near_math.h"
+#include "solid_math.h"
 #include "table_math.h"
+#include "throw_math.h"
 #include "throw_physics.h"
 #include "tree_body.h"
 #include "tree_plant_math.h"
@@ -165,6 +174,11 @@ int ControllersThrowGainPct();
 float ControllersCreatureSlapMps();
 int ControllersCreatureTouchCm();
 bool ControllersCreatureSlapWait();
+// The press of the open hand on the Creature (creature_stroke_open, see
+// controllers.cpp): true while the mod holds the Action button for it. And
+// whether the open hand slaps too (creature_open_slap).
+bool ControllersOpenStrokeOn();
+bool ControllersOpenSlap();
 // head_pose.cpp
 float HeadPoseScale();
 // tabletop.cpp: the Hand's size and the scale while the table owns the view,
@@ -177,6 +191,11 @@ bool TabletopGodOwnsView();
 // tabletop.cpp: true while the game's switch for the drag of the land is on,
 // so the player can move the view.
 bool TabletopMoveAllowed();
+// head_blinder.cpp: the head point that wants the solids near it, and its
+// bound in world units (head_blinder_objects).
+bool HeadBlinderSolidPoint(float point[3], float* bound);
+// Below: the points that want the solids near them (LatchSolids).
+int SolidPoints(float points[3][3], float bound[3]);
 // head_camera.cpp: the rotation and the position that the scene was drawn
 // from, in the world.
 bool HeadCameraRenderBasis(float basis_out[9], float position_out[3]);
@@ -196,6 +215,13 @@ bool ComfortCameraGameMoves();
 // 0x300 + low, and now. controllers.cpp: a grip holds the land.
 bool ComfortCameraHelpClock(int low, int32_t* at, int32_t* now);
 bool ControllersGrabHeld();
+// controllers.cpp: the grip is closed and the hand can act, and the right
+// button of the game is down, for the log of a bulk take.
+bool ControllersGripClosed();
+bool ControllersGameRightDown();
+// controllers.cpp: the render pixel of a point, for the test word "open".
+bool ControllersPointPixel(const float point[3], float* x, float* y,
+                           float* width, float* height);
 // tabletop.cpp: the teleport of the God view, for the test word "go".
 bool TabletopGodTeleport(const float target[3]);
 // temple.cpp: the door of the Temple (0) or the next leash post (1), for the
@@ -462,6 +488,11 @@ const int32_t kModeCreature = 0x13;  // the interface hand mode of state 7
 const int kStateHand = 4;        // the CHand
 const int kStateTotal = 0xD8;    // the stroke and slap total, -1 to 1
 const int kStateTime = 0xDC;     // ms in the state, int. A slap needs 1000
+// The timers of the stroke test (creature_touch_math::FirstStrokeTimers).
+const int kStateSinceStroke = 0xCC;  // ms since a stroke or a slap
+const int kStateSincePlay = 0xD0;    // ms since a stroke animation
+const int kStateContact = 0xD4;      // ms of contact
+const int kStateBone = 0x108;        // the bone of the last stroke, 9 for none
 const int kCreatureSize = 0x90;  // LH3DCreature: its size
 // LH3DCreature+0x526C: 1 while the Creature is ready for the Hand, and 0
 // skips the state's update (0x005B17EA). A press on the Creature asks for it
@@ -496,6 +527,9 @@ const int kObjectMesh = 0x40;
 const int kObjectFlags = 0x24;       // a byte: bits 0x04 and 0x20
 const int kObjectOtherFlags = 0x0A;  // a byte: bit 0x10
 const int kMeshTranslation = 0x38;
+// The scale of an LH3DObject: LH3DBoundingBox::CheckRegionOnScreen
+// (0x00868CA6) takes the radius of the box times this value [V].
+const int kObjectScale = 0x44;
 const int kIsInteractable = 0x190;
 const int kIsCannotBePickedUp = 0x180;
 const int kValidForPlaceInHand = 0x6FC;
@@ -766,6 +800,7 @@ bool g_near_pick = false;
 float g_near_bound_sq = 0.0f;
 int g_wide_frames = 0;
 uint64_t g_near_offers = 0;
+uint64_t g_solid_offers = 0;
 uint64_t g_kept_offers = 0;
 // The table owned the last frame and its size went to the Hand.
 bool g_table_hand = false;
@@ -1138,7 +1173,12 @@ bool g_in_creature = false;     // inside HandStateCreature::Update, ours
 bool g_prev_valid = false;
 float g_prev_point[3] = {0.0f, 0.0f, 0.0f};
 float g_creature_speed = 0.0f;  // what the game reads, units per second
-float g_creature_real = 0.0f;   // the real hand, meters per second
+float g_creature_real = 0.0f;   // the speed the game reads, meters per second
+float g_creature_measured = 0.0f;  // the real hand, meters per second
+// creature_swing=1: the speed over 100 ms with a hysteresis
+// (creature_touch_math::SwingSpeed). 0: the speed over 50 ms as it is.
+bool g_swing_on = true;
+creature_touch_math::Swing g_swing;
 float g_creature_k = 0.0f;      // units per second for 1 m/s
 float g_creature_total = 0.0f;
 int g_creature_logs = 0;
@@ -1169,6 +1209,7 @@ uint64_t g_touch_vetoes = 0;     // mesh hits refused: the Hand is not in it
 uint64_t g_touch_forced = 0;     // slap branches forced by the swept test
 uint64_t g_touch_kept = 0;       // frames the pick kept the Creature
 uint64_t g_touch_waits = 0;      // states that started with no wait
+uint64_t g_open_slow = 0;        // frames of the open hand read under a slap
 int g_touch_logs = 0;
 const int kMaxTouchLogs = 60;
 // THE OPEN HAND ON THE CREATURE (docs/creature.md, "The open hand"). The hand
@@ -1217,6 +1258,18 @@ int g_look_head = 1;
 bool g_script_on = true;
 bool g_script_key_down = false;
 void ScriptPlayerInstall();
+// creature_stroke_wait=0: the first stroke of a Creature state comes with the
+// first motion of the hand on the body (creature_touch_math::
+// FirstStrokeTimers). 1 keeps the game's wait of 2 s.
+bool g_stroke_wait = false;
+uint64_t g_stroke_presets = 0;
+// creature_slap_height=1: in a slap that the swept test found, the game reads
+// the height of the path in the body (controller_math::SlapPathHeight). 0:
+// the game reads the height of the Hand as it is.
+bool g_slap_height = true;
+uint64_t g_slap_heights = 0;
+// The height of the hit of this frame as a part of S, while g_touch_entered.
+float g_touch_hit_h = 0.5f;
 // creature_palm_point: with the flat hand of a stroke the Hand's point is
 // the palm, and not the tip of the index finger (near_math::PalmPoint). The
 // offset from the tip to the palm, the frame that made it, and whether the
@@ -1281,6 +1334,9 @@ bool g_virtual = false;
 const void* g_virtual_hand = nullptr;
 void* g_virtual_creature = nullptr;
 double g_virtual_since = 0.0;
+// The press came from the open hand (creature_stroke_open): it is no leash
+// click, also when it is short.
+bool g_virtual_open = false;
 uint64_t g_virtual_count = 0;
 uint64_t g_leash_clicks = 0;
 // The leash click: a press shorter than this, in real time. The game's own
@@ -1602,30 +1658,45 @@ bool TakeValid(void* object, void* status) {
 // one target turns that search off, so the mod must offer the farm itself.
 // [V]
 //
-// Each FishFarm is in a list of its town. The constructor (0x0052C360)
-// takes the nearest town and puts the farm at the head of the list at
-// Town+0x788. A node of that list is 8 bytes: the next node, then the farm.
-// The towns of a player are a list from GPlayer+0xA50, with the next town at
-// Town+0x75C (Town::GetNearestTownToPos 0x0073B170). The players are at
-// GGame+0x18, 0xA60 bytes each, up to GGame+0x5318
-// (GGame::GetNextPlayerAndNeutral 0x00550980). The game does not delete an
-// empty FishFarm: its fish come back (FishFarm::Process 0x0052D130). [V]
+// The game keeps each FishFarm in one list: the constructor (0x0052C360) puts
+// the farm at the head of the list at GGame+0x205C0C, with the next farm at
+// FishFarm+0x7C. The search at the palm walks that list (0x005D3A91). The
+// game does not delete an empty FishFarm: its fish come back
+// (FishFarm::Process 0x0052D130). [V]
+//
+// The fish that the player sees are not at the point of the farm. They are
+// a school of 15 sprites (fish_math.h) at FishFarm+0x88: each entry of the
+// school holds a fish, and the sprite of the fish holds its place in the
+// world (x, y, z). The school has its home at +0x48 and the fill of the farm
+// at +0x64. The game draws ftol(fill * 15) fish, and the search at the palm
+// finds the farm when a drawn fish is within 2 units of the land point under
+// the Hand (fn_00824B10). [V]
 const uintptr_t kFishFarmTable = 0x008DADC0;  // ??_7FishFarm
-const int kGamePlayerEnd = 0x5318;  // GGame: the end of the players
-const int kPlayerTowns = 0xA50;     // GPlayer: its first Town
-const int kTownNext = 0x75C;        // Town: the next Town of the player
-const int kTownFishFarms = 0x788;   // Town: the first node of its farms
+const int kGameFishFarms = 0x205C0C;  // GGame: the first FishFarm
+const int kFarmNext = 0x7C;           // FishFarm: the next FishFarm
+const int kFarmSchool = 0x88;         // FishFarm: its school of fish
+const int kSchoolHome = 0x48;         // the school: its home (x, y, z)
+const int kSchoolFill = 0x64;         // the school: the fill of the farm
+const int kSchoolSize = 0x68;
 // GameThingWithPos: the MapCoords of the object, x and z as ints of the
 // world unit times 6553.6.
 const int kThingPosition = 0x14;
 // Slot 0x64C, GetHeightForHandAboveInteractObject: 5 units for a FishFarm
 // (0x0052C840). The game holds the Hand that high over the farm in a take.
 const int kHandAboveSource = 0x64C;
-const int kMaxTownWalk = 64;
 const int kMaxFarmWalk = 256;
 // fish_take: 1 makes each FishFarm near the Hand a candidate of the choice,
 // and a far target. 0 leaves it out, as the draw does.
 bool g_fish_take = true;
+// fish_school: 1 puts the target of a FishFarm on its fish: the point is the
+// middle of the drawn fish, and the body goes 2 units past the fish farthest
+// from it (fish_math.h). Each farm in reach is a candidate also when the draw
+// filled the list of candidates. 0 puts the target at the point of the farm,
+// with a body of 5 units, and a farm is a candidate only while the list has
+// room.
+bool g_fish_school = true;
+// The radius of the school of a farm that is a candidate in this frame.
+bool FishSchoolRadius(const void* farm, float* radius);
 
 // The test key fish_test_off_frame=N: from frame N of the mod's hand on, the
 // mod acts as with fish_take=0. A desktop run can then put the Hand on the
@@ -1648,6 +1719,38 @@ bool IsFishFarm(void* object) {
   return object != nullptr &&
          *static_cast<void* const*>(object) ==
              reinterpret_cast<void*>(kFishFarmTable);
+}
+
+bool InsideInfluence(uint8_t* face, float x, float z);
+float ClampToMap(float v);
+
+// THE FACTS OF A TAKE, for the log of a take that ends: the game's right
+// button and the grip, the interface action, how far the Hand's point is
+// from the source across the land, and the influence of the player under the
+// Hand. A take that ends with the button down was ended by the game or by the
+// mod, not by the grip.
+float g_take_source_xz[2] = {0.0f, 0.0f};
+int g_take_far_band = 0;
+void TakeFacts(const uint8_t* face, char* out, size_t size) {
+  const int32_t action =
+      face != nullptr ? *reinterpret_cast<const int32_t*>(face + kFaceAction)
+                      : -1;
+  const float units = RoomUnits();
+  const float dx = g_point[0] - g_take_source_xz[0];
+  const float dz = g_point[2] - g_take_source_xz[1];
+  const float cm =
+      units > 0.0f ? sqrtf(dx * dx + dz * dz) / units * 100.0f : 0.0f;
+  const bool inside =
+      g_face != nullptr && face == g_face &&
+      InsideInfluence(g_face, ClampToMap(g_point[0]), ClampToMap(g_point[2]));
+  sprintf_s(out, size,
+            "the right button of the game is %s, the grip is %s, the "
+            "interface action is %d, the Hand's point is %.1f cm of the room "
+            "from the source across the land, and the land under it is %s "
+            "the influence",
+            ControllersGameRightDown() ? "down" : "up",
+            ControllersGripClosed() ? "closed" : "open", action, cm,
+            inside ? "inside" : "outside");
 }
 
 // Once a frame: each start and end of a bulk take, and the amount in the
@@ -1678,11 +1781,19 @@ void LogTake(const uint8_t* face, const uint8_t* hand) {
                "Hand holds a %s of %u, frame %llu", name, ClassName(held),
                amount, g_frame);
       }
+      const int32_t* at = reinterpret_cast<const int32_t*>(
+          static_cast<const uint8_t*>(object) + kThingPosition);
+      g_take_source_xz[0] = static_cast<float>(at[0]) / kMapScale;
+      g_take_source_xz[1] = static_cast<float>(at[1]) / kMapScale;
+      g_take_far_band = 0;
     } else if (g_take_logs < kMaxTakeLogs) {
       ++g_take_logs;
+      char facts[320];
+      TakeFacts(face, facts, sizeof(facts));
       ModLog("hand bulk    : the bulk take ends after %d game turns. The Hand "
-             "holds %s of %u, frame %llu", g_take_turns,
-             held != nullptr ? ClassName(held) : "nothing", amount, g_frame);
+             "holds %s of %u. At the end %s, frame %llu", g_take_turns,
+             held != nullptr ? ClassName(held) : "nothing", amount, facts,
+             g_frame);
     }
     g_take_object = object;
     g_take_amount = amount;
@@ -1696,6 +1807,24 @@ void LogTake(const uint8_t* face, const uint8_t* hand) {
   }
   if (object == nullptr) return;
   ++g_take_frames;
+  // The Hand goes away from the source: one line at 15, 30, 60 and 120 cm of
+  // the room across the land, with the facts of the take.
+  {
+    const float units = RoomUnits();
+    const float dx = g_point[0] - g_take_source_xz[0];
+    const float dz = g_point[2] - g_take_source_xz[1];
+    const float cm =
+        units > 0.0f ? sqrtf(dx * dx + dz * dz) / units * 100.0f : 0.0f;
+    const int band = cm >= 120.0f ? 4 : cm >= 60.0f ? 3 : cm >= 30.0f ? 2
+                     : cm >= 15.0f ? 1 : 0;
+    if (band > g_take_far_band && g_take_logs < kMaxTakeLogs) {
+      ++g_take_logs;
+      char facts[320];
+      TakeFacts(face, facts, sizeof(facts));
+      ModLog("hand bulk    : during the take %s, frame %llu", facts, g_frame);
+    }
+    if (band > g_take_far_band) g_take_far_band = band;
+  }
   // The states of the interface during a take, on each change: the object of
   // the next pick record (the game's release step reads it), the pick lock
   // and the interface action. A log of a take that does not end shows here
@@ -1914,14 +2043,14 @@ void PushTip(const float world[3]) {
   ++g_tip_count;
 }
 
-float TipSpeedMps() {
+float TipSpeedMps(double window) {
   if (g_tip_count < 2 ||
       NowSeconds() - g_tip_history[g_tip_count - 1].time > kStaleSeconds) {
     return 0.0f;
   }
   float v[3];
   if (!controller_math::MeanVelocity(g_tip_history, g_tip_count,
-                                     kCreatureWindow, v)) {
+                                     window, v)) {
     return 0.0f;
   }
   const float units = RoomUnits();
@@ -2451,11 +2580,36 @@ void TouchFrame(uint8_t* state, uint8_t* hand, float dt) {
       *time = 1000;
       ++g_touch_waits;
     }
+    // THE FIRST STROKE (creature_stroke_wait=0). The stroke test needs 1 s
+    // of contact and 2 s since the start of the state. The timers start at
+    // those values, so the first stroke comes with the first motion on the
+    // body. The game's wait between two strokes stays.
+    if (!g_stroke_wait) {
+      creature_touch_math::StrokeTimers t;
+      int32_t* since = reinterpret_cast<int32_t*>(state + kStateSinceStroke);
+      int32_t* play = reinterpret_cast<int32_t*>(state + kStateSincePlay);
+      int32_t* contact = reinterpret_cast<int32_t*>(state + kStateContact);
+      int32_t* bone = reinterpret_cast<int32_t*>(state + kStateBone);
+      t.since_stroke = *since;
+      t.since_play = *play;
+      t.contact = *contact;
+      t.bone = *bone;
+      creature_touch_math::FirstStrokeTimers(&t);
+      *since = t.since_stroke;
+      *play = t.since_play;
+      *contact = t.contact;
+      *bone = t.bone;
+      ++g_stroke_presets;
+    }
     if (g_touch_logs < kMaxTouchLogs) {
       ++g_touch_logs;
-      ModLog("hand creature: the Creature state starts, frame %llu. %s",
+      ModLog("hand creature: the Creature state starts, frame %llu. %s %s",
              g_frame, wait ? "The game's wait of 1 s before a slap stays."
-                           : "A slap can count at once.");
+                           : "A slap can count at once.",
+             g_stroke_wait ? "The game's wait of 2 s before the first stroke "
+                             "stays (creature_stroke_wait=1)."
+                           : "A stroke can count at once "
+                             "(creature_stroke_wait=0).");
     }
   }
   ++g_touch_frames;
@@ -2525,11 +2679,21 @@ void TouchFrame(uint8_t* state, uint8_t* hand, float dt) {
   g_touch_inside = g_touch_valid && g_touch_gap <= 0.0f;
   // One tick when the contact point goes into the body.
   if (g_touch_inside && !was_inside) HapticsPulse(haptics_math::kTouch);
-  // A change of the hand moves the contact point, and that is no slap.
-  g_touch_entered = g_touch_valid && g_touch_from_valid &&
+  // A change of the hand moves the contact point, and that is no slap. With
+  // creature_open_slap=0 the open hand never slaps, so it forces no slap
+  // branch either.
+  const bool open_press = ControllersOpenStrokeOn();
+  const bool open_slow = open_press && !ControllersOpenSlap();
+  g_touch_entered = !open_slow && g_touch_valid && g_touch_from_valid &&
                     g_stroke_finger == g_stroke_was_finger &&
                     controller_math::CapsuleEntered(g_touch_body,
                                                     g_touch_from, contact);
+  // THE HEIGHT OF THE HIT (creature_slap_height): the place of the path that
+  // is nearest to the axis of the body.
+  g_touch_hit_h =
+      g_touch_entered
+          ? controller_math::SlapPathHeight(g_touch_body, g_touch_from, contact)
+          : 0.5f;
   // THE TICKLE: the wave of the fingers goes on with the path of the contact
   // point while it is in the body.
   if (fresh) {
@@ -2583,10 +2747,14 @@ void TouchFrame(uint8_t* state, uint8_t* hand, float dt) {
 
   // THE SPEED. The last point goes across the line of sight by k times the
   // real speed times the game's dt, on the side the hand comes from.
+  // With creature_swing=1 the speed is the distance over 100 ms, and a
+  // hysteresis decides between a stroke and a slap (creature_touch_math::
+  // SwingSpeed). With 0 it is the distance over 50 ms, with no hysteresis.
   float v_room[3], v_grip[3], real = 0.0f;
   const bool step = dt > 0.0f && dt < 0.5f;
-  const bool moving =
-      step && HandVelocity(kCreatureWindow, v_room, v_grip, &real);
+  const double window =
+      g_swing_on ? creature_touch_math::kSwingWindow : kCreatureWindow;
+  const bool moving = step && HandVelocity(window, v_room, v_grip, &real);
   float v_world[3] = {0.0f, 0.0f, 0.0f};
   if (moving) controller_math::Apply(g_room, false, v_room, v_world);
   // A line of sight straight down keeps the axis of the last frame.
@@ -2599,16 +2767,34 @@ void TouchFrame(uint8_t* state, uint8_t* hand, float dt) {
   // backhand is, keeps the grip almost still and moves the finger tips. So the
   // speed is the larger of the grip's and the tip's.
   g_creature_grip = moving ? real : 0.0f;
-  g_creature_tip = moving ? TipSpeedMps() : 0.0f;
+  g_creature_tip = moving ? TipSpeedMps(window) : 0.0f;
   for (int i = 0; i < 3; ++i) g_creature_way[i] = moving ? v_room[i] : 0.0f;
   g_creature_k = controller_math::SlapUnitsPerMps(size, SlapMps());
-  g_creature_real = g_stroke_mode == kStrokeBefore
-                        ? g_creature_grip
-                        : near_math::SlapSpeed(g_creature_grip, g_creature_tip);
+  g_creature_measured =
+      g_stroke_mode == kStrokeBefore
+          ? g_creature_grip
+          : near_math::SlapSpeed(g_creature_grip, g_creature_tip);
+  if (fresh) g_swing.on = false;
+  g_creature_real =
+      g_swing_on ? creature_touch_math::SwingSpeed(&g_swing,
+                                                   g_creature_measured,
+                                                   SlapMps())
+                 : g_creature_measured;
+  // THE OPEN HAND AND THE SLAP. With creature_open_slap=1 the game reads the
+  // real speed of the open hand, as it reads the speed of the mouse: a slow
+  // motion strokes, and a fast hit slaps. With 0, in a press that the mod
+  // holds for the open hand, the game reads a speed under the speed of a
+  // slap. A hand that moves still moves, so the game still sees a stroke, and
+  // a slap needs the grip.
+  if (open_slow) {
+    const float full = g_creature_real;
+    g_creature_real = creature_touch_math::OpenSpeed(full, SlapMps());
+    if (g_creature_real < full) ++g_open_slow;
+  }
   g_creature_speed = g_creature_k * g_creature_real;
   // The game starts its slap effect inside the Update that follows. The
   // pulse of that effect takes its strength from this speed (haptics.cpp).
-  HapticsSlapSpeed(g_creature_real, SlapMps());
+  HapticsSlapSpeed(g_creature_measured, SlapMps());
   controller_math::SlapPreviousPoint(g_target, g_touch_across, sign,
                                      g_creature_k, g_creature_real,
                                      step ? dt : 0.0f, g_prev_point);
@@ -2675,9 +2861,35 @@ void __fastcall h_CreatureUpdate(void* self, void* unused, float dt,
   const bool first = g_touch_frame != g_frame;
   TouchFrame(state, hand, dt);
   const bool entered = first && g_touch_entered;
+  // THE HEIGHT OF A SLAP (creature_slap_height). The slap test reads the
+  // height of the Hand over the land under it (hand+0x7C) at the start of the
+  // Update, and needs 0 to 1.1 S. In a slap that went through the body
+  // between two frames the Hand can be over the head or at the land. So for
+  // this Update the Hand has the height of the hit. The state puts the Hand
+  // at its place again at the end of the Update. The mod puts the old height
+  // back when the state did not.
+  float* hand_y = reinterpret_cast<float*>(hand + kHandPosition + 4);
+  const float s_now = 15.0f * CreatureSize(hand);
+  const float* hand_at = reinterpret_cast<const float*>(hand + kHandPosition);
+  const int32_t under[3] = {static_cast<int32_t>(hand_at[0] * kMapScale),
+                            static_cast<int32_t>(hand_at[2] * kMapScale), 0};
+  const float land_now = s_now > 0.0f
+                             ? reinterpret_cast<GetAltitudeFn>(kGetAltitude)(
+                                   under)
+                             : 0.0f;
+  const float old_y = *hand_y;
+  float set_y = old_y;
+  if (entered && g_slap_height && s_now > 0.0f && land_now == land_now) {
+    set_y = land_now + g_touch_hit_h * s_now;
+    *hand_y = set_y;
+    ++g_slap_heights;
+  }
+  // What the game reads as the height, as a part of S, for the log.
+  const float read_h = s_now > 0.0f ? (*hand_y - land_now) / s_now : 0.0f;
   g_in_creature = true;
   o_CreatureUpdate(self, unused, dt, matrix);
   g_in_creature = false;
+  if (set_y != old_y && *hand_y == set_y) *hand_y = old_y;
   g_prev_valid = false;
   g_touch_fix_x = false;
   const float after = *reinterpret_cast<const float*>(state + kStateTotal);
@@ -2707,17 +2919,22 @@ void __fastcall h_CreatureUpdate(void* self, void* unused, float dt,
     if (!entered || g_miss_logs >= kMaxMissLogs) return;
     ++g_miss_logs;
     const int32_t waited = *reinterpret_cast<const int32_t*>(state + kStateTime);
+    const bool height_ok = read_h > 0.0f && read_h < 1.1f;
     ModLog("hand creature: the hand went into the body at %.2f m/s (the grip "
            "%.2f, the Hand's point %.2f), and that was no slap. A slap needs "
-           "%.2f m/s. %s. The motion in the room: %.2f right, %.2f up, %.2f "
-           "forward. The hand is %s, frame %llu", g_creature_real,
-           g_creature_grip, g_creature_tip, slap_mps,
+           "%.2f m/s, and the game read %.2f m/s (creature_swing=%d). %s. "
+           "The game read the height of the Hand as %.2f S, and a slap needs "
+           "0 to 1.1 S (creature_slap_height=%d). The motion in the room: "
+           "%.2f right, %.2f up, %.2f forward. The hand is %s, frame %llu",
+           g_creature_measured, g_creature_grip, g_creature_tip, slap_mps,
+           g_creature_real, g_swing_on ? 1 : 0,
            g_creature_real < slap_mps
                ? "The hand was too slow"
                : waited < 1000 ? "The game waits 1 s after a stroke"
-                               : "The speed was enough: the game's own test "
-                                 "of the height or of the hit said no",
-           way[0], way[1], way[2],
+               : !height_ok    ? "The speed was enough: the height was not"
+                               : "The speed and the height were enough: the "
+                                 "game's own test of the hit said no",
+           read_h, g_slap_height ? 1 : 0, way[0], way[1], way[2],
            g_stroke_finger ? "the index finger" : "the flat hand", g_frame);
     return;
   }
@@ -2727,9 +2944,15 @@ void __fastcall h_CreatureUpdate(void* self, void* unused, float dt,
   static int slap_logs = 0;
   if (slap ? slap_logs >= 200 : g_creature_logs >= kMaxCreatureLogs) return;
   if (slap) ++slap_logs; else ++g_creature_logs;
+  char went[96] = "";
+  if (entered) {
+    sprintf_s(went, ", and it went into the body since the last frame (the "
+              "game read the height %.2f S)", read_h);
+  }
   ModLog("hand creature: a %s with %s, %s as the eye sees it. The hand moved "
-         "at %.2f m/s (the grip %.2f, the Hand's point %.2f), which the game "
-         "read as %.1f units/s. A slap needs %.2f m/s (%.1f units/s) and a "
+         "at %.2f m/s (the grip %.2f, the Hand's point %.2f), and the game "
+         "read %.2f m/s, %.1f units/s (creature_swing=%d). A slap needs %.2f "
+         "m/s (%.1f units/s) and a "
          "hard slap %.2f m/s (%.1f). The motion in the room: %.2f right, "
          "%.2f up, %.2f forward. The contact point is %.2f units %s the "
          "body%s. Total %.2f to %.2f, dt %.4f. The state after it: contact "
@@ -2738,11 +2961,11 @@ void __fastcall h_CreatureUpdate(void* self, void* unused, float dt,
          slap ? (g_creature_speed >= 9.0f * s ? "hard slap" : "slap")
               : "stroke",
          g_stroke_finger ? "the index finger" : "the flat hand",
-         g_touch_step_x > 0 ? "to the right" : "to the left", g_creature_real,
-         g_creature_grip, g_creature_tip, g_creature_speed, slap_mps,
+         g_touch_step_x > 0 ? "to the right" : "to the left",
+         g_creature_measured, g_creature_grip, g_creature_tip, g_creature_real,
+         g_creature_speed, g_swing_on ? 1 : 0, slap_mps,
          5.0f * s, 1.8f * slap_mps, 9.0f * s, way[0], way[1], way[2],
-         fabsf(g_touch_gap), g_touch_inside ? "inside" : "outside",
-         entered ? ", and it went into the body since the last frame" : "",
+         fabsf(g_touch_gap), g_touch_inside ? "inside" : "outside", went,
          before, after, dt,
          *reinterpret_cast<const int32_t*>(state + 0x110),
          *reinterpret_cast<const int32_t*>(state + 0x114),
@@ -2888,6 +3111,33 @@ int LeashKind(void* creature) {
       mine, ready, holder != nullptr && holder != status,
       *reinterpret_cast<const int32_t*>(leash + kLeashOn) != 0,
       *reinterpret_cast<void* const*>(leash + kLeashObject) != nullptr);
+}
+
+// THE OBJECT THAT HOLDS A TIED LEASH (grip_skips_tied, docs/creature.md,
+// "The leash on an object"). GLeashStatus+0x24 of the local interface. The
+// game does not let the Hand take that object: a press on it is a press for
+// the leash, and it takes nothing. So with grip_skips_tied=1 it is no target
+// of the grip, at the Hand and from a distance, and it has no gold halo. The
+// trigger keeps it as its target: a double press takes the leash back.
+// Latched once a frame, because the choice asks for each candidate.
+bool g_skip_tied = true;
+uint64_t g_far_tied_out = 0;  // frames in which the far aim left it out
+void* g_tied_object = nullptr;
+uint64_t g_tied_frame = ~0ull;
+
+void* TiedLeashObject() {
+  if (g_tied_frame == g_frame) return g_tied_object;
+  g_tied_frame = g_frame;
+  g_tied_object = nullptr;
+  if (!g_skip_tied || g_face == nullptr) return nullptr;
+  const uint8_t* status =
+      *reinterpret_cast<uint8_t* const*>(g_face + kFaceStatus);
+  if (status == nullptr) return nullptr;
+  const uint8_t* leash =
+      *reinterpret_cast<uint8_t* const*>(status + kStatusLeash);
+  if (leash == nullptr) return nullptr;
+  g_tied_object = *reinterpret_cast<void* const*>(leash + kLeashObject);
+  return g_tied_object;
 }
 
 // A FIGHT OF CREATURES (docs/creature.md, "A fight of Creatures").
@@ -3053,6 +3303,7 @@ void __fastcall h_InteractCamera(void* self, void* unused, int32_t mode) {
           g_virtual_hand = hand;
           g_virtual_creature = creature;
           g_virtual_since = NowSeconds();
+          g_virtual_open = ControllersOpenStrokeOn();
           ++g_virtual_count;
           if (g_touch_logs < kMaxTouchLogs) {
             ++g_touch_logs;
@@ -3064,6 +3315,7 @@ void __fastcall h_InteractCamera(void* self, void* unused, int32_t mode) {
       }
       return;
     }
+    if (g_virtual && ControllersOpenStrokeOn()) g_virtual_open = true;
     o_InteractCamera(self, unused, mode);
     return;
   }
@@ -3077,7 +3329,7 @@ void __fastcall h_InteractCamera(void* self, void* unused, int32_t mode) {
           VTable(creature)[kCreatureGetPlayer / 4])(creature, nullptr);
       mine = player != nullptr && player == LocalPlayer();
     }
-    const bool click = held < kLeashSeconds && mine;
+    const bool click = held < kLeashSeconds && mine && !g_virtual_open;
     if (click) {
       void* game = *reinterpret_cast<void* const*>(kGame);
       if (game != nullptr) {
@@ -3094,8 +3346,10 @@ void __fastcall h_InteractCamera(void* self, void* unused, int32_t mode) {
              "0x%X). %s, frame %llu", held * 1000.0, mode,
              click ? "A short press on your Creature: the leash click "
                      "(packet 0x5F)"
-                   : (mine ? "Not a short press, so no leash click"
-                           : "Not your Creature, so no leash click"),
+                   : g_virtual_open
+                         ? "A press of the open hand, so no leash click"
+                         : (mine ? "Not a short press, so no leash click"
+                                 : "Not your Creature, so no leash click"),
              g_frame);
     }
   }
@@ -3226,6 +3480,8 @@ bool ClickScroll(void* object) {
 
 int PressKind(void* object, void* status) {
   if (g_one_target && IsCreatureObject(object)) return near_math::kCreature;
+  // The object that holds a tied leash is no target of the grip.
+  if (object != nullptr && object == TiedLeashObject()) return near_math::kNone;
   // A FishFarm with fish says yes to ValidForPlaceInHand too. The press of
   // the game tests the take first, so a grip on it takes fish.
   if (FishTakeOn(g_frame) && IsFishFarm(object) && TakeValid(object, status)) {
@@ -3332,6 +3588,63 @@ int __fastcall h_ScreenTest(const void* bounds, void* unused,
     *under = 1;
     ++g_near_offers;
     return result;
+  }
+  // THE BODIES NEAR EACH HAND (hand_feel_offer, docs/hand-model.md, "The
+  // bodies"). The point of a large building is far from its walls, and the
+  // hand that does not point has no Hand's point. So an object also goes to
+  // the pick when the ball round the box of this test is near the Hand's
+  // point or near the middle of a hand that takes bodies. The test read the
+  // box [V]: its middle at +4 and its radius at +0x1C, through the rows of
+  // the matrix of the object at +0x14 and its scale at +0x44.
+  if (g_near_pick && HandFeelOfferOn()) {
+    float points[2][3], reach[2];
+    const int hands = HandFeelOfferPoints(points, reach);
+    const float* box = static_cast<const float*>(bounds);
+    float middle[3], radius = 0.0f;
+    if (hand_feel::OfferBall(box + 1, box[7],
+                             reinterpret_cast<const float*>(object + kMeshRows),
+                             at,
+                             *reinterpret_cast<const float*>(object +
+                                                             kObjectScale),
+                             middle, &radius)) {
+      bool near_one = hand_feel::OfferGap(middle, radius, g_target) <=
+                      sqrtf(g_near_bound_sq);
+      for (int h = 0; h < hands && !near_one; ++h) {
+        near_one = hand_feel::OfferGap(middle, radius, points[h]) <= reach[h];
+      }
+      if (near_one) {
+        *under = 1;
+        ++g_near_offers;
+        HandFeelOffered();
+        return result;
+      }
+    }
+  }
+  // THE SOLIDS NEAR THE HANDS AND THE HEAD (LatchSolids): the same test of
+  // the ball round the box, at the middle of each real hand
+  // (hand_object_stop) and at the head (head_blinder_objects). So a house
+  // that the head goes into is in the list too, when the Hand is far from it.
+  if (g_near_pick) {
+    float points[3][3], bound[3];
+    const int wants = SolidPoints(points, bound);
+    const float* box = static_cast<const float*>(bounds);
+    float middle[3], radius = 0.0f;
+    if (wants > 0 &&
+        hand_feel::OfferBall(box + 1, box[7],
+                             reinterpret_cast<const float*>(object + kMeshRows),
+                             at,
+                             *reinterpret_cast<const float*>(object +
+                                                             kObjectScale),
+                             middle, &radius)) {
+      for (int p = 0; p < wants; ++p) {
+        if (hand_feel::OfferGap(middle, radius, points[p]) <= bound[p]) {
+          *under = 1;
+          ++g_near_offers;
+          ++g_solid_offers;
+          return result;
+        }
+      }
+    }
   }
   // THE LOCKED TARGET of a far grab goes to the pick on each frame, in the
   // cone or not, so the lock has its place while it moves.
@@ -3609,6 +3922,38 @@ void HandDirectPalmPointChange(const char* by) {
 }
 int HandDirectPalmPointValue() {
   return g_installed ? (g_palm_point ? 1 : 0) : kDebugCannot;
+}
+
+// The switches of the debug page for creature_stroke_wait and
+// creature_slap_height. A Creature state that runs keeps its timers. The next
+// state and the next slap take the new value.
+int HandDirectStrokeWaitValue() {
+  return g_installed ? (g_stroke_wait ? 1 : 0) : kDebugCannot;
+}
+void HandDirectStrokeWaitChange(const char* by) {
+  g_stroke_wait = !g_stroke_wait;
+  ControllersGesturePulse(0.5f, g_stroke_wait ? 0.08f : 0.30f);
+  ModLog("hand creature: %s: creature_stroke_wait is %d, frame %llu", by,
+         g_stroke_wait ? 1 : 0, g_frame);
+}
+int HandDirectSwingValue() {
+  return g_installed ? (g_swing_on ? 1 : 0) : kDebugCannot;
+}
+void HandDirectSwingChange(const char* by) {
+  g_swing_on = !g_swing_on;
+  g_swing.on = false;
+  ControllersGesturePulse(0.5f, g_swing_on ? 0.30f : 0.08f);
+  ModLog("hand creature: %s: creature_swing is %d, frame %llu", by,
+         g_swing_on ? 1 : 0, g_frame);
+}
+int HandDirectSlapHeightValue() {
+  return g_installed ? (g_slap_height ? 1 : 0) : kDebugCannot;
+}
+void HandDirectSlapHeightChange(const char* by) {
+  g_slap_height = !g_slap_height;
+  ControllersGesturePulse(0.5f, g_slap_height ? 0.30f : 0.08f);
+  ModLog("hand creature: %s: creature_slap_height is %d, frame %llu", by,
+         g_slap_height ? 1 : 0, g_frame);
 }
 
 // Ctrl and the 3 key of the number pad: the limits of the hand of a stroke
@@ -4115,6 +4460,9 @@ void __fastcall h_InterfaceStep(void* self, void* unused) {
     // A MIRACLE IN THE HAND: a cancel or a tap of the mod runs here, and the
     // record holds the target of the miracle.
     MiracleInterfaceStep(self);
+    // THE SPELL BOOK: the request of a miracle that the player took from the
+    // book goes to the game here (spell_book.cpp).
+    SpellBookInterfaceStep(self);
     // A SCAFFOLD IN THE HAND: the record holds the object that it joins.
     VillageKeepRecord();
     // MANY TREES FROM A FOREST: the take of the mod puts a tree in the
@@ -4176,6 +4524,12 @@ Body BodyOf(void* object) {
       VTable(object)[kGet2DRadius / 4])(object, nullptr);
   if (!(body.radius >= 0.0f && body.radius < 1000.0f)) body.radius = 0.0f;
   body.height = 2.0f * body.radius;
+  // A fish farm with fish_school=1: the radius of its school, and the height
+  // of the farm's own body.
+  float school = 0.0f;
+  if (IsFishFarm(object) && FishSchoolRadius(object, &school)) {
+    body.radius = school;
+  }
   if (g_near_rule) {
     const float height = reinterpret_cast<VirtualFloatFn>(
         VTable(object)[kGetHeight / 4])(object, nullptr);
@@ -5230,19 +5584,73 @@ void Choose() {
 // on the object that the halo was on. The end of the pass asks again, and the
 // choice is made again only when the draw offered more objects since.
 // THE FISH IN THE SEA AS CANDIDATES (fish_take=1, see kFishFarmTable). Once a
-// frame, before the first choice: each FishFarm of each town that is in reach
-// becomes a candidate with no mesh. Its point is the x and z of the farm and
-// the height of the land there (GetAltitude gives 0 for the sea). In reach is
-// near the Hand's point, or in the range of the far grab from the Hand with 1
-// m more for the head. With far_grab_max_m=0 each farm is a candidate.
+// frame, before the first choice: each FishFarm of the game's list that is in
+// reach becomes a candidate with no mesh. With fish_school=1 its point is the
+// middle of its drawn fish (fish_math.h), and a farm with no drawn fish has
+// the point of the farm. With fish_school=0 its point is the x and z of the
+// farm and the height of the land there (GetAltitude gives 0 for the sea). In
+// reach is near the Hand's point, or in the range of the far grab from the
+// Hand with 1 m more for the head. With far_grab_max_m=0 each farm is a
+// candidate.
+//
+// The draw offers the objects in the view near to far, and in the God view
+// the list holds kLifeCandidates. At a coast with a town in the view the draw
+// can fill it before the farms come. With fish_school=1 a farm takes a place
+// after the limit of the draw, up to kMaxCandidates.
 uint64_t g_fish_frame = 0;
-int g_fish_farms = 0;      // the farms in the lists in the last frame
+int g_fish_farms = 0;      // the farms in the list in the last frame
 int g_fish_offered = 0;    // the farms that were candidates in the last frame
 int g_fish_said_farms = -1;
+int g_fish_said_offered = -1;
+int g_fish_said_full = -1;
+int g_fish_logs = 0;
+const int kMaxFishLogs = 60;
+
+// The schools of the farms that are candidates in this frame
+// (fish_school=1). BodyOf gives such a farm the radius of its school.
+struct FishPlace {
+  void* farm;
+  float radius;
+};
+const int kMaxFishPlaces = 64;
+FishPlace g_fish_places[kMaxFishPlaces];
+int g_fish_place_count = 0;
+
+bool FishSchoolRadius(const void* farm, float* radius) {
+  if (g_fish_frame != g_frame) return false;
+  for (int i = 0; i < g_fish_place_count; ++i) {
+    if (g_fish_places[i].farm == farm) {
+      *radius = g_fish_places[i].radius;
+      return true;
+    }
+  }
+  return false;
+}
+
+// The drawn fish of a farm: the place of the sprite of each fish that the
+// game draws (fn_00824B10). The count, 0 with no school or with bad memory.
+int DrawnFishOf(const void* farm, float (*out)[3]) {
+  const uint8_t* school = *reinterpret_cast<const uint8_t* const*>(
+      static_cast<const uint8_t*>(farm) + kFarmSchool);
+  if (school == nullptr || IsBadReadPtr(school, kSchoolSize)) return 0;
+  const int count = fish_math::DrawnFish(
+      *reinterpret_cast<const float*>(school + kSchoolFill));
+  for (int i = 0; i < count; ++i) {
+    const uint8_t* fish = reinterpret_cast<const uint8_t* const*>(school)[i];
+    if (fish == nullptr || IsBadReadPtr(fish, sizeof(void*))) return 0;
+    const float* sprite = *reinterpret_cast<const float* const*>(fish);
+    if (sprite == nullptr || IsBadReadPtr(sprite, 3 * sizeof(float))) {
+      return 0;
+    }
+    for (int k = 0; k < 3; ++k) out[i][k] = sprite[k];
+  }
+  return count;
+}
 
 void OfferFishFarms() {
   if (!FishTakeOn(g_frame) || g_fish_frame == g_frame) return;
   g_fish_frame = g_frame;
+  g_fish_place_count = 0;
   if (!g_active || g_face == nullptr || g_face[kFaceLocked] != 0) return;
   const uint8_t* game = *reinterpret_cast<uint8_t* const*>(kGame);
   if (game == nullptr) return;
@@ -5250,70 +5658,103 @@ void OfferFishFarms() {
   const float far_m = FarGrabMaxMeters();
   const float reach = far_m > 0.0f ? (far_m + 1.0f) * units : 0.0f;
   const GetAltitudeFn altitude = reinterpret_cast<GetAltitudeFn>(kGetAltitude);
-  int farms = 0, offered = 0, towns = 0, walked = 0;
-  const int kSaidFarms = 8;
-  float said[kSaidFarms][3] = {};
-  void* said_object[kSaidFarms] = {};
-  for (int at = kGamePlayers; at + kGamePlayerSize <= kGamePlayerEnd;
-       at += kGamePlayerSize) {
-    const uint8_t* town =
-        *reinterpret_cast<uint8_t* const*>(game + at + kPlayerTowns);
-    while (town != nullptr && towns < kMaxTownWalk) {
-      if (IsBadReadPtr(town, kTownFishFarms + sizeof(void*))) break;
-      ++towns;
-      const uint8_t* node =
-          *reinterpret_cast<uint8_t* const*>(town + kTownFishFarms);
-      while (node != nullptr && walked < kMaxFarmWalk) {
-        if (IsBadReadPtr(node, 2 * sizeof(void*))) break;
-        ++walked;
-        void* farm = *reinterpret_cast<void* const*>(node + sizeof(void*));
-        node = *reinterpret_cast<uint8_t* const*>(node);
-        if (!ObjectLives(farm, reinterpret_cast<void*>(kFishFarmTable))) {
-          continue;
-        }
-        ++farms;
-        const int32_t* coords = reinterpret_cast<const int32_t*>(
-            static_cast<const uint8_t*>(farm) + kThingPosition);
-        const float point[3] = {static_cast<float>(coords[0]) / kMapScale,
-                                altitude(coords),
-                                static_cast<float>(coords[1]) / kMapScale};
-        if (!(point[1] == point[1])) continue;
-        if (farms <= kSaidFarms) {
-          for (int k = 0; k < 3; ++k) said[farms - 1][k] = point[k];
-          said_object[farms - 1] = farm;
-        }
-        if (reach > 0.0f && Distance(point, g_target) > reach) continue;
-        if (g_candidate_count >= g_candidate_limit || !FirstOffer(farm)) {
-          continue;
-        }
-        Candidate& c = g_candidates[g_candidate_count++];
-        if (g_candidate_count > g_most_candidates) {
-          g_most_candidates = g_candidate_count;
-        }
-        c.object = farm;
-        c.model = nullptr;
-        for (int k = 0; k < 3; ++k) c.position[k] = point[k];
-        ++offered;
+  // The objects that the draw offered before the farms came.
+  const int drawn = g_candidate_count;
+  const int limit = g_fish_school ? kMaxCandidates : g_candidate_limit;
+  int farms = 0, offered = 0, full = 0;
+  const int kSaidFarms = 16;
+  struct Said {
+    void* farm;
+    float point[3];
+    float school[3];
+    float radius;
+    int fish;
+  };
+  Said said[kSaidFarms] = {};
+  float fish[fish_math::kSchoolFish][3];
+  uint8_t* farm = *reinterpret_cast<uint8_t* const*>(game + kGameFishFarms);
+  for (int walked = 0; farm != nullptr && walked < kMaxFarmWalk; ++walked) {
+    if (!ObjectLives(farm, reinterpret_cast<void*>(kFishFarmTable))) break;
+    void* object = farm;
+    farm = *reinterpret_cast<uint8_t* const*>(farm + kFarmNext);
+    ++farms;
+    const int32_t* coords = reinterpret_cast<const int32_t*>(
+        static_cast<const uint8_t*>(object) + kThingPosition);
+    float point[3] = {static_cast<float>(coords[0]) / kMapScale,
+                      altitude(coords),
+                      static_cast<float>(coords[1]) / kMapScale};
+    if (!(point[1] == point[1])) continue;
+    fish_math::School school = {{point[0], point[1], point[2]}, 0.0f};
+    const int count = DrawnFishOf(object, fish);
+    const bool have_school =
+        count > 0 && fish_math::SchoolBody(fish, count, &school);
+    if (farms <= kSaidFarms) {
+      Said& s = said[farms - 1];
+      s.farm = object;
+      for (int k = 0; k < 3; ++k) {
+        s.point[k] = point[k];
+        s.school[k] = school.point[k];
       }
-      town = *reinterpret_cast<uint8_t* const*>(town + kTownNext);
+      s.radius = have_school ? school.radius : 0.0f;
+      s.fish = have_school ? count : 0;
     }
-    if (towns >= kMaxTownWalk) break;
+    const bool at_fish = g_fish_school && have_school;
+    if (at_fish) {
+      for (int k = 0; k < 3; ++k) point[k] = school.point[k];
+    }
+    // A farm is in reach when its body is.
+    const float body = at_fish ? school.radius : 0.0f;
+    if (reach > 0.0f && Distance(point, g_target) - body > reach) continue;
+    if (g_candidate_count >= limit) {
+      ++full;
+      continue;
+    }
+    if (!FirstOffer(object)) continue;
+    Candidate& c = g_candidates[g_candidate_count++];
+    if (g_candidate_count > g_most_candidates) {
+      g_most_candidates = g_candidate_count;
+    }
+    c.object = object;
+    c.model = nullptr;
+    for (int k = 0; k < 3; ++k) c.position[k] = point[k];
+    ++offered;
+    if (at_fish && g_fish_place_count < kMaxFishPlaces) {
+      g_fish_places[g_fish_place_count].farm = object;
+      g_fish_places[g_fish_place_count].radius = school.radius;
+      ++g_fish_place_count;
+    }
   }
   g_fish_farms = farms;
   g_fish_offered = offered;
   if (farms != g_fish_said_farms) {
     g_fish_said_farms = farms;
-    ModLog("hand fish    : %d towns have %d fish farms, %d of them in reach "
-           "of the Hand. A farm in reach is a candidate of the grip "
-           "(fish_take=1), frame %llu", towns, farms, offered, g_frame);
+    ModLog("hand fish    : the game has %d fish farms, %d of them in reach "
+           "of the Hand are candidates of the grip, and %d in reach have no "
+           "room in the list (fish_take=1, fish_school=%d), frame %llu",
+           farms, offered, full, g_fish_school ? 1 : 0, g_frame);
     for (int i = 0; i < farms && i < kSaidFarms; ++i) {
+      const Said& s = said[i];
+      const float dx = s.school[0] - s.point[0];
+      const float dz = s.school[2] - s.point[2];
       ModLog("hand fish    : the farm %p is at %.1f %.1f %.1f, %.1f cm of the "
-             "room from the Hand's point", said_object[i], said[i][0],
-             said[i][1], said[i][2],
-             units > 0.0f ? Distance(said[i], g_target) / units * 100.0f
-                          : 0.0f);
+             "room from the Hand's point. %d fish swim around %.1f %.1f %.1f, "
+             "%.1f units from the point of the farm, within %.1f units",
+             s.farm, s.point[0], s.point[1], s.point[2],
+             units > 0.0f ? Distance(s.point, g_target) / units * 100.0f
+                          : 0.0f,
+             s.fish, s.school[0], s.school[1], s.school[2],
+             sqrtf(dx * dx + dz * dz), s.radius);
     }
+  } else if ((offered != g_fish_said_offered || full != g_fish_said_full) &&
+             g_fish_logs < kMaxFishLogs) {
+    ++g_fish_logs;
+    ModLog("hand fish    : %d fish farms in reach are candidates, and %d in "
+           "reach have no room in the list. The draw offered %d objects, "
+           "with room for %d, frame %llu", offered, full, drawn,
+           g_candidate_limit, g_frame);
   }
+  g_fish_said_offered = offered;
+  g_fish_said_full = full;
 }
 
 uint64_t g_choose_frame = 0;
@@ -5630,6 +6071,22 @@ void FarSelect() {
             controller_math::FarFloorMeters(g_far_eye, base, g_far_units),
             FarGrabMaxMeters(), c.object == current)) {
       ++g_far_out_of_range;
+      continue;
+    }
+    // The object that holds a tied leash: the grip takes nothing from it
+    // (grip_skips_tied=1).
+    if (c.object == TiedLeashObject()) {
+      ++g_far_tied_out;
+      static void* said = nullptr;
+      static int says = 0;
+      if (said != c.object && says < 10) {
+        said = c.object;
+        ++says;
+        ModLog("far grab    : the %s %p in the cone holds the tied leash, so "
+               "it is no far target (grip_skips_tied=1). The trigger takes "
+               "the leash back from it, frame %llu",
+               ClassName(c.object), c.object, g_frame);
+      }
       continue;
     }
     // A bulk source (a pile of a store, a field, a fish farm) is a target
@@ -7644,7 +8101,11 @@ void FarFrameStep(bool active) {
   // A bulk take, or the totem that the Hand moves (SelectSource).
   f.take = g_face != nullptr ? SelectSource(g_face) : nullptr;
   const float life = HeadPoseScale();
-  if (active && FarGrabOn()) {
+  // THE CONE FOR THE AIM OF A NEW BOOKMARK ALONE (bookmark_aim.cpp,
+  // bookmark_aim_hold=1). With far_grab=0 the ray and the cone are made as
+  // for the far grab, but the far grab is never ready, so it selects nothing.
+  const bool cone_alone = active && !FarGrabOn() && BookmarkAimConeAlone();
+  if (active && (FarGrabOn() || cone_alone)) {
     f.usable = true;
     if (!TabletopOwnsView()) {
       f.usable = false;
@@ -7698,6 +8159,10 @@ void FarFrameStep(bool active) {
       f.ready = false;
       f.why = "the aim ray is not known";
     }
+    if (cone_alone) {
+      f.ready = false;
+      f.why = "far_grab=0";
+    }
   }
   FarGrabFrame(f);
   // THE CREATURE COMMAND (creature_command.cpp) aims with the same cone. It
@@ -7705,10 +8170,12 @@ void FarFrameStep(bool active) {
   // ready.
   // A MIRACLE IN THE HAND (miracle.cpp) aims with the same cone: the Hand is
   // not empty then, so the far grab is not ready.
+  // THE AIM OF A NEW BOOKMARK (bookmark_aim.cpp) takes an object of the
+  // same cone.
   const bool command =
       f.usable && f.have_ray &&
       ((CreatureCommandWantsCone() && !ControllersLeftLeash()) ||
-       MiracleWantsCone() || ForestTakeWantsCone());
+       MiracleWantsCone() || ForestTakeWantsCone() || BookmarkAimWantsCone());
   if (!f.ready && !command) return;
   g_far_ready = f.ready;
   g_far_ray = true;
@@ -7752,6 +8219,15 @@ void InstallNear() {
                        "the Hand and at a distance, and the grip takes fish"
                      : "a fish farm is no target, because the game does not "
                        "draw it");
+  g_fish_school = IniKey("fish_school", 1) != 0;
+  ModLog("hand fish    : fish_school=%d: %s", g_fish_school ? 1 : 0,
+         g_fish_school
+             ? "the target of a fish farm is where its fish swim, with a "
+               "body 2 units past the fish, and each farm in reach is a "
+               "candidate also when the draw filled the list"
+             : "the target of a fish farm is the point of the farm, with a "
+               "body of 5 units, and a farm is a candidate only while the "
+               "list has room");
   g_stroke_mode = IniKey("creature_stroke_hand", 0);
   if (g_stroke_mode < 0 || g_stroke_mode > 3) g_stroke_mode = 0;
   // -1 says that the ini has no creature_slap_mps: the fist stroke then has
@@ -7795,6 +8271,30 @@ void InstallNear() {
                "the glow and the ray of the game's stroke are there"
              : "With the flat hand of a stroke the Hand's point stays at the "
                "tip of the index finger");
+  g_stroke_wait = IniKey("creature_stroke_wait", 0) != 0;
+  ModLog("hand creature: creature_stroke_wait=%d. %s", g_stroke_wait ? 1 : 0,
+         g_stroke_wait
+             ? "The first stroke of a Creature state comes 2 s after the "
+               "start, as in the game"
+             : "The first stroke of a Creature state comes with the first "
+               "motion of the hand on the body. After a stroke the game waits "
+               "1 s");
+  g_swing_on = IniKey("creature_swing", 1) != 0;
+  ModLog("hand creature: creature_swing=%d. %s", g_swing_on ? 1 : 0,
+         g_swing_on
+             ? "The speed of a stroke or a slap is the distance of the hand "
+               "over 100 ms. A swing starts at the speed of a slap and ends "
+               "under 0.6 of it. Out of a swing the game reads 0.8 of the "
+               "speed of a slap at most"
+             : "The speed of a stroke or a slap is the distance of the hand "
+               "over 50 ms, as it is");
+  g_slap_height = IniKey("creature_slap_height", 1) != 0;
+  ModLog("hand creature: creature_slap_height=%d. %s", g_slap_height ? 1 : 0,
+         g_slap_height
+             ? "In a slap that went through the body between two frames, the "
+               "game reads the height of the path in the body"
+             : "In a slap that went through the body between two frames, the "
+               "game reads the height of the Hand as it is");
   g_stroke_wait_open = IniKey("creature_open_wait", 1) != 0;
   ModLog("hand creature: creature_open_wait=%d. %s",
          g_stroke_wait_open ? 1 : 0,
@@ -7985,6 +8485,14 @@ void InstallNear() {
   }
   ScriptPlayerInstall();
   g_far_leash = IniKey("far_leash", 1) != 0;
+  g_skip_tied = IniKey("grip_skips_tied", 1) != 0;
+  ModLog("hand pick    : grip_skips_tied=%d. %s", g_skip_tied ? 1 : 0,
+         g_skip_tied
+             ? "The object that holds a tied leash is no target of the grip, "
+               "at the Hand and from a distance, because the grip takes "
+               "nothing from it"
+             : "The object that holds a tied leash is a target of the grip "
+               "as each other object");
   g_fight_grip = IniKey("fight_grip", 1) != 0;
   ModLog("hand fight   : fight_grip=%d. %s", g_fight_grip ? 1 : 0,
          g_fight_grip
@@ -9138,6 +9646,14 @@ void HandDirectFrame() {
       g_history_count = 0;
     }
   }
+  // THE STOP AT THE LAND (hand_land.cpp). While the land holds the drawn hand
+  // up, the Hand's point is the tip of the drawn hand, so the glow, the pick
+  // and a take act where the player sees the hand. The motion of the throw
+  // above keeps the real hand.
+  {
+    float lift = 0.0f;
+    if (HandLandPointLift(point, &lift)) point[1] += lift;
+  }
   // THE POINT OF THE FLAT HAND. The palm of the frame before gives the offset
   // from the tip to the palm. In the Creature state with the flat hand the
   // point of this frame is the tip of this frame and that offset.
@@ -9319,7 +9835,11 @@ bool HandDirectGlowFacts(float point[3], float* length, int32_t* mode,
 // made now, from the candidates that the draw of this pass offered. So the
 // glow and the halo of this frame show the object that the next press acts
 // on. The second eye pass draws the same.
+void LatchArcBoxes();
+void LatchSolids();
 void HandDirectChooseNow() {
+  LatchArcBoxes();
+  LatchSolids();
   if (!g_one_target || !g_active || g_hand == nullptr || g_face == nullptr ||
       g_eye != 0) {
     return;
@@ -9467,6 +9987,25 @@ bool HandDirectExactFacts(float target[3], float* size, uint64_t* frame) {
 // position (CHand+0x78), and whether the controller places the Hand in this
 // frame. With the controller, the position is the target, the point that the
 // glow marks. False with no CHand.
+// For influence_edge.cpp: whether the land point x, z is inside the player's
+// influence, by the call that fn_005D1120 makes for GInterface+0x48. False
+// when the mod has no interface of the game yet.
+bool HandDirectInsideInfluence(float x, float z, bool* inside) {
+  if (!g_installed || g_face == nullptr) return false;
+  *inside = InsideInfluence(g_face, ClampToMap(x), ClampToMap(z));
+  return true;
+}
+
+// For influence_edge.cpp: the GPlayer of the interface, or null.
+void* HandDirectPlayer() {
+  if (!g_installed || g_face == nullptr) return nullptr;
+  return reinterpret_cast<GetPlayerFn>(VTable(g_face)[kFaceGetPlayer / 4])(
+      g_face, nullptr);
+}
+
+// For influence_edge.cpp, for its log: the CHand of the game, or null.
+void* HandDirectGameHand() { return g_hand; }
+
 bool HandDirectHandPosition(float out[3], bool* by_controller) {
   if (g_hand == nullptr) return false;
   const float* at = reinterpret_cast<const float*>(g_hand + kHandPosition);
@@ -9663,6 +10202,39 @@ void HandDirectGripOpened() {
     for (int i = 0; i < 3; ++i) g_latch.v_room[i] = g_latch.v_grip[i] = 0.0f;
     g_latch.real = 0.0f;
   }
+}
+
+// For miracle_throw.cpp: the swing of a thrown miracle, as the throw of an
+// object takes it (ThrowPhysicsPlan). It is the top speed of the grip from
+// the peak window before the opening of the grip to now, in the room's axes
+// and in units at the life size scale. The room basis and the two scales come
+// with it, and the times of the top speed and of the opening before now, in
+// ms. The latch of the opening stays for the release of an object. False
+// with no motion, or with no scale of the God view or the table.
+bool HandDirectSwing(float peak_room[3], float room[9], float* life,
+                     float* units_per_meter, double* peak_ms,
+                     double* opened_ms) {
+  if (!g_installed || !g_owns || g_history_count < 2) return false;
+  const double now = NowSeconds();
+  if (now - g_grip_history[g_history_count - 1].time > kStaleSeconds) {
+    return false;
+  }
+  *life = HeadPoseScale();
+  *units_per_meter = TabletopViewScale();
+  if (!(*life > 0.0f) || !(*units_per_meter > 0.0f)) return false;
+  const bool latched = g_latch.valid && now - g_latch.time >= 0.0 &&
+                       now - g_latch.time <= kLatchSeconds;
+  const double opened = latched ? g_latch.time : now;
+  double at = now;
+  if (!throw_math::PeakVelocity(g_grip_history, g_history_count,
+                                opened - throw_math::kPeakWindow, now,
+                                throw_math::kPeakHalfSpan, peak_room, &at)) {
+    return false;
+  }
+  for (int i = 0; i < 9; ++i) room[i] = g_room[i];
+  *peak_ms = (now - at) * 1000.0;
+  *opened_ms = (now - opened) * 1000.0;
+  return true;
 }
 
 // stereo.cpp, around each eye pass. On the table the choice of the last pass
@@ -9873,6 +10445,18 @@ bool HandDirectHoldableAt(const float point[3], float max_gap,
   return *object != nullptr;
 }
 
+// For take_stream.cpp: the source of the game's bulk take now
+// (GInterfaceStatus+0x3C, TakeObject) and its class for the log. False with
+// no take.
+bool HandDirectTakeSource(void** object, const char** name) {
+  if (g_face == nullptr) return false;
+  void* take = TakeObject(g_face);
+  if (take == nullptr) return false;
+  *object = take;
+  *name = ClassName(take);
+  return true;
+}
+
 // For miracle.cpp (docs/miracles.md, "A miracle in the Hand in the plain
 // game"): world units in a meter of the room now, the point of the real hand of
 // this frame, and the object of the next pick record. The record gets the
@@ -9947,6 +10531,22 @@ bool HandDirectObjectLives(void* object, void* table) {
   return ObjectLives(object, table);
 }
 
+// For bookmark_aim.cpp: the place of an object of an earlier frame, from the
+// translation of its mesh, as the draw reads it for a candidate. False when
+// the object does not live or has no mesh.
+bool HandDirectObjectPoint(void* object, void* table, float position[3]) {
+  if (!ObjectLives(object, table)) return false;
+  const uint8_t* model = *reinterpret_cast<uint8_t* const*>(
+      static_cast<uint8_t*>(object) + kObjectMesh);
+  if (model == nullptr ||
+      IsBadReadPtr(model, kMeshTranslation + 3 * sizeof(float))) {
+    return false;
+  }
+  const float* at = reinterpret_cast<const float*>(model + kMeshTranslation);
+  for (int i = 0; i < 3; ++i) position[i] = at[i];
+  return true;
+}
+
 bool HandDirectSeen(const float at[3], float radius) {
   return FarVisible(at, radius);
 }
@@ -9989,6 +10589,53 @@ bool HandDirectLiving(void* object) {
 
 bool HandDirectCreatureBody(void* creature, float out[3]) {
   return creature != nullptr && BodyPlace(creature, out) != 0;
+}
+
+// THE CREATURE WITH NO PRESS (docs/creature.md, "The stroke with the open
+// hand", and docs/ui-layer.md, "The Creature panel").
+//
+// The Creature of the local player, or null.
+void* HandDirectOwnCreature() {
+  if (!g_installed) return nullptr;
+  const uint8_t* player = static_cast<const uint8_t*>(LocalPlayer());
+  if (player == nullptr || IsBadReadPtr(player + kPlayerCreature, 4)) {
+    return nullptr;
+  }
+  return *reinterpret_cast<void* const*>(player + kPlayerCreature);
+}
+
+// The player's own Creature while the controller places the Hand at it, or
+// null: the target at the Hand's point in the Normal state (the capsule of
+// the choice), or the Creature of the touch in the Creature state. With
+// empty, the Hand must be empty too. The mouse keeps the plain game.
+void* HandDirectCreatureAtHand(bool empty) {
+  void* own = HandDirectOwnCreature();
+  if (own == nullptr || !g_owns || g_hand == nullptr ||
+      (empty && !HandEmpty())) {
+    return nullptr;
+  }
+  // A press that holds the Creature, also before the Creature state starts.
+  if (g_virtual && g_virtual_creature == own) return own;
+  const int32_t state = State(g_hand);
+  if (state == kStateCreature) return TouchObject(g_hand) == own ? own : nullptr;
+  if (state == kStateNormal && g_choice == own && !g_choice_far) return own;
+  return nullptr;
+}
+
+// The gap from the Hand's point to the body of the player's own Creature, in
+// cm of the room. 0 or less is in the body (the capsule of the choice, with
+// no creature_touch_cm). False while the controller does not place the Hand,
+// in a fight (a press on the Creature is a block there), and with no body.
+bool HandDirectOwnCreatureGap(void* creature, float* gap_cm) {
+  if (!g_installed || !g_owns || g_hand == nullptr || creature == nullptr ||
+      creature != HandDirectOwnCreature() || InFight()) {
+    return false;
+  }
+  controller_math::Capsule body;
+  const float units = RoomUnits();
+  if (!CreatureBody(creature, &body) || !(units > 0.0f)) return false;
+  *gap_cm = controller_math::CapsuleGap(body, g_target) / units * 100.0f;
+  return true;
 }
 
 // For forest_take.cpp (docs/grab.md, "Many trees from a forest"): the trees
@@ -10151,6 +10798,241 @@ bool HandDirectFeelBody(int index, void** object, float base[3], float* radius,
   return true;
 }
 
+// THE BOXES ON THE ARC OF A THROW (throw_physics.cpp, throw_arc_objects,
+// docs/throw.md, "The objects on the arc"). The mesh of a candidate is good
+// for its frame only, and a release comes in the game's step, so the first
+// eye pass keeps the box of the mesh of each candidate near the Hand while
+// the Hand holds an object. A tree, a forest, a scroll and a body with no box
+// of its mesh are not in the list.
+const int kMaxArcBoxes = 64;
+void* g_arc_objects[kMaxArcBoxes];
+throw_math::Box g_arc_boxes[kMaxArcBoxes];
+int g_arc_count = 0;
+uint64_t g_arc_frame = 0;
+
+// The reach of the list: this many meters of the room from the Hand's point.
+const float kArcBoxMeters = 4.0f;
+
+void LatchArcBoxes() {
+  if (g_eye != 0 || g_arc_frame == g_frame) return;
+  g_arc_frame = g_frame;
+  g_arc_count = 0;
+  if (!g_active || g_hand == nullptr || HandEmpty()) return;
+  void* held = *reinterpret_cast<void* const*>(g_hand + kHandHeld);
+  const float reach = kArcBoxMeters * RoomUnits();
+  for (int i = 0; i < g_candidate_count && g_arc_count < kMaxArcBoxes; ++i) {
+    if (g_candidates[i].object == held) continue;
+    if (!(Distance(g_candidates[i].position, g_target) < reach)) continue;
+    void* object = nullptr;
+    float base[3], radius = 0.0f, height = 0.0f, axis[9], half[3];
+    int kind = -1;
+    if (!HandDirectFeelBody(i, &object, base, &radius, &height, &kind, axis,
+                            half) ||
+        kind != 4) {
+      continue;
+    }
+    throw_math::Box& b = g_arc_boxes[g_arc_count];
+    for (int k = 0; k < 3; ++k) {
+      b.middle[k] = base[k];
+      b.half[k] = half[k];
+    }
+    for (int k = 0; k < 9; ++k) b.axis[k] = axis[k];
+    g_arc_objects[g_arc_count++] = object;
+  }
+}
+
+// For throw_physics.cpp: the boxes that the first eye pass of this frame or
+// of the frame before kept, at most max. The count, 0 when the list is older.
+int HandDirectArcBoxes(void* objects[], throw_math::Box out[], int max) {
+  if (g_arc_frame + 1 < g_frame) return 0;
+  int n = g_arc_count < max ? g_arc_count : max;
+  for (int i = 0; i < n; ++i) {
+    objects[i] = g_arc_objects[i];
+    out[i] = g_arc_boxes[i];
+  }
+  return n;
+}
+
+// THE SOLIDS NEAR THE HANDS AND THE HEAD (hand_land.cpp, hand_object_stop,
+// and head_blinder.cpp, head_blinder_objects. See docs/hand-model.md, "The
+// Hand stops at the land", and solid_math.h). The mesh of a candidate is good
+// for its frame only, and the hands and the head use the solids before the
+// eye passes of the next frame. So the first eye pass keeps the solid of each
+// candidate near a hand or the head:
+//   - a house: the box of the mesh of an Abode, a Creche, a Windmill or a
+//     Workshop,
+//   - a rock: the box of the mesh of a Rock,
+//   - a tree: the trunk of its body (hand_feel_math.h, BodyGapAt).
+// The box of the mesh holds each part of the mesh and the air between them,
+// so only a closed building is a solid. The Village Store (a StoragePit) is
+// an open pit with no roof: its box holds its inside and the air over it,
+// and the game draws a normal view with the head in it. A Graveyard, a
+// TownCentre, a Wonder, a field, a villager, an animal, the Creature, a
+// forest, a scroll and the object in the Hand are not solids either. Neither
+// is a small solid (solid_math::Counts).
+const int kMaxSolids = solid_math::kMostSolids;
+void* g_solid_objects[kMaxSolids];
+solid_math::Solid g_solids[kMaxSolids];
+int g_solid_count = 0;
+uint64_t g_solid_frame = 0;
+uint64_t g_solid_latches = 0;
+uint64_t g_solid_kept = 0;
+// No solid has a radius of more than this, in world units: a house has 4 to
+// 6 units, and the Workshop is smaller than the Village Store (15.5 units).
+const float kSolidFar = 40.0f;
+
+const char* const kSolidClasses[] = {"Abode", "Creche", "Windmill", "Workshop",
+                                     "Rock"};
+
+bool SolidClass(void* object) {
+  const char* name = ClassName(object);
+  for (const char* solid : kSolidClasses) {
+    if (strcmp(name, solid) == 0) return true;
+  }
+  return false;
+}
+
+// The points that want the solids near them, and the bound of each, in
+// world units: the middle of each real hand (hand_land.cpp) and the head
+// (head_blinder.cpp). Once a frame: the screen test asks for each object.
+float g_solid_point[3][3];
+float g_solid_bound[3];
+int g_solid_wants = 0;
+uint64_t g_solid_points_frame = ~0ull;
+
+// THE WALLS OF A HOUSE BELOW THE LIFE SIZE SCALE (solid_house_inset_pct, 20).
+// The box of the mesh of a house holds the eaves of its roof. Below the life
+// size scale the player walks beside the walls, so the box of a house gets
+// smaller by this percent of each level half size (solid_math::InsetLevel).
+// A rock and a trunk keep their shape, and at the life size scale and above
+// a house keeps its whole box. 0 keeps the whole box at each scale.
+float HouseInset() {
+  static int pct = -1;
+  if (pct < 0) {
+    pct = IniKey("solid_house_inset_pct", 20);
+    if (pct < 0) pct = 0;
+    if (pct > 50) pct = 50;
+    ModLog("hand land    : solid_house_inset_pct=%d. %s", pct,
+           pct > 0 ? "Below the life size scale the box of a house is that "
+                     "much smaller across, so it is nearer to its walls"
+                   : "A house is the whole box of its mesh at each scale");
+  }
+  return pct * 0.01f;
+}
+
+int SolidPoints(float points[3][3], float bound[3]) {
+  if (g_solid_points_frame != g_frame) {
+    g_solid_points_frame = g_frame;
+    g_solid_wants = HandLandSolidPoints(g_solid_point, g_solid_bound);
+    if (HeadBlinderSolidPoint(g_solid_point[g_solid_wants],
+                              &g_solid_bound[g_solid_wants])) {
+      ++g_solid_wants;
+    }
+  }
+  for (int p = 0; p < g_solid_wants; ++p) {
+    for (int k = 0; k < 3; ++k) points[p][k] = g_solid_point[p][k];
+    bound[p] = g_solid_bound[p];
+  }
+  return g_solid_wants;
+}
+
+void LatchSolids() {
+  if (g_eye != 0 || g_solid_frame == g_frame) return;
+  g_solid_frame = g_frame;
+  g_solid_count = 0;
+  if (!g_active || g_hand == nullptr) return;
+  float points[3][3], bound[3];
+  const int wants = SolidPoints(points, bound);
+  if (wants == 0) return;
+  ++g_solid_latches;
+  void* held = *reinterpret_cast<void* const*>(g_hand + kHandHeld);
+  const float units = RoomUnits();
+  for (int i = 0; i < g_candidate_count && g_solid_count < kMaxSolids; ++i) {
+    void* candidate = g_candidates[i].object;
+    if (candidate == held) continue;
+    // The first cut, before the class and the body: the point of the object
+    // is near a point that wants the solids. No solid has a radius of more
+    // than kSolidFar world units.
+    const float* at = g_candidates[i].position;
+    bool near_point = false;
+    for (int p = 0; p < wants && !near_point; ++p) {
+      const float dx = at[0] - points[p][0], dz = at[2] - points[p][2];
+      const float most = bound[p] + kSolidFar;
+      near_point = dx * dx + dz * dz <= most * most;
+    }
+    if (!near_point) continue;
+    const bool tree = IsTreeObject(candidate);
+    if (!tree && !SolidClass(candidate)) continue;
+    void* object = nullptr;
+    float base[3], radius = 0.0f, height = 0.0f, axis[9], half[3];
+    int kind = -1;
+    if (!HandDirectFeelBody(i, &object, base, &radius, &height, &kind, axis,
+                            half) ||
+        kind != (tree ? 1 : 4)) {
+      continue;
+    }
+    solid_math::Solid s = {};
+    if (tree) {
+      s.kind = solid_math::kTrunk;
+      for (int k = 0; k < 3; ++k) s.middle[k] = base[k];
+      s.radius = near_math::kTrunkShare * radius;
+      s.height = 0.5f * height;
+    } else {
+      s.kind = solid_math::kBox;
+      for (int k = 0; k < 3; ++k) {
+        s.middle[k] = base[k];
+        s.half[k] = half[k];
+      }
+      for (int k = 0; k < 9; ++k) s.axis[k] = axis[k];
+      const float life = HeadPoseScale();
+      if (life > 0.0f && units < life * 0.9999f &&
+          strcmp(ClassName(candidate), "Rock") != 0) {
+        solid_math::InsetLevel(&s, HouseInset());
+      }
+    }
+    if (!solid_math::Counts(s, units)) continue;
+    bool near_one = false;
+    for (int p = 0; p < wants && !near_one; ++p) {
+      near_one = solid_math::Distance(s, points[p]) <= bound[p];
+    }
+    if (!near_one) continue;
+    g_solids[g_solid_count] = s;
+    g_solid_objects[g_solid_count++] = object;
+    ++g_solid_kept;
+  }
+}
+
+// For hand_land.cpp and head_blinder.cpp: the solids that the first eye pass
+// of the frame before kept, at most max. The count, 0 when the list is older.
+int HandDirectSolids(void* objects[], solid_math::Solid out[], int max) {
+  if (g_solid_frame + 1 < g_frame) return 0;
+  const int n = g_solid_count < max ? g_solid_count : max;
+  for (int i = 0; i < n; ++i) {
+    objects[i] = g_solid_objects[i];
+    out[i] = g_solids[i];
+  }
+  return n;
+}
+
+// For the log: the class of a solid that the list has.
+const char* HandDirectSolidClass(void* object) {
+  for (int i = 0; i < g_solid_count; ++i) {
+    if (g_solid_objects[i] == object) return ClassName(object);
+  }
+  return "solid";
+}
+
+// For the report of hand_land.cpp: the first eye passes that kept the
+// solids, the solids that they kept and the objects that went to the pick
+// only for a solid point, since the last call.
+void HandDirectSolidCounts(uint64_t* latches, uint64_t* kept,
+                           uint64_t* offers) {
+  *latches = g_solid_latches;
+  *kept = g_solid_kept;
+  *offers = g_solid_offers;
+  g_solid_latches = g_solid_kept = g_solid_offers = 0;
+}
+
 namespace {
 
 // THE TEST KEY seek_plan, for the desktop runs of one target. A list of
@@ -10224,12 +11106,24 @@ namespace {
 //           the room before the side of the body of the nearest object of
 //           the class of the next entry of seek_feel, within 30 m of the
 //           room, in the view. The hand does not move.
+//   gointo  As gofeel, but the head goes over the land at the middle of the
+//           body of that object, so a head lower than the object is in it
+//           (head_blinder_objects). The hand does not move.
 //   gosea   The God view teleports: the head goes over the land 60 cm of the
 //           room before the nearest point of the sea in the view, within 30
 //           m of the room. The hand does not move.
 //   sea     The Hand's point goes 2 cm of the room over the nearest point of
 //           the sea, within 2 m of the room (seek_sea_cm gives a different
-//           height).
+//           height, and a negative value puts the point under the water).
+//   fish    The Hand's point goes to the drawn fish nearest to it, of each
+//           fish farm of the game, within 2 m of the room. The place is the
+//           sprite of the fish (DrawnFishOf), not a candidate.
+//   open    The Hand's point goes 3 cm of the room over open land: the
+//           nearest point, on rings of 10 cm up to 1.5 m of the room round
+//           the point, that is land (not the sea), in the middle of the view
+//           (20 to 80 percent across, 35 to 85 percent down the render) and
+//           40 cm of the room or more from the body of each candidate. Of
+//           the points of the first ring with one, the lowest in the view.
 enum {
   kPlanNone = 0, kPlanScroll, kPlanAir, kPlanCrown, kPlanPalm, kPlanCreature,
   kPlanCreaturePalm, kPlanGo, kPlanPicture, kPlanScrolls, kPlanGoSite,
@@ -10241,7 +11135,13 @@ enum {
   // The Workshop and the base of a tree (village.cpp).
   kPlanGoShop, kPlanShop, kPlanTreeBase,
   // The bodies of hand feel and the sea (hand_feel.cpp).
-  kPlanFeel, kPlanGoSea, kPlanSea, kPlanGoFeel
+  kPlanFeel, kPlanGoSea, kPlanSea, kPlanGoFeel,
+  // The head into a house (head_blinder.cpp).
+  kPlanGoInto,
+  // The fish of a fish farm.
+  kPlanFish,
+  // Open land for the stop at the land (hand_land.cpp).
+  kPlanOpen
 };
 int g_plan[16];
 int g_plan_count = -1;
@@ -10330,9 +11230,12 @@ int PlanCount() {
                      : n == 4 && strncmp(at, "hold", 4) == 0   ? kPlanHold
                      : n == 4 && strncmp(at, "feel", 4) == 0   ? kPlanFeel
                      : n == 6 && strncmp(at, "gofeel", 6) == 0 ? kPlanGoFeel
+                     : n == 6 && strncmp(at, "gointo", 6) == 0 ? kPlanGoInto
                      : n == 5 && strncmp(at, "gosea", 5) == 0  ? kPlanGoSea
                      : n == 3 && strncmp(at, "sea", 3) == 0    ? kPlanSea
+                     : n == 4 && strncmp(at, "fish", 4) == 0   ? kPlanFish
                      : n == 4 && strncmp(at, "down", 4) == 0   ? kPlanDown
+                     : n == 4 && strncmp(at, "open", 4) == 0   ? kPlanOpen
                                                                 : kPlanNone;
     if (word != kPlanNone) g_plan[g_plan_count++] = word;
     if (end == nullptr) break;
@@ -10479,6 +11382,49 @@ bool PlanPoint(int word, float out[3]) {
   void* status = *reinterpret_cast<void* const*>(g_face + kFaceStatus);
   const float units = RoomUnits();
   const float limit = 2.0f * units;
+  // THE FISH: from the sprites of the game, so the farm does not have to be
+  // a candidate.
+  if (word == kPlanFish) {
+    const uint8_t* game = *reinterpret_cast<uint8_t* const*>(kGame);
+    float fish[fish_math::kSchoolFish][3];
+    float best = limit, at[3] = {0.0f, 0.0f, 0.0f}, from_farm = 0.0f;
+    void* found = nullptr;
+    int found_fish = 0;
+    uint8_t* farm = game != nullptr ? *reinterpret_cast<uint8_t* const*>(
+                                          game + kGameFishFarms)
+                                    : nullptr;
+    for (int walked = 0; farm != nullptr && walked < kMaxFarmWalk; ++walked) {
+      if (!ObjectLives(farm, reinterpret_cast<void*>(kFishFarmTable))) break;
+      void* object = farm;
+      farm = *reinterpret_cast<uint8_t* const*>(farm + kFarmNext);
+      const int32_t* coords = reinterpret_cast<const int32_t*>(
+          static_cast<const uint8_t*>(object) + kThingPosition);
+      const int count = DrawnFishOf(object, fish);
+      for (int i = 0; i < count; ++i) {
+        const float d = Distance(fish[i], g_target);
+        if (d >= best) continue;
+        best = d;
+        found = object;
+        found_fish = count;
+        for (int k = 0; k < 3; ++k) at[k] = fish[i][k];
+        const float dx = at[0] - static_cast<float>(coords[0]) / kMapScale;
+        const float dz = at[2] - static_cast<float>(coords[1]) / kMapScale;
+        from_farm = sqrtf(dx * dx + dz * dz);
+      }
+    }
+    if (found == nullptr) {
+      ModLog("hand pick    : seek plan: fish. No drawn fish within 2 m of the "
+             "room of the Hand, frame %llu", g_frame);
+      return false;
+    }
+    for (int k = 0; k < 3; ++k) out[k] = at[k];
+    ModLog("hand pick    : seek plan: fish. The Hand's point goes to a fish "
+           "of the farm %p (%d fish drawn) at %.2f %.2f %.2f, %.1f units from "
+           "the point of the farm, %.1f cm of the room from where it is, "
+           "frame %llu", found, found_fish, out[0], out[1], out[2], from_farm,
+           units > 0.0f ? best / units * 100.0f : 0.0f, g_frame);
+    return true;
+  }
   // THE VILLAGE: the places are from the data of the game (village.cpp), so
   // the draw does not have to offer the object first.
   if (word == kPlanPile || word == kPlanVillager || word == kPlanTreeBase) {
@@ -10602,13 +11548,15 @@ bool PlanPoint(int word, float out[3]) {
     PlanCensus(out, status, units);
     return true;
   }
-  if (word == kPlanGoFeel) {
+  if (word == kPlanGoFeel || word == kPlanGoInto) {
+    const bool into = word == kPlanGoInto;
+    const char* name = into ? "gointo" : "gofeel";
     char cls[48] = "";
     float height_pct = 0.0f, gap_cm = 0.0f;
     const int entry = g_plan_feel_used++;
     if (!FeelEntry(entry, cls, sizeof(cls), &height_pct, &gap_cm)) {
-      ModLog("hand pick    : seek plan: gofeel. The test key seek_feel has no "
-             "entry %d, frame %llu", entry, g_frame);
+      ModLog("hand pick    : seek plan: %s. The test key seek_feel has no "
+             "entry %d, frame %llu", name, entry, g_frame);
       return false;
     }
     const bool any = strcmp(cls, "any") == 0;
@@ -10640,8 +11588,8 @@ bool PlanPoint(int word, float out[3]) {
       }
     }
     if (found < 0) {
-      ModLog("hand pick    : seek plan: gofeel %s. No such object in the view "
-             "within 30 m of the room (%d candidates), frame %llu", cls,
+      ModLog("hand pick    : seek plan: %s %s. No such object in the view "
+             "within 30 m of the room (%d candidates), frame %llu", name, cls,
              g_candidate_count, g_frame);
       return false;
     }
@@ -10651,20 +11599,27 @@ bool PlanPoint(int word, float out[3]) {
     // 50 cm of the room before the side of its body, so the head is not in
     // a house that is larger than the room at a zoom in.
     float back = 0.5f * units;
+    float middle[2] = {at[0], at[2]};
     {
       void* object = nullptr;
       hand_feel::Body b;
       if (HandDirectFeelBody(found, &object, b.base, &b.radius, &b.height,
                              &b.kind, b.axis, b.half)) {
         back += b.radius;
+        middle[0] = b.base[0];
+        middle[1] = b.base[2];
       }
     }
-    const float target[3] = {at[0] - d[0] / flat * back, 0.0f,
-                             at[2] - d[1] / flat * back};
+    float target[3] = {at[0] - d[0] / flat * back, 0.0f,
+                       at[2] - d[1] / flat * back};
+    if (into) {
+      target[0] = middle[0];
+      target[2] = middle[1];
+    }
     const bool went = TabletopGodTeleport(target);
-    ModLog("hand pick    : seek plan: gofeel %s. The nearest one in the view "
+    ModLog("hand pick    : seek plan: %s %s. The nearest one in the view "
            "is %p at %.1f %.1f %.1f, %.1f m of the room from the camera. %s "
-           "%.1f %.1f, frame %llu", cls, g_candidates[found].object, at[0],
+           "%.1f %.1f, frame %llu", name, cls, g_candidates[found].object, at[0],
            at[1], at[2], units > 0.0f ? best / units : 0.0f,
            went ? "The God view teleports: the head goes over the land at"
                 : "The God view does not own the view, so no teleport to",
@@ -10796,12 +11751,81 @@ bool PlanPoint(int word, float out[3]) {
     }
     static const int sea_cm = TestKey("seek_sea_cm");
     out[0] = sea[0];
-    out[1] = (sea_cm > 0 ? sea_cm : 2) * 0.01f * units;
+    out[1] = (sea_cm != 0 ? sea_cm : 2) * 0.01f * units;
     out[2] = sea[2];
     ModLog("hand pick    : seek plan: sea. The Hand's point goes to %.2f %.2f "
            "%.2f over the sea, %.1f cm of the room from where it is, frame "
            "%llu", out[0], out[1], out[2],
            units > 0.0f ? Distance(out, g_target) / units * 100.0f : 0.0f,
+           g_frame);
+    return true;
+  }
+  if (word == kPlanOpen) {
+    const float clear = 0.40f * units;
+    float best[3] = {0.0f, 0.0f, 0.0f};
+    float best_pixel[2] = {0.0f, 0.0f};
+    bool have = false;
+    int ring_cm = 0;
+    int off_view = 0;
+    for (int r = 0; r <= 150 && !have; r += 10) {
+      float lowest = -1.0f;
+      const int steps = r == 0 ? 1 : 16;
+      for (int a = 0; a < steps; ++a) {
+        const float angle = 6.2831853f * static_cast<float>(a) / steps;
+        const float x = g_target[0] + r * 0.01f * units * cosf(angle);
+        const float z = g_target[2] + r * 0.01f * units * sinf(angle);
+        if (!(x > 0.0f && x < 5120.0f && z > 0.0f && z < 5120.0f)) continue;
+        const int32_t coords[3] = {static_cast<int32_t>(x * kMapScale),
+                                   static_cast<int32_t>(z * kMapScale), 0};
+        const float land =
+            reinterpret_cast<GetAltitudeFn>(kGetAltitude)(coords);
+        if (!(land > 0.0f && land < 5000.0f)) continue;
+        // In the view: the middle 60 percent across, and from 35 to 85
+        // percent down the picture, so the hand over the point shows.
+        const float at[3] = {x, land, z};
+        float px = 0.0f, py = 0.0f, w = 0.0f, h = 0.0f;
+        if (!ControllersPointPixel(at, &px, &py, &w, &h) ||
+            px < 0.2f * w || px > 0.8f * w || py < 0.35f * h ||
+            py > 0.85f * h) {
+          ++off_view;
+          continue;
+        }
+        bool free = true;
+        for (int i = 0; i < g_candidate_count && free; ++i) {
+          const Candidate& c = g_candidates[i];
+          const float dx = c.position[0] - x, dz = c.position[2] - z;
+          const float radius = BodyOf(c.object).radius;
+          free = sqrtf(dx * dx + dz * dz) - (radius > 0.0f ? radius : 0.0f) >=
+                 clear;
+        }
+        if (!free) continue;
+        // Of the first ring with a point, the point lowest in the picture.
+        if (py > lowest) {
+          lowest = py;
+          best[0] = x;
+          best[1] = land + 0.03f * units;
+          best[2] = z;
+          best_pixel[0] = px / w;
+          best_pixel[1] = py / h;
+          have = true;
+          ring_cm = r;
+        }
+      }
+    }
+    if (!have) {
+      ModLog("hand pick    : seek plan: open. No open land in the view within "
+             "1.5 m of the room of the Hand (%d candidates, %d points off the "
+             "middle of the view), frame %llu",
+             g_candidate_count, off_view, g_frame);
+      return false;
+    }
+    for (int k = 0; k < 3; ++k) out[k] = best[k];
+    ModLog("hand pick    : seek plan: open. The Hand's point goes 3 cm of the "
+           "room over open land at %.2f %.2f %.2f, %d cm of the room from "
+           "where it is, with no body of the %d candidates within 40 cm. The "
+           "land there is at %.0f percent across and %.0f percent down the "
+           "picture, frame %llu", out[0], out[1], out[2], ring_cm,
+           g_candidate_count, best_pixel[0] * 100.0f, best_pixel[1] * 100.0f,
            g_frame);
     return true;
   }
@@ -11941,13 +12965,13 @@ void HandDirectReport() {
   if (g_far_offers != 0 || g_far_land_writes != 0) {
     ModLog("far grab    : %llu objects offered to the pick by the cone, %llu "
            "candidates in the cone that the land hides, %llu past the range "
-           "of %.1f m from the head, and the land point of the record written "
-           "on %llu game turns of a fetch, this window. The locked target "
-           "went to the pick %llu times",
+           "of %.1f m from the head, %llu that hold the tied leash, and the "
+           "land point of the record written on %llu game turns of a fetch, "
+           "this window. The locked target went to the pick %llu times",
            g_far_offers, g_far_hidden, g_far_out_of_range, FarGrabMaxMeters(),
-           g_far_land_writes, g_far_keep_offers);
+           g_far_tied_out, g_far_land_writes, g_far_keep_offers);
     g_far_offers = g_far_land_writes = g_far_hidden = 0;
-    g_far_out_of_range = 0;
+    g_far_out_of_range = g_far_tied_out = 0;
     g_far_keep_offers = 0;
   }
   FarGrabReport();
@@ -12048,15 +13072,20 @@ void HandDirectReport() {
     g_turns_asked = g_turns_given = 0;
   }
   if (g_virtual_count != 0 || g_touch_vetoes != 0 || g_touch_forced != 0 ||
-      g_touch_kept != 0) {
+      g_touch_kept != 0 || g_open_slow != 0) {
     ModLog("hand creature: %llu presses with no camera move, %llu leash "
-           "clicks, %llu states with no wait, %llu mesh hits refused at a "
-           "distance, %llu slap branches forced by the swept test, %llu "
-           "frames the pick kept the Creature, this window", g_virtual_count,
-           g_leash_clicks, g_touch_waits, g_touch_vetoes, g_touch_forced,
-           g_touch_kept);
+           "clicks, %llu states with no wait, %llu states with no wait for "
+           "the first stroke, %llu mesh hits refused at a distance, %llu slap "
+           "branches forced by the swept test, %llu of them with the height "
+           "of the hit, %llu frames the pick kept the Creature, %llu frames "
+           "in which the game read the open hand slower than a slap, this "
+           "window",
+           g_virtual_count, g_leash_clicks, g_touch_waits, g_stroke_presets,
+           g_touch_vetoes, g_touch_forced, g_slap_heights, g_touch_kept,
+           g_open_slow);
     g_virtual_count = g_leash_clicks = g_touch_waits = 0;
-    g_touch_vetoes = g_touch_forced = g_touch_kept = 0;
+    g_touch_vetoes = g_touch_forced = g_touch_kept = g_open_slow = 0;
+    g_stroke_presets = g_slap_heights = 0;
   }
   if (g_candidate_limit == kMaxCandidates) {
     ModLog("hand         : on the table, at most %d objects offered in one "

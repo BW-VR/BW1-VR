@@ -17,6 +17,11 @@ bwvr/installer/payload/*.ini text eol=crlf
 *.ico binary
 *.dll binary
 *.lib binary
+*.ttf binary
 
 # The git hook is a shell script.
 .githooks/* text eol=lf
+
+# The controller models ship as the project gives them, byte for byte.
+bwvr/assets/controllers/** -text
+*.glb binary

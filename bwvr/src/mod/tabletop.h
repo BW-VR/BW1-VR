@@ -45,6 +45,15 @@ struct TabletopSettings {
   int god_zoom_about_test = 0;   // god_zoom_about_test: a test, see below
   int god_step_cm = 5;           // god_ground_step_cm: one ground step
   int god_most_units = 4000;     // god_far_units_per_meter: the farthest zoom
+  // The nearest zoom, in tenths of a unit for each meter: 10 is about the
+  // eyes of a villager, 75 is the life size scale, and 0 takes the life size
+  // scale of head_units_per_meter_x10 (docs/god-view.md, "The limits").
+  int god_least_tenths = 10;     // god_near_units_per_meter_x10
+  // A zoom step that would put the head into a house, a rock or a tree trunk
+  // stops 30 cm out of it, or is refused (docs/god-view.md, "The limits").
+  int god_zoom_solid_stop = 1;   // god_zoom_solid_stop: 1 stops, 0 does not
+  // How far out of the solid the head stays, in cm of the room.
+  int god_zoom_solid_cm = 30;    // god_zoom_solid_cm: 5 to 200
   // Where the player goes when the game puts its own camera at a place
   // (docs/god-view.md, "The place at a camera of the game").
   int god_spawn = 1;             // god_spawn: 1 follows the game, 0 does not
@@ -52,6 +61,12 @@ struct TabletopSettings {
   // Where the game camera stands (docs/god-view.md, "The game camera"): 1
   // over the land point under the head, 0 over the recenter place.
   int god_camera_at = 1;         // god_camera_at: the place of the game camera
+  // The camera zone of a script of the game (docs/god-view.md, "The camera
+  // zone"): 1 keeps the game camera in the zone with no shake, and the
+  // player's place goes at most god_zone_margin units past it. 0 lets the
+  // game push its camera back, with its shake.
+  int god_zone = 1;              // god_zone: 1 the God view keeps to it, 0 not
+  int god_zone_margin = 50;      // god_zone_margin: units past the zone
   // The walk with the stick of the hand that does not point (docs/god-view.md,
   // "The walk with the stick"): 0 is off, 1 moves along the direction of the
   // head, and 2 along the direction in which that controller points.
@@ -69,6 +84,35 @@ struct TabletopSettings {
   // the head through a smooth filter (walk_math::FollowStep). 0: the view
   // keeps its height in the world.
   int move_stick_follow_land = 1;  // move_stick_follow_land: 1 follows, 0 not
+  // When the filter of the land starts again (walk_math::FollowRestart): 1
+  // after each move of the view, a place at a camera of the game and a
+  // recenter, but not after a turn. 0 after each change of the version of
+  // the view only.
+  int move_stick_follow_place = 1;  // move_stick_follow_place: 1 or 0
+  // A zoom in over a land more than 2.5 m below the head (zoom_math.h,
+  // ZoomLevelFor): 1 keeps the land at its height in the room, 0 zooms about
+  // a level 2.5 m below the head.
+  int god_zoom_far_level = 1;      // god_zoom_far_level: 1 or 0
+  // How the stick moves the player: 0 walks over the land (with
+  // move_stick_follow_land), 1 flies along the forward direction in 3D
+  // (walk_math.h, "The fly"). docs/god-view.md, "The walk with the stick".
+  int move_type = 0;               // move_type: 0 walk, 1 fly
+  // The speed ramp of a full push of the stick (walk_math.h, "The speed
+  // ramp"): 1 on, 0 the speed of the push only. move_stick_ramp_most is the
+  // largest factor, 1 to 64.
+  int move_stick_ramp = 1;         // move_stick_ramp: 1 on, 0 off
+  int move_stick_ramp_most = 32;   // move_stick_ramp_most: the top factor
+  // The speed by the scale (walk_math::ScaleFactor): 1 multiplies the speed
+  // of the stick by (ref / scale) ^ power, kept between low and high. 0 the
+  // speed of move_stick_speed_cm at each scale.
+  int move_stick_scale = 1;              // move_stick_scale: 1 on, 0 off
+  int move_stick_scale_ref_x10 = 160;    // the scale of factor 1, in tenths
+  int move_stick_scale_power_pct = 50;   // the power, in percent
+  int move_stick_scale_low_pct = 60;     // the least factor, in percent
+  int move_stick_scale_high_pct = 400;   // the largest factor, in percent
+  // A fly at a solid (god_zoom_solid_stop=1): 1 slides past it, and only a
+  // push straight at it stops. 0 stops the step short of it.
+  int fly_solid_slide = 1;         // fly_solid_slide: 1 slides, 0 stops
   // A test for a desktop run: the log has a line for each of the first N
   // frames of each walk. 0 is off.
   int move_stick_trace = 0;        // move_stick_trace: frames to log
@@ -113,6 +157,10 @@ void TabletopMove(const table_math::TablePose& pose);
 // ground limits of docs/god-view.md, "The ground height". False when the God view does
 // not own the view. cut is true when a limit held the height back.
 bool TabletopGodLimitHeight(table_math::TablePose* pose, bool* cut);
+// The God view: how far the land is below a point of the room of the table,
+// in meters, in the pose of now. False when the God view does not own the
+// view. For the gain of the grab (world_grab.cpp).
+bool TabletopGodLandBelow(const float point[3], float* below_m);
 
 // The game's switches for the turn and the zoom of a grab: each one that is
 // off sets its flag to false.
@@ -168,7 +216,9 @@ int TabletopGodZoomAboutValue();
 // TabletopGodWalk is the request of the stick for the next frame. push is the
 // stick, x to the right and y forward, and its length is the share of the top
 // speed (walk_math::Push). aim is the forward direction of the controller on
-// the land in the room (x and z), or null when that controller has none. The
+// the land in the room (x and z), or null when that controller has none.
+// aim3 is the unit direction in which that controller points in the room
+// (x, y and z), for the fly, or null when the controller has no pose. The
 // next main camera call uses the request once, for the time of that frame.
 // The stick asks again before each frame while it is pushed, and a frame with
 // no request moves nothing. False when the player does not move: the walk is
@@ -179,10 +229,13 @@ int TabletopGodZoomAboutValue();
 // controller of the stick (controls=1, walk_math::ClimbShare), -1 to 1, and 0
 // for no climb.
 int TabletopGodMoveStick();
+// aim3: the controller of the stick in 3D, for the fly (move_type=1), or null.
 // path: the flight keeps its height and stops at the land (controls=1,
-// move_stick_path=1, walk_math::PathShare), with no follow of the land.
-bool TabletopGodWalk(const float push[2], const float* aim, float boost,
-                     float climb, bool path);
+// move_stick_path=1, walk_math::PathShare), with no follow of the land. Only
+// the walk has the path, the boost goes with the walk and the fly, and only
+// the walk climbs.
+bool TabletopGodWalk(const float push[2], const float* aim, const float* aim3,
+                     float boost, float climb, bool path);
 
 // THE SWITCH OF A MOVE OVER THE LAND. True while the game's switch for the
 // drag of the land is on (bit 8 of CameraHelp::EnabledFeatures). The grab,
@@ -195,8 +248,41 @@ bool TabletopMoveAllowed();
 void TabletopGodMoveStickCycle();
 int TabletopGodMoveStickValue();
 
+// THE KIND OF MOVE (move_type and move_stick_follow_land). The switch
+// "Move kind" of the debug page goes from the walk that follows the land
+// (0) to the walk that keeps its height (1), to the fly (2) and back.
+// TabletopGodMoveKindValue gives that kind, or kDebugCannot.
+// TabletopGodSetMoveType is the change of the VR Settings window: 0 the
+// walk, 1 the fly. A walk or a fly that runs stops.
+void TabletopGodMoveKindCycle();
+int TabletopGodMoveKindValue();
+void TabletopGodSetMoveType(int type, const char* by);
+// The switch "Fly at solids" of the debug page (fly_solid_slide).
+void TabletopGodFlySlideToggle();
+int TabletopGodFlySlideValue();
+// The switch "Speed by scale" of the debug page (move_stick_scale), and the
+// factor of the speed of the stick at the scale now (1 when it is off).
+void TabletopGodMoveScaleToggle();
+int TabletopGodMoveScaleValue();
+float TabletopGodMoveScaleFactor();
+// The same curve with or without move_stick_scale, for the grab.
+float TabletopGodScaleCurve();
+// The switch "Deep zoom" of the debug page (god_zoom_far_level).
+void TabletopGodZoomFarToggle();
+int TabletopGodZoomFarValue();
+// For view_check.cpp: the version of the God view (it changes with each move
+// and each turn of the view), and true while the stick walks or flies.
+uint64_t TabletopGodViewVersion();
+bool TabletopGodWalkActive();
+// The switch "Speed ramp" of the debug page (move_stick_ramp).
+void TabletopGodMoveRampToggle();
+int TabletopGodMoveRampValue();
+
 // True while the table or the God view is on, also while it stands aside.
 bool TabletopIsOn();
+// True when the table or the God view is installed, also while Ctrl F11 has
+// it off. Then TabletopApplyFrame writes the values of the engine.
+bool TabletopInstalled();
 
 // Ctrl F11 and the debug page: the table or the God view goes off and on.
 // `by` names the cause, and must be a string that stays. TabletopValue is 1
@@ -216,6 +302,16 @@ uint64_t TabletopTakeTeleportMoves();
 // A snap turn of the God view: direction 1 turns the view right and -1 left,
 // by degrees, about the head. The same rule: once, at the next main call.
 bool TabletopGodTurn(int direction, float degrees);
+
+// THE SMOOTH TURN (snap_turn=4): a turn of the God view about the head for
+// the next main camera call, by share (-1 full left to 1 full right) times
+// degrees_per_second times the time of that frame. comfort_camera.cpp asks
+// again for each frame, and a frame with no request turns nothing. False
+// when the God view does not own the view. TabletopGodTakeSmoothTurn gives
+// the degrees that the smooth turn turned since the last call, for the turn
+// events of the tutorial, and their direction.
+bool TabletopGodTurnHold(float share, float degrees_per_second);
+float TabletopGodTakeSmoothTurn(int* direction);
 
 // The game's own camera over the player's place, for comfort_camera.cpp to
 // write after the game's update of the player's camera mode, once for each

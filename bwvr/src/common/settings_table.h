@@ -55,8 +55,7 @@ inline const Setting kSettings[] = {
      "right eye has a picture at its outer edge. A test build: report what "
      "looks wrong."},
     // Before the resolution too: the size of the render reads this key.
-    {kValues, "fov_margin_pct", "Margin around the view",
-     "None=0|5%=5|10%=10|15%=15|20%=20|25%=25|30%=30", 0,
+    {kSlider, "fov_margin_pct", "Margin around the view", "0|30|5|%", 0,
      "If you see black at the edge of the view when you turn your head fast, "
      "set a margin. The game then draws that much more on each side, and the "
      "picture has that many more pixels each way, so it stays as sharp. A "
@@ -94,6 +93,11 @@ inline const Setting kSettings[] = {
     {kSlider, "detail_scale_3x", "3x detail at", "2|400|1| units/m", 10,
      "The detail comes to 3x at this size of the world. This value must be "
      "lower than the value above. Soon below it the detail is 5x."},
+    {kChoice, "cull_distance", "Model cull distance", "Game|2x|3x|5x|10x", 3,
+     "How far out trees, villagers and buildings are drawn at all. The game "
+     "draws them to 700 units. The fog moves out as far as the models do, "
+     "so a far model goes into the fog and the far land stays clear. Further "
+     "costs more frame time where the land has many objects."},
 
     {kGroup, nullptr, "Performance", nullptr, 0, nullptr},
     {kRenderer, "backend", "Renderer", "Vulkan|Direct3D 9", 0,
@@ -108,7 +112,7 @@ inline const Setting kSettings[] = {
      "Only with the renderer Direct3D 9. The game draws through DXVK and "
      "Vulkan in place of the Direct3D 9 of Windows. This takes about half "
      "of the time of the driver off each frame. The mod uses it only when "
-     "your GPU has Vulkan 1.3 and the file dxvk\\d3d9.dll is in the game "
+     "your GPU has Vulkan 1.3 and DXVK is in the game "
      "folder. Else, and when a start with it fails, the game draws as "
      "before. The change counts from the next start."},
     {kBool, "xr_vulkan", "Headset session with Vulkan", nullptr, 0,
@@ -196,24 +200,16 @@ inline const Setting kSettings[] = {
     {kBool, "foveation_show", "Show the parts with fewer details", nullptr, 0,
      "A blue colour over the parts with fewer shades or fewer pixels, so "
      "you can find the settings that you like. Turn it off to play. With "
-     "the test keys, Shift O and Shift P change the two kinds while you "
-     "play."},
+     "the debug menu, the switches Foveation and Fovea images change the "
+     "two kinds while you play."},
 
     {kGroup, nullptr, "View", nullptr, 0, nullptr},
-    {kValues, "play_mode", "Play mode",
-     "God view=4|Stereoscopic window=1|Tabletop (test)=3", 4,
-     "God view: the land is at your waist, so your hands can reach it. It "
-     "works with motion controllers and with the mouse. Controllers: push "
-     "the stick of your Hand forward or back to zoom. Hold the grip of your "
-     "other hand and pull to move the land, across and up and down. Your "
-     "Hand is the right controller, or the left one with a left hand (see "
-     "Hand). Mouse: drag the "
-     "land to move it. Turn the "
-     "wheel to zoom one step. Press a tilt key to move the ground up or "
-     "down. Stereoscopic window: the game is on a 3D screen in front of "
-     "you, and your head does not move the camera. Tabletop: the island is "
-     "a model on a table in front of you. Walk around it and lean over it. "
-     "This mode is a test and is not complete."},
+    // Not offered: the mod plays in the God view (4). The other modes stay
+    // for tests (1 the stereoscopic window, 3 the tabletop). The player
+    // readme has the controls of the God view.
+    // {kValues, "play_mode", "Play mode",
+    //  "God view=4|Stereoscopic window=1|Tabletop (test)=3", 4,
+    //  "God view: the land is at your waist, so your hands can reach it."},
     // Not offered: 7.5 units for each meter is the life size scale, and a
     // different value makes the Hand and the world the wrong size.
     // {kInt, "head_units_per_meter_x10", "World scale, tenths per meter", nullptr,
@@ -221,18 +217,31 @@ inline const Setting kSettings[] = {
     //  "How many game units a real meter is worth, in tenths. 75 means 7.5 "
     //  "units, which keeps what your eyes see and what your neck feels the same "
     //  "size."},
-    {kBool, "intro_vr", "Intro in stereo", nullptr, 0,
-     "Shows the Lionhead logo at the start of the game in 3D around you. Your "
-     "view moves through the orbs on the path of the game, and it does not "
-     "turn: you look where your head looks. The menu button skips it. This "
-     "setting is a test. Off shows the intro flat."},
+    // Not offered: each player has the intro in stereo. intro_vr=0 (the
+    // flat intro) stays for the desktop tests.
+    // {kBool, "intro_vr", "Intro in stereo", nullptr, 1,
+    //  "Shows the Lionhead logo at the start of the game in 3D around you."},
     {kValues, "cutscene_immersive", "Cut scenes",
      "In a window=0|Around you=1", 0,
      "In a window: a cut scene of the game plays on a screen in front of "
      "you, and the land around you stays still. Around you: a cut scene "
      "plays all around you, and the camera of the game moves you with all "
      "its motion. Choose it only if a camera that moves is no problem for "
-     "you."},
+     "you. A video of the game always plays on the screen."},
+    {kBool, "video_view", "Video Capture Mode", nullptr, 0,
+     "The game window on the PC is the capture window: it shows a 16:9 part "
+     "of the view of your left eye, so that OBS or a different capture tool "
+     "can record it while you play in the headset. The capture window turns "
+     "smoothly when your head shakes. Faint corner marks in the headset show "
+     "the part that the capture window records, and the video does not show "
+     "them. The cards, the subtitles, the ring and the menu panels are in "
+     "the video, where your left eye sees them. It needs the Vulkan "
+     "renderer. It costs a little frame time."},
+    {kSlider, "video_view_down_pct", "Lower capture window", "0|40|5|%", 20,
+     "Only with Video Capture Mode. How far the middle of the capture window "
+     "is below the middle of your view, as a percentage of the height of "
+     "the view. In this game you look down most of the time, so the default "
+     "is 20%. 0% is the middle."},
 
     // Not offered: the sizes and the depth of the interface in the eye
     // pictures have settled defaults. With controllers the hints and the
@@ -258,44 +267,52 @@ inline const Setting kSettings[] = {
     //  "scenery does not poke through it."},
 
     {kGroup, nullptr, "Moving around", nullptr, 0, nullptr},
-    {kChoice, "snap_turn", "Turn in steps", "Off|30 degrees|45 degrees|90 degrees",
-     2,
+    // snap_turn 0 (no turn) is not in the list. The mod still takes it from
+    // bwvr.ini for a test, and the launcher shows the default for it
+    // (kShownAsDefault).
+    {kValues, "snap_turn", "Turn",
+     "Smooth=4|30 degrees=1|45 degrees=2|90 degrees=3", 2,
      "Push the stick of your Hand left or right, drag sideways with the middle "
-     "mouse button, or press a turn key, to turn in one step. You stay "
-     "where you are. The middle mouse button does not tilt the camera. Off "
-     "gives the smooth turn and tilt of the game."},
+     "mouse button, or press a turn key, to turn. You stay where you are. "
+     "Smooth: in the God view you turn while you hold the stick or the turn "
+     "key, and a larger push turns faster. The middle mouse button then "
+     "turns in steps of 45 degrees. 30, 45 or 90 degrees: you turn in one "
+     "step. The middle mouse button does not tilt the camera."},
     {kValues, "god_zoom_smooth", "Zoom with the stick", "In steps=0|Smooth=1",
      0,
      "In steps: one push of the stick of your Hand forward or back is one zoom "
      "step. Smooth: the zoom changes while you hold the stick. It stops when "
      "you let the stick go."},
-    {kValues, "god_zoom_forward_in", "Stick forward",
-     "Zooms out=0|Zooms in=1", 0,
-     "The direction of the zoom on the stick of your Hand. Zooms out: push the "
+    {kBool, "god_zoom_forward_in", "Invert zoom direction", nullptr, 0,
+     "The direction of the zoom on the stick of your Hand. Off: push the "
      "stick forward and the world gets smaller, pull it back and the world "
-     "gets larger. Zooms in is the other way."},
+     "gets larger. On: the other way."},
     {kValues, "god_zoom_about", "Center of the zoom",
      "The land you look at=1|The land under you=0|Your Hand=2", 1,
      "The point that stays where it is when you zoom with the stick. The "
      "land you look at: the thing in the middle of your view keeps its place "
      "and changes its size. The land under you: you keep your place on the "
      "land. Your Hand: the land at your Hand keeps its place."},
-    {kValues, "move_stick", "Move with the other stick",
-     "Head direction=1|Controller direction=2|Off=0", 1,
+    {kValues, "move_type", "Movement type", "Walk=0|Fly=1", 0,
      "Push the stick of your other hand (the left stick, or the right stick "
-     "with a left hand) to move over the "
-     "land in the God view. You stop when you let the stick go. Head "
+     "with a left hand) to move in the God view. You stop when you let the "
+     "stick go. Walk: you move over the land, and the height of your view "
+     "follows the hills, so the land stays at the same height below your "
+     "hands. Fly: you move in the direction of Movement direction, also up "
+     "and down. Look or point down and push the stick forward to go down. "
+     "The view does not follow the land. It stops just above the land, and "
+     "you can fly up high, also at the size of a villager. A full push of "
+     "the stick gets faster the longer you hold it."},
+    // move_stick 0 (no walk) is not in the list. The mod still takes it
+    // from bwvr.ini for a test, and the launcher shows the default for it
+    // (kShownAsDefault).
+    {kValues, "move_stick", "Movement direction",
+     "Head direction=1|Controller direction=2", 1,
+     "Which way is forward when you push the stick of your other hand. Head "
      "direction: forward is where your head faces. Controller direction: "
-     "forward is where that controller points. Off: the stick does not move "
-     "you. Some people feel ill when a stick moves them: use Off then, and "
-     "move with the grip and with the teleport."},
-    {kValues, "move_stick_follow_land", "Walk follows the land", "On=1|Off=0",
-     1,
-     "When you move with the stick, the height of your view follows "
-     "the hills, so the land stays at the same height below your hands. The "
-     "view goes up and down smoothly, and it does not follow each small "
-     "bump. It moves only while you push the stick. Off: the view keeps its "
-     "height, and a hill comes nearer or goes farther away."},
+     "forward is where that controller points. With Fly, point the "
+     "controller where you want to go. Some people feel ill when a stick "
+     "moves them: then move with the grip and with the teleport."},
     // Not offered. These four keys act on the camera of the game. In the
     // God view the mod moves the view in cuts and in its own zoom steps,
     // and a story shows in a window in the room, so the defaults are the
@@ -318,6 +335,19 @@ inline const Setting kSettings[] = {
     //  "Cut at the end: the view holds until the camera stops, then it cuts. "
     //  "With both cut choices, a long move also cuts on the way, a close shot "
     //  "gets a little more room, and the camera does not shake."},
+    {kValues, "comfort_vignette", "Comfort vignette",
+     "Off=0|Gentle=1|Strong=2", 0,
+     "The edges of your view go dark while you move with a control: the walk "
+     "with the stick, the zoom, a turn, a teleport and the grab of the "
+     "world. The middle of the view stays clear. A faster move gives a "
+     "darker edge. Some people feel less ill with it. Gentle: the edges get "
+     "darker. Strong: only the middle of the view stays clear."},
+    // Not offered: each player has the cover of the view when the head goes
+    // into the land.
+    // {kValues, "head_blinder", "Head in the land", "Cover the view=1|Off=0",
+    //  1,
+    //  "When your head goes into a hill, a house or a rock, a gold and red "
+    //  "cover fills your view."},
     {kChoice, "blink", "Blink when you jump or turn", "Off|Short|Long", 0,
      "Shows black for a moment when you jump or turn. Short is 0.1 seconds "
      "and long is 0.2 seconds. Some people find a jump easier with a blink."},
@@ -341,11 +371,13 @@ inline const Setting kSettings[] = {
     //  "Direct hand: the Hand is where your controller is. Stretch your arm to "
     //  "reach far into the world. Pointer: the controller points a ray, and the "
     //  "Hand goes where the ray points."},
-    {kValues, "left_hand", "Hand", "Follow the game=-1|Right=0|Left=1", -1,
-     "Which controller is the Hand. Follow the game: the left handed option "
-     "in the options of the game chooses it. Right or Left: the controller "
-     "of that hand is the Hand. The other controller grabs the world, moves "
-     "you with its stick and opens the ring."},
+    // Not offered: the left handed option of the game chooses the Hand
+    // (hand_follow_game=1), so the player sets it in one place.
+    // {kValues, "left_hand", "Hand", "Follow the game=-1|Right=0|Left=1", -1,
+    //  "Which controller is the Hand. Follow the game: the left handed option "
+    //  "in the options of the game chooses it. Right or Left: the controller "
+    //  "of that hand is the Hand. The other controller grabs the world, moves "
+    //  "you with its stick and opens the ring."},
     {kSlider, "hand_real_cm", "Your hand length", "14|26|1| cm", 19,
      "The length of your real hand, from the wrist to the tip of the middle "
      "finger. Your hands in the game have this length, so they are the size "
@@ -386,25 +418,74 @@ inline const Setting kSettings[] = {
      "A small glow at the tip of the index finger shows the point of the "
      "Hand that picks up and clicks. It shows while a press of the grip "
      "acts on something."},
+    // Not offered: each player has the trail of the gestures and the glow on
+    // the rays.
+    // {kBool, "gesture_trail", "Trail for gestures", nullptr, 1,
+    //  "While you draw a gesture, a gold ribbon follows the tip of your "
+    //  "index finger."},
+    // {kBool, "ray_glow", "Glow on the rays", nullptr, 1,
+    //  "The ray of the menu, the line to a far object and the arc of the "
+    //  "teleport get a soft glow."},
     {kValues, "grab_hand", "Grab the world",
      "Grip of the other hand=1|Either grip=2|Off=0", 1,
      "Hold the grip of your other hand. Move that hand to pull the world. "
      "Hold both grips to turn the world and to zoom. Either grip: the grip "
      "of your pointing hand also grabs the world when the Hand is empty and "
      "not over an object. Off: the grips do not move the world."},
-    {kValues, "hint_learn", "Hints", "Until learned=1|Always=0", 1,
-     "The cards beside your wrists show what each button does. Until "
-     "learned: a line goes away after you do its action 3 times. It comes "
-     "back after 10 minutes of play without that action. In a lesson of the "
-     "tutorial, each line shows. Always: each line always shows. To show all "
-     "lines again, delete bwvr-hint-counts.ini in the game folder."},
+    // Not offered: the ToolTips option of the game chooses it
+    // (hints_follow_game=1).
+    // {kValues, "hint_learn", "Hints", "Until learned=1|Always=0", 1,
+    //  "The cards beside your wrists show what each button does. Until "
+    //  "learned: a line goes away after you do its action 3 times. It comes "
+    //  "back after 10 minutes of play without that action. In a lesson of the "
+    //  "tutorial, each line shows. Always: each line always shows. To show all "
+    //  "lines again, delete bwvr-hint-counts.ini in the game folder."},
+    {kBool, "hint_controller", "Show 3D controller for hints", nullptr, 1,
+     "While a hand has a hint, a faint model of your controller shows in "
+     "that hand. Each button of the hint is lit in gold, and each lit button "
+     "has its own small card with a line to the button. A controller with "
+     "no model has a card beside each wrist, with a small picture of each "
+     "button. Off: a card beside each wrist names the buttons, for example "
+     "Trigger, Grip, A or X, with no model and no pictures."},
+    // Not offered: each player has the scroll look.
+    // {kValues, "hint_card_style", "Card look", "Scroll=1|Plain=0", 1,
+    //  "The look of the cards beside your wrists, of the spell book, of the "
+    //  "ring menu and of the keyboard for a name. Scroll: a small parchment "
+    //  "scroll with dark letters, and the button word on a wax seal (green for "
+    //  "the trigger, amber for the grip). The spell book and the keyboard are "
+    //  "pages of the same parchment. Each item of the ring is a wax seal. "
+    //  "Plain: dark cards with white letters."},
+    // Not offered: the row "Show 3D controller for hints" (hint_controller)
+    // gives the values of the two keys of the hints. The keys stay for
+    // tests.
+    // {kValues, "hint_style", "Hints with the controller",
+    //  "Controller in the hand=2|Cards at the wrists=1", 2,
+    //  "Controller in the hand: a faint model of your controller shows in "
+    //  "the hand that has a hint."},
+    // {kBool, "hint_card_pictures", "Button pictures on the cards", nullptr,
+    //  1,
+    //  "Each line of a button on the cards beside your wrists has a small "
+    //  "picture of your controller, with that button lit."},
+    // Not offered: each player has the stroke with the open hand.
+    // {kBool, "creature_stroke_open", "Stroke with the open hand", nullptr, 1,
+    //  "Put your open hand on your Creature and keep it there for a moment. "
+    //  "Then move the hand slowly to stroke the Creature. You do not need the "
+    //  "grip. The open hand never slaps. For a slap, close the grip. Off: only "
+    //  "the grip strokes the Creature."},
 
     {kGroup, nullptr, "Launcher", nullptr, 0, nullptr},
-    {kBool, "update_check", "Check for updates", nullptr, 1,
-     "Each time the launcher opens, it asks GitHub for the latest version "
-     "of the mod. When a newer version is out, the line at the bottom of "
-     "the window says so. Click that line to open the page of the new "
-     "version in your browser. Off: the launcher does not ask."},
+    {kBool, "large_address", "Use 4 GB of memory", nullptr, 1,
+     "The game is a 32 bit program. Without this, Windows gives it 2 GB of "
+     "memory space. A large render can fill it, and then the game can crash "
+     "or show white textures. On: before each start, the launcher sets a "
+     "flag in the program of the game that gives the game 4 GB. Off: the "
+     "launcher puts the original program back. The first change keeps a "
+     "copy of the original program in the game folder."},
+    // Not offered: the launcher always asks GitHub for the latest version
+    // (StartUpdateCheck).
+    // {kBool, "update_check", "Check for updates", nullptr, 1,
+    //  "Each time the launcher opens, it asks GitHub for the latest version "
+    //  "of the mod."},
 
     {kGroup, nullptr, "Testing", nullptr, 0, nullptr},
     {kBool, "net_check_skip", "Tell the game that there is no internet",
@@ -423,11 +504,11 @@ inline const Setting kSettings[] = {
      "place and walk: the same, and that place goes on with the walk of the "
      "stick to the time when the headset shows the picture. The menu of the "
      "app changes it at once with Save."},
-    {kBool, "test_keys", "Test keys", nullptr, 0,
-     "Turns on the keys for tests. Each key changes one rule of the mod "
-     "while you play, so that you can compare, and the readme lists them. "
-     "F12 saves a picture of each eye in the game folder. A player does "
-     "not need this."},
+    // Not offered: the debug menu has the switches. test_keys=1 stays for
+    // the desktop tests and for a tester who writes it in bwvr.ini, so a
+    // save keeps it.
+    // {kBool, "test_keys", "Test keys", nullptr, 0,
+    //  "Turns on the keys for tests. A player does not need this."},
     {kInt, "game_sse_parts", "SSE paths of the game (bits)", nullptr, 0,
      "A test of the speed. The game has code with SSE of its own for 13 "
      "parts of its work. 0: the game chooses by the CPU, and the headset "
@@ -440,16 +521,20 @@ inline const Setting kSettings[] = {
      "The doc backend.md of the mod lists them. A player does not need "
      "this. The change counts from the next start."},
     {kBool, "debug_menu", "Debug menu", nullptr, 0,
-     "Adds the item Debug to the ring of your left hand. It opens pages "
-     "with the switches of the test keys, and a choice changes a switch at "
-     "once. So you can compare in the headset with no keyboard. It does "
-     "not need the test keys. A player does not need this."},
+     "Adds the item Debug to the ring of your left hand. It opens a window "
+     "of switches. Each switch changes one rule of the mod while you play, "
+     "so that you can compare. The ray and the trigger of your right hand "
+     "change a switch at once, with no keyboard. A player does not need "
+     "this."},
 };
 
 
 // Keys that the launcher and the menu of the headset app do not offer. Each
 // save deletes them from bwvr.ini (see "Retired keys" in docs/launcher.md).
 inline const char* const kRetiredKeys[] = {
+    // The row "Movement type" replaced the row of this key: Walk always
+    // follows the land.
+    "move_stick_follow_land",
     "head_tracking",   "immersive",        "head_fov_deg",
     "eye_separation_milli", "hand_anchored", "head_roll",
     "ui_world_lock",   "pointer_clip",     "pointer_scale",
@@ -474,17 +559,26 @@ inline const char* const kRetiredKeys[] = {
     "fake_controller_left_points", "fake_head_right_cm", "fake_head_up_cm",
     "fake_head_forward_cm", "fake_head_fov", "fake_head_layers",
     "grab_probe", "fake_controller_gestures",
-    "fake_controller_gesture_cm", "fake_controller_front", "hint_profile",
+    "fake_controller_gesture_cm", "fake_controller_front",
+    "fake_controller_stick_pct", "fake_controller_pull_cm", "hint_profile",
     "hint_selftest",   "miracle_test_seeds", "miracle_test_cancel",
+    "miracle_test_orbs", "miracle_test_save_steps", "spell_book_test_items",
     "fake_mouse_script", "fake_mouse_step_px", "fake_mouse_x_pct",
     "fake_mouse_y_pct", "fake_mouse_x2_pct", "fake_mouse_y2_pct",
-    "radial_test_save", "village_test_chants", "village_test_census",
+    "radial_test_save", "spell_book_test_save", "gesture_panel_test_frame",
+    "gesture_sheet_test_save", "gesture_sheet_test_frame",
+    "places_panel_test_save", "places_test_buttons", "snapshot_test_dir",
+    "debug_window_test_save", "debug_test_parts", "welcome_test_save",
+    "card_send_test_save",
+    "welcome_test_parts",
+    "village_test_chants", "village_test_census",
     "village_test_icon", "village_test_site", "seek_step_cm",
     "village_test_miracles", "village_test_scaffolds",
     "village_test_workshop", "pointer_leave_cursor", "cursor_trace",
     "exit_test_frame", "crash_test_frame", "target_check_test_frame",
     "registry_test_guard", "intro_skip_test_frame",
     "fake_controller_play_frame", "fake_controller_play_after",
+    "fake_controller_temple_frame",
     "menu_skip_test_frame", "intro_motion_test_seconds",
     "intro_push_test_px",
     // More keys for desktop tests: each key that the mod reads with _test in
@@ -508,13 +602,16 @@ inline const char* const kRetiredKeys[] = {
     "far_test_quest", "far_test_take_gone", "bubble_card_test",
     "bubble_card_test_frame", "one_walk_marks_test_frame",
     "eye_clean_test", "eye_clean_test_frame",
+    "cull_test_frame", "cull_test_period",
     "frame_time_test_frame", "frame_time_test_readers",
     "frame_time_test_readers_frames", "god_zoom_about_test",
     "god_zoom_test_toggle",
     "hand_feel_test_toggle", "hand_model_test_look", "hand_model_test_swap",
     "help_test", "hint_counts_test_file", "land_light_test",
     "near_test_flips", "sky_test_frame", "sky_test_trace",
-    "sky_test_hour", "spawn_test_flag", "sprite_test_frame",
+    "sky_test_hour", "sky_test_mist_log", "sky_test_mist_hide",
+    "sky_test_mist_hide_all", "sky_test_round_frame", "sky_test_land_frame",
+    "spawn_test_flag", "sprite_test_frame",
     "sprite_test_trace", "roll_test_inject",
     "spawn_test_temple",
     "spawn_test_toggle", "spawn_test_x", "spawn_test_z",
@@ -534,17 +631,21 @@ inline const char* const kRetiredKeys[] = {
     "temple_test_follow_frame", "temple_test_scan", "temple_test_scan_frame",
     "temple_test_scan_hall", "temple_test_taps_frame", "temple_test_targets",
     "text_click_test", "text_click_test_text", "fake_controller_rots",
-    "fake_controller_turns", "seek_plan", "seek_go", "seek_picture",
+    "fake_controller_left_rots", "fake_controller_turns", "seek_plan", "seek_go", "seek_picture",
     "seek_class", "seek_bulk", "seek_forest", "seek_scroll", "seek_tap",
     "seek_thrown", "intro_probe",
     // Settings that the launcher offered before. Each has one right answer
     // in a headset, and the mod's default is that answer. The other
     // settings that are not offered now (the sizes and the depth of the
-    // interface, the hint, the zoom step) stay in the ini as they are, so a
-    // value that a person wrote by hand is kept.
+    // interface, the hint, the zoom step, test_keys) stay in the ini as they
+    // are, so a value that a person wrote by hand is kept. hint_style and
+    // hint_card_pictures get their values from the row hint_controller.
     "controller_hand", "controller_left_handed", "script_camera",
     "instant_jumps",
     "camera_glide",    "head_units_per_meter_x10",
+    "play_mode",       "intro_vr",         "head_blinder",
+    "gesture_trail",   "ray_glow",         "hint_style",
+    "hint_card_pictures", "update_check",
 };
 
 inline const int kSettingCount =
@@ -718,13 +819,17 @@ inline bool OnlyDirect3D9(const char* key) {
 }
 
 // The rows that only the launcher on the PC uses. The menu of the headset app
-// does not show them, and keeps their values in the ini. A page of that menu
-// has room for 10 rows, so the six rows of the hand fit and the three rows of
-// the source of the gaze are not on it. In the headset app the fovea follows
-// the gaze of OpenXR with the value of foveation_gaze in the ini (1 is the
-// default).
+// does not show them, and keeps their values in the ini. The 4 GB flag of
+// runblack.exe and the capture window are of the PC. A page of that menu has
+// room for 10 rows, so the six rows of the hand fit, the three rows of the
+// source of the gaze and the row of the mipmaps (on by default) are not on
+// it. In the headset app the fovea follows the gaze of OpenXR with the value
+// of foveation_gaze in the ini (1 is the default).
 inline bool OnlyLauncher(const char* key) {
   return key != nullptr && (strcmp(key, "update_check") == 0 ||
+                            strcmp(key, "large_address") == 0 ||
+                            strncmp(key, "video_view", 10) == 0 ||
+                            strcmp(key, "force_mips") == 0 ||
                             strncmp(key, "hand_fit_", 9) == 0 ||
                             strcmp(key, "foveation_gaze") == 0 ||
                             strncmp(key, "eye_osc_", 8) == 0);

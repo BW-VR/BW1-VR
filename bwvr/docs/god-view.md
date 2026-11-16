@@ -7,7 +7,9 @@ reach it. There is no reach gain and no Hand that grows. The reach comes from
 the world (`hand.md`).
 
 The God view is the main mode and the default. It works with motion
-controllers and with the mouse. The launcher offers it first.
+controllers and with the mouse. The launcher has no row for the play mode,
+and a save of the launcher removes `play_mode` from `bwvr.ini`, so a player
+always has the God view.
 
 The God view is the camera of the tabletop mode (`tabletop.md`) with a
 different room: the land is at the waist and there is no edge. The two modes
@@ -19,9 +21,9 @@ that math. This file has everything that is specific to the God view.
 | `play_mode` | View |
 | --- | --- |
 | 4 | The God view. The default |
-| 3 | The tabletop: the island is a model on a table in the room (`tabletop.md`). The launcher calls it "Tabletop (test)" |
-| 2 | A window that follows the head. Not in the launcher |
-| 1 | The stereoscopic window: a 3D screen in front of the player. The head does not move the camera |
+| 3 | The tabletop: the island is a model on a table in the room (`tabletop.md`). For tests |
+| 2 | A window that follows the head. For tests |
+| 1 | The stereoscopic window: a 3D screen in front of the player. The head does not move the camera. For tests |
 | 0 | Not a mode. A value of 0 in `bwvr.ini` gives the God view, and the mod logs it |
 
 ```
@@ -42,7 +44,8 @@ sets the flags of each mode.
 - **The zoom** changes the scale about the land point that the player looks
   at (`god_zoom_about`, 1), so the thing in the middle of the view stays where
   it is and only its size changes. The ground keeps its height. It goes from
-  the life size scale (7.5 units per meter) to 4000, in steps of 1.5 times.
+  1 unit per meter, where a villager is as high as the player, to 4000, in
+  steps of 1.5 times.
   With `god_zoom_smooth=1` the stick zooms while it is held, with no steps.
 - **The ground height** goes up and down with the left grip: the hand pulls
   the land up and down one to one. The mouse player has steps of 5 cm (the
@@ -50,12 +53,21 @@ sets the flags of each mode.
 - **The grab of the world** moves the land one to one with one hand, across
   and up and down, and two hands turn and scale it. Nothing moves after the
   release.
-- **The walk with the stick.** The stick of the hand that does not point
-  moves the player over the land while it is pushed, along the direction of
-  the head or of the controller (`move_stick`). The height of the view
-  follows the land under the head through a smooth filter
-  (`move_stick_follow_land`). It stops when the stick comes back (section
-  5.7).
+- **The walk and the fly with the stick.** The stick of the hand that does
+  not point moves the player while it is pushed, along the direction of the
+  head or of the controller (`move_stick`). In the walk (`move_type=0`) the
+  player moves over the land, and the height of the view follows the land
+  under the head through a smooth filter (`move_stick_follow_land`). In the
+  fly (`move_type=1`) the player moves along that direction in 3D, also up
+  and down, and the view does not follow the land. It stops when the stick
+  comes back (section 5.7).
+- **The turn.** The stick of the Hand to the side turns the view about the
+  head: in one step of 30, 45 or 90 degrees, or with `snap_turn=4` smoothly
+  while it is held, faster with a larger push (section 4).
+- **Comfort.** `comfort_vignette` darkens the edges of the view during a move
+  that the player makes with a control. While a dialog box is up the stick
+  does not turn or zoom, and a hold of the stick click of the hand that does
+  not point recenters the view (section 5.8).
 - **The Hand** is always the real hand (`hand_real_cm`, 19 cm) at the scale
   now. Zoomed out, it is large against the villagers.
 - **The game camera** stays over the player's place at 400 units, for the
@@ -87,6 +99,12 @@ sets the flags of each mode.
   camera is from a thing gets the distance from the head or the nearest
   hand. A script that asks if the camera sees a thing gets the view of the
   head. In a story the script gets the camera of the story (section 16).
+- **The camera zone.** Where a script of Land 1 keeps the camera in an area,
+  for example at the Creature select, the game camera stays in that area,
+  so the game does not push it back or shake the view. The player turns and
+  zooms freely and moves up to `god_zone_margin` (50) units past the edge.
+  There the view stops, and the game plays its sound of the block (section
+  17).
 
 ## 1. The map
 
@@ -127,7 +145,7 @@ room:
 
 ```
 W  = the point of the zoom
-s' = s * ratio,  kept between 7.5 and god_far_units_per_meter
+s' = s * ratio,  kept between the lowest scale and god_far_units_per_meter
 G' = W + (s' / s) * (G - W)
 ```
 
@@ -184,14 +202,117 @@ high. A pan can bring one over the head. So the level is first kept between
 nearer to that height. After 14 steps out at the life size scale, a hill top
 12.73 m over the head is 5.6 cm under it.
 
-**The limits.** 7.5 units per meter is the life size scale of
+**A land far below the head.** A zoom scales the heights about the level, so
+a zoom in about a level over the land moves that land farther down. With
+`god_zoom_far_level=1` (the default) a zoom in over a land more than 2.5 m
+below the head takes that land as the level (`ZoomLevelFor` in
+`zoom_math.h`), and the land keeps its height in the room. A zoom out keeps
+the level at 2.5 m below the head, so a deep land comes up toward it: from
+4.01 m below the head at 4.41 units per meter, a zoom out to 17.64 puts it
+2.88 m below. With 0 a zoom in also takes the level at 2.5 m, and the same
+land goes to 9.15 m below the head at 1 unit per meter. The switch "Deep
+zoom" of the debug page changes the key while the game runs, with a short
+pulse for 0 and a long pulse for 1. The log has one line at the end of each
+smooth zoom:
+
+```
+god view     : in the smooth zoom the land under your head went from 4.01 m to 4.01 m below your head (god_zoom_far_level=1)
+```
+
+**The limits.** The lowest scale is 1 unit per meter
+(`god_near_units_per_meter_x10`, 10). A villager is about 1.6 units high: the
+body that the hand pick finds has a half height of 0.70 to 0.85 units, and
+the game holds a villager with a height of 1.66 units. So at 1 unit per meter
+a villager is 1.6 m high in the room, as high as the player, and the eyes of
+a player who stands with the land at the feet are at the eyes of a villager.
+A value of 75 stops the zoom at the life size scale (7.5 units per meter,
+`head_units_per_meter_x10`), and 0 takes that scale from
 `head_units_per_meter_x10`. At 4000 an arm of 70 cm reaches 2800 units, which
 is inside the Hand's reach of 5600 (section 8). `god_far_units_per_meter` can
-go up to 8000. A step at a limit does nothing and is logged. From 7.5 to 4000
-is 16 steps.
+go up to 8000. A step at a limit does nothing and is logged. From the start
+scale of 100, 12 steps in go to 1 unit per meter. From 1 to 4000 is 21
+steps, and 5 steps out from 1 go past the life size scale, to 7.6.
+
+**Below the life size scale.** Each distance of the room stays the same as at
+the other scales: the Hand is 19 cm long (size 0.06), the near plane is 5 cm
+(0.05 units, section 8), the walk goes 150 cm a second times the factor of
+the scale (6 m and 6 units at 1 unit per meter, section 5.7), the reach
+of the teleport arc is 10 units. The distance factor of the ears is 0.25,
+so a sound with the maximum 300 carries 75 m of the room (`audio.md`, 6.3). The values of section 8 that follow the scale stay the
+game's own below a gain of 1. The land under the head keeps the height that
+the player gave it. A zoom in does not lower it: the player pulls the land
+down with the grip of the other hand, to at most 2.5 m below the head
+(section 3). At 1 unit per meter with the land 60 cm below the head, a
+villager stands 1 m over the eyes. With `god_zoom_about` 1 and 2 a zoom
+moves the head over the land, and the land under the new place of the head
+can be higher or lower than the level of the zoom. At a small scale a small
+change of the land is a large change in the room: 0.5 units are 50 cm at 1
+unit per meter. So after a zoom in about a point that is not under the head,
+the land under the head can be 10 cm below it (`ZoomClearHead`) or far
+below it. With the land 1.4 to 1.6 m below the head,
+the player sees the village from the eyes of a villager.
+
+**Houses at a small scale.** The player walks among the houses there, so two
+rules keep a house from covering the view of a head that is not in it:
+
+- **The walls** (`solid_house_inset_pct`, 20). The box of the mesh of a house
+  holds the eaves of its roof, which go past its walls. Below the life size
+  scale the box of a house is 20 percent smaller across, in each level
+  direction, and it keeps its height (`solid_math.h`, `InsetLevel`). A house
+  of Land 1 has a half width of about 3.4 units, so the box comes about
+  0.7 units (70 cm at 1 unit per meter) nearer to the middle on each side. A
+  head under the eaves is then out of the house, and a head that is deep in
+  the house is still in it: the head blinder covers the view there, and the
+  drawn hand stops at the smaller box. A rock and a tree trunk keep their
+  shape. At the life size scale and above a house keeps its whole box,
+  because the Hand there touches its roof from above. 0 keeps the whole box
+  at each scale.
+- **The zoom stops at a house** (`god_zoom_solid_stop`, 1). A zoom step
+  brings the head nearer to the land, and with `god_zoom_about` 1 and 2 it
+  also moves the head over the land. So near the lowest scale a step can put
+  the head into a house. A step, and each frame of the smooth zoom, stops
+  where the head is 30 cm of the room out of the nearest house, rock or
+  trunk (`god_zoom_solid_cm`, `StepShare` in `zoom_math.h`). That leaves
+  room for the Hand between the eyes and the wall, and the eyes see the
+  wall with the land beside it. The overlay of the head blinder starts at
+  5 cm, and a value of 5 stops the step there. A step that cannot go at all
+  is refused. Only a step in stops: a step out makes the world smaller about
+  the point of the zoom and lifts the head over the land, so it always goes,
+  and the player can zoom out of each place. A head that is already nearer than the limit may zoom away
+  from the solid, but not nearer. The eaves of the roof can be nearer than
+  the limit, because the box of a house below the life size scale is its
+  walls. The
+  solids are the ones near the hands and the head of the frame before.
+  Below twice the life size scale (15 units per meter) the head wants them
+  from 1.5 m of the room, so a house that the next step brings to the head
+  is in the list. 0 lets a zoom step put the head into a house.
+
+The head blinder still covers the view when the player walks or leans into
+the walls of a house (section 5.9). The land of the game has cells of 10 units, which are 10 m at
+1 unit per meter, so the land looks flat and its texture is soft there.
+
+Below twice the life size scale (15 units per meter) the zoom check of each
+step has one more line: the height of the eye over the land, the near plane,
+the fog of the game and the overlay of the head blinder after the step. A
+zoom step that a solid stops logs one line, and a hold of the smooth zoom
+logs one line for each hold:
+
+```
+god view     : the zoom step stops short at 1.93 units per meter, not 1.73: the whole step puts your head 38.8 cm into the Abode 13AF65F0, so your head stays 30 cm out of it (god_zoom_solid_stop=1)
+god view     : the zoom step is refused at 1.93 units per meter: it puts your head 21.0 cm into the Abode 13AF65F0 (god_zoom_solid_stop=1)
+```
+
+A zoom in that comes to the lowest scale logs one line, and it comes again
+only after the scale went above it:
+
+```
+god view     : the zoom is at its lowest scale, 1.00 units per meter (god_near_units_per_meter_x10=10). A villager of 1.6 units is 1.60 m high in the room, and the land under your head is 0.60 m below it
+god view     : zoom check, the scene at 1.00 units per meter: the eye is 0.60 units over the land, the near plane is 0.050 units (5.0 cm of the room), the fog of the game is on from 400 to 900 units, and the head blinder covers 0% (your head is 60.0 cm from the land)
+```
 
 **The inputs.** The right stick forward zooms out, and back zooms in
-(`god_zoom_forward_in=0`, "Stick forward" in the launcher). With 1 the stick
+(`god_zoom_forward_in=0`, the checkbox "Invert zoom direction" of the
+launcher is off). With 1 the stick
 forward zooms in. The desktop test scripts set 1, so the word `stick_up` of a
 recipe zooms in. With
 `god_zoom_smooth=0`, the default, one push past 70 percent is one step. The
@@ -338,15 +459,114 @@ goes under the new head position.
 
 ## 4. The turn
 
-The right stick left or right turns the view by the snap turn step (45
-degrees by default, the launcher's "Turn in steps"). The turn keys and the
-middle mouse do the same. The request goes through `comfort_camera.cpp`, so
-the tutorial's turn switch and `MayTurn` still apply, and the tutorial still
-hears the turn. The view turns about the head: the world point of the head
-stays, and the heading changes by the step. A 90 degree turn right puts the
-land that was on the right in front.
+The launcher row "Turn" (`snap_turn`) has four values: Smooth (4), and 30,
+45 and 90 degrees (1 to 3). The default is 45 degrees. The mod also takes
+`snap_turn=0` (no turn) from bwvr.ini, for a desktop test. The launcher and
+the settings window do not offer it: for 0 they show the default, and a save
+of the launcher writes the default.
 
-With "Turn in steps" off, there is no turn in the God view.
+**The snap turn** (1 to 3). The right stick left or right turns the view by
+the step. The turn keys and the middle mouse do the same. The request goes
+through `comfort_camera.cpp`, so the tutorial's turn switch and `MayTurn`
+still apply, and the tutorial still hears the turn. The view turns about the
+head: the world point of the head stays, and the heading changes by the
+step. A 90 degree turn right puts the land that was on the right in front.
+
+**The smooth turn** (4). While the right stick is held to the side, the view
+turns about the head, as for a snap turn, by a small angle in each frame
+(`ApplyGodTurnHold` in `tabletop.cpp`). The speed follows the push:
+
+- Up to 0.3 of the travel of the stick (the dead zone of the smooth zoom),
+  the view does not turn.
+- From 0.3 to 0.95, the part t of that travel gives the share t (1 + t) / 2
+  of the full speed (`comfort_math.h`, `SmoothTurnShare`). Half that travel
+  gives 3/8 of the speed, and a push of the stick to 0.5 gives about a fifth.
+  The curve starts at half the slope of a straight line, so a small push is
+  a slow turn that is easy to hold.
+- From 0.95 on, the view turns at `smooth_turn_speed` (90 degrees a second
+  by default).
+
+The default speed is a quarter turn a second. It is also the full turn speed
+of the comfort vignette, so a full push gives the full darkness of the
+vignette and a small push a light edge. The turn of a frame is the share
+times the speed times the time of the frame, at most 0.05 s, so a long frame
+does not make a jump.
+
+The smooth turn, the walk with the stick and the smooth zoom take the time
+of a frame by one rule, latched once for each frame at the main camera call:
+
+- With a session of a headset and `god_display_time=1`, the time is the gap
+  between the display times of two frames of the headset (section 5.7, "The
+  time of a frame").
+- With no session (a desktop run has `stereo_headless=1` and no session),
+  or with `god_display_time=0`, the time is the time of the CPU between two
+  main camera calls.
+
+The stop line of a hold gives the time of its frames by that rule and by the
+clock of the CPU. A desktop run with `test_frame_rate=60` has the paced
+frames of 1/60 s only from frame 150 of the controllers. Before that frame
+a desktop frame is shorter, so a hold of 60 frames there is shorter than
+1 s, and it turns less than the speed for 1 s.
+
+The turn stops in the frame in which the stick comes back into the dead
+zone: a frame with no request turns nothing, and nothing glides. The larger
+axis of the stick wins, so one frame never zooms and turns. A push that the
+game refused (the turn switch of the tutorial, a fight, a land drag, the
+Action button of the game),
+a grab of the world, a dialog box, and a hold that stopped because the stick
+went forward or back, must come back into the dead zone before the stick
+turns again. A held turn key turns the view at the full speed. A drag of the
+middle mouse turns in steps of 45 degrees, and so do a view that is not the
+God view and a room of the Temple.
+
+**The tests of the game** (`MayTurn` in `comfort_camera.cpp`). A snap turn
+and the smooth turn need the turn switch of the script, no pivot that a
+script holds, and no fight. `CameraModeNew3::Update` also sets two flags on
+each update [V]: `0x00C5B0F0` in the land drag (interface hand mode `0x14`,
+or the Move button in hand mode `0x1B`), and `0x00C5B0B4` while the Action
+button of the game is held (`ControlMap::IsActionPerformed(2)`,
+`BINDABLE_ACTION_ACTION`). The first one stops a turn. The second one stops
+a turn unless a miracle is in the Hand (Hand state 8, Grain): then the grip
+is the Action button, and the closed grip of a charge, a pour or a circle
+holds it. The Action button alone does not move the camera of the game, so
+the view turns with a miracle in the Hand as it does with an empty Hand. The
+log has a line for a turn that a miracle lets through and for a refused turn
+with its cause (`comfort : the snap turn goes on while a miracle in the Hand
+holds the Action button of the game`, `comfort : the snap turn is refused:
+...`), 30 at most.
+
+The smooth turn writes as a snap turn writes. A turn alone turns the game
+camera about its own focus (`god_turn_keeps_focus`), and the version of the
+view goes up in each frame that turns, so the game camera follows. For the
+tutorial, each `turn_help_degrees` of the turn (5) is one turn event of the
+game's help, one in each game turn (45 degrees with `turn_help_degrees=0`).
+The settings window changes the turn and its speed at once.
+
+With the turn off (`snap_turn=0`), there is no turn in the God view: the
+stick does not turn, and the game's own smooth turn of the turn keys and the
+middle mouse turns only the game camera, not the view. A desktop run with
+`snap_turn=0` shows the same picture before and after a push of the stick
+and a hold of the turn key.
+
+While a dialog box is up, the stick does not turn (`menu_stops_turn`,
+section 5.8). A snap turn puts the comfort vignette at its full darkness at
+once, and the smooth turn darkens the edges by its speed (`comfort_vignette`,
+section 5.8).
+
+The log of the smooth turn:
+
+```
+god view     : the smooth turn starts to the right, 100% of a full push, at 90 degrees a second for a full push (smooth_turn_speed), heading 56.14 degrees, frame 221
+god view     : smooth turn frame 1 of the hold: 1.493 degrees in 0.0166 s at 100% of a full push, heading 57.634 degrees, frame 221
+god view     : the smooth turn stops, the stick asks for no turn now. It turned 92.92 degrees right in 1.032 s of 60 frames (90.0 degrees a second), heading 56.14 to 149.06 degrees. The clock of the CPU gave 1.032 s for these frames, frame 281
+god view     : turn check, 30 frames after the stop the heading is 149.061 degrees, and it was 149.061 degrees at the stop
+```
+
+The lines are from a desktop run with a full push of 1 s at 60 frames a
+second. The log has one line for each frame of the first 4 holds, at most
+240 frames each. The report of a window counts the requests that the God view took,
+the ones that `MayTurn` and a grab refused, and the turn events that the
+smooth turn owed to the help.
 
 ## 5. Moving around: the grab and the mouse
 
@@ -357,11 +577,13 @@ the table by the grips") is the same as on the table, with the vertical grab
 and the ground limits added.
 
 - One hand (the other hand's grip, the left grip by default): the land moves
-  one to one with the hand, across and up and down. A hand that moves up
-  raises the land by the same distance, and a hand that moves down lowers it
-  (`TableGrabSolve` with `vertical`, then `GodGroundHeight` for the limits of
-  section 3). At a limit the land stops and does not jump. The height of the
-  waist point is the height of the press plus the rise of the hand.
+  with the hand, across and up and down. A hand that moves up raises the
+  land, and a hand that moves down lowers it (`TableGrabSolve` with
+  `vertical`, then `GodGroundHeight` for the limits of section 3). At a
+  limit the land stops and does not jump. With the land at the hand and a
+  scale of 16 units per meter or more the move is one to one. The gain of
+  the grab below changes that for land far below the hand and for a small
+  scale.
 - Both grips: the land turns about up with the hands and scales with their
   spread, about the land point under the middle of the hands. Two hands move
   the land only across. With `controls=0` the height of the table center of
@@ -379,7 +601,8 @@ and the ground limits added.
   land is below the head now and at the anchor.
 - The solve is from the press every time, so a head that moves with still
   hands moves nothing, and nothing moves after the release.
-- The scale stays between 7.5 and `god_far_units_per_meter`. The mouse pan
+- The scale stays between the lowest scale (section 2) and
+  `god_far_units_per_meter`. The mouse pan
   never lifts or drops the view: its hand is on the level plane of the press.
 - The game's camera switches hold for the grab (section 7, "The tutorial").
   While the switch for the drag is off, the grab moves nothing, and it
@@ -390,6 +613,53 @@ and the ground limits added.
   0x308 for a pan, 0x300 and the direction for a turn, and 0x304 for a zoom.
 
 The sticks are refused while a grip holds the world.
+
+**The gain of the grab** (`grab_boost`, 1, `grab_gain_math.h`). A player at
+the villager scale can find the land 20 m below the head, and a grab of 60
+cm at a time then takes 33 pulls. So a grab with one hand has two gains, each
+on its own axis:
+
+| Part | Axis | Gain | With the defaults |
+| --- | --- | --- | --- |
+| The distance | Up | `d / reach`, at least 1 and at most `grab_boost_most` (50). `d` is the land below the hand, `reach` is `grab_boost_reach_cm` (50) | 1 for land within 50 cm of the hand, 4 for land 2 m below, 40 for land 20 m below |
+| The scale | Across | The factor of the speed of the stick (section 5.7, the curve of `move_stick_scale_*`), at least 1 | 4 at 1 unit per meter, 1.46 at 7.5, 1 from 16 up |
+
+- The solve takes a hand point of its own. At the press it is the hand. In
+  each solve it moves by the step of the hand since the solve before, with
+  the gains of that solve. So a gain that changes in a pull makes no jump,
+  and a hand at rest moves nothing at each gain.
+- Up, the gain falls with the distance during the pull. `LandUp` takes the
+  exact answer for each step, so the land comes up to `reach` below the
+  hand by the gain, and never nearer: there is no overshoot. Then the land
+  is 1:1 with the hand. Land 20 m below the hand comes to 1.03 m below it in
+  three pulls of 60 cm (0.5 + 19.5 e^-3.6), and to 0.66 m in four.
+- A move down of the hand is 1:1, so the land never drops away fast. The
+  limits of section 3 stay: a pull that takes the land farther than 2.5 m
+  below the head stops at the limit, and a pull that brings far land nearer
+  acts from each depth. At a limit the hand point of the solve goes to the
+  height of the pose, so a move back acts at once.
+- The distance part acts up only. With the land 20 m below the hand its
+  gain is 40, and a small move of the hand to the side would throw the view
+  meters to the side in each pull. The scale part acts across only: in
+  height the hand holds the ground at the waist, and a gain there would
+  move the land away from the hand with each small move up or down.
+- Two hands (the turn and the zoom) keep the real hands, 1:1. The test step
+  of the grab "one to one" (Shift F11, "Grab test" of the debug page) turns
+  the gain off too.
+- With `grab_boost=0` the grab is 1:1 at each distance and scale. The switch
+  "Grab gain" of the debug page changes the key while the game runs, with a
+  short pulse for 1:1 and a long pulse for the gain. A grab that holds
+  ends.
+- The comfort vignette counts the move of the view in the room, so a pull
+  with a large gain darkens the edges as a fast walk does (section 5.8).
+
+The log has a line for each press with the gain (at most 60 in a game), and
+a line at the release with the way of the hand and of the land:
+
+```
+grab         : the gain of the grab (grab_boost=1): 40.00 up, with the land 20.00 m below the hand (reach 50 cm, at most 50), and 1.00 across at 100.00 units per meter, frame 1450
+grab         : the hand went 60.0 cm and the land 1423.0 cm in the room. The gain of the grab was 12.74 to 40.00 up and 1.00 to 1.00 across (grab_boost=1)
+```
 
 The code is in `world_grab.cpp` (the state machine, `TableAnchor`,
 `TableSolve`) and `controllers.cpp` (the grip points and the buttons).
@@ -480,6 +750,11 @@ the Hand, which the game puts on the same ray.
   drag while a grip holds the world, and a drag that the game's switch does
   not allow pan nothing until the release.
 - A zoom or a turn during the drag anchors the pan again, with no move.
+
+A desktop run with the test mouse (`hand_run.ps1 -Kind mousepan -Save
+temple`, no controller) shows the pan: the mouse takes the land 1.31 m from
+the head, the grabbed land stays within 0.000 cm of the mouse ray, and the
+view moves only on the frames in which the mouse moves.
 
 ### 5.4 What the game's land drag does
 
@@ -603,6 +878,9 @@ All in `[bwvr]`.
 | `grab_smoothing_ms` | 35 | The ease of the grip points. 0 is no smoothing |
 | `grab_press_pct` | 70 | The squeeze that starts a grab |
 | `grab_release_pct` | 50 | The squeeze that ends it |
+| `grab_boost` | 1 | The gain of a grab with one hand in the God view (5.1). 1: land far below the hand comes up faster than the hand, and at a small scale the land moves across faster. 0: 1:1. The switch "Grab gain" of the debug page. Not in the launcher |
+| `grab_boost_reach_cm` | 50 | Land within this distance below the hand is held 1:1 up, in cm of the room |
+| `grab_boost_most` | 50 | The largest gain of the distance part |
 | `grab_gain_mode` | 1 | Game camera grab only. 1 the land looks glued to the hand, 0 one to one |
 | `grab_gain_pct` | 100 | Game camera grab only. Multiplies `g` |
 | `grab_gain_max` | 60 | Game camera grab only. The most `g` can be |
@@ -625,6 +903,11 @@ keys. After a run, the report has one line, `the held camera moved X units a
 frame on average, Y at most`. A real hand is never quite still, so in the
 headset this line shows the tracking noise times the gain.
 
+`hand_run.ps1 -Kind holdland` holds the grip on the land with still hands:
+the held camera moves 0.0000 units on each of 249 frames. A step of the hand
+of 10 cm up in a second grip moves the ground 10.00 cm up in the room, and
+the still frames after it move nothing.
+
 ### 5.7 The walk with the stick
 
 The stick of the hand that does not point (the left stick, by default) moves
@@ -633,7 +916,8 @@ the world (5.1): the waist point goes to the land that was one step from it
 in the room, and the heading and the scale stay. With
 `move_stick_follow_land=1` the height of the view follows the land under the
 head (see "The land under the head" below). With 0 the height of the ground
-stays too.
+stays too. With `move_type=1` the stick flies in place of the walk (see "The
+fly" below).
 
 ```
 G' = G + s * Lt * (step.x, 0, step.z)      step = speed * the time of the frame
@@ -651,7 +935,9 @@ event.
   which the controller of the stick points (its aim ray, `controllers.md`,
   section 8), flat on the land. The mod takes the direction again in each
   frame, so a turn of the head or of the hand turns the walk. With 0 the
-  stick does not move the player.
+  stick does not move the player. The launcher and the settings window do
+  not offer 0: for 0 they show the default (1), and a save of the launcher
+  writes 1. The mod takes 0 from bwvr.ini for a desktop test.
 - **A controller that points up or down.** A controller that points less than
   11.5 degrees from straight up or from straight down has no direction on
   the land. The walk then keeps the direction of the frame before, and a walk
@@ -662,11 +948,65 @@ event.
   move below 30 percent, the top speed from 95 percent, and a straight line
   between the two. A diagonal is not faster than a straight push.
 - **The speed** is a speed of the room: `move_stick_speed_cm` (150) cm of the
-  room for each second at a full push. So the walk feels the same at each
-  scale. At 100 units for each meter that is 150 units a second over the
-  land, and at the life size scale it is 11 units a second. The step of a
-  frame is the speed times the real time of the frame, and a frame counts at
-  most 50 ms.
+  room for each second at a full push, times the factor of the scale
+  (`move_stick_scale`, 1). The step of a frame is the speed times the real
+  time of the frame, and a frame counts at most 50 ms.
+- **The speed by the scale** (`ScaleFactor` in `walk_math.h`). A walk at one
+  speed of the room is slow at the villager scale: the land is as large as
+  for a villager, and a town is many seconds away. So the speed of the
+  stick is multiplied by a smooth function of the scale, with no steps:
+
+  ```
+  factor = (ref / scale) ^ power, kept between low and high
+  ```
+
+  With the defaults (ref 16 units per meter, power 0.5, low 0.6, high 4):
+
+  | Scale (units per meter) | 1 | 4 | 7.5 | 16 | 30 | 44.4 and up |
+  | --- | --- | --- | --- | --- | --- | --- |
+  | Factor | 4 | 2 | 1.46 | 1 | 0.73 | 0.6 |
+  | Room speed with 150 cm | 6.0 m/s | 3.0 | 2.2 | 1.5 | 1.1 | 0.9 |
+  | Room speed with 250 cm | 10.0 m/s | 5.0 | 3.7 | 2.5 | 1.8 | 1.5 |
+
+  At 1 unit per meter a villager is as high as the player, so 6 to 10 m/s
+  of the room is the run of a villager, and a town of 100 units takes 10 to
+  17 s before the speed ramp. From 21 to 43 units per meter the factor is
+  0.87 to 0.61, so a walk there is a little slower than the key. The power
+  of 0.5 is half way between one speed of the room (0) and one speed over
+  the land (1). The factor depends on the scale only: in a smooth zoom
+  during a walk it follows the scale of each frame, and with the stick at
+  rest nothing moves. The speed ramp multiplies the result and keeps its
+  cap, so the top speed at a large scale is 0.6 times the top speed of the
+  key, and at 1 unit per meter it is 4 times. The comfort vignette counts
+  the move in the room (section 5.8), so at a large factor it stays at its
+  full darkness. With `move_stick_scale=0` the speed is the speed of the key
+  at each scale. The grab of the world has a gain of its own with the same
+  curve across (section 5.1, "The gain of the grab"). The switch "Speed by
+  scale" of the debug page changes the key while
+  the game runs, with a short pulse for 0 and a long pulse for 1. A walk or
+  a fly that runs stops.
+- **The speed ramp** (`move_stick_ramp`, 1). While the stick is pushed to 90
+  percent of the top speed or more, the time of that push counts. After 1 s
+  the speed doubles each 2 s, up to `move_stick_ramp_most` (32) times
+  (`RampFactor` in `walk_math.h`):
+
+  ```
+  factor = 2 ^ ((t - 1 s) / 2 s), at most 32      t = the time of the full push
+  ```
+
+  A push under 90 percent sets the time to 0, so the speed goes back to the
+  speed of the push in the same frame. A release stops the walk in the same
+  frame, as before. The ramp acts in the walk and in the fly. At the scale
+  of a villager (1 unit for each meter), with the speed by the scale and
+  `move_stick_speed_cm=150`, a full push is 6 units each second, and 192
+  units each second after 11 s: 1000 units of the land take about 13 s from
+  rest. With `move_stick_scale=0` it is 1.5 and 48 units each second, and
+  about 29 s. At 100 units for each meter the top is 2880 units each second
+  (4800 with `move_stick_scale=0`), so a player at that scale lets go
+  before it. The comfort
+  vignette is at its full darkness from a move of 150 cm of the room each
+  second (section 5.8), so a faster move keeps it full. With
+  `move_stick_ramp=0` the speed is the speed of the push only.
 - **The time of a frame** (`god_display_time`, 1 is the default). The walk,
   the smooth zoom and the smoothing of the grips of a grab (5.1) take the
   time of a frame from the display times that the runtime predicts for two
@@ -703,15 +1043,32 @@ event.
     the height above the land. The filter keeps its state from one walk to
     the next, so a climb in short pushes follows the land as a long push
     does. When something else moved the view since the last frame of a walk
-    (a teleport, a grab, a zoom, a ground step, a new build), the filter
-    starts again at the land under the head, and the land keeps the height
-    below the head that it has then.
+    (a teleport, a jump to a place of the Places sheet, a grab, a zoom, a
+    ground step, a fly, a new build, a place at a camera of the game, a
+    recenter), the filter starts again at the land under the head, and the
+    land keeps the height below the head that it has then
+    (`move_stick_follow_place=1`, `FollowRestart` in `walk_math.h`). A place
+    at a camera of the game is a load, the end of a story or of a cut scene,
+    and each new place of the game camera (section 15). A snap turn and the
+    smooth turn turn about the head, so the head stays over the same land,
+    and the filter goes on. With `move_stick_follow_place=0` the filter
+    starts again only when the version of the view changed: after each move
+    and each turn, but not after a place at a camera of the game or a
+    recenter. Then the next walk moves the view up or down by the difference
+    of the land of the two places: 2.99 m for land of 18.0 and 31.2 units
+    at 4.41 units per meter. The log has one line when a place or a recenter
+    is the only cause (at most 20 in a game).
+  - A walk after a fly starts the filter at the land under the head with
+    each value of the key, so it keeps the height that the fly left, and it
+    does not chase the land of a place before the fly.
   - The teleport puts the land under the head at the same height in the room
     as before the teleport (section 14.4), with each value of the key. So
     after a teleport the land is at the height below the hands that the
     player has.
   - With `move_stick_follow_land=0` the view keeps its height in the world.
-    The launcher row "Walk follows the land" sets the key.
+    The launcher has no row for the key: "Walk" of the row "Movement type"
+    is 1, and a save of the launcher removes the key from bwvr.ini. The
+    switch "Move kind" of the debug page sets it while the game runs.
 - **A hill at the new place.** When the land at the new place of the head is
   nearer than 10 cm below the head, all of the land goes down to that limit
   (`ZoomClearHead`), as in a zoom that moves the head over the land. The
@@ -719,6 +1076,88 @@ event.
   short sharp hill that the filter does not follow comes that near. With
   `move_stick_follow_land=0` the limit acts on each frame of a hill near the
   head, so the view then goes up with each bump at once.
+- **The fly** (`move_type=1`, the launcher row "Movement type", Fly). The
+  stick moves the view along the forward direction in 3D, so a push while
+  the player looks or points down goes down, and up goes up. Forward is the
+  forward axis of the head (`move_stick=1`), with its pitch, or the aim ray
+  of the controller of the stick (2). So with the controller the player
+  flies where the controller points. The stick to the side moves level, at
+  right angles to the flat part of forward (`FlyRight` in `walk_math.h`).
+  When forward points less than 11.5 degrees from straight up or down, the
+  side move goes along the level right of the head. The speed and the time
+  of a frame are the ones of the walk, and the speed is along the 3D
+  direction:
+
+  ```
+  G' = G + s * Lt * step                     step = speed * the time of the frame
+  ```
+
+  - The view does not follow the land.
+  - The floor (`FlyFloor` in `walk_math.h`, `FlyLandClearance`). The
+    clearance has the measure of the head blinder (section 5.9): the head
+    point over the highest land at it and at four points 6 cm of the room
+    around it. So a steep slope in front of the face counts, as for the
+    overlay. The floor is 10 cm (`kFlyClearMeters`), 5 cm over the start of
+    the overlay. The fly looks at the place of the head after the step.
+    When the step brings the head nearer than the floor, the view goes up
+    until the head is at the floor. So a fly down stops over the land, and
+    a fly across a rising slope slides up along it while the stick is
+    pushed. Nothing lifts the view when the stick is at rest. A head that
+    is already nearer (the player bent down into the land) is held at its
+    clearance, and the fly does not lift it out.
+  - The ceiling (`FlyCeiling`). The fly has no ceiling of 2.5 m, so a player
+    at the scale of a villager can fly over the island as a bird. The
+    ceiling is 10000 world units over the land under the head, in world
+    units so that a small scale does not get a low ceiling. The far zoom
+    already puts the head that high (4000 units for each meter, the land
+    2.5 m below the head). At the ceiling the move up stops, and the move
+    across goes on.
+  - The solids (`FlySolidStop`, `FlySlide` in `walk_math.h`). With
+    `god_zoom_solid_stop=1` the head stays `god_zoom_solid_cm` (30) out of a
+    house, a rock or a tree trunk (the solids of section 2, "Houses at a
+    small scale"), with the solids that the first eye pass of the frame
+    before kept within 1.5 m of the head (`TabletopZoomSolidReachM`). With
+    `fly_solid_slide=1` a step that goes into that shell slides past the
+    solid: only the part of the step along the outward direction of the
+    solid at the head comes off (the gradient of the distance to the
+    solid), and the part along the solid stays. A second pass does the same
+    at the end of the step, for a corner. So a fly at a slant goes round a
+    tree, and a fly forward with the head pitched up goes up the wall of a
+    house and over its roof. Only a push straight at the middle of a solid
+    stops (less than 1 percent of the step is along it). The slide adds no
+    part away from the solid, and a stick at rest moves nothing. A head
+    that is already nearer than the shell may go on while it does not come
+    nearer. With `fly_solid_slide=0` a step stops short of the shell along
+    its own direction, and the player steers away to go on. The switch "Fly
+    at solids" of the debug page changes the key. The solids near the head
+    need `head_blinder=1` and `head_blinder_objects=1` (the defaults): with
+    0 the fly does not see a house.
+  - High over the land at a small scale the God view keeps the fog of the
+    sky and the distance of the map objects (`cull_distance`, `cull_fog`,
+    `backend.md`), because it turns the fog off only above 3 times the life
+    size scale (section 2). So from a great height the far land can be in
+    the fog.
+  - After a fly the land can be more than 2.5 m below the head. Nothing
+    moves the view back by itself. The walk starts its filter again at the
+    land under the head, so it keeps that height over the land and follows
+    the hills from there. The grab, the ground step and a zoom keep their
+    range of 10 cm to 2.5 m only for a move that goes farther out of it
+    (`GodGroundHeight`): a grab or a step that lowers the view acts, a move
+    up is stopped. A teleport and a move of the game camera to a new place
+    (a story, a load) keep the land under the head at its height in the
+    room, at most 2.5 m below the head.
+  - The way back to the land at the waist is a grab of one hand that pulls
+    the land up. With the gain of the grab (5.1) land 20 m below the hand
+    comes to about 1 m below it in three pulls of 60 cm. With
+    `grab_boost=0` the pull is 1:1, so 2.5 m takes about four pulls. A
+    ground step up of the keyboard also brings the land up. A zoom out
+    brings a deep land up toward 2.5 m below the head, and with
+    `god_zoom_far_level=1` the next zoom in keeps it there.
+  - The fly stops in the frame in which the stick comes back, as the walk
+    does. There is no glide and no ease.
+  - The comfort vignette counts the move up and down too (section 5.8).
+  - A change of `move_type` stops a walk or a fly that runs. The filter of
+    the land starts again at the next walk.
 - **The map and the game camera.** The waist point stays on the map, as for a
   grab. The version of the view goes up on each frame that moves, so the game
   camera follows the player (section 7).
@@ -778,20 +1217,36 @@ event.
   `test_keys=1`, Ctrl, Shift and the backslash key change
   `move_stick_climb` (on a German keyboard the key with the caret).
 - **Comfort.** A walk with a stick makes some players ill. The grab and the
-  teleport move the player with no such motion. `move_stick=0`, and the
-  choice "Off" of the launcher, turn the walk off.
+  teleport move the player with no such motion. `move_stick=0` turns the
+  walk off (bwvr.ini only).
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `move_stick` | 1 | 0: the stick does not move the player. 1: forward is the direction of the head. 2: forward is the direction in which the controller of the stick points. The launcher row "Move with the other stick" |
+| `move_stick` | 1 | 0: the stick does not move the player (bwvr.ini only). 1: forward is the direction of the head. 2: forward is the direction in which the controller of the stick points. The launcher row "Movement direction" |
+| `move_type` | 0 | 0: the stick walks over the land. 1: the stick flies along the forward direction in 3D, and the view does not follow the land. The launcher row "Movement type" |
 | `move_stick_speed_cm` | 150 | The speed of a full push, in cm of the room for each second, 10 to 500 |
 | `move_stick_cap_ms` | 50 | The longest frame of the game that the walk counts, 10 to 250. The row "Walk cap" of the debug page gives 50 or 250 (`android.md`, "A long frame of the game") |
 | `move_stick_boost_pct` | 500 | With `controls=1`: the speed at a full pull of the trigger of the hand of the stick, in percent of the speed with no trigger, 100 to 2000 |
 | `move_stick_path` | 1 | With `controls=1`: 1 the flight keeps its height and stops at the land, with no follow of the land. 0 the walk follows the land as `move_stick_follow_land` says |
 | `move_stick_climb` | 1 | With `controls=1`: 1 the tilt of the controller of the stick moves the player up and down, and past the top limit the world gets smaller. 0 the walk keeps the height |
 | `god_display_time` | 1 | 1: the walk, the smooth zoom and the smoothing of the grips take the time of a frame from the display times of the headset. 0: from the time of the CPU |
-| `move_stick_follow_land` | 1 | 1: while the player walks, the height of the view follows the land under the head through the filter. 0: the view keeps its height. The launcher row "Walk follows the land" |
-| `move_stick_trace` | 0 | A test for a desktop run: the log has one line for each of the first N frames of each walk (at most 2000 lines in a game) |
+| `move_stick_follow_land` | 1 | 1: while the player walks, the height of the view follows the land under the head through the filter. 0: the view keeps its height. Not in the launcher: a save of the launcher removes it |
+| `move_stick_follow_place` | 1 | 1: the filter of the land starts again after each move of the view, a place at a camera of the game and a recenter, and a turn keeps it. 0: it starts again after each change of the version of the view only, so a walk after a place at a camera of the game chases the land of the place before. Not in the launcher and not on the debug page |
+| `move_stick_trace` | 0 | A test for a desktop run: the log has one line for each of the first N frames of each walk or fly (at most 2000 lines in a game) |
+| `move_stick_ramp` | 1 | 1: a push of 90 percent or more gets faster with its time, in the walk and in the fly. 0: the speed of the push only. The switch "Speed ramp" of the debug page. Not in the launcher |
+| `move_stick_ramp_most` | 32 | The largest factor of the speed ramp, 1 to 64 |
+| `move_stick_scale` | 1 | 1: the speed of the stick is times the factor of the scale (the speed by the scale). 0: the same speed of the room at each scale. The switch "Speed by scale" of the debug page. Not in the launcher |
+| `move_stick_scale_ref_x10` | 160 | The scale where the factor is 1, in tenths of a unit for each meter, 10 to 40000 |
+| `move_stick_scale_power_pct` | 50 | The power of the factor, in percent, 0 to 100 |
+| `move_stick_scale_low_pct` | 60 | The least factor, in percent, 10 to 100 |
+| `move_stick_scale_high_pct` | 400 | The largest factor, in percent, 100 to 1000 |
+| `fly_solid_slide` | 1 | With `god_zoom_solid_stop=1`, 1: a fly slides past a house, a rock or a tree trunk, and only a push straight at it stops. 0: a fly stops short of it. The switch "Fly at solids" of the debug page |
+
+The switch "Move kind" of the debug page goes from the walk that follows the
+land (`move_type=0`, `move_stick_follow_land=1`) to the walk that keeps its
+height (`move_stick_follow_land=0`), to the fly (`move_type=1`) and back. The
+pointing controller gives a short, a medium and a long pulse. A walk or a
+fly that runs stops.
 
 With `test_keys=1`, Shift and the Menu key of the keyboard change `move_stick`
 from 1 to 2, to 0 and back to 1 while the game runs. The Menu key is the key
@@ -811,6 +1266,15 @@ god view     : walk check, 30 frames after the stop the waist point is at 2625.1
 controllers  : the stick of the other hand does not move you: a grip holds the world, frame 1081
 ```
 
+The lines above are from a run with `move_stick_scale=0`. With 1 the line of
+the start also gives the factor of the scale and the speed with it, and the
+line of the end gives the least and the largest factor of the walk:
+
+```
+At 100.00 units per meter the speed of the stick is times 0.60 (move_stick_scale=1: (16.0 / scale) ^ 0.50, from 0.60 to 4.00): 90 cm of the room each second.
+The scale made the speed of the stick 0.60 to 0.60 times move_stick_speed_cm (move_stick_scale=1).
+```
+
 The line of the end also says how far the land went down for a hill, and on
 how many frames the controller had no direction. The shortest and the
 longest frame and step show whether the walk was even: at a steady push each
@@ -822,11 +1286,44 @@ frame before (see "An even walk" below):
 Of N frames of the headset, M came more than one refresh of 8.3 ms after the frame before, and the headset showed the frame before again for them.
 ```
 
+The first walk after a place at a camera of the game, or after a recenter,
+has one line for the filter of the land:
+
+```
+god view     : the view went to a camera of the game since the last walk. The filter of the land holds 18.00, and the land under your head is at 31.20: 299.3 cm of the room apart. The filter starts again at the land under your head (move_stick_follow_place=1)
+```
+
+With `move_stick_follow_place=0` the end of the line is "The filter goes on
+from the land of the last walk".
+
 With `move_stick_trace=N` the log also has one line for each of the first N
 frames of each walk:
 
 ```
-god view     : walk trace, frame 61 of the walk: 18.05 ms, a step of 2.707 cm of the room, the waist point at 2023.553 42.130 2487.737, the land under your head at 49.517 (filtered 40.547) and 52.61 cm below your head, frame 961
+god view     : walk trace, frame 61 of the walk: 18.05 ms, a step of 2.707 cm of the room (the speed times 1.00), the waist point at 2023.553 42.130 2487.737, the land under your head at 49.517 (filtered 40.547) and 52.61 cm below your head, frame 961
+```
+
+A fly has the same lines with the word "fly". The line of the start also
+gives the degrees of forward below or above level, and the line of the end
+gives how far the fly went up or down in the room (`move_type=1`). The line
+of the start names the speed ramp, and the line of the end gives the
+largest factor of the ramp when it went above 1 ("The speed ramp went up to
+R times the speed of the push"). Each trace line has the factor of its
+frame. The trace of a fly has the step up and the clearance of the head
+(the measure of the head blinder) in each frame. The line of the end of a
+fly also gives how far its floor lifted the view, the least clearance after
+a step, how many solids the fly met, and how many steps slid past one or
+stopped at one. Each solid that the fly slides past or stops at has one
+line, and one more when the way changes from a slide to a stop:
+
+```
+god view     : the fly slides past the Tree 1632AEE0 at X Y Z: the whole step puts your head 26.7 cm out of it, and your head stays 30.0 cm out of it (the shell is 30 cm, fly_solid_slide=1). Your head is at X Y Z, and the middle of the solid is D degrees to the right of straight ahead in the room, frame N
+```
+
+The trace of a fly:
+
+```
+god view     : fly trace, frame F of the fly: T ms, a step of S cm of the room (U cm up, the speed times R), the waist point at X Y Z, the land under your head at H and B cm below your head, a clearance of C cm, frame N
 ```
 
 **An even walk.** The step of each frame is the speed times the real time
@@ -844,6 +1341,172 @@ Desktop), or Space Warp, gives an even walk. The count in the line of the
 end shows how many frames came late. The report of a window has
 the count of the walks, their time and the frames that moved the view.
 
+### 5.8 The comfort of a move
+
+Three things help a player who feels ill when the view moves: the comfort
+vignette, a stick that does not turn or zoom while a dialog box is up, and a
+recenter from the controllers.
+
+**The comfort vignette** (`comfort_vignette`, `vignette.cpp`). The edges of
+the view go dark during a move that the player makes with a control and that
+the body does not feel. The middle of the view stays clear. These moves count:
+
+- the walk and the fly with the stick, the smooth zoom, the smooth turn and
+  the grab of the world with one hand or two hands. Each one reports how
+  fast the view moved in the frame (for the fly, also the move up and down), as a share of the full speed of a control: 150 cm of the room each
+  second, a turn of 90 degrees each second, or a zoom of 1.5 times in 500 ms.
+  The largest of the three counts (`comfort_math.h`, `MoveShare`). So a slow
+  push of the stick gives a light vignette, and a grab that holds still gives
+  none.
+- a snap turn, a zoom step, a step of the ground and a teleport. Each one is
+  a step of one frame, and it puts the vignette at its full darkness at once.
+
+A move that the player did not make (a story, a move of the game camera, the
+view that is built again) and a move of the head give no vignette. The
+vignette comes in 0.15 s and goes in 0.3 s, in a straight line. It never
+moves the view.
+
+| Value | The middle of the eye is clear to | Full darkness from | The darkness at full speed |
+| --- | --- | --- | --- |
+| 0 | The vignette is off (the default) | | |
+| 1, gentle | 35 degrees | 58 degrees | 85%. The edge of the view of a Quest 3, about 50 degrees from the middle, gets about 60% |
+| 2, strong | 22 degrees | 45 degrees | 100%, black |
+
+The darkness goes along a smooth curve from the clear angle to the dark
+angle. The vignette is the last draw of the mod in each eye pass, after the
+world, the hands and the glow (`sky_detail.cpp`, `h_SunGlare`): 6 rings of 48
+black triangles with an alpha at each corner, in the pixels of the eye. The
+angles go to pixels with the projection of the game (`InfoTransform`). The
+draw has no depth test, so the land never hides it. The interface of the
+game draws after it, and the hint cards and the ring are layers of their own,
+so they stay clear. One walk for both eyes (`one_walk.cpp`) copies the batch
+into the right eye with no shift, because each vertex has an rhw of 1. The
+hands of the player are in the world pass too, so the edge darkens them.
+
+**No turn and no zoom while a dialog box is up** (`menu_stops_turn`,
+`PumpStick` in `controllers.cpp`). While a box of the game is up, for
+example the game menu of Esc, the walk, the teleport and the grab of the
+world do not move the view. With `menu_stops_turn=1` the stick of the
+pointing hand also does not turn and does not zoom the God view: the snap
+turn, the smooth turn, the zoom step and the smooth zoom stop, and so does
+the turn in a room
+of the Temple. Each push is refused one time and counted, and it must come
+back to the middle before it acts after the box closes. Outside the God view
+the push forward and back is a wheel click, which a box can use, so only the
+turn stops there.
+
+**The recenter hold** (`recenter_hold`, `PumpRecenter` in
+`controllers.cpp`). Hold the stick click of the hand that does not point for
+1 s, with the stick at rest, and the view recenters as F11 and the
+recenter of the headset do (`HeadPoseRecenter`). Both hands get a pulse. A
+push of the stick in the hold starts the time again, so a click that comes
+with a walk does not recenter. On a Vive wand the click of the pad is a part
+of each push, and the same rule keeps a walk from a recenter. After a
+recenter the click must go up before the next hold. The hold does not act
+when the stick click of that hand has a different job: the ring with
+`radial_menu_button=2` on the hand that does not point, and the draw of a
+gesture with `gesture_button=2` on the pointing hand. The log says so one
+time. The item `recenter` of the ring does the same (`controllers.md`,
+10.2).
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `comfort_vignette` | 0 | 0: the edges of the view stay clear. 1: a gentle vignette. 2: a strong vignette. The launcher row "Comfort vignette" |
+| `menu_stops_turn` | 1 | 1: while a dialog box is up, the stick does not turn and does not zoom the God view. 0: it turns and zooms then |
+| `recenter_hold` | 1 | 1: a hold of 1 s of the stick click of the hand that does not point recenters the view. 2: the stick click of the pointing hand. 0: no hold recenters |
+
+The debug page of the ring (`debug_menu=1`, the group "View") has the
+switches "Vignette" (off, gentle, strong), "Menu turn" (turns, stops) and
+"Recenter hold" (off, the other hand, the Hand). The pointing hand gives a
+short pulse for the old value and a longer pulse for the others.
+
+The log:
+
+```
+vignette     : comfort_vignette=1 (gentle). In a move that you make with a control, the edges of the view go dark: clear to 35 degrees from the middle, and 85% dark from 58 degrees at full speed. It comes in 0.15 s and goes in 0.30 s
+vignette     : the edges of the view go dark (gentle), the walk with the stick, frame 272
+vignette     : the edges of the view are clear again after 2.97 s, with a top level of 1.00, frame 440
+vignette     : the edges of the view go dark (gentle), a snap turn, frame 772
+controllers  : the stick turn is refused while a dialog box is up (menu_stops_turn=1), frame 1121
+controllers  : a hold of the stick click of the other hand recenters the view, frame 1634
+head         : recentered on the next frame
+```
+
+The report of a window counts the times that the vignette came, the steps
+among them and the eye passes that drew it, and the pushes that a dialog box
+refused and the recenters.
+
+### 5.9 The head under the land
+
+The land is at the waist, so a player who bends down can put the head into a
+hill. The game draws no land from the inside, and the eyes then see what is
+under the land. As in Half-Life: Alyx, an opaque overlay then fills the view
+(`head_blinder`, `head_blinder.cpp`, math in `blinder_math.h`).
+
+- **The head.** Once a frame the head point is the render head of the God
+  view, in the middle between the eyes. The land counts at the head point
+  and at four points 6 cm of the room around it, and the highest one counts,
+  so a steep slope in front of the face counts too. The land is
+  `LH3DIsland::GetAltitude`, as for the stop of the Hand at the land
+  (`hand-model.md`, "The Hand stops at the land").
+- **The solids** (`head_blinder_objects`). A house, a rock and a tree trunk
+  count too, with the solids that stop the Hand (`hand-model.md`, "The
+  Hand stops at the land"): the box of the mesh of a house and of a rock,
+  and the trunk of a tree. The clearance is the least of the height over the
+  land and the distance from the head point to each solid, so the overlay
+  starts 5 cm out of a wall and is opaque in the house. The hook of the
+  screen test of the draw offers each object whose ball round its box is
+  within 15 cm of the room of the head, so the house that the head goes
+  into is in the list also when the Hand is far from it. A solid stays in
+  the list of the blinder while the head is within 15 cm of it, for 600
+  frames at most after the last frame that had it. So a house that the draw
+  stops to offer while the head is in it still counts. A field, a villager,
+  an animal and the Creature do not count.
+- **The strength.** From 5 cm over the land the overlay starts at the edge of
+  the view and grows inward along a smooth curve. At the land and under it
+  each eye sees only the overlay. The overlay comes in 0.1 s and goes in
+  0.25 s, in a straight line. It never moves the view.
+- **The picture.** A warm gold in the middle of the eye and a deep red from
+  50 degrees out. It is the last draw of the mod in each eye pass, after the
+  vignette (section 5.8), with the same states: no depth test, and the
+  vertices in the pixels of the eye with an rhw of 1. So the land does not
+  hide it, both renderers have it, and one walk for both eyes copies it into
+  the right eye. The head point is between the eyes, so both eyes get the
+  same overlay. The hint cards and the ring are layers of their own, and they
+  show over it.
+- **When.** Only while the God view owns the view and no dialog box is up. In
+  a room of the Temple, in a menu, in a story and in a cut scene the overlay
+  does nothing, and an overlay that shows goes at once.
+- **The floor of the head.** When the view goes to a place of a game camera,
+  and in a zoom, a walk and a grab, the land under the head stays 10 cm
+  (`kGroundNearest`) below the head (`FloorHeadY` in `tabletop.cpp`). With
+  `head_blinder=1` that is 10 cm below the height of the head at the recenter
+  pose, not below the head now. So a head that goes down does not push the
+  land down, and nothing moves the view that the player did not move: the
+  head goes into the land, and the overlay covers it. With `head_blinder=0`
+  the floor follows the head now. The log has the line "the
+  floor of the head acts" each time that the floor moves the land down.
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `head_blinder` | 1 | 1: an opaque overlay when the head goes into the land, and the floor of the head is at the height of the head at the recenter pose. 0: the eyes see under the land, and the floor of the head follows the head. The switch "Head blinder" of the debug page. Not in the launcher, and a save of the launcher removes it (`launcher.md`, "Retired keys") |
+| `head_blinder_objects` | 1 | 1: a house, a rock and a tree trunk cover the view as the land does. 0: only the land counts, and the eyes see into a house. The switch "Blinder solids" of the debug page |
+| `solid_house_inset_pct` | 20 | Below the life size scale the box of a house is this percent smaller across, nearer to its walls (section 2, "Houses at a small scale"). It is the same box for the drawn hand (`hand-model.md`). 0 to 50. 0: the whole box at each scale |
+
+The log has one line when the overlay starts, with the clearance of the
+head, what it is near (the land, or the class and the address of a solid)
+and its place on the map. One line when the view is opaque, with the same
+facts. One line when the overlay is gone, with its time and the least
+clearance of the head. The report of a window counts the times that the
+overlay showed, the opaque frames and the eye passes that drew it.
+
+The desktop run of the solids is `village_run.ps1 -Kind headhouse`. At 29.6
+units a meter a house is about 11 cm high. The head goes over the middle of
+a house (the seek word `gointo`), then 55 cm down into its box for 120
+frames, and up again. No desktop run has shown the overlay in a house yet.
+The Village Store is no solid: it is an open pit, and the game draws a
+normal view with the head in it.
+
 ## 6. The Hand
 
 The Hand's size is the real hand at the scale now:
@@ -852,8 +1515,8 @@ The Hand's size is the real hand at the scale now:
 size = hand_real_cm * hand_scale_pct / 100 * s / 3.2
 ```
 
-It is 19 cm long in the room at every scale: size 0.45 at 7.5 units per
-meter, 5.9 at 100, and 237.5 at 4000. So zoomed out it is large against the
+It is 19 cm long in the room at every scale: size 0.06 at 1 unit per meter,
+0.45 at 7.5 units per meter, 5.9 at 100, and 237.5 at 4000. So zoomed out it is large against the
 villagers, and a held villager takes the size of the Hand, as the game does.
 
 The controllers place the Hand through the God view's room with no reach
@@ -899,7 +1562,8 @@ its moving flag for a camera that changes, and the interface then clears the
 gesture trail. It does not undo the game's own moves of its camera either. At
 the build the game camera stays where the game put it, and the view goes to
 it (section 15). No write happens while a script holds the input or the
-pivot, while a fight holds the camera, or while a jump flies.
+pivot, while a fight holds the camera, or while a jump flies. In a camera
+zone of a script the game camera stays in the zone (section 17).
 
 **A snap turn alone keeps the focus** (`god_turn_keeps_focus`, 1). When the
 view only turned with snap turns since the last write
@@ -919,7 +1583,7 @@ The story plays at the life size scale, as in the immersive mode. When the
 player's camera is back, the God view is built again at the game camera, with
 the last scale and the last ground height (section 15). Ctrl F11 and a new
 land build it again the same way. The move of a story starts at the head of
-the player, not at the game camera of the God view (section 17).
+the player, not at the game camera of the God view (section 18).
 
 **Cut scenes.** A cut scene does not play in the full view. While the cinema
 bars of the game are up, the view closes to a screen 2 m ahead, and the game
@@ -956,7 +1620,8 @@ God view keeps to the same bits:
   14.1).
 - A two hand grab turns only with bit 2 and zooms only with bit 4
   (`TabletopGrabAllows`, called by `world_grab.cpp`).
-- A snap turn needs bit 2 (`MayTurn` in `comfort_camera.cpp`).
+- A snap turn and the smooth turn need bit 2 (`MayTurn` in
+  `comfort_camera.cpp`).
 - The mouse double click needs bit 0x10, because it is the jump of the game.
 - While bit 8 is off the player cannot come nearer to an object, so the far
   grab has no range limit then (`far_grab_still_m`, `grab.md`, "The range in a
@@ -1068,7 +1733,9 @@ full turn of snap turns:
   degrees of its angle (`table_math::SnapTurnEvents`): 9 for 45 degrees. It
   sends the first at once, and `PayTurnEvents` sends one of the others in
   each new game turn. One full turn of snap turns is 72 events for each size
-  of the step. 0 gives one event for a snap turn.
+  of the step. 0 gives one event for a snap turn. The smooth turn owes one
+  event for each 5 degrees that it turned (`comfort_math::SmoothTurnEvents`),
+  so one full turn is 72 events too.
 - `god_turn_keeps_focus` (1): the game camera keeps the focus that the script
   put (section 7, "A snap turn alone keeps the focus").
 
@@ -1213,16 +1880,17 @@ at the table scale"), but they follow the scale. The gain is `s / 7.5`.
 
 | Value | Address | In the God view |
 | --- | --- | --- |
-| Map objects stop | `0x00C37200` | the game's 700 times the gain, at most 8000 |
+| Map objects stop | `0x00C37200` | the game's 700 times the gain, times the factor of `cull_distance`, at most 8000. The factor counts at each scale and in the frames that the view does not own |
 | Size cap of the model detail | `0x00C37EC8` | 5 times the gain, at most 30 |
 | Land detail lines | `0x00E9C4FC`, `0x00E9C4D4` | 1600 and 2500 times the gain |
 | Land texture line | `0x00E9C524` | the game's value times the gain, unless `table_textures=0` |
 | The Hand's reach | `CHand+0x4838` | 1800 times the gain, at most 5600 |
-| Fog | `0x00C37204` | the game's below a gain of 3, off above it |
+| Fog | `0x00C37204` | the game's below a gain of 3, off above it. Below a gain of 3, `cull_fog=1` moves the fog start and end out as far as `cull_distance` moves the map object distance out |
 | Reflection | `0x00E9CD8C` | the game's below a gain of 3, off above it |
 
-At the life size scale every value is the game's own. A distance in the room
-stays the same at every zoom. The fog ends at 900 units, which is 40 m of the
+At the life size scale and below it every value is the game's own: a value
+never goes below the game's. Above it a distance in the room stays the same
+at every zoom. The fog ends at 900 units, which is 40 m of the
 room at a gain of 3 (22.5 units per meter). Past that the fog would cover the
 island, so it goes off, as on the table.
 
@@ -1240,6 +1908,12 @@ on the wrist of the hand that does not point, the mod hides that icon
 (`leash_icon_hide`, [grab.md](grab.md), "The leash at the mod's hand"), so
 no ring in the water moves with the head.
 
+Below the life size scale each value is the game's own, so the map objects stop
+at 700 units and the fog ends at 900. At the nearest zoom (1 unit per meter) that is 700 m
+and 900 m of the room. `cull_distance` (default 5x, 3500 units) moves both out,
+so a view high over the land at a small scale shows the far land and its
+objects (`backend.md`, "Models are drawn further out").
+
 **The near plane.** `LandFeature::GetNearClipping` `0x005E2F30` gives 3.5
 units for a camera 20 units or more over the land. At the life size scale that
 is 47 cm, and it would cut away a real hand in front of the eyes. A hook on
@@ -1251,6 +1925,7 @@ bit) the game's 3.5 is nearer, and it stays.
 
 | Scale (units per meter) | Near plane, 24 bit | Near plane, 16 bit |
 | --- | --- | --- |
+| 1 (the lowest scale) | 0.05 units, 5 cm | 0.1 units, 10 cm |
 | 7.5 (life size) | 0.375 units, 5 cm | 0.75 units, 10 cm |
 | 22.5 | 1.125 units, 5 cm | 2.25 units, 10 cm |
 | 35 | 1.75 units, 5 cm | 3.5 units, the game's |
@@ -1315,7 +1990,7 @@ about 9 degrees (`tabletop.md`, "A spirit at a place of the world"). With
 | --- | --- |
 | Right stick forward or back | Zoom out or in one step (`god_zoom_forward_in=1` turns the direction), about the land that the head looks at (`god_zoom_about`). With `god_zoom_smooth=1`, zoom while the stick is held |
 | Right stick left or right | Turn one step about the head |
-| Left stick | Move over the land while it is pushed (`move_stick`, section 5.7) |
+| Left stick | Walk over the land, or fly with `move_type=1`, while it is pushed (`move_stick`, section 5.7) |
 | Left grip | Grab the land: pull to move it across, and up or down |
 | Y (left controller) | Hold it for the ring menu, and move the hand to an item (`controllers.md`, section 10) |
 | X (left controller) | No job |
@@ -1350,17 +2025,25 @@ the pointing hand (`controllers.md`, 3.6).
 **The menu ray.** While a dialog box is up (`SetupBox::GetCurrentActiveBox`
 `0x00407ED0`, which reads `0x00C4CD20`), the direct hand steps aside. The
 pointing hand points like a mouse: its aim ray picks the render pixel (the
-pointer mode of `controller_hand=0`), and the trigger clicks. A thin ray (2 mm,
-warm white) leaves the aim pose and shows where it points. It ends on the
-cursor in both eyes (see "The depth of the menu" in `controllers.md`). When the
+pointer mode of `controller_hand=0`), and the trigger clicks. A warm white
+ray leaves the aim pose and shows where it points. With `ray_glow=1` and
+`ray_glow_only=1` (the defaults) it is a glow of 0.96 cm of the room from the
+middle to the edge, with a solid core and a light that runs along the ray
+from the hand. With `ray_glow_only=0` it is a thin tube (2 mm) under a glow
+of 1.2 cm, and with `ray_glow=0` the thin tube alone. It ends on the
+cursor in both eyes (see "The depth of the menu" in `controllers.md`), and
+its end is a round soft glow (`ray_tip=1`, `hand-model.md`, "The glow at the
+end of the menu ray"). When the
 box closes, the direct hand comes back on the same frame.
 
 ### Ini keys
 
-All in `[bwvr]`. The launcher has the play mode, the grab row, the two rows
+All in `[bwvr]`. The launcher has the grab row, the two rows
 of the zoom and the row of the walk with the stick. The keys of the teleport
-are in section 14.6, the keys of the grab are in section 5.6, and the keys of
-the walk with the stick are in section 5.7.
+are in section 14.6, the keys of the grab are in section 5.6, the keys of
+the walk with the stick are in section 5.7, and the keys of the comfort of a
+move (the vignette, the stick in a dialog box and the recenter hold) are in
+section 5.8.
 
 | Key | Default | Meaning |
 | --- | --- | --- |
@@ -1374,13 +2057,21 @@ the walk with the stick are in section 5.7.
 | `god_zoom_about` | 1 | The point that a zoom keeps at its place in the room (section 2). 1: the land point that the head looks at. 0: the land point under the head. 2: the Hand's point. The launcher row "Center of the zoom". Ctrl, Shift and Delete change it with `test_keys=1` |
 | `god_zoom_about_far_cm` | 300 | With `god_zoom_about=1`, the point is at most this far from the head, 50 to 1000 |
 | `god_zoom_about_test` | 0 | A test with no key press: at this frame of the controllers the test key of `god_zoom_about` acts. 0 is never |
+| `god_zoom_far_level` | 1 | A zoom in over a land more than 2.5 m below the head (section 2, "A land far below the head"). 1: the land keeps its height in the room. 0: the zoom takes a level 2.5 m below the head, and the land goes farther down. The switch "Deep zoom" of the debug page. Not in the launcher |
 | `god_ground_step_cm` | 5 | One ground step, 1 to 50 |
 | `god_far_units_per_meter` | 4000 | The farthest zoom, 10 to 8000 |
-| `story_start_at_head` | 1 | 1: when a script takes the camera, the game camera goes to the head, so the move of the story starts there (section 17). 0: the move starts at the game camera of the God view |
+| `story_start_at_head` | 1 | 1: when a script takes the camera, the game camera goes to the head, so the move of the story starts there (section 18). 0: the move starts at the game camera of the God view |
+| `god_zoom_solid_stop` | 1 | 1: a zoom step stops `god_zoom_solid_cm` before the head goes into a house, a rock or a tree trunk, or it is refused (section 2, "Houses at a small scale"). 0: a zoom step can put the head into a house |
+| `god_zoom_solid_cm` | 30 | How far out of the solid the head stays after a zoom step, in cm of the room, 5 to 200. 5 stops the step where the overlay of the head blinder starts |
+| `god_near_units_per_meter_x10` | 10 | The nearest zoom, in tenths of a unit per meter (section 2, "The limits"). 10: 1 unit per meter, where a villager is as high as the player. 75: the life size scale. 0: the life size scale of `head_units_per_meter_x10` |
 | `god_spawn` | 1 | 1: the player goes where the game puts its own camera (section 15). 0: the view is built at the start, a load and the end of a story only, with the focus under the recenter pose |
 | `god_spawn_ahead_cm` | 50 | How far the land point that the game camera looks at is in front of the head, 0 to 150 |
 | `god_camera_at` | 1 | 1: the game camera is over the land point under the head. 0: over the recenter place (section 7). Ctrl and Numpad 1 change it with `test_keys=1` |
+| `god_zone` | 1 | 1: in a camera zone of a script the game camera stays in the zone, the player's place goes at most `god_zone_margin` past it, and the view does not shake (section 17). 0: the game pushes its camera back into the zone, with its sound and its shake. The debug page has the switch "Camera zone" |
+| `god_zone_margin` | 50 | How far the player's place goes past the camera zone, in world units, 0 to 2000 (section 17) |
 | `god_turn_keeps_focus` | 1 | 1: a snap turn alone turns the game camera about its own focus (section 7). 0: it puts the game camera over the land under the head |
+| `snap_turn` | 2 | The turn (section 4). 1, 2, 3: a snap turn of 30, 45 or 90 degrees. 4: the smooth turn of the God view. 0: off (bwvr.ini only, the launcher shows the default for it). The launcher row "Turn" |
+| `smooth_turn_speed` | 90 | The degrees a second of the smooth turn at a full push of the stick, 10 to 360 (section 4). The settings window has the row "Turn speed" (45, 90, 135 and 180), and the launcher has no row for it |
 | `tilt_help_degrees` | 3 | A look of the head up or down at 20 degrees a second or faster counts as the game's tilt: one tilt event of the help for each so many degrees, one in each game turn (section 7, "The tutorial"). 0: the head sends no tilt events |
 | `turn_help_degrees` | 5 | A snap turn counts as one turn event of the help for each so many degrees, one in each game turn, so the turn lesson of the tutorial ends with one full turn (section 7, "The turn lesson"). 0: one event for a snap turn |
 | `script_distance` | 1 | 1: a script that measures the distance from the camera gets the distance from the player (section 16). 0: the game's camera |
@@ -1396,7 +2087,9 @@ the face buttons of the left hand, `lmenu`, its menu button, `lgrip` and
 `lpoint`, the grip and the points of the left hand
 (`fake_controller_left_points`), `lstick_left`, `lstick_right`, `lstick_up`
 and `lstick_down`, the stick of the left hand, and `movekey`, the test key of
-`move_stick`.
+`move_stick`. The test key `fake_controller_stick_pct` (100) sets how far
+the words of the right stick push it, in percent of a full push, so a run
+can push the stick by half for the smooth turn.
 
 **The test mouse.** A desktop run must not move the real mouse. So
 `fake_mouse_script` moves the pointer and presses the left button inside the
@@ -1423,9 +2116,10 @@ The launcher removes these keys from `bwvr.ini` when it saves.
 | File | What it holds |
 | --- | --- |
 | `src/mod/table_math.h` | `GodRoom`, `PoseWorld`, `PoseRoom`, `GroundInRoom`, `ScaleAbout`, `GodZoomAbout`, `GodZoom`, `GodRaise`, `GodTurn`, `GameCameraOver`, `RayLevel`, `RayLand`, `GodSpawn`, `CameraLookPoint` and `HeadYaw`, as pure functions |
-| `src/mod/zoom_math.h` | The smooth zoom: the share of the top rate for a push (`StickShare`), the time of a frame (`FrameSeconds`) and the ratio of a frame (`FrameRatio`). The point of a zoom: its place across the room for each value of `god_zoom_about` (`PointAcross`), the level (`ZoomLevel`), the point in the world (`PivotAt`) and the rule for a hill at the new place of the head (`ClearHead`). All are pure functions |
-| `src/mod/walk_math.h` | The walk with the stick: the push (`Push`), the forward direction of the head and of the controller (`HeadForward`, `AimForward`), the speed in the room (`Speed`), the step of a frame (`Step`), the view after a step (`Walk`) and the filter of the land that the view follows (`FollowStart`, `FollowStep`). All are pure functions |
+| `src/mod/zoom_math.h` | The smooth zoom: the share of the top rate for a push (`StickShare`), the time of a frame (`FrameSeconds`) and the ratio of a frame (`FrameRatio`). The point of a zoom: its place across the room for each value of `god_zoom_about` (`PointAcross`), the level (`ZoomLevel`, and `ZoomLevelFor` over a deep land), the point in the world (`PivotAt`) and the rule for a hill at the new place of the head (`ClearHead`). All are pure functions |
+| `src/mod/walk_math.h` | The walk with the stick: the push (`Push`), the forward direction of the head and of the controller (`HeadForward`, `AimForward`), the speed in the room (`Speed`), the step of a frame (`Step`), the view after a step (`Walk`), the filter of the land that the view follows (`FollowStart`, `FollowStep`), and the fly: the key (`Type`), the kinds of the debug switch (`Kind`, `NextKind`), the level right (`FlyRight`), the speed and the step in 3D (`FlySpeed`, `FlyStep`) and the view after a step (`Fly`). All are pure functions |
 | `src/mod/tabletop.cpp`, `tabletop.h` | The God view in the table state: the place at a game camera (`PlaceGod`, `ApplyGodSpawn`), the steps (`ApplyGodSteps`), the point of a zoom (`GodZoomPoint`, `ZoomClearHead`), the smooth zoom (`TabletopGodZoomHold`, `ApplyGodZoomHold`), the walk with the stick (`TabletopGodWalk`, `ApplyGodWalk`), the mouse pan (`MousePan`), the camera switches and events, the hook on `GGame::ClearMap`, the values that follow the scale, the Hand's size, the ears and the game camera it wants |
+| `src/mod/camera_zone.cpp`, `camera_zone.h`, `camera_zone_math.h` | The camera zone of a script (section 17): the read of the zone of the game, the limit of a move (`LimitMove`), the game camera in the zone (`KeepCamera`, `PointInside`), the bump for the sound (`BumpPoint`), and the hook on the shake of the push |
 | `src/mod/near_plane.cpp` | The near plane hook, for the God view, the table and the immersive view |
 | `src/mod/teleport.cpp`, `teleport.h`, `aim_smooth.h` | The teleport: the states, the arc and the hit on the CPU, the refusals, the mouse double click, the aim filter, the log (section 14) |
 | `src/mod/comfort_camera.cpp` | The game camera write (`GodAfter`), the watch of the game's own camera moves (`WatchBefore`, `WatchAfterGame`, `WatchEnd`), the turn, the wheel, the tilt keys (`GodTiltKeys`), the game camera after a land drag (`GodDragBefore`, `GodDragAfter`), the write of the grab on the game camera (`ComfortCameraGrabMove`) and the log of the camera events (`h_Help`) |
@@ -1434,7 +2128,7 @@ The launcher removes these keys from `bwvr.ini` when it saves.
 | `src/mod/controllers.cpp` | The sticks (`PumpStick`, and `PumpWalk` for the walk), the layout of the buttons (`ButtonLayout`), the menu button (`PumpEsc`), the pointer mode while a dialog box is up (`DirectHandNow`, `ControllersMenuRay`), the grip points and the fake left hand |
 | `src/mod/script_camera.cpp` | `ScriptCameraStoryOwns`, and `ScriptCameraOwnerNow` for the scripts |
 | `src/mod/hand_direct.cpp`, `near_math.h` | The player that a script sees: the hooks on the six script words, the latch of the player and the test of section 16.4 (`ScriptPlayerNow`, `PlayerDistance`, `PlayerIsCamera`, `HeadSees`), and the camera moves of section 16.6 (`ScriptMoveAnswer`, `ScriptHandState`, `ScriptArrows`, `HelpRecent`) |
-| `src/mod/story_start.cpp`, `story_start_math.h` | The start of a story at the head: the hook on `GScript::StartCameraControl` and the camera at the head (section 17) |
+| `src/mod/story_start.cpp`, `story_start_math.h` | The start of a story at the head: the hook on `GScript::StartCameraControl` and the camera at the head (section 18) |
 | `src/mod/cutscene_window.cpp`, `cutscene_window_math.h` | The cut scene window: the signal, the state of each frame, the screen and the walls (`cutscene-window.md`) |
 | `src/mod/mod_main.cpp`, `src/launcher/launcher.cpp` | The play modes, the default, and the keys |
 
@@ -1474,6 +2168,19 @@ checks the pure functions at 7.5, 100 and 2000 units per meter:
   under the head moves a half and a third of the distance to the point, and
   the step back puts it under the head again. The point of a hold keeps its
   room point while the head turns 9 degrees.
+- The step that stops short of a solid (`zoom_checks.h`, `StepShareChecks`):
+  a clearance that goes from 30 cm to -20 cm stops the step at its half, a
+  step with no solid in the way goes all the way, and a head nearer than
+  the limit may go away from the solid but not nearer. The walls of a house
+  (`solid_checks.h`): an inset of 20 percent makes the half width of a box of
+  10 units 8 units and keeps its height, a head under the eave is out of the
+  walls, a head deep in the house is still in them, a trunk does not change,
+  and the inset is at most a half.
+- The lowest scale (`zoom_checks.h`, `LowestChecks`): the default key gives
+  1 unit per meter, 75 and 0 give 7.5, and a villager of 1.6 units is 1.6 m
+  high there. 12 steps in from 100 stop at 1, 5 steps out from 1 give 7.59,
+  a key of 75 stops a step in at 7.5, and a step to the lowest scale keeps
+  the point of the zoom in the room.
 - A ground step raises every land point 5 cm in the room and not across, and a
   step down puts it back.
 - A snap turn keeps the head's world point, and a turn of 90 degrees right
@@ -1520,6 +2227,27 @@ checks the pure functions at 7.5, 100 and 2000 units per meter:
   give the same. On a long hill the view rises with the land, 50 cm of the
   walk behind it. A bump of 10 cm moves the view by less than 15 percent of
   its height, and 80 cm later the view is back within 5 percent.
+- The fly with the stick (`walk_checks.h`, `FlyChecks`): `move_type` 1 is
+  the fly and each other value the walk, and the debug switch goes from the
+  walk to the level walk, to the fly and back. With a look 45 degrees down a
+  full push forward goes down and ahead at the top speed, a push to the side
+  is level, and a push back goes up. A look straight down strafes along the
+  right of the head and goes straight down. A controller 60 degrees up goes
+  up. A frame with no time and a stick at rest give no step. A step of 10 cm
+  down and 20 cm ahead at 100 units for each meter moves the waist point 10
+  units down and 20 units ahead, also with a heading of 90 degrees. A fly up
+  goes past 2.5 m
+  and stops with the head 10000 units over the land, at 100 and at 1 unit
+  for each meter. A view over the ceiling stays, cannot go up, and can come
+  down. The speed ramp: a push of 90 percent
+  or more counts its time and a push of 85 percent sets it to 0. The factor
+  is 1 in the first second, 2 after 3 s, 4 after 5 s and 32 from 11 s, and
+  a most of 1 is no ramp. At 1 unit for each meter and 60 frames a second,
+  1000 units take 29 s. The floor of the fly: with the clearance of the
+  head blinder a step to 8 cm over the land goes up 2 cm, a step to 50 cm
+  stays, and a head bent down to 4 cm is held at 4 cm and not lifted out.
+  A fly level into a slope of 45 degrees keeps the head at 10 cm and slides
+  up along the slope.
 - The teleport (14.8), the place at a game camera (15.9) and the player that a
   script sees (16.9) have their own checks.
 
@@ -1587,7 +2315,7 @@ render size, because the recipes depend on it.
   rate of a small push has only the math test.
 
 - The walk with the stick [R]: `spawn_run.ps1 -Save temple` with
-  `fake_controller_play_frame=800`, `fake_controller_yaw=30`,
+  `move_stick_ramp=0`, `fake_controller_play_frame=800`, `fake_controller_yaw=30`,
   `fake_controller_sweep_yaw=30`, `fake_controller_sweep_pitch=-30`,
   `god_zoom_about=0` and the steps `look@830+1300 lstick_up@900+60
   lstick_right@1020+60 movekey@1130+1 lstick_up@1150+60 movekey@1260+1
@@ -1610,16 +2338,19 @@ render size, because the recipes depend on it.
   `layoutkey` the stick opens the ring and moves nothing. The scripted stick
   has full pushes only, so the speed of a small push has only the math test.
 - The follow of the land [R]: `spawn_run.ps1 -Save temple` with
-  `move_stick_trace=320` and the steps `lstick_up@900+300
-  lstick_right@1300+300 lstick_down@1700+200`, once with
+  `move_stick_trace=320`, `move_stick_ramp=0` and the steps
+  `lstick_up@900+300 lstick_right@1300+300 lstick_down@1700+200`, once with
   `move_stick_follow_land=1` and once with 0. The first walk goes 7.9 m of
   the room over the hills at the Temple, where the land under the head goes
   from 0 to 112 units (at 100 units for each meter), and the third walk is
   over the sea. In each walk of both runs each frame moves the view at
   149.93 to 150.07 cm of the room each second, with frames of 14.8 to 46.2
-  ms.
-  - With 1: the land under the head is 61.6 cm below the head at the start
-    of each walk, and 63.8, 61.6 and 61.6 cm at their ends. In the hills it
+  ms. With `test_frame_rate=60` each frame is 16.7 ms, so the walks go
+  7.5, 7.5 and 5.0 m.
+  - With 1 and `test_frame_rate=60`: the land under the head is 61.6, 62.9
+    and 61.6 cm below the head at the starts of the walks, and 62.9, 61.6
+    and 61.6 cm at their ends. Each walk starts where the walk before it
+    ended. Each trace line has "the speed times 1.00". In the hills it
     is 19 to 115 cm below the head (the filter is behind the land on the
     steep slopes), and the land never comes nearer than 10 cm. The height of
     the view changes by at most 2.5 cm in a frame, and its speed up or down
@@ -1632,6 +2363,96 @@ render size, because the recipes depend on it.
     in a frame, and its speed up or down changes by up to 181 cm each second
     from one frame to the next. After the hills the land is 108.2 cm below
     the head, and 122.3 cm after the second walk.
+- The speed ramp [R]: `spawn_run.ps1 -Save temple` with
+  `test_frame_rate=60`, `move_stick_trace=700`, `card_send_test_save=0`,
+  `fake_controller_play_frame=800` and the steps `lstick_up@900+300
+  lstick_half@1200+120 lstick_up@1320+180 lstick_up@1600+60`. For the first
+  60 frames of the full push a step is 2.45 to 2.51 cm, "times 1.00", and
+  1.01 at frame 61. Then the factor is 1.41 at frame 120, 2.00 at 180, 2.83
+  at 240 and 4.00 at 300, with a step of 10.02 cm at 300. At the half push,
+  in its first frame, the factor is 1.00 and the step 0.768 cm, with no stop
+  line between the pushes. The next full push starts at 1.00 for 60 frames.
+  The line of the end has "The speed ramp went up to 4.00 times the speed
+  of the push". The last push starts again at 1.00 and stays at 1.00 for its
+  60 frames.
+- The fly with the stick [R]: `spawn_run.ps1 -Save temple` with
+  `test_frame_rate=60`, `card_send_test_save=0`, `move_type=1`,
+  `move_stick=1`, `move_stick_trace=700`, `fake_controller_play_frame=800`,
+  `fake_head_pitch=-45`, `god_zoom_about=0`, `comfort_vignette=1` and the
+  steps `lstick_up@900+240 lstick_down@1200+400 lstick_right@1700+60`. The
+  line of the start has "45.0 degrees below level", and the vignette goes
+  dark for "the fly with the stick" in each fly. The first fly goes down at
+  45 degrees to the floor and on across. The second fly goes back and up:
+  the land under the head goes past 250 cm below the head near fly frame
+  130 and on to about 2000 cm, with the factor of the ramp from 1.00 to
+  7.15 and no line of a limit. At about 20 m the camera zone of the script
+  (`god_zone_margin=50`) holds the place across, and the fly goes on along
+  the edge of the zone. The strafe has "0.000 cm up" in each frame. 30
+  frames after each stop the waist point is 0.000 units from its place at
+  the stop.
+- The fly with the controller [R]: the same with `move_stick=2`,
+  `fake_controller_sweep_pitch=40` (the word of the script sets the
+  direction of the stick, not `fake_controller_pitch`), no
+  `fake_head_pitch`, and the step `lstick_up@900+400`. The line of the start
+  has "40.0 degrees above level". The land under the head goes from 62.9 to
+  1895.4 cm below the head with each step up more than 0, and the factor is
+  1.00 to fly frame 60, 2.83 at 240 and 7.13 at 400.
+- The floor of the fly [R]: the fly with the stick above (the head 45
+  degrees down) has no line of the head blinder. Each of its 135 trace lines
+  of the first fly has a clearance of 10.00 cm or more, and where the slope
+  rises at the floor the step up is more than 0 (42 lines, for example
+  "0.633 cm up ... a clearance of 10.00 cm"). A level fly into the hills
+  (`move_stick_ramp=0`, no `fake_head_pitch`, the step `lstick_up@900+300`)
+  has no line of the head blinder. Over level land the steps are 2.49 to
+  2.65 cm with "0.000 cm up", where the hill comes within 10 cm the steps
+  go up ("a step of 4.597 cm of the room (3.855 cm up ...), a clearance of
+  10.00 cm"), and past the top they are level again. The line of the end
+  has "The floor of the fly lifted the view 37.3 cm on 18 frames, and the
+  least clearance of your head after a step was 10.0 cm", and 150.0 cm of
+  the room each second.
+- The filter of the land after a place [R]: `spawn_run.ps1 -Save temple`
+  with `test_frame_rate=60`, `card_send_test_save=0`,
+  `fake_controller_play_frame=800`, `move_stick_ramp=0`,
+  `move_stick_speed_cm=150`, `god_zoom_about=0`, `god_units_per_meter=10`,
+  `spawn_test_temple=1000`, `spawn_test_flag=0` and the steps
+  `lstick_up@900+300 lstick_right@1300+40 lstick_right@1400+40
+  lstick_right@1500+40 lstick_right@1800+40 lstick_right@1900+40
+  lstick_right@2000+40`, once with `move_stick_follow_place=1` and once with
+  0. The test calls the zoom of the game to the Temple between two walks, and
+  the view goes to the pen (the waist point from 1968.0 29.7 2470.6 to
+  2235.4 16.3 3156.7). The line of the filter gives 29.59 against the land
+  at 16.08, 135.1 cm of the room apart. With 1 the filter starts again, and
+  the next walk keeps the land 62.1 cm below the head with "0.0 cm up and
+  0.0 cm down". With 0 the filter goes on, and the walks after the place go
+  122.8, 12.2 and 14.1 cm down, to the floor of 10 cm in the first walk.
+- The zoom over deep land [R]: `spawn_run.ps1 -Save temple` with
+  `test_frame_rate=60`, `card_send_test_save=0`,
+  `fake_controller_play_frame=800`, `move_type=1`, `move_stick=1`,
+  `fake_head_pitch=-45`, `god_zoom_about=0`, `god_zoom_smooth=1` and the
+  steps `lstick_down@900+400 stick_up@1400+60 stick_down@1550+60`, once with
+  `god_zoom_far_level=1` and once with 0. The fly puts the land 21 m below
+  the head. With 1 the zoom in from 100 to 44.44 units per meter keeps it at
+  21.05 m, and the zoom out brings it to 10.75 m (2.5 + 18.55 / 2.25). With 0
+  the zoom in puts it at 43.74 m (2.5 + 18.33 * 2.25), and the zoom out
+  brings it back to 20.83 m.
+- The scale check [R] (`controller-hints.md`, 9.16): `spawn_run.ps1 -Save
+  temple` with `test_frame_rate=60`, `card_send_test_save=0`,
+  `move_stick_scale=0`, `fake_controller_play_frame=800`, `move_stick_ramp=0`,
+  `move_stick_speed_cm=150`, `god_zoom_about=0`, `god_zoom_smooth=0`,
+  `fake_head_right_cm=10`, `fake_head_up_cm=-10`, six left points
+  (`fake_controller_left_points=-16,-30,50 -16,-30,30 -16,-30,10 -16,-30,50
+  -16,-30,30 -16,-30,10`) and the steps `lean@900+100 lpoint@1050+1
+  lpoint@1100+1 lpoint@1150+1 lstick_up@1250+120 lpoint@1400+1
+  lgrip@1450+150 lpoint@1500+1 lpoint@1550+1`, at `god_units_per_meter=1`,
+  at 100, and at 15 with `god_zoom_step_pct=100` and a first step
+  `stick_up@850+10` (7.5). At each scale the eyes and the drawn grip give
+  the scale of the God view exactly, the walk gives 150.0 cm of the room
+  each second, and the grab moves the land 40.0 cm for 40.0 cm of the grip.
+  At 100 units per meter the walk goes over a slope: the follow of the land
+  adds 29.3 cm up and 34.6 cm down, and the camera of the game goes 157.1
+  cm each second in all. The same run with `move_stick_scale=1` has no
+  result yet: the walk must give 150 cm times the factor across the land
+  (600 at 1, 219 at 7.5 and 90 at 100 units per meter).
 
 **The mouse pan and the tutorial events** need a run with the test mouse. Use
 `play_mode=0` (it must log the God view), `-NEWGAME` on Land 1,
@@ -1656,9 +2477,8 @@ and the camera events (0x304 for a wheel click and 0x308 for a land drag).
   math test. An advisor goes to a place of the world in a desktop run only
   with a test (`tabletop.md`, "A spirit at a place of the world"). No desktop
   run has the sound.
-- **The mouse pan on the desktop** and the **tutorial events** (section 7)
-  have not run in the game. The numbers and the bits come from the binary.
-  The run is in section 12.
+- **The tutorial events** (section 7) have not run in the game. The
+  numbers and the bits come from the binary. The run is in section 12.
 - **The mouse** pans, zooms, turns and moves the ground. Its Hand still has
   the game's own size, which grows with the distance, and its throw has the
   speeds of the life size scale. These are in `hand_direct.cpp`.
@@ -1680,10 +2500,7 @@ and the camera events (0x304 for a wheel click and 0x308 for a land drag).
 - **Not built for the grab:** a vignette while the camera moves, a cut for the
   advisor anchor (`SpiritAnchorCameraCut`) on a fast grab, and a hint text
   "Grab the world" (see `controller-hints.md`).
-- **The smooth zoom** (section 2) is not the default. A headset test must
-  show how it feels: whether a scale that changes in each frame is
-  comfortable with no blink, whether 500 ms for a step is a good top rate,
-  and whether the dead zone of 30 percent fits a real stick. No run has shown
+- **The smooth zoom** (section 2) is not the default. No run has shown
   a push with the zoom switch off, a small push, or the key Ctrl, Shift and
   Insert with a real key.
 - **The point of the zoom** (section 2). A headset session compared the
@@ -1693,18 +2510,12 @@ and the camera events (0x304 for a wheel click and 0x308 for a land drag).
   the Hand's point with no controller, a hill at the new place of the head,
   the mouse wheel with the look, or the key with a real key. These have the
   math test only.
-- **The walk with the stick** (section 5.7). A headset test must show
-  whether the walk is comfortable with the head as the direction and with
-  the controller as the direction (Shift and the Menu key change the rule),
-  whether 150 cm of the room for each second is a good top speed near the
-  land and far out, and whether the dead zone of 30 percent fits a real
-  stick. It must also show whether the follow of the land is calm on the
-  hills and keeps the land near enough to the hands on a steep slope, and
-  whether the walk is even (the count of the late frames in the line of the
-  end of a walk, "An even walk" in section 5.7). No run has shown a small
-  push, the edge of the map, a push with the switch for the drag off, a
-  controller that points straight up or down, or the test key with a real
-  key. These have the math test or no test.
+- **The walk with the stick** (section 5.7). With `god_zone=0` a walk
+  (`village_run.ps1 -Kind walk`) stops at the edge of the map at x 5120 and
+  slides along it. No run has shown a small push, a hill within 10 cm of the
+  head, a push with the switch for the drag off, a controller that points
+  straight up or down, or the test key with a real key. These have the math
+  test or no test.
 - **The tutorial** (section 7, "The steps of the tutorial"). A desktop run
   and the log of a session in the headset show the tutorial of Land 1 from
   the walk to the village to the texts after the zoom lesson. On the walk to
@@ -1714,16 +2525,10 @@ and the camera events (0x304 for a wheel click and 0x308 for a land drag).
   the Temple, the missionaries, the lessons of Land 2 (levels 8 and 12) and
   the lessons of the Gods' Playground after the step of the turn. With
   `script_view=1` the Island Keeper did not start his first walk in the
-  desktop runs (section 7). A headset session must show that a player comes
-  through each of them.
-- **Needs the headset:** the ground height of 60 cm, the zoom step of 1.5
-  times, the start scale of 100, the Hand at the life size scale near the
-  eyes with the near plane of 5 cm, the look of the land and the clouds at
-  each scale, the frame rate at 90 Hz, the sound, the spirits, whether a
-  story that stands aside feels right, the mouse pan with a real mouse (the
-  land must stay under the Hand, and must not move after the release), the
-  tracking noise times the gain of the grab on the game camera, the squeeze
-  levels of real Touch and Index controllers, and the frame age of the hands.
+  desktop runs (section 7).
+
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ## 14. The teleport
 
@@ -1878,18 +2683,23 @@ over it. The inner radius is 0.75 of the outer radius, so the band has a
 width of a quarter of the radius at each size. A valid ring has a disc in the
 middle. A red ring has a cross. The meshes are opaque, with the depth test and
 the depth write on, as the hands. The tube of the arc and the lift of the ring
-are in meters of the room, so they look the same at every scale.
+are in meters of the room, so they look the same at every scale. With
+`ray_glow=1` (the default) the arc has a glow ribbon with a light that runs
+along the arc from the hand (`hand-model.md`, "The glow ribbons"). With
+`ray_glow_only=1` (the default) the glow is the whole arc, 2 cm of the room
+from the middle to the edge, with no tube. With `ray_glow_only=0` the tube
+stays, and the glow over it is 2.5 cm. The ring has no glow.
 
 **The size of the ring.** By default (`teleport_ring_mode=1`) the ring has one
 size in the world: an outer radius of 11 units (`teleport_ring_units`). The
-God view scale goes from 7.5 units a meter (life size) to 4000, and the start
+God view scale goes from 1 unit a meter to 4000, and the start
 scale is 100. At the start scale the ring is 11 cm of the room. It gets
 larger in the room when the player zooms in and smaller when the player zooms
 out, but never smaller than 4 cm (`teleport_ring_min_cm`) and never larger
 than 40 cm (`teleport_ring_max_cm`). So the ring says how large the place is
 from 27.5 to 275 units a meter (about 3 zoom steps in and 4 steps out from
 the start scale). Outside this range it has the limit: 40 cm at life size
-(0.3 units) and 4 cm at 4000 units a meter (160 units). The lift of 2 cm
+(3 units), 40 cm at 1 unit a meter (0.4 units), and 4 cm at 4000 units a meter (160 units). The lift of 2 cm
 stays in the room at each size. The rule is in `teleport_math.h`.
 `teleport_ring_mode=0` gives a ring of one size in the room
 (`teleport_ring_cm`, 11 by default). The overlay
@@ -2046,18 +2856,15 @@ each scale.
 
 - Not run on the desktop: the red arc on the sea, the aim at the sky, the
   cancel with B and the mouse double click (the steps 4 to 7 of 14.9).
-- The look of the arc and the ring in the headset: the width of 6 mm, the
-  colors, the limits of 4 and 40 cm of the ring, and whether the arc is easy to aim at 4000 units a
-  meter.
-- Whether the aim pose (the point of the controller) feels right as the start
-  of the arc, or whether the arc must start at the index finger.
 - The immersive move and the table ray have no desktop run. Ctrl F11 gives
   the immersive view.
 - `teleport_switch`: no run has the key Ctrl, Shift and comma with a real
   key, a switch that goes off while the player aims, or the teleport on the
   walk around the mountain, where the game has the drag on and the jump off
-  too. Only a headset session can show whether a player finds the way to the
-  village with the teleport and the stick, with no snap turn there.
+  too.
+
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ## 15. The place at a camera of the game
 
@@ -2300,10 +3107,9 @@ the fake controller with `fake_controller_front=1`, and a render of 2560 by
 - **A grab that moves the land, and the mouse pan,** have no run with the
   watch. Each one writes the game camera, which is a move of the player by
   the rule of 15.3.
-- **Only the headset can show** whether 50 cm ahead is the right distance,
-  whether the height of the look point is right on a slope, whether the cut
-  1 s after "Keep your old Creature" is good, and whether a quest puts
-  the player at the right place.
+
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ## 16. The player that a script sees
 
@@ -2605,16 +3411,221 @@ line, and one "the mouse owns the pointer" line, at the start dialog.
   Playground, which waits for the hold of both buttons. The pointer at a
   side of the screen also shows the rotate arrow of the game: no run has
   that in the God view.
-- **Only the headset can show** if the quests of a real session go on:
-  the Island Keeper of the Gods' Playground, the mother of `FollowUs`. It can
-  also show if the nearest hand is the right point for a real player, and if
-  a script that deletes a thing behind the head is good in VR.
 
-## 17. A story starts at the head
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
+
+## 17. The camera zone
+
+Some steps of Land 1 keep the camera in an area of the map: the camera zone.
+The Creature select is one of them. The code is in `camera_zone.cpp`, and the
+math is in `camera_zone_math.h`.
+
+### 17.1 What the game does
+
+[V: the disassembly, `Scripts\Quests\challenge.chl` and `Data\Zones`]
+
+- **The script word.** "set camera zone" (`GScript::SetCameraZone`
+  `0x006ED890`) loads a file of `Data\Zones`. The file gives a polygon on the
+  map (`CameraModeNew3::ForceFieldPoints` `0x00C5B130`, the count at
+  `0x00C5E130`) and a height limit. The word sets
+  `CameraModeNew3::DrawForceField` `0x00C5E144`, and `0x009CE6B0` for the
+  height limit. A save holds the zone (`CameraExclusion::SaveExclusionFile`).
+- **The test.** On each update `CameraModeNew3::Update` tests the position
+  of the game camera against the polygon (`0x0045F983` to `0x0045FCE1`,
+  `CameraExclusion::InsideInclusion` `0x00455E20`). The test uses x and z
+  only. It does not test the focus.
+- **The push.** For a position outside the polygon the game looks for a
+  point in it on a ring of 50 units about the position (20 units in a mode
+  that is not 4), starting in the direction of the focus. When no point of
+  the ring is inside, it takes the nearest point of the edge. The camera and
+  its focus go there in one update. Then the game:
+  - sends the help event 0x202,
+  - starts the effect 42 of the force feedback (`GInterface::StartImmersion`),
+    which the controllers give as a pulse of 0.20 for 15 ms,
+  - plays the sound 0x2B at the camera (`fn_0042A000`, `GAudio::PlaySoundEffect`),
+  - starts a shake of 400 ms (`LH3DCameraChecker::Create` `0x00821050`, from
+    `0x0045FC89`),
+  - and pulses the force field at the edge (`LightSheet::PulseForceField`).
+- **The shake.** `LH3DTech::UpdateCamera` adds the shake to the camera that
+  it gets (`fn_008210C0` at `0x00819A0B`): a random step of up to 1 unit on
+  each axis of the position and of the focus, in each call, for 400 ms. It
+  acts while the drawn camera is within 100 units of the place of the
+  shake. The hook on `PSysGlobal::StartCameraShake` (`backend.md`, "No
+  shakes") does not see this shake, because the push calls `Create` itself.
+- **The height limit.** A camera higher than the limit goes down to it (event
+  0x203). That move has no sound and no shake.
+
+**The zones of Land 1.** `challenge.chl` names seven files. `Data\Zones` also
+has `Land1Zone1.exc` and `Land1Zone4.exc`, which no script names. No other
+land and no other script file has a camera zone.
+
+| File | x | z |
+| --- | --- | --- |
+| `Land1Begin.exc` | 1439 to 1758 | 2027 to 2421 |
+| `Land1TemplePath.exc` | 1450 to 1981 | 2089 to 2574 |
+| `Land1Building.exc` | 1308 to 2038 | 1892 to 2878 |
+| `Land1Zone2.exc` | 888 to 3013 | 1496 to 3161 |
+| `Land1Zone3.exc` | 888 to 3013 | 1496 to 3287 |
+| `Land1Choose.exc` | 2060 to 2295 | 2960 to 3208 |
+| `Land1Zone5.exc` | 888 to 4120 | 1398 to 4379 |
+
+`Land1Choose.exc` is the zone of the Creature select: 20 points, about 235
+by 250 units, with the middle at 2166 3099. The game camera of the select is
+at 2224.9 20.2 3146.3, in the zone, 35 units from its focus at the pens.
+
+### 17.2 The God view and the zone
+
+The God view puts the game camera 400 units from the land under the head, 50
+degrees above it (section 7). That is 257 units back on the map. At the
+Creature select the zone is smaller than that, so with no rule of the mod
+(`god_zone=0`) each move of the view puts the game camera out of the zone.
+On each update of a move the game then pushes its camera back, plays its
+sound and starts its shake, and the shake goes into the view of the head.
+The view does not follow the push.
+
+### 17.3 What the God view does
+
+With `god_zone=1` (the default) and a zone of three points or more:
+
+- **The game camera stays in the zone.** The land point that it looks at goes
+  into the zone, 5 units past the nearest point of the edge
+  (`PointInside`). The position comes along the line to its focus, to 5
+  units before the edge, so it keeps its direction and its pitch and comes
+  nearer to its focus (`KeepCamera`). When that leaves less than 40 units
+  across the map (`kLeastAcross`), the camera goes 40 units from its focus
+  toward the middle of the zone, with the same pitch, and looks at its
+  focus from that side. The test of the game casts a ray from the camera
+  toward its focus: with the two at one place the ray has no direction, the
+  test finds the camera outside on each update, and the game pushes it, with
+  its sound, on each update. A snap turn that turns the game camera about its
+  own focus (section 7) keeps to the same rule. So the game does not push
+  its camera.
+- **The player's place has a limit.** The waist point of the God view goes at
+  most `god_zone_margin` (50) units past the zone. At the start scale of 100
+  units for each meter that is 50 cm of the room. At the Creature select the
+  player can stand 50 cm past the edge and see the three Creatures and the
+  Hand. The limit holds for the walk with the stick, the grab, the mouse
+  pan, a zoom step, the smooth zoom and the teleport.
+- **At the limit the view stops.** A move past the limit goes to the point
+  of the limit nearest to the place that the move asked for (`LimitMove`).
+  So the part of the move along the edge stays, and the part out of the zone
+  goes. There is no spring back and no bounce. With the grab the land stops
+  and the hand keeps moving. A place that the game put farther out (a new
+  place of the game camera, a load) may stay as far out, and no move takes
+  it farther, so the limit never makes a jump.
+- **The turn and the zoom stay free.** A snap turn is not limited. A zoom
+  changes the scale freely. When the zoom also moves the place (the zoom
+  about the land that the head looks at, section 2), the move of the place
+  keeps to the limit.
+- **The teleport.** A target farther than the limit is not valid: the arc
+  and the ring are red ("the target is past the limit of the camera zone of
+  the game").
+- **The sound of the block.** While the player pushes past the limit, the
+  game camera goes 10 units out of the zone for one update, at most once
+  each 500 ms (`BumpPoint`). The game then plays its sound of the block,
+  gives the pulse and the force field, and moves its camera back in. The view
+  does not move with the game camera.
+- **No shake.** While the God view owns the view, the shake of the push is
+  not started (the hook on `LH3DCameraChecker::Create`, for the call from
+  `0x0045FC89` only).
+
+The height limit is not changed: a game camera above it goes down, with no
+sound and no shake.
+
+With `god_zone=0` the God view does none of this, and the game pushes its
+camera with its sound and its shake. The debug page has the switch "Camera
+zone" in the group View (`controllers.md`, 10.8).
+
+### 17.4 The keys
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `god_zone` | 1 | 1: the God view keeps to the camera zone (17.3). 0: the game pushes its camera, with its shake |
+| `god_zone_margin` | 50 | How far the player's place goes past the zone, in world units, 0 to 2000. 0 keeps the place in the zone |
+
+### 17.5 The log
+
+A line for each change of the zone, a line at the start and at the end of
+each push past the limit, a line for the first bumps and for the first
+writes of the game camera that the zone changed, and the counts of each
+window of the report:
+
+```
+camera zone  : god_zone=1. In a camera zone of a script the game camera stays in the zone, so the game does not push it back or shake the view. Your place goes at most 50 units past the zone (god_zone_margin), and a push past that plays the sound of the game
+camera zone  : a script set a camera zone of 20 points, x 2060.3 to 2294.7 and z 2960.1 to 3208.3, the middle at 2168.0 3099.2 (god_zone=1)
+camera zone  : the game camera stays in the zone: at 2068.5 179.4 3041.4, not at 1977.9 309.5 2980.5, looking at 2191.4 3.1 3123.8
+camera zone  : the walk with the stick asked for your place at 1979.6 2981.7, 100.4 units past the zone. It stops at 1980.0 2981.9, 100.0 units past it (the limit of god_zone_margin=100, or the place before the move)
+camera zone  : you push past the limit, so the game camera goes to 2062.5 3017.9, 10 units out of the zone, for one update. The game plays its sound of the block and moves its camera back in
+camera zone  : the push past the limit ended. Your place is at 2002.1 2941.1, 97.5 units past the zone
+camera zone  : god_zone=1, a zone is set. The limit stopped 177 moves in 1 pushes, and 7 bumps asked the game for its sound. The game camera was kept in the zone on 278 writes, and its land point on 217. 6 shakes of the zone were not started, and the game started 0
+```
+
+### 17.6 Tests
+
+The math test (`zone_checks.h`) covers the inside of a square and of an L,
+the distance to the edge, the limit of a move (into the margin, past it,
+along the edge, from a place far out, with no margin, and a sweep that never
+passes the margin and never moves back), a point in the zone, the game
+camera in the zone with its pitch kept, and the point of a bump.
+
+The desktop runs start in the test save `pen` (`tools/desk/README.md`), at
+the Creature select, with the zone `Land1Choose.exc`. The recipe walks with
+the stick 5 s back out of the zone, 2.5 s forward, makes two snap turns,
+two zoom steps in and one out, and walks 5 s to the side, out of the zone
+again:
+
+```powershell
+$s = 'lstick_down@4700+300 shot@4900+1 shot@4960+1 lstick_up@5050+150 ' +
+     'stick_right@5250+8 stick_right@5300+8 stick_up@5360+10 stick_up@5420+10 ' +
+     'stick_down@5480+10 lstick_left@5550+300 shot@5800+1'
+.\bwvr\tools\desk\hand_run.ps1 -Name zone1 -Dll <dll> -Kind fixed -Steps $s -Set 'god_zone=1;god_zone_margin=100;test_frame_rate=60'
+.\bwvr\tools\desk\hand_run.ps1 -Name zone0 -Dll <dll> -Kind fixed -Steps $s -Set 'god_zone=0;test_frame_rate=60'
+```
+
+With the renderer Vulkan and `god_zone_margin=100`:
+
+| | `god_zone=1` | `god_zone=0` |
+| --- | --- | --- |
+| The first walk out | Stops 100 units past the zone. 267.95 of 759 units | 759.78 units, to 1562 2702, 500 units out of the zone |
+| The walk to the side | Stops 100 units past the zone, 89 units | 503 units |
+| The turns and the zooms | Free | Free |
+| Shakes that the game started | 0 | 75 |
+| Shakes of the push that the mod did not start | 12, all after a bump | 0 |
+| Bumps (the push of the game, with its sound) | 17, at most one each 30 frames (500 ms) while the walk pushes past the limit | none: the game pushes on each update of a move out of the zone |
+
+The eye pictures of frames 374 and 433 of the run with `god_zone=1` are
+the same view: the place stays at the limit while the stick pushes. They
+show the force field of the game at the edge of the zone, which the bumps
+pulse.
+
+With the renderer Direct3D 9 (`backend=dxwrapper\ddraw.dll`) the walk of
+`hand_run.ps1 -Kind zone` stops 50.0 units past the zone, and the game camera
+goes 10 units out of the zone for one update with its sound. The limit
+stopped 252 moves in 1 push, 9 bumps asked for the sound, and the game
+started 0 shakes. In the test save `temple` the zone of the island (x 888 to
+4120, z 1398 to 4379) stops a walk with the stick (`village_run.ps1 -Kind
+walk`).
+
+### 17.7 Not tested, and what needs the headset
+
+- The other zones of Land 1 have the same rule. The verify runs show the zone
+  `Land1Zone5.exc` in the test save `temple`, with no push. No session has
+  shown a push at a zone other than the zone of the Creature select.
+- `Influence::CalculatePlayerRawInfluence` and `CameraModeFollow::Update`
+  also call `InsideInclusion`. What they do with the zone is not read.
+- The two other callers of `LH3DCameraChecker::Create`
+  (`AddSoundToAtom::ModifyAtomCore` and `fn_006E63C0`) still shake the
+  view in the God view.
+
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
+
+## 18. A story starts at the head
 
 The code is in `story_start.cpp` and `story_start_math.h`.
 
-### 17.1 Why
+### 18.1 Why
 
 The game camera of the God view is 400 units from the player and about 300
 units above the land (section 7). A script takes the camera with
@@ -2628,7 +3639,7 @@ example: its script flies the camera to the scroll for about 8 s, and the
 cinema bars come only after that. In the plain game the move starts at the
 camera of the player, which shows what the player saw.
 
-### 17.2 The rule
+### 18.2 The rule
 
 - A hook on `GScript::StartCameraControl` reads the top camera mode before
   and after the call. When the call pushed `CameraModeScript` over a mode of
@@ -2654,7 +3665,7 @@ camera of the player, which shows what the player saw.
   land that the head looked at (section 15.4), and not at its place of
   before the story (section 15.5).
 
-### 17.3 The keys and the log
+### 18.3 The keys and the log
 
 | Key | Default | Meaning |
 | --- | --- | --- |
@@ -2668,7 +3679,7 @@ The three frames after it each have a line with the camera of the game and
 its distance from the head of the start. The report has the count of the
 starts.
 
-### 17.4 Tests and what needs the headset
+### 18.4 Tests and what needs the headset
 
 The math test (`story_start_checks.h`) covers the rule (each condition) and
 the camera at the head: the position, the focus 100 units ahead at 100 units

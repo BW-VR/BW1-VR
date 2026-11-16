@@ -71,7 +71,10 @@ GameFolder FindGameFolder(const std::string& app_folder) {
   fclose(f);
   char hex[41];
   bwvr::detail::Sha1Finish(&sha, hex);
-  g.exe_right = size == bwvr::kGameExeSize && strcmp(hex, bwvr::kGameExeSha1) == 0;
+  // The launcher of the PC can set the flag LARGE_ADDRESS_AWARE in the file (large_address.h).
+  // Only that bit differs, so each address of the mod is the same.
+  const bool large = strcmp(hex, bwvr::kGameExeSha1LargeAddress) == 0;
+  g.exe_right = size == bwvr::kGameExeSize && (strcmp(hex, bwvr::kGameExeSha1) == 0 || large);
   if (g.exe_right) {
     g.message = "The game folder has runblack.exe of the unofficial patch v1.42.";
   } else {
@@ -82,6 +85,6 @@ GameFolder FindGameFolder(const std::string& app_folder) {
   }
   AppLog("game folder  : runblack.exe in %s, %llu bytes, SHA-1 %s (%s)",
          g.folder.c_str(), static_cast<unsigned long long>(size), hex,
-         g.exe_right ? "v1.42" : "not v1.42");
+         !g.exe_right ? "not v1.42" : large ? "v1.42 with the flag LARGE_ADDRESS_AWARE" : "v1.42");
   return g;
 }

@@ -2258,6 +2258,12 @@ void TeleportChecks() {
             "the disc or the cross is inside the inner radius", cross_far,
             15.0);
     }
+    // The ring around an object has the band and no disc.
+    const int band = overlay_math::BuildLandRing(
+        100.0f, 200.0f, 15.0f, 20.0f, 2.0f, true, slope, ring,
+        overlay_math::kRingMaxTriangles, false);
+    Near("the ring around an object has the band only: 48 triangles", band,
+         48.0, 0.0);
   }
 }
 
@@ -3253,6 +3259,47 @@ void HintHandChecks() {
   Near("and no vertical disparity", far_l[1] - far_r[1], 0.0, 1e-3);
   Near("the size between two points is scaled",
        (far_l[0] - corner_l[0]), 100.0 * s1, 1e-3);
+
+  // BEYOND THE FINGERTIP (hint_hand_tip). A box of 80 by 30 px, a gap of 15
+  // px. The palm is down and to the right of the tip: the finger points up
+  // and to the left, and the box goes up and to the left of the tip.
+  {
+    const float tip[2] = {1000.0f, 1000.0f};
+    const float palm[2] = {1060.0f, 1080.0f};  // 100 px away, along 0.6 0.8
+    float corner[2];
+    HintBeyondTip(tip, palm, 80.0f, 30.0f, 15.0f, 20.0f, corner);
+    const float right = corner[0] + 80.0f, bottom = corner[1] + 30.0f;
+    // Each corner of the box is at least the gap past the tip along -u.
+    const float u[2] = {-0.6f, -0.8f};
+    float least = 1e9f;
+    const float xs[2] = {corner[0], right}, ys[2] = {corner[1], bottom};
+    for (int i = 0; i < 2; ++i) {
+      for (int j = 0; j < 2; ++j) {
+        const float along = (xs[i] - tip[0]) * u[0] + (ys[j] - tip[1]) * u[1];
+        if (along < least) least = along;
+      }
+    }
+    Near("the nearest corner of the box is the gap past the tip", least, 15.0,
+         1e-3);
+    Check(right < tip[0] + 1.0f || bottom < tip[1],
+          "the box is on the side of the tip away from the palm", 1, 1);
+    // A palm 10 px from the tip: the finger points along the view, and the
+    // box goes up from the tip, with its middle over the tip.
+    const float near_palm[2] = {1006.0f, 1008.0f};
+    HintBeyondTip(tip, near_palm, 80.0f, 30.0f, 15.0f, 20.0f, corner);
+    Near("a finger along the view: the box is over the tip (x)",
+         corner[0] + 40.0f, 1000.0, 1e-3);
+    Near("its bottom is the gap over the tip", corner[1] + 30.0f, 985.0,
+         1e-3);
+    // The palm on the left: the box goes to the right, its middle at the
+    // height of the tip.
+    const float left_palm[2] = {900.0f, 1000.0f};
+    HintBeyondTip(tip, left_palm, 80.0f, 30.0f, 15.0f, 20.0f, corner);
+    Near("the palm on the left: the left edge is the gap past the tip",
+         corner[0], 1015.0, 1e-3);
+    Near("and the middle is at the height of the tip", corner[1] + 15.0f,
+         1000.0, 1e-3);
+  }
 }
 
 // THE CREATURE BY TOUCH (docs/creature.md, "The Creature by touch"): the body
@@ -3510,10 +3557,95 @@ void CreatureChecks() {
     Check(!CreaturePanelPoint(eyes, above, 0.30f, 0.15f, 0.5f, 1.5f, at),
           "a head right over the eyes has no place", 0, 0);
   }
+
+  // THE PANEL OVER THE CREATURE (creature_panel_over): a panel 11 degrees
+  // wide and 6 degrees high in half, 2 degrees over the top of the body,
+  // 10 cm nearer than the top, 0.6 to 1.5 m from the eyes, 25 degrees over
+  // eye level at most.
+  {
+    const float kDegree = 0.01745329f;
+    const float eyes[3] = {0.0f, 1.6f, 0.0f};
+    const auto up_of = [&](const float p[3]) {
+      const float dx = p[0] - eyes[0], dz = p[2] - eyes[2];
+      return atan2f(p[1] - eyes[1], sqrtf(dx * dx + dz * dz)) / kDegree;
+    };
+    const auto yaw_of = [&](const float p[3]) {
+      return atan2f(p[0] - eyes[0], p[2] - eyes[2]) / kDegree;
+    };
+    const float over_top[3] = {0.2f, 0.9f, -0.8f};
+    float at[3];
+    Check(CreatureOverPoint(eyes, over_top, 6.0f, 2.0f, 0.10f, 0.6f, 1.5f,
+                            25.0f, at),
+          "a place over a Creature at the waist", 1, 1);
+    Near("the panel is right over the Creature: the same yaw", yaw_of(at),
+         yaw_of(over_top), 1e-3);
+    Near("its middle is 8 degrees over the top of the Creature, so its lower "
+         "edge is 2 degrees over it", up_of(at) - up_of(over_top), 8.0, 1e-3);
+    Near("it is 10 cm nearer than the top", Distance(at, eyes),
+         Distance(over_top, eyes) - 0.10f, 1e-4);
+    const float far_top[3] = {2.0f, 1.0f, -9.0f};
+    CreatureOverPoint(eyes, far_top, 6.0f, 2.0f, 0.10f, 0.6f, 1.5f, 25.0f, at);
+    Near("a Creature 9 m away: the panel comes to 1.5 m, over it",
+         Distance(at, eyes), 1.5, 1e-4);
+    Near("and it keeps the yaw of the Creature", yaw_of(at), yaw_of(far_top),
+         1e-3);
+    const float near_top[3] = {0.05f, 1.4f, -0.2f};
+    CreatureOverPoint(eyes, near_top, 6.0f, 2.0f, 0.10f, 0.6f, 1.5f, 25.0f,
+                      at);
+    Near("a Creature at the face: the panel goes out to 0.6 m",
+         Distance(at, eyes), 0.6, 1e-4);
+    const float tall_top[3] = {0.0f, 2.6f, -1.0f};
+    CreatureOverPoint(eyes, tall_top, 6.0f, 2.0f, 0.10f, 0.6f, 1.5f, 25.0f,
+                      at);
+    Near("a top 45 degrees over eye level: the panel is at the top's angle, "
+         "not lower", up_of(at), up_of(tall_top), 1e-3);
+    const float mid_top[3] = {0.0f, 1.95f, -1.0f};
+    CreatureOverPoint(eyes, mid_top, 6.0f, 2.0f, 0.10f, 0.6f, 1.5f, 25.0f, at);
+    Near("a top 19 degrees over eye level: the panel goes up to 25 degrees",
+         up_of(at), 25.0, 1e-2);
+    const float above[3] = {0.0f, 3.0f, 0.0f};
+    Check(!CreatureOverPoint(eyes, above, 6.0f, 2.0f, 0.10f, 0.6f, 1.5f,
+                             25.0f, at),
+          "a top right over the eyes has no place", 0, 0);
+    float angle = 0.0f, ratio = 0.0f;
+    const float a[3] = {0.0f, 1.6f, -1.0f}, b[3] = {1.0f, 1.6f, -1.0f};
+    Check(AngleAndRatio(eyes, a, b, &angle, &ratio) &&
+              fabsf(angle - 45.0f) < 1e-3f &&
+              fabsf(ratio - sqrtf(2.0f)) < 1e-4f,
+          "the angle and the ratio of two places", angle, 45.0);
+  }
+
+  // THE HEIGHT OF A SLAP (creature_slap_height): a capsule 1.1 high (S = 1)
+  // on the land at 0.
+  {
+    Capsule slap_body;
+    slap_body.base[0] = slap_body.base[1] = slap_body.base[2] = 0.0f;
+    slap_body.height = 1.1f;
+    slap_body.radius = 0.4f;
+    const float level_from[3] = {-1.0f, 0.5f, 0.0f};
+    const float level_to[3] = {1.0f, 0.5f, 0.0f};
+    Near("a level slap at 0.5 S counts at 0.5 S",
+         SlapPathHeight(slap_body, level_from, level_to), 0.5, 1e-4);
+    const float down_from[3] = {-1.0f, 0.5f, 0.0f};
+    const float down_to[3] = {1.0f, -0.2f, 0.0f};
+    Near("a slap down that ends at the land counts where it met the axis, "
+         "0.15 S", SlapPathHeight(slap_body, down_from, down_to), 0.15, 1e-3);
+    const float top_from[3] = {-1.0f, 2.2f, 0.0f};
+    const float top_to[3] = {1.0f, 0.4f, 0.0f};
+    Near("a slap from over the head counts at 1.0 S at most, 0.1 S under "
+         "the limit of the game",
+         SlapPathHeight(slap_body, top_from, top_to), 1.0, 1e-4);
+    const float low_from[3] = {-1.0f, 0.0f, 0.0f};
+    const float low_to[3] = {1.0f, -0.5f, 0.0f};
+    Near("a slap at the land counts at 0.05 S at least",
+         SlapPathHeight(slap_body, low_from, low_to), 0.05, 1e-4);
+  }
 }
 
 #include "aim_checks.h"
 #include "miracle_checks.h"
+#include "miracle_throw_checks.h"
+#include "circle_aim_checks.h"
 #include "audio_checks.h"
 #include "command_checks.h"
 #include "exact_checks.h"
@@ -3531,31 +3663,45 @@ void CreatureChecks() {
 #include "throw_checks.h"
 #include "window_checks.h"
 #include "story_start_checks.h"
+#include "scene_checks.h"
 #include "intro_skip_checks.h"
 #include "intro_motion_checks.h"
 #include "eye_clean_checks.h"
 #include "draw_merge_checks.h"
 #include "bubble_card_checks.h"
 #include "spawn_checks.h"
+#include "zone_checks.h"
 #include "spirit_size_checks.h"
 #include "stay_checks.h"
 #include "look_checks.h"
 #include "head_checks.h"
 #include "ring_checks.h"
+#include "ring_sheet_checks.h"
 #include "debug_menu_checks.h"
 #include "teleport_checks.h"
+#include "spell_book_checks.h"
+#include "gesture_sheet_checks.h"
+#include "text_fit_checks.h"
+#include "hand_cut_checks.h"
+#include "gesture_panel_checks.h"
 #include "sky_checks.h"
 #include "sprite_checks.h"
 #include "camera_stale_checks.h"
+#include "job_icon_checks.h"
 #include "feel_checks.h"
 #include "pinch_checks.h"
+#include "hand_land_checks.h"
+#include "solid_checks.h"
 #include "feel_shape_checks.h"
 #include "temple_checks.h"
 #include "take_stream_checks.h"
 #include "eye_luma_checks.h"
 #include "land_light_checks.h"
+#include "sea_depth_checks.h"
+#include "cull_checks.h"
 #include "tree_plant_checks.h"
 #include "tree_body_checks.h"
+#include "fish_checks.h"
 #include "text_click_checks.h"
 #include "script_frame_checks.h"
 #include "frame_stats_checks.h"
@@ -3564,8 +3710,11 @@ void CreatureChecks() {
 #include "catch_checks.h"
 #include "one_walk_checks.h"
 #include "walk_checks.h"
+#include "grab_gain_checks.h"
 #include "blt_copy_checks.h"
+#include "save_picture_checks.h"
 #include "read_ahead_checks.h"
+#include "save_store_checks.h"
 #include "target_glow_checks.h"
 #include "scene_sample_checks.h"
 #include "anim_trig_checks.h"
@@ -3580,6 +3729,8 @@ void CreatureChecks() {
 #include "vk_texture_checks.h"
 #include "vk_prim_checks.h"
 #include "vk_draw_checks.h"
+#include "address_space_checks.h"
+#include "large_address_checks.h"
 #include "foveation_checks.h"
 #include "fovea_res_checks.h"
 #include "vk_compose_checks.h"
@@ -3625,12 +3776,36 @@ void CreatureChecks() {
 #include "gpu_parts_checks.h"
 #include "update_checks.h"
 #include "refresh_rate_checks.h"
-#include "address_space_checks.h"
+#include "memory_watch_checks.h"
 #include "large_block_checks.h"
 #include "render_chain_checks.h"
 #include "bar_split_checks.h"
 #include "sse_parts_checks.h"
 #include "hand_fit_checks.h"
+#include "menu_room_checks.h"
+#include "comfort_checks.h"
+#include "video_view_checks.h"
+#include "video_layers_checks.h"
+#include "blinder_checks.h"
+#include "glow_checks.h"
+#include "ray_card_checks.h"
+#include "ray_tip_checks.h"
+#include "places_checks.h"
+#include "bookmark_aim_checks.h"
+#include "debug_window_checks.h"
+#include "settings_panel_checks.h"
+#include "button_map_checks.h"
+#include "hint_picture_checks.h"
+#include "hint_model_checks.h"
+#include "creature_touch_checks.h"
+#include "eye_cant_checks.h"
+#include "view_check_checks.h"
+#include "grip_fit_checks.h"
+#include "hand_angle_checks.h"
+#include "panel_raster_checks.h"
+#include "card_send_checks.h"
+#include "controls_layout_checks.h"
+#include "head_lag_checks.h"
 
 int main() {
   const float eye[3] = {120.0f, 45.0f, -300.0f};
@@ -4001,34 +4176,51 @@ int main() {
   command_checks::LiveChecks();
   window_checks::WindowChecks();
   story_start_checks::StoryStartChecks();
+  scene_checks::SceneChecks();
   intro_skip_checks::IntroSkipChecks();
   intro_motion_checks::IntroMotionChecks();
   eye_clean_checks::EyeCleanChecks();
   draw_merge_checks::DrawMergeChecks();
   bubble_card_checks::BubbleCardChecks();
   spawn_checks::SpawnChecks();
+  zone_checks::ZoneChecks();
   spirit_size_checks::SpiritSizeChecks();
   village_checks::VillageChecks();
   aim_checks::AimChecks();
   miracle_checks::MiracleChecks();
+  miracle_throw_checks::MiracleThrowChecks();
+  circle_aim_checks::CircleAimChecks();
   ring_checks::RingChecks();
+  ring_sheet_checks::RingSheetChecks();
   debug_menu_checks::DebugMenuChecks();
   teleport_checks::TeleportChecks();
+  spell_book_checks::SpellBookChecks();
+  gesture_sheet_checks::GestureSheetChecks();
+  text_fit_checks::TextFitChecks();
+  hand_cut_checks::HandCutChecks();
+  gesture_panel_checks::GesturePanelChecks();
   sky_checks::SkyChecks();
   sprite_checks::SpriteChecks();
   camera_stale_checks::CameraStaleChecks();
+  job_icon_checks::JobIconChecks();
   forest_checks::ForestChecks();
   forest_checks::ForestGripChecks();
   feel_checks::FeelChecks();
   pinch_checks::PinchChecks();
+  hand_land_checks::HandLandChecks();
+  solid_checks::SolidChecks();
   feel_shape_checks::FeelShapeChecks();
   temple_checks::TempleChecks();
   eye_luma_checks::EyeLumaChecks();
   land_light_checks::LandLightChecks();
+  sea_depth_checks::SeaDepthChecks();
+  cull_checks::CullChecks();
   tree_plant_checks::TreePlantChecks();
   tree_body_checks::TreeBodyChecks();
+  fish_checks::FishChecks();
   zoom_checks::ZoomChecks();
   stay_checks::StayChecks();
+  creature_touch_checks::CreatureTouchChecks();
   look_checks::LookChecks();
   head_checks::HeadChecks();
   text_click_checks::TextClickChecks();
@@ -4038,8 +4230,15 @@ int main() {
   catch_checks::CatchChecks();
   one_walk_checks::OneWalkChecks();
   walk_checks::WalkChecks();
+  grab_gain_checks::GrabGainChecks();
+  comfort_checks::ComfortChecks();
+  video_view_checks::VideoViewChecks();
+  video_layers_checks::VideoLayersChecks();
+  blinder_checks::BlinderChecks();
   blt_copy_checks::BltCopyChecks();
+  save_picture_checks::SavePictureChecks();
   read_ahead_checks::ReadAheadChecks();
+  save_store_checks::SaveStoreChecks();
   take_stream_checks::TakeStreamChecks();
   target_glow_checks::TargetGlowChecks();
   scene_sample_checks::SceneSampleChecks();
@@ -4055,6 +4254,8 @@ int main() {
   vk_texture_checks::VkTextureChecks();
   vk_prim_checks::VkPrimChecks();
   vk_draw_checks::VkDrawChecks();
+  address_space_checks::AddressSpaceChecks();
+  large_address_checks::LargeAddressChecks();
   foveation_checks::FoveationChecks();
   fovea_res_checks::FoveaResChecks();
   vk_compose_checks::VkComposeChecks();
@@ -4098,12 +4299,33 @@ int main() {
   gpu_parts_checks::GpuPartsChecks();
   update_checks::UpdateChecks();
   refresh_rate_checks::RefreshRateChecks();
-  address_space_checks::AddressSpaceChecks();
+  memory_watch_checks::MemoryWatchChecks();
   large_block_checks::LargeBlockChecks();
   render_chain_checks::RenderChainChecks();
   bar_split_checks::BarSplitChecks();
   sse_parts_checks::SsePartsChecks();
   hand_fit_checks::HandFitChecks();
+  menu_room_checks::MenuRoomChecks();
+  menu_room_checks::KeyboardChecks();
+  glow_checks::GlowChecks();
+  ray_card_checks::GlowAloneChecks();
+  ray_card_checks::RayCardChecks();
+  ray_tip_checks::RayTipChecks();
+  head_lag_checks::HeadLagChecks();
+  places_checks::PlacesChecks();
+  bookmark_aim_checks::BookmarkAimChecks();
+  debug_window_checks::DebugWindowChecks();
+  settings_panel_checks::SettingsPanelChecks();
+  button_map_checks::ButtonMapChecks();
+  hint_picture_checks::HintPictureChecks();
+  hint_model_checks::HintModelChecks();
+  eye_cant_checks::EyeCantChecks();
+  view_check_checks::ViewCheckChecks();
+  grip_fit_checks::GripFitChecks();
+  hand_angle_checks::HandAngleChecks();
+  panel_raster_checks::PanelRasterChecks();
+  card_send_checks::CardSendChecks();
+  controls_layout_checks::ControlsLayoutChecks();
   late_camera_checks::LateCameraChecks();
   // Last: it recenters the head of head_pose.cpp.
   motion_comp_checks::MotionCompChecks();

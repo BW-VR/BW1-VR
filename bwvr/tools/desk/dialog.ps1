@@ -150,6 +150,10 @@ function Invoke-DialogCalibration([string]$Dll) {
         fake_controller_points = $points
         fake_controller_script = $words
     }
+    # The frames of the measure need the frame rate of the recipes. With the
+    # renderer Vulkan a desktop frame is too short (README.md, "The check
+    # before a merge").
+    if ((Get-BwvrBackend) -eq 'vulkan') { $extra['test_frame_rate'] = 60 }
     "the start dialog is not measured for a render of $($size[0]) by $($size[1]) yet: one run of 45 s measures it"
     $o = & (Join-Path $PSScriptRoot 'desk_run.ps1') -Name 'dialogcal' -Dll $Dll -Extra $extra -Seconds 45 -WaitMinutes 30
     if (Test-BwvrVerdict $o 'NOT RUN') { $o | Select-Object -Last 1; return $false }

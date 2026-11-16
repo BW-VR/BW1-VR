@@ -70,9 +70,11 @@
 #include "../vr/xr_screen.h"
 #include "MinHook.h"
 #include "controller_math.h"
+#include "creature_touch_math.h"
 #include "cutscene_window.h"
 #include "debug_menu.h"
 #include "hint_card.h"
+#include "menu_room.h"
 #include "subtitle_card_math.h"
 #include "ui_panel.h"
 #include "vk_scene.h"
@@ -102,6 +104,12 @@ bool HeadCameraStageBasis(float basis_out[9]);
 bool HeadCameraGameCamera(float position[3], float focus[3]);
 bool TabletopRoom(float origin[3], float basis[9], float center[3],
                   float* gain);
+// hand_direct.cpp: the player's Creature, and the Creature at the Hand that
+// the controller places (the panel that stays).
+void* HandDirectOwnCreature();
+void* HandDirectCreatureAtHand(bool empty);
+// controllers.cpp: the press of the open hand on the Creature is on.
+bool ControllersOpenStrokeOn();
 
 namespace {
 
@@ -158,8 +166,10 @@ const char* ModeName(int mode) {
 // THE CREATURE PANEL. fn_005178D0, from the help text callback (0x005CD03C),
 // draws the box with DrawCreatureStats (0x00517080) when the alpha at
 // 0x00CC630C is above 0, and then clears the alpha and the layout. cdecl, no
-// arguments, plain ret. Creature::Draw arms it with layout 1 while the Hand
-// is over the player's Creature. CameraModeFollow::Update arms it with
+// arguments, plain ret. Creature::Draw arms it with layout 1 while a press
+// holds the player's Creature (the locked select sets bit 0x10 of
+// Object+0x24), and the mod arms it with no press (LingerFrame).
+// CameraModeFollow::Update arms it with
 // layout 0. The four values are a, b, c and d of DrawCreatureStats, at
 // 0x00CC62EC down to 0x00CC62E0.
 const uintptr_t kCreaturePanelDraw = 0x005178D0;
@@ -178,10 +188,11 @@ uint64_t g_frame = 0;           // the frame of UiPanelBeginFrame
 uint64_t g_creature_frame = 0;  // the last frame the Creature panel drew
 int32_t g_creature_layout = 1;
 float g_creature_values[4] = {0.0f, 0.0f, 0.0f, 0.0f};
-// The Creature's head and the player's head center, in LOCAL meters, from
-// the frame the panel drew.
+// The Creature's head, the top of its body (1.1 S, the top of the touch) and
+// the player's head center, in LOCAL meters, from the frame the panel drew.
 bool g_creature_have_head = false;
 float g_creature_head[3] = {0.0f, 0.0f, 0.0f};
+float g_creature_top[3] = {0.0f, 0.0f, 0.0f};
 float g_creature_eyes[3] = {0.0f, 0.0f, 0.0f};
 // Near the Creature, the panel stays where it went until it is hidden for
 // kCreatureHideSeconds.
@@ -248,16 +259,22 @@ bool WorldToLocal(const float world[3], float local_out[3],
 
 // The head of the Creature that armed the panel, in LOCAL meters. Layout 1
 // only: Creature::Draw armed it for the object of the pick (the test of
-// GetInteractObject, bit 0x10 of Object+0x24). The head is the base of the
-// LH3DCreature (+0x78) raised by 15 * size (+0x90), the height of S.
-bool CreatureHead() {
+// GetInteractObject, bit 0x10 of Object+0x24), or the mod armed it for
+// `armed` (the panel that stays). The head is the base of the LH3DCreature
+// (+0x78) raised by 15 * size (+0x90), the height of S.
+bool CreatureHead(const void* armed) {
   if (g_creature_layout != 1) return false;
-  void* game = *reinterpret_cast<void* const*>(kGame);
-  if (game == nullptr) return false;
-  void* face = reinterpret_cast<MyInterfaceFn>(kMyInterface)(game, nullptr);
-  const uint8_t* object = ReadPointer(face, kFaceNextObject);
-  if (object == nullptr || IsBadReadPtr(object, 0x168) ||
-      (object[0x24] & 0x10) == 0) {
+  const uint8_t* object = static_cast<const uint8_t*>(armed);
+  if (object == nullptr) {
+    void* game = *reinterpret_cast<void* const*>(kGame);
+    if (game == nullptr) return false;
+    void* face = reinterpret_cast<MyInterfaceFn>(kMyInterface)(game, nullptr);
+    object = ReadPointer(face, kFaceNextObject);
+    if (object == nullptr || IsBadReadPtr(object, 0x168) ||
+        (object[0x24] & 0x10) == 0) {
+      return false;
+    }
+  } else if (IsBadReadPtr(object, 0x168)) {
     return false;
   }
   const uint8_t* model = ReadPointer(ReadPointer(object, 0x160), 0x58);
@@ -266,22 +283,142 @@ bool CreatureHead() {
   const float size = *reinterpret_cast<const float*>(model + 0x90);
   if (!(size > 0.0f && size < 1000.0f)) return false;
   const float head[3] = {base[0], base[1] + 15.0f * size, base[2]};
-  return WorldToLocal(head, g_creature_head, g_creature_eyes);
+  const float top[3] = {base[0], base[1] + 1.1f * 15.0f * size, base[2]};
+  float eyes[3];
+  return WorldToLocal(head, g_creature_head, g_creature_eyes) &&
+         WorldToLocal(top, g_creature_top, eyes);
+}
+
+// THE PANEL THAT STAYS (creature_panel_linger, docs/ui-layer.md, "The
+// Creature panel", and creature_touch_math.h). The game arms the panel only
+// while a press holds the Creature (the locked select sets bit 0x10). The mod
+// arms it also while the Hand is at the player's Creature with no press, and
+// for kLingerSeconds after the Hand left, with the values that
+// Creature::Draw (0x00517910) writes: a = 1 - (vtable +0x11C), b = 1 -
+// [+0x160]+0x1C, c = [+0x160]+0x30. The lesson total d keeps the value of the
+// last Creature state, as the game's own panel has it before a stroke.
+const int kCreatureLives = 0x2C;    // a vtable slot of the Creature
+const int kCreatureValueA = 0x11C;  // a vtable slot: 1 - a
+const int kCreatureMind = 0x160;
+typedef int(__fastcall* CreatureIntFn)(const void* self, void* unused);
+typedef float(__fastcall* CreatureFloatFn)(const void* self, void* unused);
+creature_touch_math::Linger g_linger;
+uint64_t g_linger_frame = 0;   // the frame of the last step
+bool g_linger_arming = false;  // the mod armed the panel in the last frame
+bool g_linger_at = false;      // the Hand was at the Creature then
+double g_linger_left = 0.0;    // the time the Hand left the Creature
+bool g_linger_said = false;
+uint64_t g_linger_frames = 0;  // frames the mod armed the panel
+int g_linger_logs = 0;
+const int kMaxLingerLogs = 40;
+
+// The mod arms the panel of this frame for the player's Creature. False when
+// the Creature cannot be read or does not live.
+bool LingerWrite(const void* creature) {
+  const uint8_t* bytes = static_cast<const uint8_t*>(creature);
+  if (bytes == nullptr || IsBadReadPtr(bytes, kCreatureMind + 4)) return false;
+  void* const* table = *reinterpret_cast<void* const* const*>(bytes);
+  if (table == nullptr ||
+      IsBadReadPtr(table, static_cast<UINT_PTR>(kCreatureValueA) + 4)) {
+    return false;
+  }
+  if (reinterpret_cast<CreatureIntFn>(table[kCreatureLives / 4])(
+          creature, nullptr) == 0) {
+    return false;
+  }
+  const uint8_t* mind = ReadPointer(creature, kCreatureMind);
+  if (mind == nullptr || IsBadReadPtr(mind, 0x34)) return false;
+  const float a = reinterpret_cast<CreatureFloatFn>(
+      table[kCreatureValueA / 4])(creature, nullptr);
+  float* v = reinterpret_cast<float*>(kCreaturePanelValues);
+  v[3] = 1.0f - a;
+  v[2] = 1.0f - *reinterpret_cast<const float*>(mind + 0x1C);
+  v[1] = *reinterpret_cast<const float*>(mind + 0x30);
+  *reinterpret_cast<int32_t*>(kCreaturePanelAlpha) = 255;
+  *reinterpret_cast<int32_t*>(kCreaturePanelLayout) = 1;
+  return true;
+}
+
+// Once a frame, before the game draws the panel. The Creature that the mod
+// armed the panel for, or null.
+const void* LingerFrame(bool game_armed) {
+  if (g_settings.creature_panel_linger == 0) return nullptr;
+  if (!g_linger_said) {
+    g_linger_said = true;
+    ModLog("ui panel     : creature_panel_linger=1. The Creature panel shows "
+           "while the Hand is at your Creature with no press, and for %.1f s "
+           "after the Hand left it", creature_touch_math::kLingerSeconds);
+  }
+  const double now = NowSeconds();
+  const void* own = HandDirectOwnCreature();
+  // A press of the open hand counts as the Hand at the Creature from its
+  // start: the Hand leaves its Normal state before the Creature state
+  // starts, and the game arms its own panel only when its locked select has
+  // begun. So the stay does not start in the press.
+  const bool at = HandDirectCreatureAtHand(false) != nullptr ||
+                  (own != nullptr && ControllersOpenStrokeOn());
+  bool arm = creature_touch_math::LingerStep(
+      &g_linger, own, at, game_armed, now, creature_touch_math::kLingerSeconds);
+  if (arm && !LingerWrite(own)) arm = false;
+  if (arm) ++g_linger_frames;
+  // The log: the start of a show by the mod, the Hand that leaves, and the
+  // end of the stay.
+  if (g_linger_logs < kMaxLingerLogs) {
+    if (arm && !g_linger_arming && at) {
+      ++g_linger_logs;
+      ModLog("ui panel     : the Hand is at your Creature %p with no press: "
+             "the mod shows the Creature panel (creature_panel_linger=1), "
+             "frame %llu", own, g_frame);
+    } else if (arm && g_linger_at && !at) {
+      ++g_linger_logs;
+      g_linger_left = now;
+      ModLog("ui panel     : the Hand left your Creature: the Creature panel "
+             "stays for %.1f s, frame %llu",
+             creature_touch_math::kLingerSeconds, g_frame);
+    } else if (!arm && g_linger_arming && !game_armed) {
+      ++g_linger_logs;
+      ModLog("ui panel     : the Creature panel goes, %.2f s after the Hand "
+             "left your Creature or the press ended, frame %llu",
+             g_linger_at ? 0.0 : now - g_linger_left, g_frame);
+    }
+  }
+  // The last time at which the Hand was at the Creature or a press of the
+  // game held it. The stay of LingerStep counts from the same time.
+  if (at || game_armed) g_linger_left = now;
+  g_linger_arming = arm;
+  g_linger_at = at;
+  return arm ? own : nullptr;
 }
 
 void __cdecl h_CreaturePanelDraw() {
-  const int32_t alpha = *reinterpret_cast<const int32_t*>(kCreaturePanelAlpha);
-  // Once a frame: the first eye pass draws it and clears the alpha.
-  if (alpha > 0 && g_creature_frame != g_frame) {
-    g_creature_frame = g_frame;
-    ++g_creature_draws;
-    g_creature_layout =
-        *reinterpret_cast<const int32_t*>(kCreaturePanelLayout);
-    const float* v = reinterpret_cast<const float*>(kCreaturePanelValues);
-    for (int i = 0; i < 4; ++i) g_creature_values[i] = v[3 - i];
-    g_creature_have_head = CreatureHead();
+  int32_t alpha = *reinterpret_cast<const int32_t*>(kCreaturePanelAlpha);
+  // Once a frame: the first eye pass draws it and clears the alpha. The mod
+  // arms it in the first call of a frame only, so the second eye pass does
+  // not draw it again.
+  if (g_creature_frame != g_frame) {
+    const void* armed = nullptr;
+    if (g_linger_frame != g_frame) {
+      g_linger_frame = g_frame;
+      armed = LingerFrame(alpha > 0);
+      if (armed != nullptr) {
+        alpha = *reinterpret_cast<const int32_t*>(kCreaturePanelAlpha);
+      }
+    }
+    if (alpha > 0) {
+      g_creature_frame = g_frame;
+      ++g_creature_draws;
+      g_creature_layout =
+          *reinterpret_cast<const int32_t*>(kCreaturePanelLayout);
+      const float* v = reinterpret_cast<const float*>(kCreaturePanelValues);
+      for (int i = 0; i < 4; ++i) g_creature_values[i] = v[3 - i];
+      g_creature_have_head = CreatureHead(armed);
+    }
   }
+  // The batches of this call are the Creature panel. The subtitle card
+  // keeps their bounds apart (creature_panel_over).
+  UiPanelCreatureScope(true);
   o_CreaturePanelDraw();
+  UiPanelCreatureScope(false);
 }
 
 // The box of DrawCreatureStats in render pixels, 8 px wider on each side:
@@ -300,11 +437,99 @@ void CreatureRect(int32_t layout, uint32_t w, uint32_t h, int32_t out[4]) {
   out[3] = box_h + 2 * pad;
 }
 
+// THE PANEL OVER THE CREATURE (creature_panel_over, docs/ui-layer.md, "The
+// Creature panel"). The panel is kOverWidthDeg wide as the eyes see it, at
+// each distance, so the player reads it from where he stands. Its lower edge
+// is kOverGapDeg over the top of the body (1.1 S), and it is kOverAheadM
+// nearer than the top, 0.6 to 1.5 m from the eyes, facing them. It takes its
+// place when it shows. It stays there while the Creature breathes, turns and
+// takes a step, and it takes a new place only when the Creature or the
+// player moved far (creature_touch_math::OverMoves). After 1 s with no panel
+// the next show takes a new place.
+const float kOverWidthDeg = 11.0f;
+const float kOverGapDeg = 2.0f;
+const float kOverAheadM = 0.10f;
+const float kOverNearM = 0.6f;
+const float kOverFarM = 1.5f;
+const float kOverMostDeg = 25.0f;
+creature_touch_math::OverHold g_over_hold;
+float g_over_position[3] = {0.0f, 0.0f, 0.0f};
+float g_over_orientation[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+float g_over_distance = 1.0f;
+double g_over_seen = 0.0;
+uint64_t g_over_frame = 0;   // the frame of the last pose
+uint64_t g_over_frames = 0;  // frames with the panel over the Creature
+uint64_t g_over_moves = 0;   // new places after the first one of a show
+int g_over_logs = 0;
+const int kMaxOverLogs = 40;
+
+// The pose of the panel over the Creature in this frame, for a box of
+// rect_w by rect_h pixels: the center, the turn, and the size in meters.
+// False with no head of the Creature in this frame.
+bool OverPose(int32_t rect_w, int32_t rect_h, float position[3],
+              float orientation[4], float* width, float* height) {
+  if (!g_creature_have_head || g_creature_frame != g_frame || rect_w <= 0 ||
+      rect_h <= 0) {
+    return false;
+  }
+  const double now = NowSeconds();
+  if (g_over_hold.placed && now - g_over_seen >= kCreatureHideSeconds) {
+    g_over_hold.placed = false;
+  }
+  const float aspect = static_cast<float>(rect_h) / static_cast<float>(rect_w);
+  const float half_deg = 0.5f * kOverWidthDeg * aspect;
+  float want[3];
+  if (!controller_math::CreatureOverPoint(g_creature_eyes, g_creature_top,
+                                          half_deg, kOverGapDeg, kOverAheadM,
+                                          kOverNearM, kOverFarM, kOverMostDeg,
+                                          want)) {
+    return false;
+  }
+  const bool fresh = !g_over_hold.placed;
+  float angle = 0.0f, ratio = 1.0f;
+  if (!fresh && !controller_math::AngleAndRatio(g_creature_eyes,
+                                                g_over_position, want, &angle,
+                                                &ratio)) {
+    angle = 180.0f;
+  }
+  // The place can change once a frame only.
+  if (g_over_frame != g_frame &&
+      creature_touch_math::OverMoves(&g_over_hold, fresh, angle, ratio, now)) {
+    for (int i = 0; i < 3; ++i) g_over_position[i] = want[i];
+    controller_math::FacePose(want, g_creature_eyes, g_over_orientation);
+    g_over_distance = controller_math::Distance(want, g_creature_eyes);
+    if (!fresh) ++g_over_moves;
+    if (g_over_logs < kMaxOverLogs) {
+      ++g_over_logs;
+      const float top_away =
+          controller_math::Distance(g_creature_top, g_creature_eyes);
+      ModLog("ui panel     : the Creature panel %s over the Creature at %.2f "
+             "%.2f %.2f m, %.2f m from the eyes. The top of the Creature is "
+             "%.2f m from the eyes. The panel is %.0f degrees wide "
+             "(creature_panel_over=1)%s, frame %llu",
+             fresh ? "goes" : "goes to a new place", want[0], want[1],
+             want[2], g_over_distance, top_away, kOverWidthDeg,
+             fresh ? "" : ", because the Creature or the player moved far",
+             g_frame);
+    }
+  }
+  g_over_frame = g_frame;
+  g_over_seen = now;
+  ++g_over_frames;
+  for (int i = 0; i < 3; ++i) position[i] = g_over_position[i];
+  for (int i = 0; i < 4; ++i) orientation[i] = g_over_orientation[i];
+  *width = 2.0f * g_over_distance *
+           tanf(0.5f * kOverWidthDeg * 0.01745329f);
+  *height = *width * aspect;
+  return true;
+}
+
 // The Creature panel quad of this frame. Fixed: 0.9 m out, 35 degrees left
 // of the recenter yaw and 15 degrees down, so a recenter moves it. Near the
-// Creature: when it shows, 30 cm over the Creature's head and 15 cm to its
-// left, 0.5 to 1.5 m from the eyes, facing them. It stays there while it
-// shows, and until it is hidden for 1 s.
+// Creature with creature_panel_over=1: over its head (OverPose). Near the
+// Creature with creature_panel_over=0: when it shows, 30 cm over the
+// Creature's head and 15 cm to its left, 0.5 to 1.5 m from the eyes, facing
+// them. It stays there while it shows, and until it is hidden for 1 s.
 void CreatureQuad(uint32_t render_w, uint32_t render_h, const float anchor[3],
                   const float yaw[4], bwvr::PanelQuad* q) {
   q->visible = false;
@@ -315,6 +540,23 @@ void CreatureQuad(uint32_t render_w, uint32_t render_h, const float anchor[3],
       g_creature_placed = false;
     }
     return;
+  }
+  if (g_settings.creature_panel == kCreaturePanelNear &&
+      g_settings.creature_panel_over != 0) {
+    int32_t rect[4];
+    CreatureRect(g_creature_layout, render_w, render_h, rect);
+    float width = 0.0f, height = 0.0f;
+    if (OverPose(rect[2], rect[3], q->position, q->orientation, &width,
+                 &height)) {
+      for (int i = 0; i < 4; ++i) q->rect[i] = rect[i];
+      q->width = width;
+      q->height = height;
+      q->visible = true;
+      g_creature_seen = now;
+      g_creature_placed = true;
+      g_creature_near = true;
+      return;
+    }
   }
   g_creature_seen = now;
   const bool fresh = !g_creature_placed;
@@ -414,6 +656,11 @@ struct SubtitleState {
   uint8_t* pixels = nullptr;
   uint32_t texture_w = 0;
   uint32_t texture_h = 0;
+  // The number of the picture in `pixels` (CardLayer::serial), and the size
+  // of the last copy.
+  uint32_t serial = 0;
+  uint32_t copied_w = 0;
+  uint32_t copied_h = 0;
   int read_failures = 0;     // frames in a row with no copy of the panel
   bool read_failed = false;
   double last_time = 0.0;
@@ -591,14 +838,31 @@ const int kCopyDone = 0;
 const int kCopyNotYet = 1;  // the read ahead has no pixels of this text yet
 const int kCopyFailed = 2;
 
+// THE CREATURE CARD (creature_panel_over, with the subtitle card): the box of
+// the Creature panel at half the size, with no fade. SubtitleCopy fills it
+// from the same copy as the subtitle card.
+struct OverCard {
+  uint8_t* pixels = nullptr;
+  uint32_t w = 0;  // the texture of the card
+  uint32_t h = 0;
+  uint32_t serial = 0;
+  bool have = false;  // the pixels are of the copy of this frame
+  uint64_t frames = 0;
+  uint64_t lost = 0;  // frames with the box and no pixels of it
+};
+OverCard g_over_card;
+
 // The half size copy of `rect` of the panel target, into s.pixels, with the
 // color and the alpha multiplied by `fade`. `used` gets the rect of the panel
 // that the pixels hold: `rect`, or with the read ahead the rect of the copy
-// of a frame before.
+// of a frame before. With `keep`, a rect of the render in `rect`, the half
+// size pixels of `keep` also go to g_over_card, with no fade, when `used`
+// holds all of `keep`.
 int SubtitleCopy(const int rect[4], uint32_t render_w, uint32_t render_h,
-                 float fade, int used[4], uint32_t* w_out, uint32_t* h_out,
-                 double* ms_out) {
+                 float fade, const int* keep, int used[4], uint32_t* w_out,
+                 uint32_t* h_out, double* ms_out) {
   SubtitleState& s = g_sub;
+  g_over_card.have = false;
   LARGE_INTEGER t0, t1, frequency;
   QueryPerformanceFrequency(&frequency);
   QueryPerformanceCounter(&t0);
@@ -654,24 +918,71 @@ int SubtitleCopy(const int rect[4], uint32_t render_w, uint32_t render_h,
     return kCopyFailed;
   }
   s.read_failures = 0;
+  // THE BOX OF THE CREATURE PANEL, before the fade.
+  if (keep != nullptr) {
+    const int kx = (keep[0] - used[0]) / 2, ky = (keep[1] - used[1]) / 2;
+    const int kw = keep[2] / 2, kh = keep[3] / 2;
+    OverCard& c = g_over_card;
+    if (kx >= 0 && ky >= 0 && kw > 0 && kh > 0 &&
+        kx + kw <= static_cast<int>(w) && ky + kh <= static_cast<int>(h)) {
+      bool changed_box = c.serial == 0;
+      if (c.pixels == nullptr || c.w != static_cast<uint32_t>(kw) ||
+          c.h != static_cast<uint32_t>(kh)) {
+        delete[] c.pixels;
+        c.pixels = new uint8_t[static_cast<size_t>(kw) * kh * 4];
+        c.w = static_cast<uint32_t>(kw);
+        c.h = static_cast<uint32_t>(kh);
+        changed_box = true;
+      }
+      for (int y = 0; y < kh; ++y) {
+        const uint8_t* in = source + static_cast<size_t>(ky + y) * pitch +
+                            static_cast<size_t>(kx) * 4;
+        uint8_t* out = c.pixels + static_cast<size_t>(y) * kw * 4;
+        if (changed_box || memcmp(out, in, static_cast<size_t>(kw) * 4) != 0) {
+          changed_box = true;
+          memcpy(out, in, static_cast<size_t>(kw) * 4);
+        }
+      }
+      if (changed_box) c.serial = bwvr::XrScreen::NewCardSerial();
+      c.have = true;
+    }
+  }
+  // THE NUMBER OF THE PICTURE (CardLayer::serial). The game draws the help
+  // text again in each frame, so the copy compares each row with the row of
+  // the last copy. A new size or a changed row gives a new number, and the
+  // view for videos copies the card only then.
+  bool changed = s.serial == 0 || w != s.copied_w || h != s.copied_h;
   if (s.pixels == nullptr || s.texture_w != texture_w ||
       s.texture_h != texture_h) {
     delete[] s.pixels;
     s.pixels = new uint8_t[static_cast<size_t>(texture_w) * texture_h * 4];
     s.texture_w = texture_w;
     s.texture_h = texture_h;
+    changed = true;
   }
   const int scale = static_cast<int>(fade * 256.0f + 0.5f);
   for (uint32_t y = 0; y < h; ++y) {
     const uint8_t* in = source + static_cast<size_t>(y) * pitch;
     uint8_t* out = s.pixels + static_cast<size_t>(y) * texture_w * 4;
     if (scale >= 256) {
-      memcpy(out, in, static_cast<size_t>(w) * 4);
+      if (changed || memcmp(out, in, static_cast<size_t>(w) * 4) != 0) {
+        changed = true;
+        memcpy(out, in, static_cast<size_t>(w) * 4);
+      }
     } else {
       for (uint32_t i = 0; i < w * 4; ++i) {
-        out[i] = static_cast<uint8_t>((in[i] * scale) >> 8);
+        const uint8_t value = static_cast<uint8_t>((in[i] * scale) >> 8);
+        if (out[i] != value) {
+          out[i] = value;
+          changed = true;
+        }
       }
     }
+  }
+  if (changed) {
+    s.serial = bwvr::XrScreen::NewCardSerial();
+    s.copied_w = w;
+    s.copied_h = h;
   }
   read_done();
   QueryPerformanceCounter(&t1);
@@ -684,6 +995,46 @@ int SubtitleCopy(const int rect[4], uint32_t render_w, uint32_t render_h,
   *h_out = h;
   *ms_out = ms;
   return kCopyDone;
+}
+
+// The Creature card of this frame: the box `box` (a rect of the render) over
+// the head of the Creature (OverPose), with the pixels that SubtitleCopy put
+// in g_over_card.
+void CreatureCardStage(const int box[4]) {
+  OverCard& c = g_over_card;
+  if (!c.have) {
+    // The read ahead has no copy with the box yet.
+    ++c.lost;
+    return;
+  }
+  bwvr::CardLayer layer = {};
+  if (!OverPose(box[2], box[3], layer.position, layer.orientation,
+                &layer.width, &layer.height)) {
+    ++c.lost;
+    return;
+  }
+  layer.visible = true;
+  layer.pixels = c.pixels;
+  layer.texture_width = c.w;
+  layer.texture_height = c.h;
+  layer.rect[0] = 0;
+  layer.rect[1] = 0;
+  layer.rect[2] = static_cast<int32_t>(c.w);
+  layer.rect[3] = static_cast<int32_t>(c.h);
+  layer.serial = c.serial;
+  bwvr::XrScreen::StageCard(bwvr::kCardCreature, layer);
+  ++c.frames;
+  if (g_sub.capture) {
+    const int pitch = static_cast<int>(c.w) * 4;
+    EyeCaptureSaveUi("creature-card", g_frame, 0, c.pixels, pitch, c.w, c.h);
+    EyeCaptureSaveUi("creature-card-over", g_frame, 1, c.pixels, pitch, c.w,
+                     c.h);
+    ModLog("ui panel     : frame %llu, the Creature card: the box %d %d %d %d "
+           "of the render, %u by %u px, at %.3f %.3f %.3f m, %.2f by %.2f m",
+           g_frame, box[0], box[1], box[2], box[3], c.w, c.h,
+           layer.position[0], layer.position[1], layer.position[2],
+           layer.width, layer.height);
+  }
 }
 
 // The test of vk_panel, in a frame that saves pictures: the same part of the
@@ -715,8 +1066,8 @@ void SubtitleWindowCard(const int rect[4], uint32_t render_w,
   uint32_t w = 0, h = 0;
   double ms = 0.0;
   int used[4] = {0, 0, 0, 0};
-  if (SubtitleCopy(rect, render_w, render_h, 1.0f, used, &w, &h, &ms) !=
-      kCopyDone) {
+  if (SubtitleCopy(rect, render_w, render_h, 1.0f, nullptr, used, &w, &h,
+                   &ms) != kCopyDone) {
     return;
   }
   if (!CutsceneWindowSubtitleQuad(render_w, render_h, used, layer.position,
@@ -734,6 +1085,7 @@ void SubtitleWindowCard(const int rect[4], uint32_t render_w,
   layer.rect[1] = 0;
   layer.rect[2] = static_cast<int32_t>(w);
   layer.rect[3] = static_cast<int32_t>(h);
+  layer.serial = s.serial;
   bwvr::XrScreen::StageCard(bwvr::kCardSubtitles, layer);
   ++s.frames_shown;
   const bool fresh = !s.window_showing;
@@ -791,15 +1143,50 @@ void SubtitleEndPasses() {
   float bounds[4];
   uint32_t render_w = 0, render_h = 0;
   int rect[4] = {0, 0, 0, 0};
-  bool content = UiPanelDrew(kPanelHelp) && !UiPanelFrameFailed() &&
-                 UiPanelHelpBounds(bounds, &render_w, &render_h) &&
+  bool have_help = UiPanelDrew(kPanelHelp) && !UiPanelFrameFailed() &&
+                   UiPanelHelpBounds(bounds, &render_w, &render_h);
+  // THE CREATURE PANEL OVER THE CREATURE (creature_panel_over). Its batches
+  // have bounds of their own. With the head of the Creature in this frame
+  // it goes to a card of its own (kCardCreature), and the subtitle card does
+  // not show it. Else it stays on the subtitle card, left of the middle.
+  float creature_bounds[4];
+  uint32_t creature_w = 0, creature_h = 0;
+  int creature_rect[4] = {0, 0, 0, 0};
+  bool creature_card = false;
+  if (!UiPanelFrameFailed() &&
+      UiPanelCreatureBounds(creature_bounds, &creature_w, &creature_h)) {
+    render_w = creature_w;
+    render_h = creature_h;
+    creature_card = !s.window && g_settings.creature_panel_over != 0 &&
+                    g_creature_frame == g_frame && g_creature_have_head &&
+                    !bwvr::XrScreen::CardFailed(bwvr::kCardCreature) &&
+                    subtitle_math::CardRect(
+                        creature_bounds, kSubtitlePad, kSubtitleGrid,
+                        static_cast<int>(render_w),
+                        static_cast<int>(render_h), creature_rect);
+    if (!creature_card) {
+      if (have_help) {
+        for (int i = 0; i < 2; ++i) {
+          if (creature_bounds[i] < bounds[i]) bounds[i] = creature_bounds[i];
+          if (creature_bounds[i + 2] > bounds[i + 2]) {
+            bounds[i + 2] = creature_bounds[i + 2];
+          }
+        }
+      } else {
+        for (int i = 0; i < 4; ++i) bounds[i] = creature_bounds[i];
+        have_help = true;
+      }
+    }
+  }
+  bool content = have_help &&
                  subtitle_math::CardRect(bounds, kSubtitlePad, kSubtitleGrid,
                                          static_cast<int>(render_w),
                                          static_cast<int>(render_h), rect);
   // The read ahead shows only a copy from the frame in which the help text
   // of now started, or later.
-  if (content && !s.had_content) s.content_since = g_frame;
-  s.had_content = content;
+  const bool any = content || creature_card;
+  if (any && !s.had_content) s.content_since = g_frame;
+  s.had_content = any;
 
   // IN THE CUT SCENE WINDOW the card has the place of the screen. It has no
   // anchor of its own, and it does not fade.
@@ -854,27 +1241,66 @@ void SubtitleEndPasses() {
   }
   subtitle_math::ShownStep(&s.shown, s.anchor, content, dt,
                            kSubtitleFadeSeconds);
-  if (!content) {
-    s.showing = false;
-    return;
-  }
+  if (!content) s.showing = false;
+  if (!content && !creature_card) return;
 
-  // THE PICTURE: the part that drew, at half the size.
+  // THE PICTURE: the part that drew, at half the size. With the Creature
+  // card the copy holds the box of the Creature panel too, and the box goes
+  // to the card with no fade.
+  int copy_rect[4] = {creature_rect[0], creature_rect[1], creature_rect[2],
+                      creature_rect[3]};
+  if (content && creature_card) {
+    const int x0 = rect[0] < creature_rect[0] ? rect[0] : creature_rect[0];
+    const int y0 = rect[1] < creature_rect[1] ? rect[1] : creature_rect[1];
+    const int x1 = rect[0] + rect[2] > creature_rect[0] + creature_rect[2]
+                       ? rect[0] + rect[2]
+                       : creature_rect[0] + creature_rect[2];
+    const int y1 = rect[1] + rect[3] > creature_rect[1] + creature_rect[3]
+                       ? rect[1] + rect[3]
+                       : creature_rect[1] + creature_rect[3];
+    copy_rect[0] = x0;
+    copy_rect[1] = y0;
+    copy_rect[2] = x1 - x0;
+    copy_rect[3] = y1 - y0;
+  } else if (content) {
+    for (int i = 0; i < 4; ++i) copy_rect[i] = rect[i];
+  }
   uint32_t w = 0, h = 0;
   double ms = 0.0;
   int used[4] = {0, 0, 0, 0};
-  if (SubtitleCopy(rect, render_w, render_h, s.shown.fade, used, &w, &h,
+  if (SubtitleCopy(copy_rect, render_w, render_h,
+                   content ? s.shown.fade : 1.0f,
+                   creature_card ? creature_rect : nullptr, used, &w, &h,
                    &ms) != kCopyDone) {
     return;
   }
   const uint32_t texture_w = s.texture_w, texture_h = s.texture_h;
+  if (creature_card) CreatureCardStage(creature_rect);
+  if (!content) return;
+
+  // The part of the pixels that is the help text: all of them, or with the
+  // Creature card the rect of the help text in them.
+  int part[4] = {used[0], used[1], used[2], used[3]};
+  if (creature_card) {
+    const int x0 = rect[0] > used[0] ? rect[0] : used[0];
+    const int y0 = rect[1] > used[1] ? rect[1] : used[1];
+    const int x1 = rect[0] + rect[2] < used[0] + used[2] ? rect[0] + rect[2]
+                                                         : used[0] + used[2];
+    const int y1 = rect[1] + rect[3] < used[1] + used[3] ? rect[1] + rect[3]
+                                                         : used[1] + used[3];
+    if (x1 <= x0 || y1 <= y0) return;
+    part[0] = x0;
+    part[1] = y0;
+    part[2] = x1 - x0;
+    part[3] = y1 - y0;
+  }
 
   // THE QUAD: the rect on the screen that hangs from the anchor. It is the
   // rect of the pixels, so each pixel keeps its place in the room.
-  const float rect_f[4] = {static_cast<float>(used[0]),
-                           static_cast<float>(used[1]),
-                           static_cast<float>(used[2]),
-                           static_cast<float>(used[3])};
+  const float rect_f[4] = {static_cast<float>(part[0]),
+                           static_cast<float>(part[1]),
+                           static_cast<float>(part[2]),
+                           static_cast<float>(part[3])};
   subtitle_math::Quad quad;
   subtitle_math::RectQuad(s.shown.head, s.shown.yaw, SubtitleLayout(),
                           static_cast<float>(render_w),
@@ -884,14 +1310,21 @@ void SubtitleEndPasses() {
   layer.pixels = s.pixels;
   layer.texture_width = texture_w;
   layer.texture_height = texture_h;
-  layer.rect[0] = 0;
-  layer.rect[1] = 0;
-  layer.rect[2] = static_cast<int32_t>(w);
-  layer.rect[3] = static_cast<int32_t>(h);
+  layer.rect[0] = (part[0] - used[0]) / 2;
+  layer.rect[1] = (part[1] - used[1]) / 2;
+  layer.rect[2] = part[2] / 2;
+  layer.rect[3] = part[3] / 2;
+  if (!creature_card) {
+    layer.rect[0] = 0;
+    layer.rect[1] = 0;
+    layer.rect[2] = static_cast<int32_t>(w);
+    layer.rect[3] = static_cast<int32_t>(h);
+  }
   for (int i = 0; i < 3; ++i) layer.position[i] = quad.position[i];
   for (int i = 0; i < 4; ++i) layer.orientation[i] = quad.orientation[i];
   layer.width = quad.width;
   layer.height = quad.height;
+  layer.serial = s.serial;
   if (s.shown.fade > 0.0f) {
     bwvr::XrScreen::StageCard(bwvr::kCardSubtitles, layer);
     ++s.frames_shown;
@@ -907,12 +1340,13 @@ void SubtitleEndPasses() {
                           subtitle_math::kDegrees
                     : 0.0f;
     ModLog("subtitles    : frame %llu, the subtitle card: the rect %d %d %d %d "
-           "of the %u by %u render, %u by %u px on the card, at %.3f %.3f "
+           "of the %u by %u render, %d by %d px on the card, at %.3f %.3f "
            "%.3f m, turn %.4f %.4f %.4f %.4f, %.2f by %.2f m, %.2f m from "
            "the head and %.0f degrees below eye level. The head has a yaw of "
            "%.0f degrees and the card of %.0f. Fade %.2f, the copy took %.2f "
-           "ms", g_frame, used[0], used[1], used[2], used[3], render_w,
-           render_h, w, h, quad.position[0], quad.position[1],
+           "ms", g_frame, part[0], part[1], part[2], part[3], render_w,
+           render_h, layer.rect[2], layer.rect[3], quad.position[0],
+           quad.position[1],
            quad.position[2], quad.orientation[0], quad.orientation[1],
            quad.orientation[2], quad.orientation[3], quad.width, quad.height,
            away, below, head_yaw / subtitle_math::kDegrees,
@@ -980,6 +1414,22 @@ void SaveCaptures(uint64_t frame) {
 
 }  // namespace
 
+// The hook of the Creature panel (h_CreaturePanelDraw). It latches what the
+// game draws for the quad of ui_panel=1, and it arms the panel with no press
+// (creature_panel_linger) with each value of ui_panel.
+void InstallCreaturePanelHook() {
+  if (g_creature_hooked) return;
+  void* target = reinterpret_cast<void*>(kCreaturePanelDraw);
+  MH_STATUS status =
+      MH_CreateHook(target, reinterpret_cast<void*>(&h_CreaturePanelDraw),
+                    reinterpret_cast<void**>(&o_CreaturePanelDraw));
+  if (status == MH_OK) status = MH_EnableHook(target);
+  g_creature_hooked = status == MH_OK;
+  ModLog("hooks        : the Creature panel draw at 0x%08X %s",
+         static_cast<unsigned>(kCreaturePanelDraw),
+         g_creature_hooked ? "ok" : "FAILED");
+}
+
 void UiPanelSetOptions(const UiPanelSettings& settings) {
   g_settings = settings;
   if (g_settings.mode < kUiPanelOff || g_settings.mode > kUiPanelTest) {
@@ -987,13 +1437,32 @@ void UiPanelSetOptions(const UiPanelSettings& settings) {
   }
   g_mode = g_settings.mode;
   SubtitleReadSettings();
+  ModLog("ui panel     : creature_panel_over=%d. %s",
+         g_settings.creature_panel_over != 0 ? 1 : 0,
+         g_settings.creature_panel_over != 0
+             ? "The Creature panel shows over the head of the Creature, "
+               "turned to the eyes, and it stays there while you touch the "
+               "Creature"
+             : "The Creature panel shows on the subtitle card with "
+               "ui_panel=0, and beside the Creature with ui_panel=1");
+  MenuRoomSetOptions(g_settings.menu_room != 0, g_settings.menu_room_test != 0,
+                     g_settings.vr_keyboard != 0,
+                     g_settings.mode == kUiPanelOff);
   if (g_settings.mode == kUiPanelOff) {
+    // The panel with no press and the panel over the Creature need the hook
+    // also when the interface stays in the eye pictures.
+    if (g_settings.creature_panel_linger != 0 ||
+        g_settings.creature_panel_over != 0) {
+      InstallCreaturePanelHook();
+    }
     // The subtitle card needs the panel target, and the hook that puts the
     // game's target back after the subtitle box. It needs no share: its
     // picture goes to the headset through the CPU, as the hint cards do.
+    // The menus in the room need the share: their quad takes the panel as
+    // the eyes take their pictures.
     const SubtitleSettings& sub = g_sub.set;
-    if (sub.on) {
-      GpuBridgePanelWant(true, false);
+    if (sub.on || MenuRoomEnabled()) {
+      GpuBridgePanelWant(true, MenuRoomEnabled());
       UiPanelInstallHooks();
     }
     UiDepthSetSubtitleSelfTest(sub.selftest);
@@ -1026,18 +1495,8 @@ void UiPanelSetOptions(const UiPanelSettings& settings) {
   }
   GpuBridgePanelWant(true, g_settings.mode == kUiPanelLayer);
   UiPanelInstallHooks();
-  // The Creature panel: the hook only latches what the game draws.
-  if (!g_creature_hooked) {
-    void* target = reinterpret_cast<void*>(kCreaturePanelDraw);
-    MH_STATUS status =
-        MH_CreateHook(target, reinterpret_cast<void*>(&h_CreaturePanelDraw),
-                      reinterpret_cast<void**>(&o_CreaturePanelDraw));
-    if (status == MH_OK) status = MH_EnableHook(target);
-    g_creature_hooked = status == MH_OK;
-    ModLog("hooks        : the Creature panel draw at 0x%08X %s",
-           static_cast<unsigned>(kCreaturePanelDraw),
-           g_creature_hooked ? "ok" : "FAILED");
-  }
+  // The Creature panel: the hook latches what the game draws.
+  InstallCreaturePanelHook();
   ModLog("ui panel     : ui_panel=%d, %s", g_settings.mode,
          ModeName(g_settings.mode));
   ModLog("ui panel     : the menu panel %d cm ahead at %d degrees, %d px a "
@@ -1049,6 +1508,12 @@ void UiPanelSetOptions(const UiPanelSettings& settings) {
 }
 
 const UiPanelSettings& UiPanelOptions() { return g_settings; }
+
+// The menu rect in pixels of a render of w by h: ui_menu_rect, or the
+// default of docs/ui-layer.md.
+void UiPanelMenuRect(uint32_t w, uint32_t h, int out[4]) {
+  Rect(kPanelMenu, w, h, out);
+}
 
 int UiPanelMode() { return g_mode; }
 
@@ -1118,6 +1583,15 @@ void UiPanelBeginFrame(bool to_headset, bool projection, uint64_t frame,
   if (g_settings.mode == kUiPanelOff) {
     // And the subtitle card takes the help text of the frame.
     SubtitleBeginFrame(to_headset, projection, frame, capture);
+    // The menus in the room take the menus of the frame.
+    const bool menu = MenuRoomBeginFrame(to_headset, projection, frame);
+    if (MenuRoomEnabled()) {
+      if (!g_sub.set.on) {
+        GpuBridgePanelNewFrame(false);
+        UiPanelRouteFrame(kUiPanelSubtitles, false, false);
+      }
+      UiPanelRouteMenu(menu);
+    }
     return;
   }
   bool on = false;
@@ -1136,7 +1610,9 @@ void UiPanelBeginFrame(bool to_headset, bool projection, uint64_t frame,
 }
 
 void UiPanelAfterFirstEye(uint64_t frame, bool capture) {
-  if (g_settings.mode == kUiPanelOff || !capture) return;
+  if (!capture) return;
+  // With ui_panel=0 the panel of the menus in the room is saved too.
+  if (g_settings.mode == kUiPanelOff && !MenuRoomFrame()) return;
   SaveCaptures(frame);
 }
 
@@ -1183,7 +1659,12 @@ void UiPanelAfterFinish(bool in_stereo_pass, uint64_t frame) {
 bool UiPanelQuads(uint32_t render_w, uint32_t render_h,
                   bwvr::PanelQuad out[2]) {
   out[0].visible = out[1].visible = false;
-  if (g_mode != kUiPanelLayer || UiPanelFrameFailed()) return false;
+  if (UiPanelFrameFailed()) return false;
+  // With ui_panel=0, the one quad of the menus in the room.
+  if (g_settings.mode == kUiPanelOff) {
+    return MenuRoomFrame() && MenuRoomQuad(render_w, render_h, &out[0]);
+  }
+  if (g_mode != kUiPanelLayer) return false;
   if (render_w == 0 || render_h == 0) return false;
   float anchor[3], yaw[4];
   if (!HeadPoseOrigin(anchor, yaw)) return false;
@@ -1252,8 +1733,33 @@ void UiPanelHead(const float center[3], const float orientation[4]) {
   g_sub.have_head = true;
 }
 
+// The line of the Creature panel in the report, with each value of ui_panel.
+void CreaturePanelReport() {
+  if (g_creature_draws != 0) {
+    ModLog("ui panel     : the Creature panel drew on %llu frames and went to "
+           "the room %llu times this window. The mod armed it on %llu of the "
+           "frames, with no press (creature_panel=%d, creature_panel_linger="
+           "%d)", g_creature_draws, g_creature_shows, g_linger_frames,
+           g_settings.creature_panel, g_settings.creature_panel_linger);
+    ModLog("ui panel     : the Creature panel was over the Creature on %llu "
+           "frames, %llu of them on the Creature card, and it went to a new "
+           "place %llu times. %llu frames had the box and no copy of it yet "
+           "(the read ahead gives the copy of a frame before), so the box "
+           "showed on no card (creature_panel_over=%d)", g_over_frames,
+           g_over_card.frames,
+           g_over_moves, g_over_card.lost, g_settings.creature_panel_over);
+    g_creature_draws = 0;
+    g_creature_shows = 0;
+    g_linger_frames = 0;
+    g_over_frames = g_over_moves = 0;
+    g_over_card.frames = g_over_card.lost = 0;
+  }
+}
+
 void UiPanelReport() {
   HintCardReport();
+  MenuRoomReport();
+  CreaturePanelReport();
   if (g_settings.mode == kUiPanelOff) {
     if (g_sub.set.on) {
       SubtitleReport();
@@ -1264,11 +1770,29 @@ void UiPanelReport() {
   }
   UiPanelReportRoutes();
   GpuBridgePanelReport();
-  if (g_creature_draws != 0) {
-    ModLog("ui panel     : the Creature panel drew on %llu frames and went to "
-           "the room %llu times this window (creature_panel=%d)",
-           g_creature_draws, g_creature_shows, g_settings.creature_panel);
-    g_creature_draws = 0;
-    g_creature_shows = 0;
-  }
+}
+
+// The switch of the debug page for creature_panel_linger.
+int UiPanelLingerValue() { return g_settings.creature_panel_linger != 0 ? 1 : 0; }
+void UiPanelLingerChange(const char* by) {
+  g_settings.creature_panel_linger =
+      g_settings.creature_panel_linger != 0 ? 0 : 1;
+  if (g_settings.creature_panel_linger != 0) InstallCreaturePanelHook();
+  ControllersGesturePulse(0.5f,
+                          g_settings.creature_panel_linger != 0 ? 0.30f : 0.08f);
+  ModLog("ui panel     : %s: creature_panel_linger is %d now", by,
+         g_settings.creature_panel_linger);
+}
+
+// The switch of the debug page for creature_panel_over. The next show of the
+// panel takes the new place.
+int UiPanelOverValue() { return g_settings.creature_panel_over != 0 ? 1 : 0; }
+void UiPanelOverChange(const char* by) {
+  g_settings.creature_panel_over = g_settings.creature_panel_over != 0 ? 0 : 1;
+  if (g_settings.creature_panel_over != 0) InstallCreaturePanelHook();
+  g_over_hold.placed = false;
+  ControllersGesturePulse(0.5f,
+                          g_settings.creature_panel_over != 0 ? 0.30f : 0.08f);
+  ModLog("ui panel     : %s: creature_panel_over is %d now", by,
+         g_settings.creature_panel_over);
 }

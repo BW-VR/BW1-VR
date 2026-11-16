@@ -16,6 +16,8 @@ add_library(bwvr_mod SHARED
     note_depth.cpp
     draw_hooks.cpp
     ui_panel.cpp
+    menu_room.cpp
+    vr_keyboard.cpp
     eye_camera.cpp
     eye_stale.cpp
     texture_filter.cpp
@@ -61,6 +63,7 @@ add_library(bwvr_mod SHARED
     vk_stream.cpp
     render_chain.cpp
     vk_window.cpp
+    vk_video.cpp
     vk_fallback.cpp
     frame_time.cpp
     fov.cpp
@@ -69,20 +72,24 @@ add_library(bwvr_mod SHARED
     head_camera.cpp
     snapshot_guard.cpp
     water_mode.cpp
+    sea_depth.cpp
     ui_worldlock.cpp
     pointer_map.cpp
     cursor_trace.cpp
     exit_test.cpp
     crash_report.cpp
+    address_space.cpp
     game_start.cpp
     comfort_camera.cpp
     script_camera.cpp
     story_start.cpp
     cutscene_window.cpp
     sky_detail.cpp
+    cull_distance.cpp
     sprite_up.cpp
     spirit_anchor.cpp
     fight_marks.cpp
+    job_icon.cpp
     controllers.cpp
     xr_input.cpp
     motion_world.cpp
@@ -90,7 +97,10 @@ add_library(bwvr_mod SHARED
     setup_box.cpp
     controller_hints.cpp
     hint_card.cpp
+    card_scroll.cpp
     text_click.cpp
+    text_fit.cpp
+    hand_cut.cpp
     hand_direct.cpp
     hand_glow.cpp
     target_glow.cpp
@@ -98,7 +108,12 @@ add_library(bwvr_mod SHARED
     hand_exact.cpp
     hand_model.cpp
     hand_model_file.cpp
+    hint_model.cpp
+    view_check.cpp
+    head_lag.cpp
+    grip_fit.cpp
     hand_feel.cpp
+    hand_land.cpp
     far_grab.cpp
     left_hold.cpp
     take_stream.cpp
@@ -109,20 +124,41 @@ add_library(bwvr_mod SHARED
     creature_look.cpp
     creature_head.cpp
     miracle.cpp
+    miracle_throw.cpp
+    miracle_watch.cpp
     village.cpp
     radial_menu.cpp
     remote_control.cpp
+    bookmark_aim.cpp
+    leash_model.cpp
+    panel_kit.cpp
+    places_panel.cpp
+    debug_window.cpp
+    settings_panel.cpp
+    controls_page.cpp
+    snapshot.cpp
+    spell_book.cpp
+    book_bubble.cpp
+    gesture_panel.cpp
+    gesture_sheet.cpp
     debug_menu.cpp
     temple.cpp
     throw_physics.cpp
     overlay.cpp
+    ray_card.cpp
+    influence_edge.cpp
+    vignette.cpp
+    video_view.cpp
+    head_blinder.cpp
     teleport.cpp
     world_grab.cpp
     tabletop.cpp
+    camera_zone.cpp
     near_plane.cpp
     net_check.cpp
     dx_check.cpp
     file_read_ahead.cpp
+    save_store.cpp
     hang_watch.cpp
     stall_watch.cpp
     memory_watch.cpp
@@ -146,6 +182,10 @@ set_target_properties(bwvr_mod PROPERTIES
 )
 
 target_link_libraries(bwvr_mod PRIVATE minhook bwvr_vr d3d9 d3d11 ws2_32)
+# The snapshot (snapshot.cpp) writes PNG files with the Windows Imaging
+# Component. It calls only COM, so the mod imports no function of
+# windowscodecs.dll: the library gives the GUIDs.
+target_link_libraries(bwvr_mod PRIVATE ole32 windowscodecs)
 
 # Windows loads d3d11.dll and dxgi.dll at the first call of the mod, and not
 # at the start of the game. So backend=vulkan with vulkan_only=1 loads no
@@ -165,9 +205,10 @@ if(NOT EXISTS "${VULKAN_HEADERS_DIR}/vulkan/vulkan.h")
 endif()
 target_include_directories(bwvr_mod PRIVATE "${VULKAN_HEADERS_DIR}")
 
-# The reader of a hand that the player edited (hand_model_file.cpp) uses
-# cgltf, one header with the MIT license. With no clone of it the mod builds
-# with no reader, and the log of the mod says so.
+# The reader of a hand that the player edited (hand_model_file.cpp) and of
+# the controller models of the hints (hint_model.cpp) uses cgltf, one header
+# with the MIT license. With no clone of it the mod builds with no reader,
+# and the log of the mod says so.
 set(CGLTF_DIR "${BWVR_THIRD_PARTY}/cgltf")
 if(EXISTS "${CGLTF_DIR}/cgltf.h")
   target_include_directories(bwvr_mod PRIVATE "${CGLTF_DIR}")

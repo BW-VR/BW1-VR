@@ -122,6 +122,10 @@ bool HandExactHeldMatrix(void* object, float out[12]);
 // tabletop.cpp and head_pose.cpp: the world units in a meter of the room.
 float TabletopViewScale();
 float HeadPoseScale();
+// hand_direct.cpp: the boxes of the meshes near the Hand, from the first eye
+// pass, and the class of an object.
+int HandDirectArcBoxes(void* objects[], throw_math::Box out[], int max);
+const char* HandDirectClass(void* object);
 
 namespace {
 
@@ -149,12 +153,20 @@ const int kPointDepth = 0x24;
 const int kPointNormal = 0x40;
 const int kPointOther = 0x4C;
 const int kObTurn = 0x68;        // the angular momentum, 3 floats
+// The inverse of the inertia, three rows (PhysOb::SetUpMoi 0x007FB880), and
+// the axes of the object, three rows before the center.
+const int kObInverseInertia = 0x38;
+const int kObAxes = 0x7C;
 const int kObHitBy = 0x78;       // the PhysOb that touched this one
 const int kObPosition = 0xA0;    // the center, after the 9 floats of the axes
 const int kObVelocity = 0xDC;
 const int kObSpeed = 0xF4;       // the length of the velocity
 const int kObForce = 0x104;
 const int kObTorque = 0x110;     // the torque of this step, 3 floats
+// The constant torque of this game turn [V, PhysOb::ZeroForces 0x007FD42C,
+// the clear at 0x00646093, packet 0x40 at 0x0063CE87]: each step starts its
+// torque from it. See throw_math.h, TurnTorqueFactor.
+const int kObTurnTorque = 0x128;
 const int kObMass = 0x134;
 // The constants of the contact, from a row of PhysicsConstants.txt
 // (PhysOb::SetUpConstants 0x007FB810): the spring and the second spring are
@@ -191,6 +203,9 @@ const uintptr_t kLocalObject = 0x00D47828;
 const uintptr_t kGetAltitude = 0x00803090;
 const float kMapScale = 6553.6f;
 const float kMapEdge = 5119.0f;
+// The land is under the sea where its altitude is less than this, and there
+// fn_007FD4D0 floats the object [V, 0x007FD5AB, the float at 0x008BF518].
+const float kSeaLand = 0.0001f;
 // Object and LH3DObject: the mesh at +0x40, and its matrix at +0x14 (the
 // position is at +0x38).
 const int kObjectMesh = 0x40;
@@ -219,6 +234,13 @@ IntegrateFn o_Integrate = nullptr;
 DrawAllFn o_DrawAll = nullptr;
 
 int g_law = 2;
+// THE OBJECTS ON THE ARC (throw_arc_objects): true stops the real arc where it
+// goes into the box of the mesh of an object near the Hand, before the game's
+// physics has the object. false tests the land only.
+bool g_arc_objects = true;
+// throw_shield: the ball of a Physical Shield stops the arc, and the flight
+// takes the game's step near it.
+bool g_shield = true;
 // throw_log: 1 logs each turn and each third frame, 2 also logs each substep
 // and each frame after the first contact.
 int g_log = 0;
@@ -242,6 +264,10 @@ float g_land_rate = 1.0f;
 float g_bounce = 0.5f;
 float g_brake = 0.6f;
 bool g_settle = true;      // throw_tree_settle: a tree that falls settles
+// THE TURN OF A THROWN OBJECT (throw_turn, throw_math.h, kTurnCap): true
+// divides the momentum of the release by the rate of the flight and keeps
+// the turn of the picture at the game's cap. false is the game's momentum.
+bool g_turn = true;
 // THE REST AFTER A LANDING (throw_land_rest, throw_math.h, kRestAll): 1 lets
 // a turn in place wear off fast, turns the brake off on steep land, and gives
 // an object that lies still its rest. 2, 3 and 4 are one of the three, and 0
@@ -296,6 +322,15 @@ struct Flight {
   bool leaves;
   double land_t;
   float land[3];
+  // The arc meets the box of an object first (throw_arc_objects): lands is
+  // true, and land is the point where the arc goes into the box.
+  bool hits_object;
+  void* hit;
+  // The arc goes into the ball of a Physical Shield first (throw_shield):
+  // hits_object is true too, and hit is the shield.
+  bool hits_shield;
+  bool shield_logged;    // the line of the flight near a shield came
+  int near_boxes;        // the boxes near the arc, for the log
   // The physics.
   double time;           // the seconds of the flight that the state is at
   float remainder;
@@ -372,6 +407,19 @@ struct Flight {
   int steep_steps;
   bool spin_logged;
   bool steep_logged;
+  // The turn of the object in the game turn that is open now, for the log:
+  // the largest turn of a substep in radians a second of the picture.
+  float turn_top_show;
+  // throw_turn of this flight, latched when the game's physics has the
+  // object, and the substeps in which the mod cut the momentum.
+  bool turn_rule;
+  int turn_cuts;
+  float turn_top_cut;    // the largest turn of the picture before a cut
+  // The constant torque of a game turn (packet 0x40), for the log: the
+  // substeps in which the mod cut it, and the first one is logged.
+  int torque_substeps;
+  int torque_step_cuts;  // the steps that the cap of a step cut
+  bool torque_logged;
   // A release in the glide of a far fetch: the place of the picture at the
   // release, from the place in the Hand.
   bool has_lead;
@@ -511,15 +559,143 @@ float Gap(const float a[3], const float b[3]) {
                (a[2] - b[2]) * (a[2] - b[2]));
 }
 
+// The turn of the object in radians a second of the game's time, as
+// fn_007FE260 works it out from the momentum, before its cap.
+float TurnSpeed(const uint8_t* ob) {
+  return throw_math::TurnSpeedOf(
+      reinterpret_cast<const float*>(ob + kObAxes),
+      reinterpret_cast<const float*>(ob + kObInverseInertia),
+      reinterpret_cast<const float*>(ob + kObTurn));
+}
+
+// The turn of the picture in radians a second for a turn of the game, at
+// the rate of the flight: the game cuts its turn to kTurnCap, and with
+// throw_turn=1 the mod cuts the turn of the picture to kTurnCap.
+float TurnShown(const Flight& f, float turn_speed) {
+  const float cap = throw_math::kTurnCap;
+  float shown = (turn_speed < cap ? turn_speed : cap) * f.scale;
+  if (f.turn_rule && shown > cap) shown = cap;
+  return shown;
+}
+
+// THE BODIES OF THE PHYSICAL SHIELDS [V, PhysicalShield::
+// GetAlwaysRemainsInPhysicsInternalSystem 0x0072CAF0]: each one stays in the
+// array of the physics, with the ball of its body at PhysOb+0xA0 and +0x150.
+// The game tests the points of a moving body against the faces of the dome
+// (PhysOb::CheckVFaces 0x007FDA60) once a substep when the two balls meet.
+// The extra steps of the real flight have no such test, and the arc before
+// the game's physics has none at all.
+const uintptr_t kPhysicalShieldTable = 0x00983F64;
+const int kMaxShields = 4;
+
+int ShieldBalls(float middle[][3], float radius[], void* objects[], int most) {
+  uint8_t* base = *reinterpret_cast<uint8_t* const*>(kPhysicsArray);
+  const int32_t count = *reinterpret_cast<const int32_t*>(kPhysicsCount);
+  if (base == nullptr || count <= 0 || count > 4096) return 0;
+  int found = 0;
+  for (int i = 0; i < count && found < most; ++i) {
+    const uint8_t* entry = base + i * kEntrySize;
+    void* object = *reinterpret_cast<void* const*>(entry + kEntryObject);
+    if (object == nullptr || IsBadReadPtr(object, 4) ||
+        *static_cast<const uintptr_t*>(object) != kPhysicalShieldTable) {
+      continue;
+    }
+    const uint8_t* ob = entry + kEntryPhysOb;
+    const float* at = reinterpret_cast<const float*>(ob + kObPosition);
+    for (int k = 0; k < 3; ++k) middle[found][k] = at[k];
+    radius[found] = *reinterpret_cast<const float*>(ob + kObRadius);
+    objects[found] = object;
+    if (radius[found] > 0.0f && radius[found] < 1000.0f) ++found;
+  }
+  return found;
+}
+
 // Where the real arc meets the land. It goes along the arc in steps of 2 ms,
-// for 6 s at most.
+// for 6 s at most. With throw_arc_objects=1 it also stops where the arc goes
+// into the box of the mesh of an object near the Hand, in the time before
+// the game's physics can have the object (kHeldLimit). From that time the
+// game's physics tests the objects itself.
 void FindLanding(Flight* f) {
   f->lands = f->leaves = false;
+  f->hits_object = false;
+  f->hits_shield = false;
+  f->hit = nullptr;
+  f->near_boxes = 0;
   f->land_t = 0.0;
+  const int kMaxNear = 16;
+  void* near_objects[kMaxNear];
+  throw_math::Box near_boxes[kMaxNear];
+  int near_count = 0;
+  if (g_arc_objects) {
+    void* objects[64];
+    throw_math::Box boxes[64];
+    const int count = HandDirectArcBoxes(objects, boxes, 64);
+    float low[3], high[3];
+    throw_math::ArcBounds(f->p0, f->v0, f->gs, kHeldLimit, 1.0f, low, high);
+    for (int i = 0; i < count && near_count < kMaxNear; ++i) {
+      if (objects[i] == f->object) continue;
+      if (!throw_math::BoxNear(boxes[i], low, high)) continue;
+      near_objects[near_count] = objects[i];
+      near_boxes[near_count++] = boxes[i];
+    }
+    f->near_boxes = near_count;
+  }
+  float shield_middle[kMaxShields][3], shield_radius[kMaxShields];
+  void* shield_object[kMaxShields];
+  const int shields =
+      g_shield ? ShieldBalls(shield_middle, shield_radius, shield_object,
+                             kMaxShields)
+               : 0;
+  float before[3] = {f->p0[0], f->p0[1], f->p0[2]};
   for (int k = 1; k <= 3000; ++k) {
     const double t = k * 0.002;
     float p[3], v[3];
     throw_math::RealArc(f->p0, f->v0, f->gs, t, p, v);
+    if (near_count > 0 && t <= kHeldLimit + 0.002) {
+      int first = -1;
+      float first_u = 2.0f;
+      for (int i = 0; i < near_count; ++i) {
+        float u = 0.0f;
+        if (throw_math::SegmentEntersBox(near_boxes[i], before, p, &u) &&
+            u < first_u) {
+          first = i;
+          first_u = u;
+        }
+      }
+      // The ball of a shield is in front of the boxes in it.
+      int shield = -1;
+      for (int i = 0; i < shields; ++i) {
+        float u = 0.0f;
+        if (throw_math::SegmentEntersBall(shield_middle[i], shield_radius[i],
+                                          before, p, &u) &&
+            u < first_u) {
+          shield = i;
+          first_u = u;
+        }
+      }
+      if (shield >= 0) {
+        f->lands = true;
+        f->hits_object = true;
+        f->hits_shield = true;
+        f->hit = shield_object[shield];
+        f->land_t = t - 0.002 * (1.0 - first_u);
+        float at[3];
+        throw_math::RealArc(f->p0, f->v0, f->gs, f->land_t, at, v);
+        for (int i = 0; i < 3; ++i) f->land[i] = at[i];
+        return;
+      }
+      if (first >= 0) {
+        f->lands = true;
+        f->hits_object = true;
+        f->hit = near_objects[first];
+        f->land_t = t - 0.002 * (1.0 - first_u);
+        float at[3];
+        throw_math::RealArc(f->p0, f->v0, f->gs, f->land_t, at, v);
+        for (int i = 0; i < 3; ++i) f->land[i] = at[i];
+        return;
+      }
+    }
+    for (int i = 0; i < 3; ++i) before[i] = p[i];
     if (!OnMap(p[0], p[2])) {
       f->leaves = true;
       f->land_t = t;
@@ -710,10 +886,17 @@ void EndFlight(Flight* f, const char* why) {
     ModLog("hand throw   : the flight of %p is over after %.2f s (%s). It "
            "ended %.1f units (%.2f m of the room) from the release, across "
            "the land. The game ran %d turns, %d substeps and %d steps for "
-           "it, and %d substeps touched an object. The steps took %.2f ms",
+           "it, and %d substeps touched an object. The steps took %.2f ms. "
+           "The mod cut the momentum of the turn in %d substeps, where the "
+           "picture would turn %.2f times a second at most, and the torque "
+           "of a game turn in %d substeps, with the cap in %d steps of them "
+           "(throw_turn=%d)",
            f->object, f->time, why, Flat(end, f->p0),
            Flat(end, f->p0) / f->s, f->turns, f->substeps, f->steps,
-           f->hit_substeps, f->step_seconds * 1000.0);
+           f->hit_substeps, f->step_seconds * 1000.0, f->turn_cuts,
+           f->turn_top_cut / 6.2831853f, f->torque_substeps,
+           f->torque_step_cuts,
+           f->turn_rule ? 1 : 0);
   }
   f->active = false;
   if (g_active > 0) --g_active;
@@ -758,14 +941,61 @@ void StartPhysics(Flight* f, uint8_t* entry, double now) {
     position[i] += p[i] - matrix[9 + i];
     velocity[i] = v[i] / f->scale;
   }
+  // AT THE BOX OF AN OBJECT (throw_arc_objects): the arc stopped where it
+  // goes into the box. The center goes one radius back along the arc, so the
+  // object touches the object there and is not in it. The velocity of the
+  // arc at that time goes on into the object, and the game's contact gives
+  // the hit and the damage.
+  float back = 0.0f;
+  if (f->hits_object && t >= f->land_t && radius > 0.0f && radius < 1000.0f) {
+    const float speed = controller_math::Length(v);
+    if (speed > 1e-4f) {
+      back = radius;
+      for (int i = 0; i < 3; ++i) position[i] -= v[i] / speed * radius;
+    }
+  }
   // Not in the land: the center stays one radius or more over it.
   if (radius > 0.0f && radius < 1000.0f && OnMap(position[0], position[2])) {
     const float floor = Altitude(position[0], position[2]) + radius;
     if (position[1] < floor) position[1] = floor;
   }
+  if (f->hits_object && g_flight_logs < kMaxFlightLogs) {
+    ++g_flight_logs;
+    ModLog("hand throw   : the game's physics has %p %.0f ms after the "
+           "release, and the arc met the box of the %s %p after %.0f ms. %s",
+           f->object, t * 1000.0, HandDirectClass(f->hit), f->hit,
+           f->land_t * 1000.0,
+           t >= f->land_t
+               ? "The object starts at the box, one radius back along the "
+                 "arc, with the velocity of the arc toward the object "
+                 "(throw_arc_objects=1)"
+               : "The game's physics has it before it gets there, and the "
+                 "game tests the objects from now");
+    if (back > 0.0f) {
+      ++g_flight_logs;
+      ModLog("hand throw   : the center of %p went %.2f units back along the "
+             "arc to %.1f %.1f %.1f", f->object, back, position[0],
+             position[1], position[2]);
+    }
+  }
   f->drag = *reinterpret_cast<const float*>(ob + kObDrag);
   *reinterpret_cast<float*>(ob + kObDrag) = 0.0f;
   f->drag_off = true;
+  // THE TURN OF THE RELEASE (throw_math::TurnStartFactor). The game's
+  // physics runs f->scale steps in a substep of the flight, so the momentum
+  // of the release turns the picture that many times as fast as the game.
+  float* turn = reinterpret_cast<float*>(ob + kObTurn);
+  const float turn_given = TurnSpeed(ob);
+  f->turn_rule = g_turn;
+  f->turn_cuts = 0;
+  f->turn_top_cut = 0.0f;
+  f->torque_substeps = 0;
+  f->torque_step_cuts = 0;
+  f->torque_logged = false;
+  if (f->turn_rule) {
+    const float factor = throw_math::TurnStartFactor(f->scale);
+    for (int i = 0; i < 3; ++i) turn[i] *= factor;
+  }
   f->phase = kPhysics;
   f->time = t;
   f->show = t;
@@ -778,9 +1008,18 @@ void StartPhysics(Flight* f, uint8_t* entry, double now) {
            "release. The game put it at %.1f %.1f %.1f, and the flight is at "
            "%.1f %.1f %.1f. Mass %.2f, radius %.2f, drag %.3f (0 until the "
            "first contact). The velocity in the game's time is %.1f %.1f "
-           "%.1f", f->object, t * 1000.0, before[0], before[1], before[2],
+           "%.1f. The release gave a turn of %.2f radians a second in the "
+           "game's time, which the picture shows at %.2f turns a second at "
+           "%.2f steps a substep. throw_turn=%d: %s", f->object,
+           t * 1000.0, before[0], before[1], before[2],
            p[0], p[1], p[2], *reinterpret_cast<const float*>(ob + kObMass),
-           radius, f->drag, velocity[0], velocity[1], velocity[2]);
+           radius, f->drag, velocity[0], velocity[1], velocity[2],
+           turn_given, TurnShown(*f, TurnSpeed(ob)) / 6.2831853f,
+           f->scale, f->turn_rule ? 1 : 0,
+           f->turn_rule ? "the momentum is divided by the steps of a "
+                          "substep, and the turn of the picture is cut to "
+                          "1.5 turns a second before each substep"
+                        : "the game's momentum");
     const float mass = *reinterpret_cast<const float*>(ob + kObMass);
     if (mass > 0.0f) {
       ++g_flight_logs;
@@ -865,13 +1104,27 @@ void FirstContact(Flight* f, uint8_t* ob, int step) {
   const float* velocity = reinterpret_cast<const float*>(ob + kObVelocity);
   const float speed = controller_math::Length(velocity);
   const void* other = *reinterpret_cast<void* const*>(ob + kObHitBy);
+  // The other body is the PhysOb of an entry of the physics: its object.
+  char hit[96] = "an object";
+  if (other != nullptr) {
+    const uint8_t* entry = static_cast<const uint8_t*>(other) - kEntryPhysOb;
+    void* object = !IsBadReadPtr(entry + kEntryObject, 4)
+                       ? *reinterpret_cast<void* const*>(entry + kEntryObject)
+                       : nullptr;
+    if (object != nullptr && !IsBadReadPtr(object, 4)) {
+      sprintf_s(hit, "an object, %p (%s)", object, HandDirectClass(object));
+    }
+  }
   ModLog("hand throw   : first contact of %p after %.3f s of the flight, at "
          "%.1f %.1f %.1f, %.1f units over the land (%s). The real arc is at "
          "%.1f %.1f %.1f at that time, %.2f units (%.1f cm of the room) "
          "away. The speed is %.1f units/s in the game's time (%.2f m/s of "
          "the room)", f->object, t, matrix[9], matrix[10], matrix[11],
          matrix[10] - Altitude(matrix[9], matrix[11]),
-         other != nullptr ? "an object" : "the land or the water", p[0],
+         other != nullptr ? hit
+         : Altitude(matrix[9], matrix[11]) < kSeaLand
+             ? "the water: the land is under the sea there"
+             : "the land", p[0],
          p[1], p[2], Gap(&matrix[9], p), Gap(&matrix[9], p) / f->s * 100.0f,
          speed, speed * f->scale / f->s);
   ++g_flight_logs;
@@ -1027,10 +1280,38 @@ int FlySubstep(Flight* f, uint8_t* ob) {
   uint8_t* entry = ob - kEntryPhysOb;
   // Another object touched this one in this substep (fn_007FDA60 wrote
   // PhysOb+0x78). Then the game's one step runs.
-  const bool hit = *reinterpret_cast<void* const*>(ob + kObHitBy) != nullptr;
-  if (!hit && f->substep_open) {
+  const bool touched =
+      *reinterpret_cast<void* const*>(ob + kObHitBy) != nullptr;
+  if (!touched && f->substep_open) {
     *reinterpret_cast<void**>(ob + kObHitBy) = f->hit_before;
   }
+  // Near the ball of a Physical Shield the game's one step runs too, so the
+  // game tests the pair after each step of the object (throw_shield). The
+  // margin is the way of one step of the flight and 1 unit.
+  bool near_shield = false;
+  if (g_shield) {
+    float middle[kMaxShields][3], radius[kMaxShields];
+    void* objects[kMaxShields];
+    const int shields = ShieldBalls(middle, radius, objects, kMaxShields);
+    const float* at = reinterpret_cast<const float*>(ob + kObPosition);
+    const float* v = reinterpret_cast<const float*>(ob + kObVelocity);
+    const float margin =
+        controller_math::Length(v) * throw_math::kSubstep * f->scale + 1.0f;
+    const float own = *reinterpret_cast<const float*>(ob + kObRadius);
+    for (int i = 0; i < shields && !near_shield; ++i) {
+      near_shield = throw_math::BallsNear(at, own, middle[i], radius[i], margin);
+    }
+    if (near_shield && !f->shield_logged && g_flight_logs < kMaxFlightLogs) {
+      f->shield_logged = true;
+      ++g_flight_logs;
+      ModLog("hand throw   : %p comes near the ball of a Physical Shield "
+             "%.3f s into its flight, at %.1f %.1f %.1f: the flight takes the "
+             "game's one step in a substep there, so the game tests the "
+             "faces of the dome (throw_shield=1)", f->object, f->time, at[0],
+             at[1], at[2]);
+    }
+  }
+  const bool hit = touched || near_shield;
   f->substep_open = false;
   // The rate of this substep. After the first contact it goes to the rate of
   // the land, by the time that the object touched.
@@ -1082,6 +1363,69 @@ int FlySubstep(Flight* f, uint8_t* ob) {
     steps = 1;
     ++f->hit_substeps;
   }
+  // THE CAP OF THE TURN (throw_math::TurnCutFactor). The picture turns at
+  // the rate of this substep times the game's turn. The momentum is cut so
+  // that this is the game's cap at most, and the momentum that the cap of
+  // the game hides is gone.
+  const float rate = hit ? 1.0f : f->scale;
+  if (f->turn_rule) {
+    const float speed = TurnSpeed(ob);
+    const float factor =
+        throw_math::TurnCutFactor(speed, rate, throw_math::kTurnCap);
+    if (factor < 1.0f) {
+      float* turn = reinterpret_cast<float*>(ob + kObTurn);
+      for (int i = 0; i < 3; ++i) turn[i] *= factor;
+      ++f->turn_cuts;
+      if (speed * rate > f->turn_top_cut) f->turn_top_cut = speed * rate;
+    }
+  }
+  // THE TORQUE OF A GAME TURN (throw_math::TurnTorqueFactor). Each step of
+  // the substep starts its torque from the constant torque, so the mod
+  // multiplies the constant torque by the factor for the steps of this
+  // substep, and puts the game's value back after them. The game's own
+  // PhysOb::ZeroForces of this substep copied the whole constant torque to
+  // the torque of the first step, so the first step loses the rest here.
+  float* turn_torque = reinterpret_cast<float*>(ob + kObTurnTorque);
+  const float torque_given[3] = {turn_torque[0], turn_torque[1],
+                                 turn_torque[2]};
+  const float torque_factor =
+      f->turn_rule ? throw_math::TurnTorqueFactor(rate) : 1.0f;
+  const bool torque_cut = torque_factor < 1.0f &&
+                          controller_math::Length(torque_given) > 1e-6f;
+  if (controller_math::Length(torque_given) > 1e-6f && !f->torque_logged &&
+      g_flight_logs < kMaxFlightLogs) {
+    f->torque_logged = true;
+    ++g_flight_logs;
+    // The momentum that the torque gives in the steps of one game turn, at
+    // this rate, and the turn of the picture that it adds.
+    float plain[3], flight[3];
+    for (int i = 0; i < 3; ++i) {
+      plain[i] = torque_given[i] * throw_math::kSubstepsInTurn *
+                 throw_math::kSubstep;
+      flight[i] = plain[i] * rate * torque_factor;
+    }
+    const float* axes = reinterpret_cast<const float*>(ob + kObAxes);
+    const float* inverse =
+        reinterpret_cast<const float*>(ob + kObInverseInertia);
+    ModLog("hand throw   : the game gives %p a torque of %.1f for one game "
+           "turn, %.3f s into its flight (packet 0x40, from the move of the "
+           "pointer after the release). In the plain game it adds %.2f "
+           "turns a second. In the flight at %.2f steps a substep it adds "
+           "%.2f turns a second of the picture (throw_turn=%d), before the "
+           "cut of each substep", f->object,
+           controller_math::Length(torque_given), f->time,
+           throw_math::TurnSpeedOf(axes, inverse, plain) / 6.2831853f, rate,
+           throw_math::TurnSpeedOf(axes, inverse, flight) * rate / 6.2831853f,
+           f->turn_rule ? 1 : 0);
+  }
+  if (torque_cut) {
+    float* torque = reinterpret_cast<float*>(ob + kObTorque);
+    for (int i = 0; i < 3; ++i) {
+      turn_torque[i] = torque_given[i] * torque_factor;
+      torque[i] -= torque_given[i] - turn_torque[i];
+    }
+    ++f->torque_substeps;
+  }
   float* cap = reinterpret_cast<float*>(kCap);
   const float cap_before = *cap;
   *cap = 1.0e9f;
@@ -1098,6 +1442,19 @@ int FlySubstep(Flight* f, uint8_t* ob) {
         (*reinterpret_cast<const int32_t*>(ob + kObContacts) > 0 ||
          ob[kObContact] != 0)) {
       FirstContact(f, ob, j);
+    }
+    // THE CAP IN EACH STEP (throw_math::TurnCutBeforeStep). In a substep
+    // with the torque of the flick, the momentum of this step has the cap
+    // of the picture at most.
+    if (torque_cut &&
+        throw_math::TurnCutBeforeStep(
+            reinterpret_cast<float*>(ob + kObTurn),
+            reinterpret_cast<const float*>(ob + kObTorque),
+            *reinterpret_cast<const float*>(ob + kObTurnKeep),
+            throw_math::kSubstep, reinterpret_cast<const float*>(ob + kObAxes),
+            reinterpret_cast<const float*>(ob + kObInverseInertia), rate,
+            throw_math::kTurnCap)) {
+      ++f->torque_step_cuts;
     }
     code = o_Integrate(ob, nullptr);
     ++done;
@@ -1119,6 +1476,9 @@ int FlySubstep(Flight* f, uint8_t* ob) {
     if (j + 1 >= steps || code != 1) break;
   }
   *cap = cap_before;
+  if (torque_cut) {
+    for (int i = 0; i < 3; ++i) turn_torque[i] = torque_given[i];
+  }
   // THE SUM OF THE TURN. After this call the game adds the force of this
   // last step to PhysicsObject+0x0C when the step had a contact
   // (0x00645FEE). The sum must then be the largest sum of 20 steps so far.
@@ -1153,6 +1513,11 @@ int FlySubstep(Flight* f, uint8_t* ob) {
                                     f->samples[f->count - 1].matrix) /
                 (done * throw_math::kSubstep)
           : 0.0f;
+  if (shown > 1e-9) {
+    const float show_rate = static_cast<float>(
+        f->turn_rate * done * throw_math::kSubstep / shown);
+    if (show_rate > f->turn_top_show) f->turn_top_show = show_rate;
+  }
   // AN OBJECT THAT LIES STILL (throw_math::LiesStill). It has a point in
   // contact, and its speed and its turn are far below the limits of the rest
   // test of the game. After kStillSeconds of that, the game gets the answer
@@ -1843,6 +2208,24 @@ void ThrowSettleChange(const char* by) {
          g_settle ? 1 : 0);
 }
 
+int ThrowTurnValue() {
+  if (!g_installed) return kDebugCannot;
+  return g_turn ? 1 : 0;
+}
+
+void ThrowTurnChange(const char* by) {
+  if (!g_installed) return;
+  g_turn = !g_turn;
+  ControllersGesturePulse(0.5f, g_turn ? 0.30f : 0.06f);
+  ModLog("hand throw   : %s: a thrown object now %s (throw_turn=%d)", by,
+         g_turn ? "turns as fast as the game turns it, and the mod cuts the "
+                  "turn of the picture to 1.5 turns a second before each "
+                  "substep"
+                : "keeps the game's momentum, and the picture turns as many "
+                  "times faster as the flight runs steps of the game",
+         g_turn ? 1 : 0);
+}
+
 int ThrowRestValue() { return g_installed ? g_rest : kDebugCannot; }
 
 void ThrowRestChange(const char* by) {
@@ -2263,6 +2646,8 @@ void ThrowPhysicsSetSlow(int slow_x10, bool trees) {
 
 void ThrowPhysicsSetSettle(bool settle) { g_settle = settle; }
 
+void ThrowPhysicsSetTurn(bool turn) { g_turn = turn; }
+
 void ThrowPhysicsSetRest(int rule) {
   g_rest = rule < 0 || rule > 4 ? throw_math::kRestAll : rule;
 }
@@ -2348,6 +2733,10 @@ bool ThrowPhysicsCatchFrom(void* object, float matrix[12]) {
 void ThrowPhysicsSetDraw(int rule) {
   g_draw = rule != 0 ? throw_math::kDrawReal : throw_math::kDrawFlight;
 }
+
+void ThrowPhysicsSetArcObjects(bool on) { g_arc_objects = on; }
+
+void ThrowPhysicsSetShield(bool on) { g_shield = on; }
 
 void ThrowPhysicsSetFall(int limit_cm) {
   if (limit_cm < 0) limit_cm = 0;
@@ -2441,6 +2830,19 @@ void ThrowPhysicsInstall() {
                      "law",
          prepare_hook ? "in the Hand's draw" : "only in the physics draw",
          g_log ? ". throw_log logs each flight in full" : "");
+  ModLog("hand throw   : throw_shield=%d, %s", g_shield ? 1 : 0,
+         g_shield
+             ? "the real arc stops at the ball of the body of a Physical "
+               "Shield, and the flight takes the game's one step in a "
+               "substep near it"
+             : "the game tests a Physical Shield only in its own steps");
+  ModLog("hand throw   : throw_arc_objects=%d, %s", g_arc_objects ? 1 : 0,
+         g_arc_objects
+             ? "before the game's physics has a thrown object, its real arc "
+               "stops at the box of the mesh of an object near the Hand, as "
+               "it stops at the land"
+             : "before the game's physics has a thrown object, its real arc "
+               "stops at the land only");
   ModLog("hand throw   : the time factor is %.2f: a throw flies the same "
          "arc as the real throw, %.2f times slower. Trees %s", g_slow,
          g_slow, g_trees ? "fly the same way (throw_trees=1)"
@@ -2707,12 +3109,31 @@ void ThrowPhysicsReleased(void* held) {
   FindLanding(f);
   if (g_flight_logs >= kMaxFlightLogs) return;
   ++g_flight_logs;
-  char where[200];
-  if (f->lands) {
+  char where[320];
+  if (f->hits_shield) {
+    sprintf_s(where, "The real arc meets the ball of the body of the %s %p "
+              "after %.2f s at %.1f %.1f %.1f, %.1f units over the land, "
+              "before the land (throw_shield=1)",
+              HandDirectClass(f->hit), f->hit, f->land_t, f->land[0],
+              f->land[1], f->land[2],
+              f->land[1] - Altitude(f->land[0], f->land[2]));
+  } else if (f->hits_object) {
+    sprintf_s(where, "The real arc meets the box of the %s %p after %.2f s at "
+              "%.1f %.1f %.1f, %.1f units over the land, before the land "
+              "(throw_arc_objects=1, %d boxes near the arc)",
+              HandDirectClass(f->hit), f->hit, f->land_t, f->land[0],
+              f->land[1], f->land[2],
+              f->land[1] - Altitude(f->land[0], f->land[2]), f->near_boxes);
+  } else if (f->lands) {
     sprintf_s(where, "The real arc meets the land after %.2f s at %.1f %.1f "
-              "%.1f, %.1f units (%.2f m of the room) away",
+              "%.1f, %.1f units (%.2f m of the room) away%s",
               f->land_t, f->land[0], f->land[1], f->land[2],
-              Flat(f->land, f->p0), Flat(f->land, f->p0) / f->s);
+              Flat(f->land, f->p0), Flat(f->land, f->p0) / f->s,
+              !g_arc_objects ? " (throw_arc_objects=0: the arc tests no "
+                               "object)"
+              : f->near_boxes > 0 ? ". It goes into no box of an object near "
+                                    "it"
+                                  : ". No box of an object is near it");
   } else if (f->leaves) {
     sprintf_s(where, "The real arc leaves the map after %.2f s", f->land_t);
   } else {
@@ -2769,6 +3190,7 @@ void ThrowPhysicsTurnBegin() {
     ++f.turns;
     f.turn_steps = 0;
     f.turn_seconds = 0.0;
+    f.turn_top_show = 0.0f;
     for (int i = 0; i < 3; ++i) f.window[i] = f.best[i] = 0.0f;
     f.window_steps = 0;
     // THE SEARCH OF THE NEAR OBJECTS. At the start of a turn the game puts
@@ -2820,12 +3242,18 @@ void ThrowPhysicsTurnEnd() {
              "the picture, and the real time is %.3f s. The center is at "
              "%.1f %.1f %.1f, the speed is %.1f "
              "units/s in the game's time, %d points touch, the last step "
-             "gave %d", f.turns, f.object, f.turn_steps,
+             "gave %d. The angular momentum is %.1f, the turn is %.2f "
+             "radians a second in the game's time, and %.2f turns a second "
+             "of the picture at most in this turn", f.turns, f.object,
+             f.turn_steps,
              f.turn_seconds * 1000.0, f.time, f.show, now - f.t0, p[0], p[1],
              p[2],
              controller_math::Length(v),
              *reinterpret_cast<const int32_t*>(ob + kObContacts),
-             f.last_code);
+             f.last_code,
+             controller_math::Length(
+                 reinterpret_cast<const float*>(ob + kObTurn)),
+             f.turn_rate, f.turn_top_show / 6.2831853f);
     }
     // THE CHECK OF THE AXES. The game wrote the mesh matrix from the last
     // substep (fn_007FD140, the angles, then SetXYZAngles). It must be the

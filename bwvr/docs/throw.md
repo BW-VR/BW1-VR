@@ -21,6 +21,13 @@ object is in `grab.md`.
   object goes down as in the game (`throw_land_rest`).
 - A tree that falls comes to rest in about 1 s after its first contact
   (`throw_tree_settle`).
+- A thrown Fireball or flock leaves the Hand with the top speed of the grip
+  of the real hand and with no turn, as a thrown object does, and then has
+  the game's physics (`miracle_throw`, see "A thrown miracle").
+- A thrown object turns at about the pace of the game. The mod scales the
+  turn of the release and the torque of the flick (packet `0x40`) to the
+  steps of the flight. Before each substep it cuts the turn of the picture to
+  the game's cap of 1.5 turns a second (`throw_turn`).
 - A still hand near the land sets the object down. A still hand higher up
   than `release_fall_cm` lets the object fall (see "The height of a
   release").
@@ -135,8 +142,9 @@ game sees the speeds of its own physics.
    the flight starts, from the mesh position of that moment.
 2. **The first frames.** The game holds the object in the Hand until the drop
    action of a game turn. In that time the mod draws the object on the real
-   arc `p0 + s v t - s g t^2 / 2`, stopped at the land. So the object leaves
-   the hand on the frame of the release action.
+   arc `p0 + s v t - s g t^2 / 2`, stopped at the land or at an object (see
+   "The objects on the arc"). So the object leaves the hand on the frame of
+   the release action.
 3. **The state.** A call before `GameTurnUpdate` (`pass_guard.cpp` has the
    hook) finds the entry of the object. On the first turn it moves the PhysOb
    to the place of the arc at that time and writes the velocity `sqrt(s) v`,
@@ -180,8 +188,9 @@ game sees the speeds of its own physics.
     the sea, leaves the physics (a new pick up), or after 60 s. Up to 4
     objects fly at one time.
 
-**What keeps the game's time.** A Miracle in the Hand gets the velocity of
-the square root law. A tree flies as a rock does, unless `throw_trees=0`. The
+**What keeps the game's time.** A Miracle keeps the game's physics. It leaves
+the Hand with the velocity of the real hand in the world (see "A thrown
+miracle"). A tree flies as a rock does, unless `throw_trees=0`. The
 disassembly shows that a tree is a physics object like a rock:
 `Object::InitialisePhysicsFromHand` `0x00636F00` calls
 `PhysicsObject::AddObject` for each object. The only differences are the
@@ -203,6 +212,86 @@ A multiplayer game uses the square root law for each throw, because all
 players must run the same physics. The mouse player's throw does not pass
 through the release hook. Each object that the player did not throw keeps the
 game's physics.
+
+### The objects on the arc
+
+The game's physics has the thrown object 0.1 to 0.2 s after the release (at
+most `kHeldLimit`, 0.6 s). Until then the mod draws the real arc, and the
+game's physics then starts at the place of the arc at that time. The game
+tests the objects only from that time. A throw down from a low place meets a
+house on its arc in that time. With an arc that stops only at the land, the
+mod puts the object at the land inside the house, and the game's physics
+sees no contact with the house.
+
+With `throw_arc_objects=1` the arc also stops where it goes into the box of
+the mesh of an object near the Hand:
+
+- The first eye pass of each frame keeps the box of the mesh of each
+  candidate of the draw that is within 4 m of the room of the Hand's point,
+  while the Hand holds an object (`HandDirectArcBoxes` in `hand_direct.cpp`,
+  the box of `HandDirectFeelBody`). A tree, a forest, a scroll and an object
+  with no box of its mesh are not in the list. The object in the Hand is not
+  in it.
+- At the release, `FindLanding` keeps the boxes that are near the arc of
+  the first 0.6 s (`ArcBounds`, `BoxNear` in `throw_math.h`). Along the arc
+  in steps of 2 ms it finds where the arc first goes into one of them
+  (`SegmentEntersBox`). A release inside a box is the game's own case, and
+  that box does not stop the arc.
+- The arc stops there, as it stops at the land. When the game's physics has
+  the object after that time, the center goes one radius back along the
+  arc, and the object gets the velocity of the arc at that point. So the
+  game's contact gives the hit and the damage, as for a fast throw that the
+  game's physics has before the house.
+- After the game's physics has the object, nothing changes: the game tests
+  the objects itself.
+
+`throw_arc_objects=0` stops the arc at the land only.
+
+The log line of the start says "The real arc meets the box of the Abode ...
+before the land", with the count of boxes near the arc. The line of the
+physics says where the object starts. The first contact then says "(an
+object, P (Abode))" for the house: the object of the other body and its
+class.
+
+### A Physical Shield on the arc
+
+The body of a Physical Shield stays in the array of the physics
+(`PhysicalShield::GetAlwaysRemainsInPhysicsInternalSystem` `0x0072CAF0`).
+It is built one time at the full size of the dome, and it has a ball
+(`PhysOb+0xA0`, `+0x150`) and faces. In each substep the game tests the
+points of a moving body against the faces of the dome
+(`PhysOb::CheckVFaces` `0x007FDA60`) when the two balls meet [V]. Two parts
+of the real flight have no such test: the arc before the game's physics has
+the object, and the extra steps of a substep. So without help a thrown
+object goes through the dome: with `throw_shield=0` the arc meets the box of
+the Temple inside the dome first, and a pig comes to rest inside, 7.5 units
+from its middle. With the game's physics (`throw_law=1`) the game tests the
+pair, and the pig comes to rest on top of the dome.
+
+With `throw_shield=1` (the default):
+
+- The arc stops where it goes into the ball of the body of a shield, as it
+  stops at the box of a mesh (`throw_math::SegmentEntersBall`). The ball of
+  a shield is in front of the boxes in it. The game's physics then gets the
+  object one radius back along the arc, with the speed of the arc there.
+- While the ball of the object is near the ball of a shield (the gap is
+  less than the way of one step of the flight and 1 unit,
+  `throw_math::BallsNear`), the flight takes the game's one step in a
+  substep, as in a substep in which another object touched it. So the game
+  tests the faces of the dome after each step of the object, and the object
+  bounces off the dome. Near the dome the object moves in the game's own
+  time.
+
+A release inside the ball of a shield is the game's own case: the arc does
+not stop at that ball, and the steps near it are the game's steps.
+A desktop run with `throw_shield=1` (`miracle_run.ps1 -Kind pshield`): the
+arc meets the ball of the shield 0.06 s after the release, the flight takes
+the game's steps from 0.16 s, the first contact is with the shield after
+0.217 s, and the pig comes to rest on the land outside the dome, 19.3 units
+from its middle. `throw_shield=0` tests the shield only in the game's own
+steps. The log lines: "The real arc meets the ball of the body of the PhysicalShield ...",
+and "... comes near the ball of a Physical Shield ... the flight takes the
+game's one step in a substep there".
 
 **The game's state is ahead.** A turn works out the next 0.1 s of the flight,
 and the mod draws it as the time comes. So the Object of the game is up to
@@ -279,6 +368,8 @@ times as long.
 | `release_fall_cm` | 15 | The height of the Hand's point over the land, in cm of the room, above which a still hand lets the object fall. 0 sets it down at each height |
 | `throw_trees` | 1 | 1 lets a thrown tree fly as a rock does. 0 gives the tree the game's physics |
 | `throw_draw` | 1 | Where the mod draws a thrown object between the steps of the game (see "The picture between the steps"). 1: a substep with a touch of another object is 5 ms of the picture, the picture stays at a guess until the object comes to it, and the clock falls back after a wait. 0: each substep has its time of the flight |
+| `throw_shield` | 1 | 1: the real arc stops at the ball of the body of a Physical Shield, and the flight takes the game's one step in a substep near it, so the object bounces off the dome (see "A Physical Shield on the arc"). 0: the game tests the shield only in its own steps |
+| `throw_arc_objects` | 1 | 1: before the game's physics has a thrown object, its real arc stops at the box of the mesh of an object near the Hand, as it stops at the land (see "The objects on the arc"). 0: the arc stops at the land only |
 
 Outside the God view and the table (play modes 0 to 2) the throw uses the
 gain of `throw_law=0`.
@@ -312,7 +403,7 @@ gain of `throw_law=0`.
 Tag `hand throw`. The release: the top speed and its time before the release,
 the mean of 80 ms, the speed of the flight in units per second, the speed in
 the game's time, and what the release sent. The start: where the real arc
-meets the land, and when. "The game's physics has" the object: the delay, the
+meets the land or the box of an object, and when. "The game's physics has" the object: the delay, the
 place of the game and of the flight, the mass, the radius and the drag. The
 first contact: the time, the place, and the distance from the real arc at that
 time. The end: the time, the cause, the distance across the land, the count of
@@ -395,15 +486,12 @@ stayed at the place of a guess: the math checks cover that rule.
 - A Miracle and the objects that a thrown object pushes keep the game's time.
 - While another object touches a thrown object, the thrown object moves at
   the speed of the game's own time (`sqrt(s) / k` times slower than in the
-  flight). Only a headset shows whether that looks right.
+  flight).
 - A flying tree is tested in desktop runs only (a throw of 3.0 m/s, and a
   fall from the Hand, see "The landing of a tree"), and not in the headset.
-- Only a headset shows: whether a throw feels like a real throw at 7.5, 67
-  and 400 units per meter, whether the top speed of 120 ms gives the throw
-  that the player meant, whether a quick put down throws by accident (the 1
-  m/s rule), whether a villager lives through a soft throw and dies from a
-  hard one, whether a rock still breaks a house, and the cost of the steps at
-  1000 units per meter and more (the log gives it for each flight).
+
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ## The landing of a thrown object
 
@@ -719,22 +807,29 @@ catch up of the picture (`kCatchUp`).
 
 ### Open
 
-- Not tested: a throw into a pile of objects. A desktop run shows the landing
-  of a villager, of a rock in the sea and of a rock at 7.5 to 225 units per
-  meter ("Desktop runs" in "The throw physics", and "The rest after a
-  landing"). The log does not say whether a thrown villager lives.
-- The rest after a landing: only a headset shows whether a rock that stops
-  its turn this fast looks right, and whether a rock on a steep slope goes
-  down at a pace that looks right. On such a slope the object moves in the
+- Not tested: a rock thrown into a pile. A bundle of wood thrown at the pile
+  of the Village Store goes into the store at its first contact: the game
+  takes it out of its physics (`village_run.ps1 -Kind throwpile`). The card
+  of the store does not show the count of the throw.
+- A thrown villager lives through a throw of 3.0 m/s (1.8 m/s at the first
+  contact) and dies from a throw of 12.7 m/s (6.5 m/s at the first contact):
+  the census of the worship counts one villager less (`village_run.ps1 -Kind
+  throwlive`). No log line names the death. After the hard landing the
+  villager hops 2.2 m high in the room (`roadmap.md`, N14).
+- A rock thrown at 7.5 m/s at a house breaks its roof and a wall
+  (`village_run.ps1 -Kind throwhousefast`). A rock that falls 40 units from a
+  still hand stays against the house with no damage (`-Kind throwhouse`).
+- The same throw from 5 units over the roof (`-Kind throwhouselow`, 7.6 m/s)
+  meets the box of the house after 0.01 s, before the game's physics has
+  the rock. The rock starts at the box, its first contact is with the house
+  after 0.135 s, and the roof breaks. With `throw_arc_objects=0` the rock
+  goes through the house to the land.
+- The rest after a landing: on a steep slope the object moves in the
   game's own time until the land is flatter (8 s on the slope at the pen,
   which is 41 units high).
-  Ctrl and Shift with Pause give the landing with no rule for a comparison.
-- Only a headset shows: whether the landing looks natural at the rate of the
-  land, or too slow (on the slope of the pen the rock moves slowly for about
-  2.5 s before it stops: try `throw_land=2` with the Pause key, or a higher
-  rate with Ctrl and Numpad Divide), whether the change of the rate shows at
-  the first contact, and whether a thrown villager lives through a soft throw
-  and dies from a hard one.
+
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ## The landing of a tree
 
@@ -773,8 +868,210 @@ game's landing. Rocks and other objects are not changed.
   runs, with the settle on or off. The aim keeps the tree, and the gaps in the
   target were the near rule while the tree falls past the Hand. The tumble is
   gone with the settle, so it can not move the candidate.
-- Only a headset shows whether a tree that stops this fast looks right, and
-  whether a rolling tree on a slope still rolls.
+
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
+
+## The turn of a thrown object
+
+### What the game does [V]
+
+- **The release gives a turn.** `InitialisePhysicsFromHand` `0x00636F00`
+  writes its second argument to the angular momentum of the physics object
+  (`PhysicsObject+0x90`, which is `PhysOb+0x68`, at `0x0063701B`). That
+  argument is the second vector of packet `0x4D`. The release action
+  `0x005D4DB0` makes it from `CHand+0x48D4` times the inertia of the object
+  (`PhysOb+0x08`, an `LHMatrix` that `PhysOb::SetUpMoi` `0x007FB880` fills,
+  with its inverse at `PhysOb+0x38`). So `CHand+0x48D4` is a turn in radians
+  a second of the game's time, in the axes of the object. A function of the
+  hold (`HandStateGrain_vfunc3`, which calls `HandStateHolding::Update`)
+  writes it at `0x005B36C6`, from an `acos` of the swing of the object in the
+  Hand [I for the meaning]. The mod does not write it.
+- **The turn of a step.** `fn_007FE260` adds the torque to the momentum L,
+  and multiplies L by the turn factor (`PhysOb+0x148`). The turn is
+  `w = M^T (A L)`, with A the axes (`PhysOb+0x7C`, three rows) and M the
+  inverse of the inertia. It cuts the length of w to 3 pi radians a second
+  (1.5 turns a second), and L keeps its size.
+- **The flight has almost no torque.** The drag of the mod is 0 until the
+  first contact, and the weight acts at the center. So in the flight the
+  object keeps the turn of the release, less the turn factor, until the
+  torque of the flick comes.
+- **The torque of the flick.** `PhysOb::ZeroForces` `0x007FD200` starts the
+  torque of each step from a constant torque at `PhysOb+0x128`
+  (`0x007FD42C`). `PhysicsObject::GameTurnUpdate` sets it to 0 at the end of
+  each game turn (`0x00646093`). `CHand::GetRequiredState` counts down
+  `CHand+0x48F8` from 180 ms after the last frame of a hold (`0x0046CDEC`).
+  At 0 it sends packet `0x40` for the last thrown object (`CHand+0x48FC`,
+  `0x0046CE86`) with the move d of the land point under the pointer since
+  that frame (`0x00C5E640` minus `0x00C5E650`). `GPacket::ProcessPacket`
+  adds `1.6 m |v| (-d.z, 0, d.x)` to the constant torque (`0x0063CE87`),
+  with m the mass and v the velocity. So a move of the pointer after the
+  release turns the object, for one game turn of torque. Each kind of
+  object gets it: a villager, a rock and a tree.
+
+### Why a strong throw turns fast [I]
+
+This is from the code. The desktop runs show the part of the contact, not
+the part of the release (see "What the desktop runs show").
+
+The flight runs `sqrt(s) / k` steps of the game in each substep ("The real
+flight"), 5 at 100 units per meter. Each step turns the object by the turn
+of the game for 5 ms. So the picture turns 5 times as fast as the game turns
+the object: a release that the game turns at its cap is 7.5 turns a second
+in the picture. The draw shows the release matrix until the game's physics
+has the object (0.1 to 0.2 s after the release), so the fast turn starts
+then. A strong swing in the Hand gives a larger turn in the game.
+
+The first contact runs at the rate of the flight too, until the rate of the
+land comes ("The landing of a thrown object"). A contact on one corner gives
+a momentum many times the cap ("The landing of a tree"), and the object
+turns at the cap for as long as the turn factor takes to wear the momentum
+down: 2.45 s for 30 times the cap with the turn factor of the land. The
+settle of a tree acts only while the center is slow, so a tree that slides
+fast after its landing turns at the cap.
+
+### What the mod does
+
+With `throw_turn=1` (the default):
+
+1. **The turn of the release.** When the game's physics has the object, the
+   mod divides its momentum by the steps of a substep (`TurnStartFactor` in
+   `throw_math.h`). The picture then turns as fast as the game turns that
+   throw in the plain game. The direction of the turn does not change.
+2. **The cap.** Before each substep the mod works out the turn of the game
+   from the momentum, as `fn_007FE260` does (`TurnSpeedOf`). When that turn
+   times the steps of the substep is more than the cap of 3 pi radians a
+   second, the mod cuts the momentum to the cap (`TurnCutFactor`). So the
+   momentum that the cap of the game hides is gone, and after a contact the
+   turn falls from the cap at once, at the pace of the turn factor. The cut
+   acts before a substep. A contact or a torque in the steps of a substep
+   can still turn the picture faster than the cap in that substep.
+3. **The torque of the flick.** In each substep of the flight the mod
+   multiplies the constant torque by 1 / r^2, with r the steps of the
+   substep (`TurnTorqueFactor`), and it puts the game's value back after the
+   steps. The game gives the torque for 20 steps, and the flight runs r
+   times as many steps. So the momentum of the flick is 1 / r of the game's,
+   as for the release, and the picture turns as fast as the game turns that
+   flick. A substep with a touch of another object runs one step and keeps
+   the torque.
+4. **The cap in each step.** The torque of the flick comes back in each
+   step, so in a substep with that torque the cut before the substep does
+   not hold the cap. In such a substep the mod also changes the momentum
+   before each step, so that the momentum of that step
+   (`(L + torque dt) keep`, as `fn_007FE260` makes it) turns the picture at
+   the cap at most (`TurnCutBeforeStep`). Other substeps, and so each
+   contact, keep the cut before the substep only.
+
+The flight latches the key when the game's physics has the object. The mod
+changes only the momentum. The place, the velocity, the contact and the
+damage are the game's. `throw_turn=0` keeps the game's momentum.
+
+**What the throw gives.** The turn of the release is the game's turn from
+the swing of the object in the Hand. The mod does not give the twist of the
+real hand to the throw.
+
+### What the desktop runs show
+
+The recipes `treefast`, `treeup` and `rockfast` of `throw_queue.ps1` throw a
+tree up and across the land, a tree straight up, and a rock. The top speed
+of the scripted hand is 7.2 to 8.0 m/s. `village_run.ps1 -Kind throw` throws
+a villager at 3 m/s. The runs have 60 frames a second.
+
+- **The release.** The scripted hand gives no turn: the release gave 0.00
+  radians a second in each run. So the runs do not show the factor of the
+  release (step 1 above).
+- **The flight of a tree and a rock.** The picture turns less than 0.1 times
+  a second until the first contact, with the key at 1 and at 0. The fast
+  turn starts at the first contact, 2.5 to 3.1 s after the release.
+- **The contact.** The table gives the fastest turn of the picture in one
+  game turn, in turns a second.
+
+The table is from runs at a render size in which each throw lands on the
+land. The scripted hand aims by the render size, so at another size a throw
+can land in the sea, and then the first contact is the water. The line
+"first contact of" says which one it is.
+
+| Throw | `throw_turn=1` | `throw_turn=0` | Substeps that the mod cut |
+| --- | --- | --- | --- |
+| Tree across the land | 1.2 | 1.0 | 0 |
+| Tree straight up | 1.8 | 2.6 | 4 |
+| Rock | 2.3 | 6.6 | 4 |
+
+- Before the cut, the picture of the rock and of the tree straight up would
+  turn 2.7 and 2.1 times a second. The tree across the land touched the land
+  at 89 units a second and the mod did not cut it.
+- After the contact the turn falls faster with the key at 1. In the next
+  game turn the rock turns 0.6 times a second, against 1.5 with the key at 0.
+  With the key at 0 the rock turns 0.4 times a second 0.5 s after the
+  contact, and the tree straight up wears its turn off in 0.5 s. Neither
+  stays at the cap for 2.45 s. The rest of the landing (`throw_land_rest`)
+  can be the cause [I].
+- In the game turn of the contact the picture turns faster than the cap with
+  the key at 1: 1.8 and 2.3 turns a second.
+- **The villager.** The villager of `village_run.ps1 -Kind throw` gets the
+  torque of the flick 0.35 s into its flight, with no contact. With the key
+  at 0 that torque adds 88 turns a second to the picture, and the picture
+  turns 5.0 times a second for the rest of the flight. With the factor of
+  the torque (step 3) and no cap in each step, the picture turns 1.78 times
+  a second in the game turn of the torque and 1.5 or less after it. No run
+  has the cap in each step (step 4) yet. The log line "the game gives ... a
+  torque" says when the torque comes and how fast the picture turns with it.
+- **The torque of the flick on a tree and a rock.** The scripted hand gives
+  a tree and a rock a small torque of the flick: 0.01 turns a second of the
+  picture or less.
+- The eye pictures do not show the turn. They are still pictures, and the
+  thrown object is small at that distance.
+
+### Keys
+
+| Key | Default | What it does |
+| --- | --- | --- |
+| `throw_turn` | 1 | 1: a thrown object turns as fast as the game turns it: the mod divides the momentum of the release by the steps of a substep, the torque of the flick by the square of the steps, and it cuts the turn of the picture to 1.5 turns a second before each substep. 0: the game's momentum and torque, and the picture turns as many times faster as the flight runs steps of the game |
+
+The keys are read from `bwvr.ini`. The debug menu (`debug_menu=1`,
+`controllers.md`, 10.8) has the row "Throw turn" in the group of the throw:
+a long pulse for 1 and a short pulse for 0. A flight in the air keeps its
+value.
+
+### The log
+
+Tag `hand throw`, with `throw_log=1`. "The game's physics has": the turn that
+the release gave in radians a second of the game's time, the turn of the
+picture after the change, and the value of `throw_turn`. Each turn of a
+flight: the size of the momentum, the turn of the last substep in the game's
+time, and the fastest turn of the picture in that turn. "The game gives ...
+a torque", one time in a flight: the size of the torque of the flick, the
+time in the flight, and the turn that it adds in a game turn in the plain
+game and in the picture of the flight. The end of a flight: the substeps in
+which the mod cut the momentum, the turn of the picture that the cut stopped,
+and the substeps in which the mod cut the torque of the flick.
+
+### Checks
+
+`ThrowChecks` covers the turn of the game from the momentum, the axes and
+the inverse of the inertia, the factor of the release at the rates 5, 1 and
+0.5, the cut at the cap, and two cases: a throw that the game turns at 1 turn
+a second shows 5 turns a second at 5 steps a substep with no change and 1
+turn a second with the change, the factor of the torque of the flick, and a
+torque that turns the picture 25 times as fast with no change and as fast as
+the game with the change, and a momentum of 30 times the cap after a
+contact turns at the cap for 2.45 s with the game's momentum and not at all
+after the cut.
+
+### Open
+
+- The cut before a substep does not hold the cap in the substep of a
+  contact (2.3 turns a second for a rock), or for a villager that the game
+  turns in its flight (4.2 turns a second). A cut in each step of the game
+  holds it. Find what gives the villager its turn first.
+- No desktop run shows a turn of the release, so the factor of the release
+  has no run. The scripted hand gives the game no swing.
+- How large the turn of the release is with the direct hand is not known:
+  the hold of the game makes it from the swing of the object, and the mod
+  draws the object in the Hand by itself.
+
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ## The height of a release
 
@@ -868,7 +1165,9 @@ throw at each height.
   cm. A tree that falls is in "The landing of a tree".
 - Not tested in a desktop run: a pot, a villager and an animal that fall
   from the Hand, and an opening over a store at a height.
-- Only a headset shows whether 15 cm feels right.
+
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ## The release at once
 
@@ -1012,6 +1311,130 @@ closes it again, and the trace of 12 values.
   `release_at_once=0`. The run needs the start dialog of `god-view.md`,
   section 12, a far target that is no tree (`far_test_influence=1`,
   `far_grab_max_m=4.0`) and a pull, a grip open and a release.
-- Only a headset shows: whether a throw leaves the hand when the hand opens,
-  and whether the fast opening lets go of an object that the player wants to
-  keep (the lines of the tag `grip` show the grip values before each opening).
+
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
+
+## A thrown miracle
+
+A Fireball (and its two power levels) and the two flocks are cast at the
+release: the grip closes, the hand swings, and the grip opens
+(`miracles.md`, "The grip casts"). The miracle leaves the Hand in the
+direction and with the speed of the real hand, as a thrown object does.
+
+### What the game does [V]
+
+- **The speed of the Hand.** With a miracle in the Hand the Grain state
+  (`HandStateGrain_vfunc3` `0x005B3310`) keeps a filter of the speed of the
+  Hand at `CHand+0x48C8`. Each update moves the filtered velocity toward the
+  velocity of the Hand's point (`CHand+0x78`) in that update, by the part
+  `1 - exp(-r dt)`, with `r = -10 ln(1 - 0.8)` = 16.09 a second (the float at
+  `0x00BF014C`). That is a time constant of 62 ms.
+- **The cast.** The release of the miracle (`FUN_005D48D0`) calls the cast at
+  the land point `FUN_005D3340`. It copies `CHand+0x48C8`, with no cap, to
+  the first vector of packet `0x4D` (`0x005D351C`), with the Hand's point
+  (`+0x48E0`). The miracle leaves the Hand with that velocity. The release
+  action of an object (`0x005D4DB0`) does not run for a miracle, so the
+  velocity of the throw of an object never reaches a miracle.
+- **The turn of the Hand.** The same packet has the turn of the Hand at
+  `CHand+0x48D4` (`0x005D354E`). The Grain state writes it as `(0, y, 0)`
+  (`0x005B36C6`): y is a filter of how fast the direction of the path of the
+  Hand across the land turns (`__CIacos` at `0x005B363F`), over its speed.
+  The cast copies y (`GInterfaceStatus+0x54`) to the cast info at `+0x34`
+  (`SpellSeed::DoPreCastThings`, `0x007294D5`). A Fireball turns in its
+  flight by it [I for the use: the desktop runs show the turn].
+- **The Fireball.** The particle system of a Fireball carries a
+  `MagicFireBall`. `AttatchFireBallToAtom::ModifyAtomCollection`
+  (`0x00682FD0`) makes it with `MagicFireBall::Create` at the place of the
+  first atom of the collection (`+0x40`), and it moves the ball with that
+  atom on each update. The atom has its place at `+0x80`, `+0x84` and
+  `+0x88`.
+
+So the game's velocity of a thrown miracle is the mean of about the last 60
+ms of the motion of the Hand's point, read when the grip opened. A swing that
+curves gives a direction of the past, and a hand that slows at the opening
+gives less speed. A swing that curves also makes the Fireball turn in its
+flight, and a swing of a real arm always curves. The Hand's point is the index tip of the Hand (`hand.md`,
+section 4), and not the grip, so a turn of the wrist in the swing moves it
+more than the grip, and to the side. The throw of an object takes the top
+speed of the grip in the swing ("The speed of a throw").
+
+### What the mod does
+
+With `miracle_throw=1` (the default) the hook of the cast at the land point
+(`miracle.cpp`) writes the velocity of the throw of an object to
+`CHand+0x48C8`, before the cast reads it (`miracle_throw.cpp`). It is the
+top speed of the grip in the 120 ms before the opening of the grip
+(`HandDirectSwing` in `hand_direct.cpp`, `throw_math::PeakVelocity`), turned
+from the room into the world and scaled to s units in a meter
+(`miracle_throw_math::SwingWorld`). That is `s v` in world units a second:
+the speed of the real hand in the world, which is the unit of the game's
+filter. It also writes no turn to `CHand+0x48D4`, so the miracle flies
+straight, as a thrown object does. The game's physics of the miracle then
+flies it. The mod does not change the flight of a miracle.
+
+With no motion of the grip, or outside the God view and the table, the cast
+keeps the game's filter, and it still gets no turn. `miracle_throw=2` gives
+the velocity of the real hand and keeps the game's turn. `miracle_throw=0`
+keeps the game's filter and its turn. The debug page has the switch
+"Miracle throw" in the group Throw (game, hand, hand turns).
+
+A swing of 0.3 s with a top speed of 4 m/s that turns 70 degrees to the left
+(the math check): with the grip open at the top speed, the game's filter is
+8.6 degrees to the right of the swing and has 2.95 m/s. The top speed of the
+grip is 2.6 degrees from the swing and has 3.97 m/s.
+
+### Keys
+
+| Key | Default | What it does |
+| --- | --- | --- |
+| `miracle_throw` | 1 | 1: a Fireball and a flock leave the Hand with the top speed of the grip of the real hand in the 120 ms before the opening of the grip, and with no turn, as a thrown object does. 2: the same velocity, with the game's turn of the path of the Hand. 0: the game's filter of the speed of the Hand (62 ms) and its turn |
+
+### The log
+
+Tag `miracle throw`. The key at the start. For each throw: the top speed of
+the real hand, its time before the cast, the time of the opening of the
+grip, the speed and the direction of the game's filter (degrees to the right
+or the left of the real hand), the game's turn of the Hand, and the velocity
+and the turn that the cast got. For a
+Fireball: where its flight starts and how far that is from the Hand's point,
+then its place 0.25, 0.5, 1, 2 and 4 s after the start and its last place.
+Each place has the distance across the land from the start, and how many
+degrees its path goes to the right or the left of the velocity that the cast
+got and of the game's filter.
+
+### Checks
+
+`MiracleThrowChecks` in `bwvr/test/controller_math/miracle_throw_checks.h`
+covers the side of a direction in the axes of the game, the game's filter
+(1 - 1/e of a step after 62 ms), the velocity in a turned room at a scale,
+and the curved swing above.
+
+### Desktop runs
+
+`miracle_run.ps1 -Kind throwdir` throws four Fireballs from seeds of the test
+key `miracle_test_seeds`: ahead, to the left, to the right, and on a swing
+that curves to the left. A fifth Fireball stays in the Hand with the grip
+closed while the stick turns the view and zooms (`god-view.md`, section 4).
+The scripted hand steps 6 cm on each of the last two frames of the grip, at
+44.4 units per meter.
+
+| `miracle_throw` | The cast gets | The flight of the Fireball |
+| --- | --- | --- |
+| 1 | 3.65 to 3.94 m/s of the real hand. The ahead, left and right throws go in three directions 90 degrees apart. The turn is 0 (the game had 5.23 for the curved swing) | 130 to 134 units across the land in 2 s. The path is straight, 6.5 to 8 degrees to the right of the velocity of the cast, also for the curved swing |
+| 2 | The same velocity, and the game's turn | The same, but the Fireball of the curved swing turns to the left: its path is 5, 12.5 and 20 degrees to the left of the cast after 0.3, 0.6 and 1 s |
+| 0 | 0.68 to 0.73 m/s: the game's filter, because the scripted hand stops one frame before the opening | 34 to 60 units across the land in all. 8 to 12 degrees to the right of the cast at first |
+
+### Open
+
+- In each direction a Fireball flies 6.5 to 8 degrees to the right of the
+  velocity that the cast gets, with the turn 0, at 44.4 units per meter and
+  about 3.7 m/s. The cause is in the particle system of the Fireball and is
+  not found. Not measured: other scales and speeds.
+- The horizontal speed of a Fireball in its flight is about 45 percent of
+  the speed that the cast gets (69 of 160 units a second). Its range at each
+  scale of the God view is not measured in a headset (`roadmap.md`, F6).
+- The flocks get the same velocity and no turn. No run shows where a flock
+  goes.
+- Only a headset shows a real swing: the speed and the turn of the game for
+  a real arm, and how near the path is to the throw.

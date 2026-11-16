@@ -64,6 +64,25 @@
 // software. One basis for all domes shows the base side of every dome behind
 // the game camera, and those domes vanish when the player turns around.
 //
+// A DRIFTING CLOUD STAYS OVER THE LAND
+//
+// CloudInSky (0x005E23F0) makes the 70 drifting clouds of the sky with their
+// place 300 to 500 units up and a scale of 13 to 50, and fn_005E25C0 moves
+// them along the wind. A dome that faces a camera near its height is a disc
+// that stands up, and it goes down by its radius times A under its place:
+// 260 to 1000 units for a round cloud. The land is 0 to 171 units high, so
+// such a dome goes into the land and the sea, and the land cuts it with a
+// hard line that moves with the cloud. The eye of the God view is low, so
+// most clouds are near its height.
+//
+// cloud_land=1 makes rows 1 and 2 of the basis of a drifting cloud shorter
+// by one share, so that each test point of the dome stays 10 units over the
+// land or the sea under it (sky_math::LandClearShare). Row 0 stays, so the
+// cloud keeps its width and gets flatter. The land is asked only when the
+// lowest point of the dome is lower than the highest land. cloud_land=0 is
+// the dome of the game, and cloud_land=2 draws no drifting cloud. The clouds
+// of a storm and the mists of the ground keep the rules above.
+//
 // THE MOON
 //
 // LH3DSky::Draw (0x0086B010) puts the moon at the stored camera plus the
@@ -126,6 +145,7 @@
 #include <windows.h>
 #include <math.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "debug_menu.h"
@@ -133,14 +153,22 @@
 
 float TabletopViewScale();
 #include "MinHook.h"
+#include "debug_menu.h"
 #include "sky_math.h"
 
 extern void ModLog(const char* format, ...);
+// controllers.cpp: a short pulse of the hand, for a step of a switch.
+void ControllersGesturePulse(float amplitude, float seconds);
 // head_camera.cpp: the camera of the table frame that is drawn, with no
 // head. False outside a table frame.
 bool HeadCameraTableCamera(float out[3]);
 // controllers.cpp: the frame number that the scripted controller counts.
 uint64_t ControllersFrameCount();
+uint64_t ControllersTestFrame(uint64_t key_frame, uint64_t frame);
+// hand_direct.cpp: world units in a meter of the room. head_camera.cpp: the
+// render head of the last table frame.
+float HandDirectRoomUnits();
+bool HeadCameraTableEye(float out[3]);
 // head_camera.cpp: the room, which is world up and the game camera's
 // heading. Columns are right, up and forward, in world space.
 bool HeadCameraStageBasis(float basis_out[9]);
@@ -157,6 +185,17 @@ void EyeStaleDraw(int kind);
 void HandGlowDraw();
 // overlay.cpp: the mod's own meshes, in each eye pass.
 void OverlayDraw();
+// vignette.cpp: the comfort vignette, in each eye pass.
+void VignetteDraw();
+// video_view.cpp: the corner marks of the view for videos.
+void VideoViewDrawMarks();
+// head_blinder.cpp: the overlay of a head under the land, in each eye pass.
+void HeadBlinderDraw();
+// book_bubble.cpp: the game's bubble of a miracle that the hand pulls out of
+// the spell book.
+void BookBubbleDraw();
+// gesture_panel.cpp: the game's gesture pictures over the palm.
+void GesturePanelDraw();
 
 namespace {
 
@@ -170,6 +209,22 @@ const uint8_t kMistSkyCloud = 2;
 const int kMistScale = 0x88;    // float, the size of the dome
 const int kMistFlatten = 0x8C;  // float, how flat a cloud near the horizon is
 const float kDomeHeight = 20.0f;  // mist.l3d: the pole is at y 20
+
+// The drifting clouds of CloudInSky. 0x00D1A270 points to the entries, 20
+// bytes each, with the LH3DMist at +0x10. fn_005E25C0 moves as many as
+// 0x00D1A278 holds (0x005E25E1).
+const uintptr_t kCloudEntries = 0x00D1A270;
+const uintptr_t kCloudCount = 0x00D1A278;
+const int kCloudEntrySize = 0x14;
+const int kCloudEntryMist = 0x10;
+const uint32_t kCloudMost = 200;  // CloudInSky::Open keeps the count to 200
+// MapCoords::GetLHPoint, thiscall: the land point of a MapCoords.
+const uintptr_t kGetLHPoint = 0x00605C40;
+const float kMapScale = 6553.6f;  // MapCoords units in a world unit
+const float kMapSize = 5120.0f;   // 512 cells of 10 units
+const float kLandTop = 171.0f;    // an altitude byte of 255 times 0.67
+const float kLandGap = 10.0f;     // units over the land at the least
+const float kLandLeast = 0.05f;   // the least share of rows 1 and 2
 
 // The moon. fn_0086AC60 is __cdecl with three arguments: the place of the
 // moon, the turn that it makes (12 floats) and the matrix of the moon mesh.
@@ -248,6 +303,7 @@ int g_detail_log_frames = 0;
 
 // For the report. Each eye pass draws every dome, so both passes count.
 uint64_t g_dome_draws = 0;
+uint64_t g_sky_draws = 0;     // of them, the sky clouds
 uint64_t g_poles_limited = 0;
 uint64_t g_glare_calls = 0;
 uint64_t g_glare_wanted = 0;
@@ -328,6 +384,300 @@ bool LimitPole(float a, float distance, float basis[9]) {
   basis[4] *= k;
   basis[5] *= k;
   return true;
+}
+
+// THE MISTS THAT ARE NOT SKY CLOUDS, for the desktop runs (a mist of the
+// weather, of a storm or of the ground: flag 2 at +0x80 is clear).
+// sky_test_mist_log=1 gives one line for each new such mist and a line in
+// each report window. sky_test_mist_hide=N: from frame N of the scripted
+// controller the mod does not draw them. sky_test_mist_hide_all=M: from
+// frame M the mod draws no mist at all, the sky clouds too. So eye pictures
+// before and after each frame tell what the mists draw.
+bool g_mist_log = false;
+// cloud_round_near: a sky cloud nearer than this many units to the stored
+// camera keeps its round shape (sky_math::NearFlatten). 0 is the engine's
+// flatten for each cloud. sky_test_round_frame: at this frame of the steps
+// the key goes to 0 and back from its value, one time, for one run with
+// each value.
+float g_round_near = 1000.0f;
+// cloud_fade_near_cm and cloud_fade_far_cm: in a table frame a sky cloud is
+// clear when the eye is in it or within the near distance of its surface,
+// in cm of the room, and whole from the far distance on
+// (sky_math::CloudFade). A far distance of 0 keeps each cloud whole.
+float g_fade_near_cm = 15.0f;
+float g_fade_far_cm = 60.0f;
+// LH3DObject+0x4C: the color of the object, with its alpha in the top byte.
+const int kMistColor = 0x4C;
+uint64_t g_fade_clear = 0;     // draws of a sky cloud that the fade skipped
+uint64_t g_fade_part = 0;      // draws with a part of the alpha
+double g_fade_part_sum = 0.0;  // the sum of their shares
+uint64_t g_fade_whole = 0;     // draws of a sky cloud within 2 times the far
+                               // distance that stayed whole
+uint64_t g_round_test_frame = 0;
+bool g_round_test_done = false;
+uint64_t g_rounded = 0;        // draws of a sky cloud with less flatten
+// The sky clouds for the log of sky_test_mist_log.
+const int kSkySeen = 80;
+const void* g_sky_seen[kSkySeen];
+int g_sky_seen_count = 0;
+float g_sky_nearest = 0.0f;
+float g_sky_lowest = 0.0f;     // the least height of a sky cloud over the eye
+uint64_t g_sky_logged_draws = 0;
+uint64_t g_mist_hide_frame = 0;
+uint64_t g_mist_hide_all_frame = 0;
+bool g_mist_hide_said = false;
+bool g_mist_hide_all_said = false;
+uint64_t g_sky_hidden = 0;      // sky clouds that the test key hid
+const int kMistSeen = 40;
+const void* g_mist_seen[kMistSeen];
+int g_mist_seen_count = 0;
+uint64_t g_mist_draws = 0;      // this report window
+uint64_t g_mist_hidden = 0;
+float g_mist_nearest = 0.0f;
+float g_mist_widest = 0.0f;
+
+bool MistIniPath(char path[MAX_PATH]) {
+  const DWORD length = GetModuleFileNameA(nullptr, path, MAX_PATH);
+  char* slash =
+      length > 0 && length < MAX_PATH ? strrchr(path, '\\') : nullptr;
+  if (slash == nullptr || strlen(path) + 9 >= MAX_PATH) return false;
+  slash[1] = 0;
+  strcat_s(path, MAX_PATH, "bwvr.ini");
+  return true;
+}
+
+// The frame of a test key is reached. The line comes at the first draw of
+// any mist from that frame on, so it comes also when no mist of the kind
+// that the key hides is drawn.
+bool MistKeyReached(uint64_t key, bool* said, const char* text,
+                    const char* what) {
+  if (key == 0) return false;
+  const uint64_t frame = ControllersFrameCount();
+  if (ControllersTestFrame(key, frame) < key) return false;
+  if (!*said) {
+    *said = true;
+    ModLog("sky          : %s: from frame %llu (the frame %llu of the "
+           "steps) the mod does not draw %s", text, frame, key, what);
+  }
+  return true;
+}
+
+bool MistHidden(const uint8_t* mist) {
+  const bool sky = (mist[kMistFlags] & kMistSkyCloud) != 0;
+  const bool hide_all = MistKeyReached(g_mist_hide_all_frame,
+                                       &g_mist_hide_all_said,
+                                       "sky_test_mist_hide_all",
+                                       "a mist or a sky cloud");
+  const bool hide = MistKeyReached(g_mist_hide_frame, &g_mist_hide_said,
+                                   "sky_test_mist_hide",
+                                   "a mist that is not a sky cloud");
+  if (hide_all || (hide && !sky)) {
+    if (sky) {
+      ++g_sky_hidden;
+    } else {
+      ++g_mist_hidden;
+    }
+    return true;
+  }
+  return false;
+}
+
+void MistLog(const void* self, const float position[3], float scale,
+             float a, float flatten, uint8_t flags, float distance,
+             const float* stored, bool table_faced, bool limited) {
+  ++g_mist_draws;
+  const float radius = kDomeHeight * scale;
+  if (g_mist_draws == 1 || distance < g_mist_nearest) {
+    g_mist_nearest = distance;
+  }
+  if (radius > g_mist_widest) g_mist_widest = radius;
+  for (int i = 0; i < g_mist_seen_count; ++i) {
+    if (g_mist_seen[i] == self) return;
+  }
+  if (g_mist_seen_count >= kMistSeen) return;
+  g_mist_seen[g_mist_seen_count++] = self;
+  const float d[3] = {position[0] - stored[0], position[1] - stored[1],
+                      position[2] - stored[2]};
+  ModLog("sky mist     : a mist that is not a sky cloud, %p, at %.0f %.0f "
+         "%.0f: its dome has a radius of %.0f units (20 times the scale %.2f) "
+         "and a pole of %.0f units (20 times A %.2f, the flatten %.2f, the "
+         "flags 0x%02X). It is %.0f units from the point that it faces (%s) "
+         "and %.0f units from the stored camera. %s, frame %llu", self,
+         position[0], position[1], position[2], radius, scale,
+         kDomeHeight * fabsf(a), a, flatten, flags, distance,
+         table_faced ? "the table camera" : "the stored camera",
+         sqrtf(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]),
+         limited ? "The pole limit made its pole shorter"
+                 : "The pole limit did not act",
+         ControllersFrameCount());
+}
+
+// How far the render head of the table frame is from the stored camera, in
+// units, or -1 with no table frame.
+float HeadToStored(const float* stored) {
+  float head[3];
+  if (!HeadCameraTableEye(head)) return -1.0f;
+  const float d[3] = {head[0] - stored[0], head[1] - stored[1],
+                      head[2] - stored[2]};
+  return sqrtf(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+}
+
+// One line for each new sky cloud (up to 80), and the nearest and the
+// lowest one for the report.
+void SkyCloudLog(const void* self, const float position[3], float scale,
+                 float a, float flatten, float used, float distance,
+                 const float* stored, bool limited, float gap_cm,
+                 float fade) {
+  const float over = position[1] - stored[1];
+  const float d[3] = {position[0] - stored[0], position[1] - stored[1],
+                      position[2] - stored[2]};
+  const float from_stored = sqrtf(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+  if (g_sky_logged_draws == 0 || from_stored < g_sky_nearest) {
+    g_sky_nearest = from_stored;
+  }
+  if (g_sky_logged_draws == 0 || over < g_sky_lowest) g_sky_lowest = over;
+  ++g_sky_logged_draws;
+  for (int i = 0; i < g_sky_seen_count; ++i) {
+    if (g_sky_seen[i] == self) return;
+  }
+  if (g_sky_seen_count >= kSkySeen) return;
+  g_sky_seen[g_sky_seen_count++] = self;
+  ModLog("sky cloud    : a sky cloud %p at %.0f %.0f %.0f, %.0f units from "
+         "the stored camera and %.0f units over it (%.0f from the point that "
+         "it faces). Its dome is %.0f units wide (20 times the scale %.2f) "
+         "and %.0f units high on the screen (20 times A %.2f): the flatten "
+         "of the engine is %.2f, and the cloud gets %.2f "
+         "(cloud_round_near=%.0f). %s. The eye is %.0f cm of the room from "
+         "its surface, so its draw keeps %.2f of itself (the render head of "
+         "the table frame is %.0f units from the stored camera), frame %llu",
+         self, position[0], position[1], position[2], from_stored, over,
+         distance, kDomeHeight * scale, scale, kDomeHeight * fabsf(a), a,
+         flatten, used, g_round_near,
+         limited ? "The pole limit made its pole shorter"
+                 : "The pole limit did not act",
+         gap_cm, fade, HeadToStored(stored), ControllersFrameCount());
+}
+
+// At sky_test_round_frame cloud_round_near goes to 0, or from 0 to 1000.
+void RoundTestCheck() {
+  if (g_round_test_frame == 0 || g_round_test_done) return;
+  const uint64_t frame = ControllersFrameCount();
+  if (ControllersTestFrame(g_round_test_frame, frame) < g_round_test_frame) {
+    return;
+  }
+  g_round_test_done = true;
+  g_round_near = g_round_near > 0.0f ? 0.0f : 1000.0f;
+  ModLog("sky          : sky_test_round_frame at frame %llu: "
+         "cloud_round_near=%.0f now", frame, g_round_near);
+}
+
+// cloud_land: 0 the dome of the game, 1 a drifting cloud stays over the land
+// and the sea, 2 no drifting cloud. See A DRIFTING CLOUD STAYS OVER THE LAND.
+enum CloudLand {
+  kCloudLandGame = 0,
+  kCloudLandOver = 1,
+  kCloudLandHidden = 2,
+  kCloudLandModes = 3
+};
+int g_cloud_land = kCloudLandOver;
+// sky_test_land_frame: at each of these frames of the steps the switch makes
+// one step, as the debug page does.
+const int kLandTestFrames = 4;
+uint64_t g_land_test_frame[kLandTestFrames] = {0, 0, 0, 0};
+int g_land_test_next = 0;
+// For the report.
+uint64_t g_land_draws = 0;    // draws of a drifting cloud
+uint64_t g_land_reach = 0;    // of them, a dome that goes into the land
+uint64_t g_land_kept = 0;     // of them, made flatter by cloud_land=1
+uint64_t g_land_hidden = 0;   // draws that cloud_land=2 skipped
+uint64_t g_land_asked = 0;    // questions to the land
+float g_land_least = 1.0f;    // the least share in the window
+int64_t g_land_ticks = 0;     // the time of the test, in counts of the QPC
+uint64_t g_land_report_frame = 0;
+
+const char* CloudLandWords(int mode) {
+  switch (mode) {
+    case kCloudLandGame:
+      return "a drifting cloud is the dome of the game, and it can go into "
+             "the land and the sea";
+    case kCloudLandHidden:
+      return "the mod draws no drifting cloud of the sky";
+    default:
+      return "a drifting cloud stays 10 units over the land and the sea "
+             "under it, and it gets flatter where it must";
+  }
+}
+
+// True for one of the drifting clouds of CloudInSky.
+bool IsDriftingCloud(const void* mist) {
+  const uintptr_t entries = *reinterpret_cast<const uintptr_t*>(kCloudEntries);
+  if (entries == 0 || mist == nullptr) return false;
+  uint32_t count = *reinterpret_cast<const uint32_t*>(kCloudCount);
+  if (count > kCloudMost) count = kCloudMost;
+  for (uint32_t i = 0; i < count; ++i) {
+    const uintptr_t at = entries + i * kCloudEntrySize + kCloudEntryMist;
+    if (*reinterpret_cast<const void* const*>(at) == mist) return true;
+  }
+  return false;
+}
+
+// The height of the land under a point, or of the sea (y 0) out of the map
+// and over the sea.
+struct MapCoords {
+  int32_t x, z;
+  float over;  // added to the height of the land by GetLHPoint
+};
+typedef float*(__fastcall* GetLHPointFn)(const MapCoords* self, void* unused,
+                                         float* out);
+
+float LandUnder(float x, float z) {
+  if (!(x >= 0.0f && x < kMapSize && z >= 0.0f && z < kMapSize)) return 0.0f;
+  MapCoords at = {static_cast<int32_t>(x * kMapScale),
+                  static_cast<int32_t>(z * kMapScale), 0.0f};
+  float point[3] = {x, 0.0f, z};
+  reinterpret_cast<GetLHPointFn>(kGetLHPoint)(&at, nullptr, point);
+  return point[1] > 0.0f ? point[1] : 0.0f;
+}
+
+void CloudLandStep(const char* by) {
+  g_cloud_land = (g_cloud_land + 1) % kCloudLandModes;
+  ModLog("sky          : %s: cloud_land is %d now: %s, frame %llu", by,
+         g_cloud_land, CloudLandWords(g_cloud_land), ControllersFrameCount());
+}
+
+// At each frame of sky_test_land_frame the switch makes one step.
+void LandTestCheck() {
+  if (g_land_test_next >= kLandTestFrames) return;
+  const uint64_t key = g_land_test_frame[g_land_test_next];
+  if (key == 0) return;
+  if (ControllersTestFrame(key, ControllersFrameCount()) < key) return;
+  ++g_land_test_next;
+  CloudLandStep("sky_test_land_frame");
+}
+
+// The share of rows 1 and 2 of the basis that keeps a drifting cloud over
+// the land, from the basis of the mod and the scale of the engine. Counts
+// the draw for the report. 1 when the cloud does not go into the land.
+float DriftingCloudShare(const float position[3], const float basis[9],
+                         float scale, float a_engine) {
+  LARGE_INTEGER start, end;
+  QueryPerformanceCounter(&start);
+  // The rows as the engine draws them: row 0 times the scale, rows 1 and 2
+  // times A.
+  float rows[9];
+  for (int i = 0; i < 9; ++i) rows[i] = basis[i] * (i < 3 ? scale : a_engine);
+  int asked = 0;
+  const float share = sky_math::LandClearShare(
+      position, rows, kLandGap, kLandTop, kLandLeast, LandUnder, &asked);
+  QueryPerformanceCounter(&end);
+  g_land_ticks += end.QuadPart - start.QuadPart;
+  g_land_asked += static_cast<uint64_t>(asked);
+  ++g_land_draws;
+  if (share < 1.0f) {
+    ++g_land_reach;
+    if (share < g_land_least) g_land_least = share;
+  }
+  return share;
 }
 
 // At the first frame of play, the time of day of sky_test_hour.
@@ -419,6 +769,21 @@ void TraceDome(const void* mist, const float place[3], const float basis[9],
 
 void __fastcall h_MistDraw(void* self, void* unused) {
   if (TabletopHidesMist(self)) return;
+  if (self != nullptr && MistHidden(static_cast<const uint8_t*>(self))) return;
+  RoundTestCheck();
+  LandTestCheck();
+  const bool drifting = IsDriftingCloud(self);
+  if (drifting && g_cloud_land == kCloudLandHidden) {
+    ++g_land_hidden;
+    return;
+  }
+  // The flatten that a near sky cloud gets for this draw, and the value of
+  // the game to put back after it. The same for the color of a cloud that
+  // fades.
+  float* flatten_field = nullptr;
+  float flatten_game = 0.0f;
+  uint32_t* color_field = nullptr;
+  uint32_t color_game = 0;
   TestFrameCheck();
   EyeStaleDraw(0);
   if (g_head_free && self != nullptr) {
@@ -428,8 +793,10 @@ void __fastcall h_MistDraw(void* self, void* unused) {
     // The engine measures the flatten of a cloud from the stored camera.
     const float* stored = reinterpret_cast<const float*>(kStoredPosition);
     float table[3];
-    const bool table_faced =
-        g_clouds_head_free && HeadCameraTableCamera(table);
+    // The rule of the near sky clouds acts in a table frame (the table and
+    // the God view), where the eye can be near a cloud of a storm.
+    const bool in_table = HeadCameraTableCamera(table);
+    const bool table_faced = g_clouds_head_free && in_table;
     const float* eye = table_faced ? table : stored;
     // Forward, from the camera to the cloud.
     float f[3] = {position[0] - eye[0], position[1] - eye[1],
@@ -455,8 +822,24 @@ void __fastcall h_MistDraw(void* self, void* unused) {
                         u[0], u[1], u[2]};
       const float scale = *reinterpret_cast<const float*>(mist + kMistScale);
       const bool sky_cloud = (mist[kMistFlags] & kMistSkyCloud) != 0;
-      const float flatten =
+      const float flatten_own =
           *reinterpret_cast<const float*>(mist + kMistFlatten);
+      // The engine measures the flatten from the stored camera.
+      const float stored_d[3] = {position[0] - stored[0],
+                                 position[1] - stored[1],
+                                 position[2] - stored[2]};
+      const float flatten =
+          sky_cloud && in_table ? sky_math::NearFlatten(
+                          flatten_own, sqrtf(sky_math::Dot3(stored_d, stored_d)),
+                          g_round_near)
+                    : flatten_own;
+      if (flatten != flatten_own) {
+        flatten_field = reinterpret_cast<float*>(
+            static_cast<uint8_t*>(self) + kMistFlatten);
+        flatten_game = flatten_own;
+        *flatten_field = flatten;
+        ++g_rounded;
+      }
       const float a_engine =
           sky_math::MistScale(scale, sky_cloud, flatten, position, stored);
       float a = a_engine;
@@ -474,12 +857,65 @@ void __fastcall h_MistDraw(void* self, void* unused) {
         ++g_table_faced;
       }
       ++g_dome_draws;
-      if (LimitPole(a, distance, basis)) ++g_poles_limited;
+      if (sky_cloud) ++g_sky_draws;
+      const bool limited = LimitPole(a, distance, basis);
+      if (limited) ++g_poles_limited;
+      // A DRIFTING CLOUD STAYS OVER THE LAND. The share is measured with
+      // each value of cloud_land, for the report, and used with 1.
+      if (drifting && a_engine != 0.0f) {
+        const float share =
+            DriftingCloudShare(position, basis, scale, a_engine);
+        if (share < 1.0f && g_cloud_land == kCloudLandOver) {
+          for (int i = 3; i < 9; ++i) basis[i] *= share;
+          ++g_land_kept;
+        }
+      }
+      if (g_mist_log && !sky_cloud) {
+        MistLog(self, position, scale, a, flatten, mist[kMistFlags], distance,
+                stored, table_faced, limited);
+      }
+      // THE FADE OF A NEAR SKY CLOUD. In a table frame the stored camera is
+      // the render head of the pass, so the gap is from the eye.
+      float gap_cm = 1e9f, fade = 1.0f;
+      if (sky_cloud && in_table) {
+        const float from_eye = sqrtf(sky_math::Dot3(stored_d, stored_d));
+        gap_cm = sky_math::CloudGapCm(from_eye, kDomeHeight * fabsf(scale),
+                                      HandDirectRoomUnits());
+        fade = sky_math::CloudFade(gap_cm, g_fade_near_cm, g_fade_far_cm);
+        if (fade <= 0.0f) {
+          ++g_fade_clear;
+        } else if (fade < 1.0f) {
+          ++g_fade_part;
+          g_fade_part_sum += fade;
+          color_field = reinterpret_cast<uint32_t*>(
+              static_cast<uint8_t*>(self) + kMistColor);
+          color_game = *color_field;
+          uint32_t alpha = color_game >> 24;
+          if (alpha == 0) alpha = 0xFF;
+          const uint32_t faded =
+              static_cast<uint32_t>(static_cast<float>(alpha) * fade + 0.5f);
+          *color_field = (color_game & 0x00FFFFFFu) | (faded << 24);
+        } else if (g_fade_far_cm > 0.0f && gap_cm < 2.0f * g_fade_far_cm) {
+          ++g_fade_whole;
+        }
+      }
+      if (g_mist_log && sky_cloud) {
+        SkyCloudLog(self, position, scale, a, flatten_own, flatten, distance,
+                    stored, limited, gap_cm, fade);
+      }
+      if (fade <= 0.0f) {
+        // The eye is in the cloud or near it: no draw, and the flatten of
+        // the game goes back.
+        if (flatten_field != nullptr) *flatten_field = flatten_game;
+        return;
+      }
       memcpy(reinterpret_cast<void*>(kMistBasis), basis, sizeof(basis));
       if (g_trace) TraceDome(self, position, basis, scale, a_engine, eye);
     }
   }
   o_MistDraw(self, unused);
+  if (flatten_field != nullptr) *flatten_field = flatten_game;
+  if (color_field != nullptr) *color_field = color_game;
 }
 
 // The moon, in both of its calls. See THE MOON above.
@@ -523,7 +959,13 @@ void __cdecl h_MoonTurn(const float* place, float* turn, float* mesh) {
 // The overlay's meshes (overlay.cpp) and the glow at the Hand's point
 // (hand_glow.cpp) come after it: the world is drawn, the depth buffer still
 // holds it, and the interface is not drawn yet. The meshes go first, so the
-// glow shows on the overlay's hand too.
+// glow shows on the overlay's hand too. The game's bubble of the spell book
+// (book_bubble.cpp) comes after the meshes: its glass is clear, so the hand
+// behind it must be there first. The game's gesture pictures over the palm
+// (gesture_panel.cpp) come after them, with the same reason. The comfort
+// vignette (vignette.cpp) darkens each draw of the world and of the mod at
+// the edges of the view, and the head blinder (head_blinder.cpp) is the last
+// draw: it covers the view of a head under the land.
 void __cdecl h_SunGlare() {
   uint32_t* wanted = reinterpret_cast<uint32_t*>(kSunGlareWanted);
   ++g_glare_calls;
@@ -537,7 +979,12 @@ void __cdecl h_SunGlare() {
     o_SunGlare();
   }
   OverlayDraw();
+  BookBubbleDraw();
+  GesturePanelDraw();
   HandGlowDraw();
+  VignetteDraw();
+  VideoViewDrawMarks();
+  HeadBlinderDraw();
 }
 
 bool Hook(uintptr_t address, void* replacement, void** original,
@@ -566,6 +1013,67 @@ const char* GlareModeText(int mode) {
 void SkyDetailInstall() {
   if (g_hooked) return;
   g_hooked = true;
+  char path[MAX_PATH];
+  if (MistIniPath(path)) {
+    g_mist_log = GetPrivateProfileIntA("bwvr", "sky_test_mist_log", 0, path) != 0;
+    const int hide =
+        static_cast<int>(GetPrivateProfileIntA("bwvr", "sky_test_mist_hide", 0, path));
+    g_mist_hide_frame = hide > 0 ? static_cast<uint64_t>(hide) : 0;
+    const int round = static_cast<int>(
+        GetPrivateProfileIntA("bwvr", "cloud_round_near", 1000, path));
+    g_round_near = round > 0 ? static_cast<float>(round) : 0.0f;
+    const int fade_near = static_cast<int>(
+        GetPrivateProfileIntA("bwvr", "cloud_fade_near_cm", 15, path));
+    const int fade_far = static_cast<int>(
+        GetPrivateProfileIntA("bwvr", "cloud_fade_far_cm", 60, path));
+    g_fade_near_cm = fade_near > 0 ? static_cast<float>(fade_near) : 0.0f;
+    g_fade_far_cm = fade_far > 0 ? static_cast<float>(fade_far) : 0.0f;
+    if (g_fade_far_cm > 0.0f && !(g_fade_far_cm > g_fade_near_cm)) {
+      g_fade_far_cm = 0.0f;
+    }
+    ModLog("sky          : cloud_fade_near_cm=%d, cloud_fade_far_cm=%d. %s",
+           fade_near, fade_far,
+           g_fade_far_cm > 0.0f
+               ? "In the table and the God view a sky cloud is clear when the "
+                 "eye is in it or near its surface, and it comes in to its "
+                 "full draw at the far distance, in cm of the room"
+               : "Each sky cloud has its full draw");
+    const int round_test = static_cast<int>(
+        GetPrivateProfileIntA("bwvr", "sky_test_round_frame", 0, path));
+    g_round_test_frame =
+        round_test > 0 ? static_cast<uint64_t>(round_test) : 0;
+    ModLog("sky          : cloud_round_near=%d. %s", round > 0 ? round : 0,
+           round > 0 ? "A sky cloud nearer than this many units keeps its "
+                       "round shape, with the full flatten of the engine "
+                       "from 2 times it"
+                     : "Each sky cloud has the flatten of the engine");
+    const int land = static_cast<int>(
+        GetPrivateProfileIntA("bwvr", "cloud_land", kCloudLandOver, path));
+    g_cloud_land = land >= 0 && land < kCloudLandModes ? land : kCloudLandOver;
+    ModLog("sky          : cloud_land=%d. %s", g_cloud_land,
+           CloudLandWords(g_cloud_land));
+    char frames[128] = "";
+    GetPrivateProfileStringA("bwvr", "sky_test_land_frame", "", frames,
+                             sizeof(frames), path);
+    int read[kLandTestFrames] = {0, 0, 0, 0};
+    const int count = sscanf_s(frames, "%d,%d,%d,%d", &read[0], &read[1],
+                               &read[2], &read[3]);
+    for (int i = 0; i < kLandTestFrames && i < count; ++i) {
+      g_land_test_frame[i] = read[i] > 0 ? static_cast<uint64_t>(read[i]) : 0;
+    }
+    if (count > 0 && g_land_test_frame[0] != 0) {
+      ModLog("sky          : sky_test_land_frame=%s: at each of these frames "
+             "of the steps cloud_land makes one step", frames);
+    }
+    const int hide_all = static_cast<int>(
+        GetPrivateProfileIntA("bwvr", "sky_test_mist_hide_all", 0, path));
+    g_mist_hide_all_frame = hide_all > 0 ? static_cast<uint64_t>(hide_all) : 0;
+    if (g_mist_log || g_mist_hide_frame != 0 || g_mist_hide_all_frame != 0) {
+      ModLog("sky          : the test keys of the mists: sky_test_mist_log=%d, "
+             "sky_test_mist_hide=%d, sky_test_mist_hide_all=%d",
+             g_mist_log ? 1 : 0, hide, hide_all);
+    }
+  }
   Hook(kMistDraw, reinterpret_cast<void*>(&h_MistDraw),
        reinterpret_cast<void**>(&o_MistDraw), "LH3DMist::Draw");
   Hook(kSunGlare, reinterpret_cast<void*>(&h_SunGlare),
@@ -599,6 +1107,18 @@ void SkySetHeadFree(bool clouds, bool moon, int test_frame, bool trace,
 
 bool SkyHeadFree() { return g_head_free; }
 
+// The switch cloud_land of the debug page: 0 game, 1 over the land, 2 off.
+int SkyCloudLandValue() {
+  if (!g_hooked) return kDebugCannot;
+  return g_cloud_land;
+}
+
+void SkyCloudLandChange(const char* by) {
+  if (!g_hooked) return;
+  CloudLandStep(by);
+  ControllersGesturePulse(0.5f, g_cloud_land != kCloudLandGame ? 0.30f : 0.08f);
+}
+
 // 0 draws the glare through the eye camera, 1 as the game draws it, and 2
 // hides it. Other values give 0.
 void SkySetGlareMode(int mode) {
@@ -626,7 +1146,63 @@ void SkyDetailReport() {
   if (!g_hooked) return;
   if (g_dome_draws > 0) {
     ModLog("sky          : the pole limit acted on %llu of %llu cloud and "
-           "mist draws", g_poles_limited, g_dome_draws);
+           "mist draws (%llu of them sky clouds)", g_poles_limited,
+           g_dome_draws, g_sky_draws);
+  }
+  if (g_fade_clear > 0 || g_fade_part > 0) {
+    ModLog("sky          : the fade of the near sky clouds: %llu draws clear "
+           "(the eye in the cloud or within %.0f cm of the room of it), %llu "
+           "draws with a part of their alpha (a mean share of %.2f), and %llu "
+           "draws within %.0f cm that stayed whole", g_fade_clear,
+           g_fade_near_cm, g_fade_part,
+           g_fade_part > 0 ? g_fade_part_sum / g_fade_part : 0.0, g_fade_whole,
+           2.0f * g_fade_far_cm);
+  }
+  g_fade_clear = 0;
+  g_fade_part = 0;
+  g_fade_part_sum = 0.0;
+  g_fade_whole = 0;
+  const uint64_t frame_now = ControllersFrameCount();
+  const uint64_t frames =
+      frame_now > g_land_report_frame ? frame_now - g_land_report_frame : 0;
+  g_land_report_frame = frame_now;
+  if (g_land_draws > 0 || g_land_hidden > 0) {
+    LARGE_INTEGER rate;
+    QueryPerformanceFrequency(&rate);
+    const double ms = rate.QuadPart > 0
+                          ? 1000.0 * static_cast<double>(g_land_ticks) /
+                                static_cast<double>(rate.QuadPart)
+                          : 0.0;
+    ModLog("sky          : cloud_land=%d: %llu of %llu draws of a drifting "
+           "cloud went into the land or the sea, %llu of them made flatter, "
+           "the least share of their height %.2f. %llu draws not drawn. The "
+           "test asked the land %llu times in %.3f ms, %.4f ms a frame",
+           g_cloud_land, g_land_reach, g_land_draws, g_land_kept,
+           g_land_reach > 0 ? g_land_least : 1.0f, g_land_hidden,
+           g_land_asked, ms, frames > 0 ? ms / frames : 0.0);
+  }
+  g_land_draws = 0;
+  g_land_reach = 0;
+  g_land_kept = 0;
+  g_land_hidden = 0;
+  g_land_asked = 0;
+  g_land_least = 1.0f;
+  g_land_ticks = 0;
+  if (g_rounded > 0) {
+    ModLog("sky          : %llu draws of a near sky cloud had less flatten "
+           "(cloud_round_near=%.0f)", g_rounded, g_round_near);
+  }
+  g_rounded = 0;
+  if (g_mist_log && g_sky_logged_draws > 0) {
+    ModLog("sky cloud    : %llu draws of a sky cloud, the nearest %.0f units "
+           "from the stored camera, the lowest %.0f units over it",
+           g_sky_logged_draws, g_sky_nearest, g_sky_lowest);
+  }
+  g_sky_logged_draws = 0;
+  if (g_mist_hide_frame != 0 || g_mist_hide_all_frame != 0) {
+    ModLog("sky          : the test keys of the mists hid %llu draws of a "
+           "mist that is not a sky cloud and %llu draws of a sky cloud",
+           g_mist_hidden, g_sky_hidden);
   }
   if (g_glare_wanted > 0) {
     ModLog("sky          : %llu of %llu passes asked for a sun glare, %s",
@@ -636,6 +1212,18 @@ void SkyDetailReport() {
     ModLog("sky          : %llu of %llu cloud and mist draws faced the table "
            "camera", g_table_faced, g_dome_draws);
   }
+  if (g_mist_log) {
+    ModLog("sky mist     : %llu draws of a mist that is not a sky cloud, the "
+           "nearest %.0f units from the point that it faces, the widest dome "
+           "%.0f units. The test keys hid %llu draws of such mists and %llu "
+           "draws of sky clouds", g_mist_draws, g_mist_nearest, g_mist_widest,
+           g_mist_hidden, g_sky_hidden);
+  }
+  g_mist_draws = 0;
+  g_mist_hidden = 0;
+  g_sky_hidden = 0;
+  g_mist_nearest = 0.0f;
+  g_mist_widest = 0.0f;
   if (g_moon_turns > 0) {
     ModLog("sky          : the moon was turned %llu times, %llu of them with "
            "world up", g_moon_turns, g_moon_level);
@@ -654,6 +1242,7 @@ void SkyDetailReport() {
            "to the next", g_moon_tilt_most, g_moon_step_most);
   }
   g_dome_draws = 0;
+  g_sky_draws = 0;
   g_poles_limited = 0;
   g_glare_calls = 0;
   g_glare_wanted = 0;

@@ -32,6 +32,34 @@ inline int NextRule(int value) {
   return value >= kRuleController ? kRuleOff : value + 1;
 }
 
+// move_type: how the stick moves the player.
+const int kTypeWalk = 0;  // over the land (Walk, Speed and Step)
+const int kTypeFly = 1;   // along the forward direction in 3D (Fly)
+
+// The value of the key from a number: 1 is the fly, each other value the
+// walk.
+inline int Type(int value) { return value == kTypeFly ? kTypeFly : kTypeWalk; }
+
+// THE KINDS OF MOVE for the test switch: the walk that follows the land
+// (move_type=0, move_stick_follow_land=1), the walk that keeps its height
+// (move_type=0, move_stick_follow_land=0), and the fly (move_type=1).
+const int kKindWalk = 0;
+const int kKindWalkLevel = 1;
+const int kKindFly = 2;
+
+inline int Kind(int type, int follow_land) {
+  if (Type(type) == kTypeFly) return kKindFly;
+  return follow_land != 0 ? kKindWalk : kKindWalkLevel;
+}
+
+// The next kind for the test switch: from the walk to the level walk, to the
+// fly and back to the walk.
+inline int NextKind(int kind) {
+  return kind == kKindWalk ? kKindWalkLevel
+         : kind == kKindWalkLevel ? kKindFly
+                                  : kKindWalk;
+}
+
 // THE PUSH. The stick as a vector, x to the right and y forward, with the
 // dead zone and the curve of the smooth zoom (zoom_math::StickShare) along
 // its length. So a push in each direction has the same dead zone, a small
@@ -264,6 +292,294 @@ inline float FollowStep(LandFollow* follow, float land, float way,
   follow->stage[0] = land + gap0 * e;
   follow->stage[1] = land + gap1 * e + gap0 * x * e;
   return follow->stage[1] - before;
+}
+
+// WHEN THE FILTER STARTS AGAIN (move_stick_follow_place). The filter holds
+// land heights of the place where the last walk stopped. When the view went
+// to a different place since then, those heights are not the land under the
+// head, and a filter that went on would move the view up or down by the
+// difference in the next walk. So the filter starts again at the land under
+// the head (FollowStart) when:
+//
+//   rule 1  the view moved since the last walk (moved), a camera of the game
+//           put the view at a place (placed), or the room was recentered
+//           (recentered). A turn about the head is not a move: the head
+//           stays over the same land, so the filter stays.
+//   rule 0  the version of the view changed (changed): each move and each
+//           turn. A place at a camera of the game and a recenter do not
+//           change the version.
+//
+// have is false before the first walk.
+const int kFollowPlaceVersion = 0;
+const int kFollowPlaceEach = 1;
+
+inline bool FollowRestart(int rule, bool have, bool changed, bool moved,
+                          bool placed, bool recentered) {
+  if (!have) return true;
+  if (rule == kFollowPlaceVersion) return changed;
+  return moved || placed || recentered;
+}
+
+// THE SPEED RAMP (move_stick_ramp=1). While the stick is pushed to
+// kRampShare of the top speed or more, the time of that push counts. For
+// the first kRampHoldSeconds nothing changes. Then the speed doubles each
+// kRampDoubleSeconds, up to `most` times the speed of the push:
+//
+//     factor = 2 ^ ((held - 1 s) / 2 s), at most `most`
+//
+// A push under kRampShare sets the time to 0, so the speed goes back to the
+// speed of the push in that frame. A frame with no push stops the walk, as
+// before. At the villager scale (1 unit for each meter) a full push is 1.5
+// units each second. With `most` 32 it is 48 units each second after 11 s,
+// and 1000 units of the land take about 30 s from rest.
+const float kRampShare = 0.9f;
+const float kRampHoldSeconds = 1.0f;
+const float kRampDoubleSeconds = 2.0f;
+
+// The time of the full push after a frame: before plus the time of the
+// frame while share is kRampShare or more, else 0.
+inline float RampSeconds(float before, float share, float seconds) {
+  if (!(share >= kRampShare)) return 0.0f;
+  if (!(seconds > 0.0f)) return before;
+  return before + seconds;
+}
+
+// The factor of the speed after `held` seconds of a full push. 1 for a most
+// of 1 or less.
+inline float RampFactor(float held, float most) {
+  if (!(most > 1.0f) || !(held > kRampHoldSeconds)) return 1.0f;
+  const float factor =
+      powf(2.0f, (held - kRampHoldSeconds) / kRampDoubleSeconds);
+  return factor > most ? most : factor;
+}
+
+// THE SPEED BY THE SCALE (move_stick_scale=1). The speed of the stick in the
+// room is multiplied by a smooth function of the scale of the God view, so
+// a player at the villager scale crosses a town in some seconds, and a
+// player over a small land moves a little slower:
+//
+//     factor = (ref / scale) ^ power, kept between low and high
+//
+// With ref 16 units per meter, power 0.5, low 0.6 and high 4 the factor is
+// 4 at 1 unit per meter, 1.46 at the life size scale (7.5), 1 at 16, 0.73
+// at 30, and 0.6 from 44.4 units per meter up. The factor depends on the
+// scale only, so it never moves the view while the stick is at rest. The
+// speed ramp multiplies the result, with its own cap. 1 for a scale or a ref
+// that is not more than 0.
+inline float ScaleFactor(float scale, float ref, float power, float low,
+                         float high) {
+  if (!(scale > 0.0f) || !(ref > 0.0f)) return 1.0f;
+  float factor = powf(ref / scale, power);
+  if (factor < low) factor = low;
+  if (factor > high) factor = high;
+  return factor;
+}
+
+// THE FLY (move_type=1). The stick moves the view along the forward
+// direction of the head or of the controller in 3D, so a push while the
+// player looks or points down goes down. The stick to the side moves level,
+// at right angles to that direction. The view does not follow the land.
+// The height has a floor (FlyFloor) and a ceiling (FlyCeiling).
+
+// A unit vector from a direction. False for a direction with no length or
+// with a part that is not a number, and then out is not written.
+inline bool Unit(const float direction[3], float out[3]) {
+  const float length =
+      sqrtf(direction[0] * direction[0] + direction[1] * direction[1] +
+            direction[2] * direction[2]);
+  if (!(length > 1e-6f)) return false;
+  for (int i = 0; i < 3; ++i) out[i] = direction[i] / length;
+  return true;
+}
+
+// THE LEVEL RIGHT of a fly, as x and z of the room: 90 degrees to the right
+// of the flat part of forward. A forward that points almost straight up or
+// down has a flat part shorter than `least`, and then the right is
+// `fallback` (the level right of the head).
+inline void FlyRight(const float forward[3], const float fallback[2],
+                     float least, float out[2]) {
+  const float flat = sqrtf(forward[0] * forward[0] + forward[2] * forward[2]);
+  if (flat >= least && flat > 0.0f) {
+    out[0] = forward[2] / flat;
+    out[1] = -forward[0] / flat;
+    return;
+  }
+  out[0] = fallback[0];
+  out[1] = fallback[1];
+}
+
+// THE SPEED OF A FLY IN THE ROOM, in meters for each second, x, y and z.
+// forward is a unit direction in the room, right is its level right
+// (FlyRight), push is the stick (Push), and top is the speed of a full push.
+inline void FlySpeed(const float forward[3], const float right[2],
+                     const float push[2], float top, float out[3]) {
+  out[0] = top * (push[1] * forward[0] + push[0] * right[0]);
+  out[1] = top * push[1] * forward[1];
+  out[2] = top * (push[1] * forward[2] + push[0] * right[1]);
+}
+
+// THE STEP OF ONE FRAME OF A FLY, in meters of the room. A time that is not
+// above 0 gives no step.
+inline void FlyStep(const float speed[3], float seconds, float out[3]) {
+  out[0] = out[1] = out[2] = 0.0f;
+  if (!(seconds > 0.0f)) return;
+  for (int i = 0; i < 3; ++i) out[i] = speed[i] * seconds;
+}
+
+// THE VIEW AFTER A STEP OF A FLY. The player moves `step` in the room, so
+// the waist point G goes to the world point that was `step` from it:
+//
+//     G' = G + s * Lt * step
+//
+// The heading and the scale stay. A step up is a move of G up, so the land
+// goes down in the room.
+inline void Fly(const table_math::TablePose& pose, const float step[3],
+                table_math::TablePose* out) {
+  float basis[9];
+  table_math::Basis(pose.heading, basis);
+  const float across[3] = {step[0] * pose.scale, step[1] * pose.scale,
+                           step[2] * pose.scale};
+  *out = pose;
+  table_math::Along(pose.center, basis, across, out->center);
+}
+
+// THE CEILING OF A FLY, in world units, so that a small scale does not get
+// a low ceiling: the head (head_y, in the room) stays at most ceiling_units
+// over the land under it. The far zoom (4000 units for each meter, the land
+// 2.5 m below the head) puts the head 10000 units over the land, so that
+// height is one that the view already draws. As in GodGroundHeight
+// (table_math.h), the result never moves the height farther out than
+// `current` already is, so at the ceiling the height stops and never jumps.
+//
+//     under(C.y) = room_y + (land - C.y) / s
+//     ceiling: C.y <= land - (head_y - room_y) * s + ceiling_units
+const float kFlyCeilingUnits = 10000.0f;
+
+inline float FlyCeiling(float wanted, float current, float land,
+                        float room_y, float scale, float head_y,
+                        float ceiling_units) {
+  if (!(scale > 0.0f)) return current;
+  float high = land - (head_y - room_y) * scale + ceiling_units;
+  if (current > high) high = current;
+  return wanted > high ? high : wanted;
+}
+
+// THE FLOOR OF A FLY. The clearance is the measure of the head blinder
+// (blinder_math::Clearance): the head over the highest land at the head
+// point and at four points 6 cm around it, in meters of the room. The
+// overlay starts at 5 cm (blinder_math::kStartMeters), so the floor is
+// kFlyClearMeters, 5 cm over that. `after` is the clearance at the place of
+// the head after the step, and `before` at the place before it. When the
+// step brings the head nearer than the floor, the view goes up until the
+// head is at the floor: so a fly across a rising slope slides up along it.
+// A head that is already nearer than the floor (the player bent down into
+// the land) is held at its clearance of before, and is not lifted out.
+// Gives the height of the waist point to use.
+const float kFlyClearMeters = 0.10f;
+
+inline float FlyFloor(float center_y, float after, float before, float least,
+                      float scale) {
+  if (!(scale > 0.0f) || !(after == after) || !(before == before)) {
+    return center_y;
+  }
+  const float floor = before < least ? before : least;
+  if (after >= floor) return center_y;
+  return center_y + (floor - after) * scale;
+}
+
+// THE SLIDE OF A FLY PAST A SOLID (fly_solid_slide=1). dist(q) is the
+// distance of a world point from the nearest solid (a signed distance:
+// solid_math::Least), p is the head now, and step is the step of the frame,
+// in the same units. need is the shell: the head stays `need` out of the
+// solid, or at its distance now when it is already nearer.
+//
+// A step that stays out of the shell goes as it is (kSlideFree). Else the
+// part of the step that goes into the solid comes off: the part along the
+// outward direction n of the solid at the head (the gradient of dist, with
+// central differences of h), when it points in. What stays is the part
+// along the solid, so a push at a slant goes round a tree trunk, a push up
+// at a wall goes up the wall and over the roof. A second pass does the same
+// at the end of that step, for a corner. When the step still goes into the
+// shell, it goes as far along as the shell lets it (20 halvings, as
+// zoom_math::StepShare). The slide never adds a part away from the solid,
+// and a step of 0 stays 0. When the part along the solid is less than
+// kSlideLeast of the step (a push straight at the middle of a solid), the
+// result is kSlideStop. With slide false the step only goes as far as the
+// shell lets it along its own direction (the stop of a zoom step), and the
+// result is kSlideStop.
+const int kSlideFree = 0;
+const int kSlideAlong = 1;
+const int kSlideStop = 2;
+const float kSlideLeast = 0.01f;
+
+template <typename Dist>
+inline bool Outward(Dist dist, const float p[3], float h, float out[3]) {
+  for (int i = 0; i < 3; ++i) {
+    float a[3] = {p[0], p[1], p[2]}, b[3] = {p[0], p[1], p[2]};
+    a[i] += h;
+    b[i] -= h;
+    out[i] = dist(a) - dist(b);
+  }
+  const float length =
+      sqrtf(out[0] * out[0] + out[1] * out[1] + out[2] * out[2]);
+  if (!(length > 0.0f)) return false;
+  for (int i = 0; i < 3; ++i) out[i] /= length;
+  return true;
+}
+
+template <typename Dist>
+inline int FlySlide(Dist dist, const float p[3], const float step[3],
+                    float need, float h, bool slide, float out[3]) {
+  for (int i = 0; i < 3; ++i) out[i] = step[i];
+  const auto after = [&](const float s[3]) {
+    const float q[3] = {p[0] + s[0], p[1] + s[1], p[2] + s[2]};
+    return dist(q);
+  };
+  const float now = dist(p);
+  const float floor = now < need ? now : need;
+  if (!(after(step) < floor)) return kSlideFree;
+  const float full =
+      sqrtf(step[0] * step[0] + step[1] * step[1] + step[2] * step[2]);
+  int result = kSlideStop;
+  if (slide) {
+    for (int pass = 0; pass < 2; ++pass) {
+      float at[3] = {p[0], p[1], p[2]};
+      if (pass == 1) {
+        for (int i = 0; i < 3; ++i) at[i] += out[i];
+      }
+      float n[3];
+      if (!Outward(dist, at, h, n)) break;
+      const float in = out[0] * n[0] + out[1] * n[1] + out[2] * n[2];
+      if (in < 0.0f) {
+        for (int i = 0; i < 3; ++i) out[i] -= in * n[i];
+      }
+      if (!(after(out) < floor)) break;
+    }
+    const float along =
+        sqrtf(out[0] * out[0] + out[1] * out[1] + out[2] * out[2]);
+    result = along >= kSlideLeast * full ? kSlideAlong : kSlideStop;
+  }
+  if (after(out) < floor) {
+    float lo = 0.0f, hi = 1.0f;
+    for (int i = 0; i < 20; ++i) {
+      const float mid = 0.5f * (lo + hi);
+      const float s[3] = {out[0] * mid, out[1] * mid, out[2] * mid};
+      if (after(s) >= floor) {
+        lo = mid;
+      } else {
+        hi = mid;
+      }
+    }
+    for (int i = 0; i < 3; ++i) out[i] *= lo;
+  }
+  return result;
+}
+
+// The degrees of a direction below level, for the log: up is less than 0.
+inline float DegreesDown(const float direction[3]) {
+  const float flat =
+      sqrtf(direction[0] * direction[0] + direction[2] * direction[2]);
+  return atan2f(-direction[1], flat) * 57.29578f;
 }
 
 // A direction on the land in degrees, for the log: 0 is straight ahead in the

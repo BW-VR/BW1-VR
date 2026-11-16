@@ -75,6 +75,17 @@
 //                        (OwnedStale). 0 the hint of the game takes the place
 //                        of the prompt. Ctrl and Home change it, with
 //                        test_keys=1
+//   hint_held_latch=1    1 the card keeps one text for one object in the
+//                        Hand: a fetch in work ends in the frame in which
+//                        the Hand holds the object, and the card has the
+//                        words of the mod for that object until the game
+//                        gives its hint for it. A far target that is not
+//                        locked is no context while the Hand holds an
+//                        object, and a frame with no words for the same
+//                        object in the Hand keeps the words of the frame
+//                        before, for kHeldGapSeconds at most. 0 each frame
+//                        has the words of its own context, and a fetch in
+//                        work waits for the hint of the game
 //   text_click=1         0 gives the prompt "Continue" the rule of each other
 //                        hint of the left button (text_click.cpp)
 //   prompt_moves=1       1 the prompt of the land has the line of the walk
@@ -92,6 +103,18 @@
 //                        shows always, and the mod writes no counts
 //   hint_counts_test_file  a desktop test puts the file of the counts at
 //                        this full path, in the folder of its run
+//   hint_card_style=1    1 the card is a parchment scroll with dark ink and a
+//                        wax seal for each button word (card_scroll.h). 0 the
+//                        plain dark card with white Segoe UI letters
+//   hint_card_pictures=1  1 a line of a button has a small picture of the
+//                        controller with that button lit, before the button
+//                        word (hint_picture_math.h). 0 the button word only.
+//                        The default comes from hint_controller (1 gives 1,
+//                        0 gives 0, hint_model_math.h)
+//   hint_card_save_test=0  1 saves each new picture of a card as
+//                        bwvr-hintcard-draw-NNN-NNNNN.bmp (40 at most)
+//   hint_card_fonts_test_dir  a desktop test loads the fonts of the scroll
+//                        from this folder, not from bwvr-fonts
 //
 // With no headset (the desktop test) the route runs too. A capture frame
 // saves each card as bwvr-hintcard-right-NNNNN.bmp or
@@ -104,21 +127,30 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "bookmark_aim.h"
 #include "../vr/xr_screen.h"
+#include "card_scroll.h"
 #include "controller_hints.h"
 #include "controllers.h"
 #include "creature_command.h"
+#include "creature_command_math.h"
 #include "debug_menu.h"
 #include "far_grab.h"
 #include "forest_take.h"
 #include "hint_card.h"
 #include "hint_card_math.h"
 #include "hint_learn_math.h"
+#include "hint_model.h"
+#include "hint_model_math.h"
+#include "hint_picture_math.h"
 #include "miracle.h"
+#include "near_math.h"
 #include "radial_menu.h"
+#include "spell_book.h"
 #include "temple.h"
 #include "teleport.h"
 #include "text_click.h"
+#include "text_fit.h"
 #include "tree_plant_math.h"
 #include "village.h"
 
@@ -129,21 +161,35 @@ extern void ModLog(const char* format, ...);
 // real hand.
 bool ControllersCardPose(int which, float grip_position[3],
                          float grip_orientation[4], float head[3], bool* left);
+// The orientation of the drawn hand of the same hand (hand_angle).
+bool ControllersHandOrientation(int which, float out[4]);
 int ControllersHandCm();
 int ControllersHandScalePct();
 void ControllersGesturePulse(float amplitude, float seconds);
 // controllers.cpp: the grip of the pointing hand is closed, as the pump last
 // saw it.
 bool ControllersGripClosed();
+// The press of the open hand on the Creature (creature_stroke_open), and
+// whether the open hand slaps too (creature_open_slap).
+bool ControllersOpenStrokeOn();
+bool ControllersOpenSlap();
 // controllers.cpp: a push of the stick of the other hand moves the player now.
 bool ControllersWalkPossible();
 // hand_direct.cpp: the Hand's point and what a press does there.
 bool HandDirectGlowFacts(float point[3], float* length, int32_t* mode,
                          bool* holding, int* eye, uint64_t* frame);
+// hand_direct.cpp: the CHand that the controller places.
+void* HandDirectHand(bool* active);
 // hand_direct.cpp: what the opening of the grip does with a tree in the Hand
 // (tree_plant_math.h), or -1. And the A/B key of that text.
 int HandDirectTreeVerdict();
 bool HandDirectPalmOff();
+// hand_direct.cpp, one target (docs/grab.md): the object that a press of the
+// grip acts on at the Hand's point, or null. acts is false when the influence
+// stops the press. And what a press of the grip does there, as a
+// near_math::Kind.
+void* HandDirectNearTargetObject(bool* acts);
+int HandDirectPressKind();
 void HandDirectTreeHintToggle();
 void HandDirectRootsToggle();
 // tabletop.cpp: the God view or the table makes the picture.
@@ -168,9 +214,16 @@ bool g_toggled_off = false;  // the test key
 bool g_test_keys = false;    // test_keys
 int g_timing = 1;            // prompt_timing, and its test key
 int g_words = 3;             // hint_words, and its test key
+int g_held_latch = 1;        // hint_held_latch
 int g_moves = 1;             // prompt_moves, and its test key
-int g_learn = 1;             // hint_learn
+int g_learn = 1;             // hint_learn, or the game's ToolTips option
+bool g_learn_game = true;    // hints_follow_game
+int g_learn_level = -1;      // the ToolTips option that g_learn follows
 bool g_palm_check = true;    // hint_palm_check (GameHintTrue, palm_off)
+int g_style = 1;             // hint_card_style
+int g_pictures = 1;          // hint_card_pictures
+bool g_save_test = false;    // hint_card_save_test
+bool g_saving = true;        // hint_card_saving
 // A hint of the game that a prompt owned does not show for this long after
 // the prompt went (hint_words=3, hint_card_math.h, OwnedStale).
 const double kOwnedSeconds = 0.25;
@@ -286,14 +339,51 @@ void ReadSettings() {
   g_timing = IniKey("prompt_timing", 1) != 0 ? 1 : 0;
   g_words = IniKey("hint_words", 3);
   if (g_words < 0 || g_words > 3) g_words = 3;
+  g_held_latch = IniKey("hint_held_latch", 1) != 0 ? 1 : 0;
+  ModLog("hint card    : hint_held_latch=%d, %s", g_held_latch,
+         g_held_latch != 0
+             ? "the card keeps one text for one object in the Hand: no "
+               "prompt of a fetch for the object in the Hand, and a frame "
+               "with no words keeps the words of the frame before for 0.10 s"
+             : "each frame has the words of its own context");
   g_moves = IniKey("prompt_moves", 1) != 0 ? 1 : 0;
-  g_learn = IniKey("hint_learn", 1) != 0 ? 1 : 0;
+  g_learn_game = IniKey("hints_follow_game", 1) != 0;
+  // With hints_follow_game=1 the game's ToolTips option chooses the rule
+  // (HintCardFollowTooltips). Until the game has its options, a line goes
+  // away when the player knows it, as with the default option of the game.
+  g_learn = g_learn_game ? 1 : (IniKey("hint_learn", 1) != 0 ? 1 : 0);
   g_size_pct = IniKey("hint_card_size_pct", 100);
   g_palm_check = IniKey("hint_palm_check", 1) != 0;
   ModLog("hint card    : hint_palm_check=%d, %s", g_palm_check ? 1 : 0,
          g_palm_check ? "a grip hint of the game over the land does not show "
                         "while a press there acts on no object"
                       : "a grip hint of the game over the land shows");
+  g_style = IniKey("hint_card_style", 1) != 0 ? 1 : 0;
+  // The switch of the launcher gives the default (hint_model_math.h,
+  // PicturesOfSwitch). hint_card_pictures itself still acts, for a test.
+  g_pictures = IniKey("hint_card_pictures",
+                      hint_model::PicturesOfSwitch(
+                          IniKey("hint_controller", 1))) != 0
+                   ? 1
+                   : 0;
+  ModLog("hint card    : hint_card_pictures=%d, %s", g_pictures,
+         g_pictures != 0 ? "a line of a button has a small picture of the "
+                           "controller with that button lit, before the "
+                           "button word"
+                         : "the lines have the button words only");
+  g_save_test = IniKey("hint_card_save_test", 0) != 0;
+  g_saving = IniKey("hint_card_saving", 1) != 0;
+  ModLog("hint card    : hint_card_saving=%d, %s", g_saving ? 1 : 0,
+         g_saving ? "while the game saves, the card of the pointing hand says "
+                    "\"Saving...\""
+                  : "the cards say nothing while the game saves");
+  ModLog("hint card    : hint_card_style=%d, %s%s", g_style,
+         g_style != 0 ? "the card is a parchment scroll with dark ink and a wax "
+                        "seal for each button word"
+                      : "the card is dark with white letters",
+         g_save_test ? ". hint_card_save_test=1 saves each new picture of a "
+                       "card"
+                     : "");
   if (g_size_pct < 50) g_size_pct = 50;
   if (g_size_pct > 200) g_size_pct = 200;
   ModLog("hint card    : hint_card=%d, %s. prompts=%d, %s. The size is %d "
@@ -335,6 +425,12 @@ void ReadSettings() {
                         "of A shows only while a press of A can move the player"
                       : "the prompt of the land has no line for the walk with "
                         "the stick, and the line of A shows in each case");
+  if (g_learn_game) {
+    ModLog("hint card    : hints_follow_game=1, the ToolTips option of the "
+           "game chooses whether a line goes away when the player knows it. "
+           "All ToolTips: each line shows always. The other options: a line "
+           "goes away. hint_learn does not act");
+  }
   if (g_learn == 0) {
     ModLog("hint card    : hint_learn=0, each line of the cards shows always. "
            "The mod counts no actions and writes no file of the counts");
@@ -369,11 +465,12 @@ const int kMaxLines = 4;
 const int kMaxGameLines = 3;
 struct Line {
   wchar_t button[24];  // empty for a line with no button
-  wchar_t text[48];
+  wchar_t text[96];
   int tone;
   uint32_t code;       // the mouse button code of a hint of the game, or 0
   bool click;          // the prompt of a text that waits for a click
   int skill;           // the action that a prompt teaches, or kNoSkill
+  int picture;         // the picture of the button (PictureOf), or 0
 };
 struct Content {
   int count;
@@ -394,6 +491,7 @@ bool SameContent(const Content& a, const Content& b) {
   if (a.count != b.count) return false;
   for (int i = 0; i < a.count; ++i) {
     if (a.line[i].tone != b.line[i].tone ||
+        a.line[i].picture != b.line[i].picture ||
         wcscmp(a.line[i].button, b.line[i].button) != 0 ||
         wcscmp(a.line[i].text, b.line[i].text) != 0) {
       return false;
@@ -426,6 +524,45 @@ bool g_have_facts = false;
 uint64_t g_facts_frame = 0;
 int32_t g_facts_mode = 0;
 bool g_facts_holding = false;
+void* g_facts_held = nullptr;  // the object in the Hand at that time
+
+// ONE TEXT FOR ONE OBJECT IN THE HAND (hint_held_latch). The context of a
+// frame comes from the facts of that frame. The game gives its hint for the
+// object in the Hand 0 to 6 frames after the Hand has it, and while the aim
+// turns it can give no hint for the grip for a frame or two. So:
+//   - THE OBJECT OF A FETCH. A fetch in work ends in the frame in which the
+//     Hand holds the object: it does not wait for the hint of the game, and
+//     it does not start again while the Hand holds an object. From that
+//     frame until the game gives a new hint for the grip (kTakeKeepSeconds
+//     at most), the line of the grip has the words of the mod for the object
+//     in the Hand (HoldWords): the words of a tree that the opening does not
+//     plant, as the card gives them to the hint of the game, the line of a
+//     take from a forest, or the line of the object in the Hand. The hint
+//     of the take that the prompt owned does not show (OwnedStale).
+//   - A far target that is not locked is no context while the Hand holds an
+//     object: the far grab is not ready then, and its state is one frame
+//     old.
+//   - A frame with no words on the pointing card, with the same object in
+//     the Hand as the last frame with words, keeps those words for
+//     kHeldGapSeconds at most. A card with no words between two hints of
+//     the game for the same object is a blink.
+const int kHandHeldObject = 0x4904;  // CHand: the object in the Hand
+const double kHeldGapSeconds = 0.10;
+void* g_hold_object = nullptr;    // the object of the fetch, in the Hand
+double g_hold_since = 0.0;
+uint64_t g_hold_frame = 0;
+uint64_t g_hold_frames = 0;       // frames with the words of the mod
+uint64_t g_holds = 0;
+Content g_held_words = {};
+void* g_held_words_object = nullptr;
+double g_held_words_time = 0.0;
+bool g_held_gap = false;          // the card keeps the words in this gap
+uint64_t g_held_gap_start = 0;
+uint64_t g_held_gaps = 0;         // gaps that the card kept words in
+uint64_t g_held_gap_frames = 0;
+uint64_t g_far_held_frames = 0;   // frames with a far target and an object
+int g_held_logs = 0;
+const int kMaxHeldLogs = 60;
 
 // --- the prompts -----------------------------------------------------------------
 
@@ -460,8 +597,19 @@ enum Context {
   // The Hand's point is at the door of the Temple or at a leash post, on the
   // land (temple.cpp).
   kCtxTempleLand,
+  // The spell book is open at the other hand (spell_book.cpp), or the game
+  // refused a miracle of the book a moment ago. Its lines name the miracle
+  // under the pointing hand.
+  kCtxBook,
+  // The seal with the plus of the sheet of the places waits for the grip at
+  // the aim of the pointing hand (bookmark_aim.cpp).
+  kCtxMark,
   kContexts
 };
+// PromptStep counts the shows of each context, and it takes a context past
+// its table for no context.
+static_assert(kContexts <= hint_card_math::kMaxContexts,
+              "each context has a place in the table of PromptStep");
 
 const char* const kContextName[kContexts] = {
     "none",   "a dialog box",  "the teleport aim", "a far target",
@@ -470,7 +618,8 @@ const char* const kContextName[kContexts] = {
     "the leashed Creature", "the aim of a Creature command",
     "the land, with the leash on", "a leash that is tied to an object",
     "a miracle in the Hand", "the totem or a miracle icon",
-    "a room of the Temple", "the door of the Temple or a leash post"};
+    "a room of the Temple", "the door of the Temple or a leash post",
+    "the spell book", "the aim of a new bookmark"};
 
 // The dwell, the hold and the count of each context (PromptStep).
 const hint_card_math::PromptRule kRules[kContexts] = {
@@ -492,6 +641,8 @@ const hint_card_math::PromptRule kRules[kContexts] = {
     {0.0f, 5.0f, 4},   // village: it always shows too
     {0.5f, 6.0f, 3},   // a room of the Temple
     {0.3f, 5.0f, 4},   // the door of the Temple or a leash post
+    {0.0f, 5.0f, 4},   // the spell book: it always shows too
+    {0.0f, 5.0f, 4},   // the aim of a new bookmark: it always shows too
 };
 
 // True for a context about a thing that the Hand or the aim is on. The
@@ -511,6 +662,8 @@ bool IsTargetContext(int context) {
     case kCtxMiracle:
     case kCtxVillage:
     case kCtxTempleLand:
+    case kCtxBook:
+    case kCtxMark:
       return true;
     default:
       return false;
@@ -603,14 +756,21 @@ bool TriggerDragsLand() {
 
 int ContextNow() {
   float from[3], to[3], units = 0.0f;
+  // The aim of a new bookmark has the ray of a menu, and its own lines.
+  {
+    MiracleLine lines[kMiracleLines];
+    if (BookmarkAimHint(lines) > 0) return kCtxMark;
+  }
   // The ray of a dialog box, or of a room of the Temple. A dialog box in the
-  // Temple keeps the lines of a dialog box.
-  if (ControllersMenuRay(from, to, &units)) {
+  // Temple keeps the lines of a dialog box. The ray of the circle of a Storm
+  // or a shield keeps the lines of the miracle.
+  if (ControllersMenuRay(from, to, &units) && !ControllersRayIsMiracleAim()) {
     return TempleCardRoom() >= 0 ? kCtxTemple : kCtxDialog;
   }
   if (TeleportAiming()) return kCtxTeleport;
   {
     MiracleLine lines[kMiracleLines];
+    if (SpellBookHint(lines) > 0) return kCtxBook;
     if (MiracleHint(lines) > 0) return kCtxMiracle;
     if (VillageHint(lines) > 0) return kCtxVillage;
     if (TempleLandHint(lines) > 0) return kCtxTempleLand;
@@ -619,7 +779,16 @@ int ContextNow() {
   if (command == kCommandHintAim) return kCtxCommandAim;
   FarDraw far_draw = {};
   if (FarGrabDrawState(&far_draw) && far_draw.active && far_draw.valid) {
-    return kCtxFar;
+    const bool held = g_have_facts && g_facts_frame == g_frame &&
+                      g_facts_holding;
+    if (!(g_held_latch != 0 && held && !far_draw.locked)) return kCtxFar;
+    ++g_far_held_frames;
+    if (g_held_logs < kMaxHeldLogs) {
+      ++g_held_logs;
+      ModLog("hint card    : frame %llu, the far target %p is no context: the "
+             "Hand holds %p, and the far grab has no lock (hint_held_latch=1)",
+             g_frame, far_draw.target, g_facts_held);
+    }
   }
   if (command == kCommandHintObject) return kCtxCommand;
   if (command == kCommandHintCreature) return kCtxLeashOff;
@@ -651,7 +820,7 @@ int WordHand(int word) {
   // The trigger of the commands is on the other hand with left_leash=1.
   if (word == kWordCommand) return ControllersLeftLeash() ? kOther : kPointing;
   return word == kWordMenu || word == kWordWorld || word == kWordRing ||
-                 word == kWordWalk
+                 word == kWordWalk || word == kWordBook
              ? kOther
              : kPointing;
 }
@@ -733,6 +902,55 @@ void AddLeashBackPrompts(Content cards[kHands]) {
   } else {
     AddPromptTwice(cards, kWordCommand, L"Take the leash back", kToneAction);
   }
+}
+
+// THE LINE OF THE GRIP AT A TARGET OF A COMMAND (command_look=1). The grip
+// has no far target here. So the line of the grip says what the grip does at
+// the Hand's point, or why it does nothing at the target of the trigger: the
+// target is past the range of the grab from a distance (far_grab_max_m), or
+// the Hand cannot take it (the object that holds the tied leash, a house,
+// a target outside the influence). The line of nothing has the tone of the
+// other buttons, not the gold of the grip.
+void AddCommandGripPrompt(Content cards[kHands]) {
+  if (!CreatureCommandLookOn()) return;
+  bool acts = false;
+  if (HandDirectNearTargetObject(&acts) != nullptr && acts) {
+    switch (HandDirectPressKind()) {
+      case near_math::kHold:
+        AddPrompt(cards, kWordGrab, L"Take", kToneGrab,
+                  hint_learn_math::kSkillTake);
+        return;
+      case near_math::kTake:
+        AddPrompt(cards, kWordGrab, L"Hold to collect", kToneGrab,
+                  hint_learn_math::kSkillCollect);
+        return;
+      case near_math::kTap:
+        AddPrompt(cards, kWordGrab, L"Activate", kToneGrab);
+        return;
+      default:
+        break;
+    }
+  }
+  AddPrompt(cards, kWordGrab,
+            CreatureCommandGripAt() == command_math::kGripTooFar
+                ? L"Too far to take"
+                : L"Cannot take",
+            kToneOther);
+}
+
+// THE WORDS OF THE MOD for the object in the Hand (hint_held_latch), while
+// the game has no hint for it yet: the words of a tree that the opening does
+// not plant (the card gives them to the hint of the game too), the line of a
+// take from a forest, or the line of the object in the Hand.
+const wchar_t* HoldWords() {
+  const int verdict = HandDirectTreeVerdict();
+  const wchar_t* tree =
+      verdict > 0 ? tree_plant_math::VerdictText(verdict) : nullptr;
+  if (tree != nullptr) return tree;
+  const wchar_t* forest = ForestTakeHint();
+  if (forest != nullptr) return forest;
+  if (verdict == tree_plant_math::kPlants) return L"Open to plant";
+  return L"Open to drop";
 }
 
 void AddPrompts(Content cards[kHands], int context, bool first_show) {
@@ -828,6 +1046,29 @@ void AddPrompts(Content cards[kHands], int context, bool first_show) {
       break;
     }
     case kCtxCreature:
+      // THE STROKE WITH THE OPEN HAND (creature_stroke_open): the mod holds
+      // the press, so the open hand strokes with no button. With
+      // creature_open_slap=1 a fast hit of the open hand slaps. With 0 a slap
+      // needs the grip.
+      if (ControllersOpenStrokeOn()) {
+        Content* out = &cards[kPointing];
+        const bool open_slap = ControllersOpenSlap();
+        if (out->count < kMaxLines) {
+          SetLine(&out->line[out->count++], nullptr,
+                  open_slap ? L"Move slowly to stroke"
+                            : L"Move the hand to stroke",
+                  kToneNone, 0);
+        }
+        if (open_slap) {
+          if (out->count < kMaxLines) {
+            SetLine(&out->line[out->count++], nullptr, L"Hit fast to slap",
+                    kToneNone, 0);
+          }
+        } else {
+          AddPrompt(cards, kWordGrab, L"Close and swing to slap", kToneGrab);
+        }
+        break;
+      }
       // The touch of the Creature is the game's right press, so it is the
       // grip. The game's own hint there is "Interact" for that button.
       AddPrompt(cards, kWordGrab, L"Stroke or slap", kToneGrab);
@@ -853,13 +1094,28 @@ void AddPrompts(Content cards[kHands], int context, bool first_show) {
       // the leashes and more) and the menu of the game.
       AddPrompt(cards, kWordRing, L"Ring menu", kToneOther,
                 hint_learn_math::kSkillRing);
+      // The spell book (spell_book.cpp), while a press can open it: a tap of
+      // B on the pointing hand, and the first face button of the other hand.
+      if (SpellBookTapCanOpen()) {
+        AddPrompt(cards, kWordGesture, L"Tap for spells", kToneOther);
+      }
+      if (SpellBookCanOpen()) {
+        AddPrompt(cards, kWordBook, L"Spells", kToneOther);
+      }
       if (first_show) AddPrompt(cards, kWordMenu, L"Game menu", kToneOther);
       break;
     case kCtxCommand:
       AddCommandPrompts(cards);
+      AddCommandGripPrompt(cards);
       break;
     case kCtxLeashBack:
       AddLeashBackPrompts(cards);
+      // A grip on your Creature changes the leash when the grab from a
+      // distance has it as its target. So only the object that holds the
+      // leash gets the line of the grip.
+      if (CreatureCommandHint() == kCommandHintTied) {
+        AddCommandGripPrompt(cards);
+      }
       break;
     case kCtxLeashOff:
       AddPrompt(cards, kWordCommand, L"Take the leash off", kToneAction);
@@ -870,15 +1126,21 @@ void AddPrompts(Content cards[kHands], int context, bool first_show) {
       break;
     case kCtxMiracle:
     case kCtxTempleLand:
-    case kCtxVillage: {
+    case kCtxVillage:
+    case kCtxBook:
+    case kCtxMark: {
       // The lines come from miracle.cpp: what the grip does with this
       // miracle now, why the game refused the last cast, and the cancel. Or
       // from village.cpp: what the grip does at the totem or at a miracle
       // icon.
       MiracleLine lines[kMiracleLines];
       // Or from temple.cpp: the door of the Temple or a leash post.
+      // Or from spell_book.cpp: the miracle under the pointing hand.
+      // Or from bookmark_aim.cpp: the grip sets a bookmark, and B stops.
       const int count = context == kCtxMiracle      ? MiracleHint(lines)
                         : context == kCtxTempleLand ? TempleLandHint(lines)
+                        : context == kCtxBook       ? SpellBookHint(lines)
+                        : context == kCtxMark       ? BookmarkAimHint(lines)
                                                     : VillageHint(lines);
       for (int i = 0; i < count; ++i) {
         if (lines[i].word >= 0) {
@@ -927,6 +1189,20 @@ const int kBadgeEm = 34;
 const float kCardRadius = 24.0f;
 const float kBadgeRadius = 16.0f;
 const float kCardAlpha = 0.86f;
+// The scroll (hint_card_style=1) keeps the grid above: the row, the height of
+// a seal (kBadgeHeight) and the pad. Its capital letter has the height of the
+// capital letter of Segoe UI at kTextEm, and the seal word that of kBadgeEm.
+// The rolls and the shadow add the margins of card_scroll.h. The paper is
+// opaque.
+const int kScrollTextCap = 31;
+const int kScrollSealCap = 23;
+const int kScrollSealMin = kBadgeHeight + 12;  // the narrowest seal
+const int kScrollSealPad = 22;  // from the end of a seal to its word
+// THE PICTURES OF THE BUTTONS (hint_card_pictures=1, hint_picture_math.h).
+// A line of a button has a picture of hint_picture::kSize px before its
+// badge or seal, in the middle of the row. While one line of a card has a
+// picture, each line of a button has the place of a picture, so the badges
+// and the seals stay in one column.
 // A soft fade: the card comes in 0.25 s and goes in 0.35 s, in place.
 const float kFadeInSeconds = 0.25f;
 const float kFadeOutSeconds = 0.35f;
@@ -937,6 +1213,21 @@ uint32_t* g_bits = nullptr;  // the GDI picture: white letters on black
 HFONT g_text_font = nullptr;
 HFONT g_badge_font = nullptr;
 bool g_raster_failed = false;
+HFONT g_scroll_text_font = nullptr;
+HFONT g_scroll_seal_font = nullptr;
+int g_scroll_text_ascent = 0;
+int g_scroll_seal_ascent = 0;
+int g_scroll_text_height = 0;
+int g_scroll_seal_height = 0;
+bool g_scroll_failed = false;
+// The cost of a redraw of a card picture, for the log and the report.
+int g_draw_logs = 0;
+const int kMaxDrawLogs = 24;
+uint64_t g_draws = 0;
+double g_draw_ms = 0.0;
+double g_draw_most_ms = 0.0;
+int g_saved_draws = 0;
+const int kMaxSavedDraws = 40;
 
 // One card. base is the picture, color multiplied by alpha, BGRA, at full
 // strength. staged is the picture as it goes to the headset, with the fade.
@@ -949,6 +1240,10 @@ struct CardState {
   int rect_h;
   float fade;
   float staged_fade;
+  // The number of the staged picture (CardLayer::serial): a new one at each
+  // new picture in `staged`, so the view for videos copies the card only
+  // after a change.
+  uint32_t serial;
   bool visible;
   // Right in the view, from the last frame that had one, and the side of the
   // wrist that the card is on (CardPose). 0 is no side yet.
@@ -961,13 +1256,24 @@ struct CardState {
   uint64_t frames_hidden;  // the card would hide the other hand or card
   uint64_t side_changes;
 };
-CardState g_cards[kHands] = {};
+// The cards: kPointing and kOther are the cards at the wrists. With
+// hint_style=2 they and the other slots are the cards of the lit buttons
+// (ModelCards).
+const int kSlots = 2 + bwvr::kHintButtonCards;
+CardState g_cards[kSlots] = {};
 bool g_cards_ready = false;
+
+// The card of the headset of each slot.
+int CardOfSlot(int slot) {
+  return slot == kPointing ? bwvr::kCardHintPointing
+         : slot == kOther  ? bwvr::kCardHintOther
+                           : bwvr::kCardHintButton0 + slot - 2;
+}
 
 void CardsStart() {
   if (g_cards_ready) return;
   g_cards_ready = true;
-  for (int h = 0; h < kHands; ++h) {
+  for (int h = 0; h < kSlots; ++h) {
     g_cards[h].staged_fade = -1.0f;
     g_cards[h].last_right[0] = 1.0f;
   }
@@ -1045,18 +1351,190 @@ const Rgb kBadgeColor[4] = {
     {232.0f, 236.0f, 242.0f},  // any other button
 };
 
-// Draws the content into the base picture of the card. The used part starts
-// at 0, 0 and is rect_w by rect_h.
-bool Raster(const Content& content, CardState* card) {
+// --- the pictures of the buttons -------------------------------------------------
+
+// The picture of a line: 1 + the kind, the side and the control of the
+// drawing, or 0 for no picture. `left` is the controller of the card.
+int PictureOf(const Line& line, int kind, bool left) {
+  if (g_pictures == 0 || line.button[0] == 0) return 0;
+  const int control = hint_picture::ControlOfWord(kind, left, line.button);
+  if (control < 0) return 0;
+  return 1 + (kind * 2 + (left ? 1 : 0)) * controller_art::kControls + control;
+}
+
+// The kind of the controller of a side (0 left, 1 right): the kind of the
+// test key hint_profile, as the page Controls draws it, or of the profile
+// that the runtime reports.
+int KindOfSide(int side) {
+  const char* forced = ControllerHintsForcedProfile();
+  if (forced != nullptr && forced[0] != 0) {
+    return button_map::KindOfProfile(forced);
+  }
+  return ControllersKindOf(side);
+}
+
+void SetPictures(Content* content, bool left) {
+  const int kind = KindOfSide(left ? 0 : 1);
+  for (int i = 0; i < content->count; ++i) {
+    content->line[i].picture = PictureOf(content->line[i], kind, left);
+  }
+}
+
+// THE BAKE. A picture is made one time for each look and tone, and each new
+// picture of a card copies it. The cards of a play need few of them.
+struct Baked {
+  int key;  // the picture, the look and the tone, or 0
+  uint8_t bgra[hint_picture::kSize * hint_picture::kSize * 4];
+};
+const int kBakes = 24;
+Baked g_baked[kBakes] = {};
+int g_bake_next = 0;
+uint64_t g_bakes = 0;
+int g_bake_logs = 0;
+const int kMaxBakeLogs = 24;
+
+const char* const kKindWord[button_map::kKinds] = {"Touch", "Index", "wand",
+                                                   "Mixed Reality", "simple"};
+const char* const kControlWord[controller_art::kControls] = {
+    "first face button", "second face button", "stick click", "menu button",
+    "trigger", "grip", "stick", "pad"};
+
+// The baked picture of a line, or null.
+const uint8_t* Picture(const Line& line, bool scroll) {
+  if (line.picture <= 0) return nullptr;
+  const int key = (line.picture * 2 + (scroll ? 1 : 0)) * 4 + (line.tone & 3);
+  for (int i = 0; i < kBakes; ++i) {
+    if (g_baked[i].key == key) return g_baked[i].bgra;
+  }
+  const int at = (line.picture - 1) % controller_art::kControls;
+  const int rest = (line.picture - 1) / controller_art::kControls;
+  const int kind = rest / 2;
+  const bool left = (rest % 2) != 0;
+  Baked& b = g_baked[g_bake_next];
+  g_bake_next = (g_bake_next + 1) % kBakes;
+  LARGE_INTEGER t0, t1, frequency;
+  QueryPerformanceFrequency(&frequency);
+  QueryPerformanceCounter(&t0);
+  const bool ok = hint_picture::Bake(kind, left, at,
+                                     hint_picture::LookOf(scroll, line.tone),
+                                     b.bgra);
+  QueryPerformanceCounter(&t1);
+  b.key = ok ? key : 0;
+  if (!ok) return nullptr;
+  ++g_bakes;
+  if (g_bake_logs < kMaxBakeLogs) {
+    ++g_bake_logs;
+    ModLog("hint card    : frame %llu, the picture of the %s %s %s for \"%ls\" "
+           "(%s view) in the %s look, %d by %d px, took %.2f ms", g_frame,
+           left ? "left" : "right", kKindWord[kind % button_map::kKinds],
+           kControlWord[at], line.button,
+           hint_picture::SideView(kind, at) ? "side" : "top",
+           scroll ? "scroll" : "plain",
+           hint_picture::kSize, hint_picture::kSize,
+           (t1.QuadPart - t0.QuadPart) * 1000.0 /
+               static_cast<double>(frequency.QuadPart));
+  }
+  return b.bgra;
+}
+
+// True when a line of the content has a picture.
+bool HasPictures(const Content& content) {
+  for (int i = 0; i < content.count; ++i) {
+    if (content.line[i].picture > 0) return true;
+  }
+  return false;
+}
+
+// THE FIT OF THE LINES (text_fit.h). A text that is too wide for the card
+// gets a smaller font, down to the floor, and then a second row. A card has
+// at most kMostRows rows. When the second rows do not fit, each line keeps
+// one row, and a text that is still too wide is cut (and logged).
+const int kMostRows = 4;
+
+struct LineFit {
+  int rows;   // 1 or 2
+  int width;  // the widest row of the text, in pixels
+  int step;   // the step of the font (text_fit_math::kStepPercent)
+};
+
+// The height of a line of `rows` rows: the badge height for one row.
+int BlockHeight(int rows) { return rows * kRow - (kRow - kBadgeHeight); }
+
+// The fit of each line with the font of its text. x0[i] is the left of the
+// text of line i, and `right` the right end of the words on a card of the
+// widest size. Returns the count of rows.
+int FitLines(const Content& content, HFONT font, const int* x0, int right,
+             LineFit* out) {
+  text_fit_math::Fit fit[kMaxLines] = {};
+  int rows = 0;
+  SelectObject(g_dc, font);
+  for (int pass = 0; pass < 2; ++pass) {
+    rows = 0;
+    const int most = pass == 0 ? 2 : 1;
+    for (int i = 0; i < content.count; ++i) {
+      fit[i] = text_fit::Measure(g_dc, content.line[i].text, right - x0[i],
+                                 BlockHeight(most), most);
+      out[i].rows = fit[i].lines > 1 ? 2 : 1;
+      out[i].step = fit[i].step;
+      rows += out[i].rows;
+    }
+    if (rows <= kMostRows) break;
+  }
+  for (int i = 0; i < content.count; ++i) {
+    out[i].width = 0;
+    SelectObject(g_dc, text_fit::StepFont(g_dc, font, fit[i].step));
+    for (int k = 0; k < fit[i].lines; ++k) {
+      SIZE size = {0, 0};
+      GetTextExtentPoint32W(g_dc, content.line[i].text + fit[i].start[k],
+                            fit[i].length[k], &size);
+      if (size.cx > out[i].width) out[i].width = size.cx;
+    }
+  }
+  SelectObject(g_dc, font);
+  return rows;
+}
+
+// The top of each line, from the top of the first row.
+void LineTops(const Content& content, const LineFit* fits, int top0,
+              int* top) {
+  int at = top0;
+  for (int i = 0; i < content.count; ++i) {
+    top[i] = at;
+    at += fits[i].rows * kRow;
+  }
+}
+
+// The pictures of the lines into the base picture of a card. x is the left
+// of the column of the pictures, and top[i] the top of line i.
+void PutPictures(const Content& content, CardState* card, bool scroll, int x,
+                 const int* top, const LineFit* fits, int card_w,
+                 int card_h) {
+  for (int i = 0; i < content.count; ++i) {
+    const uint8_t* picture = Picture(content.line[i], scroll);
+    if (picture == nullptr) continue;
+    const int y =
+        top[i] + (BlockHeight(fits[i].rows) - hint_picture::kSize) / 2;
+    hint_picture::Put(picture, card->base, static_cast<int>(kHintCardWidth),
+                      card_w, card_h, x, y);
+  }
+}
+
+// Draws the content into the base picture of the card in the plain look
+// (hint_card_style=0). The used part starts at 0, 0 and is rect_w by rect_h.
+bool RasterPlain(const Content& content, CardState* card) {
   if (!RasterStart()) return false;
   const int width = static_cast<int>(kHintCardWidth);
   const int height = static_cast<int>(kHintCardHeight);
   int badge_x0[kMaxLines], badge_x1[kMaxLines], text_x0[kMaxLines];
-  int text_w[kMaxLines];
-  int most = 0;
+  int top[kMaxLines], badge_top[kMaxLines];
+  LineFit fits[kMaxLines] = {};
+  const bool pictures = HasPictures(content);
   for (int i = 0; i < content.count; ++i) {
     const Line& line = content.line[i];
     int x = kPad;
+    if (pictures && line.button[0] != 0) {
+      x += hint_picture::kSize + hint_picture::kGap;
+    }
     badge_x0[i] = badge_x1[i] = x;
     if (line.button[0] != 0) {
       int w = TextWidth(g_badge_font, line.button) + 2 * kBadgePad;
@@ -1065,14 +1543,21 @@ bool Raster(const Content& content, CardState* card) {
       x = badge_x1[i] + kBadgeGap;
     }
     text_x0[i] = x;
-    text_w[i] = TextWidth(g_text_font, line.text);
-    int end = x + text_w[i];
+  }
+  const int rows =
+      FitLines(content, g_text_font, text_x0, width - kPad - 4, fits);
+  LineTops(content, fits, kPad, top);
+  int most = 0;
+  for (int i = 0; i < content.count; ++i) {
+    const Line& line = content.line[i];
+    badge_top[i] = top[i] + (BlockHeight(fits[i].rows) - kBadgeHeight) / 2;
+    int end = text_x0[i] + fits[i].width;
     if (line.text[0] == 0 && line.button[0] != 0) end = badge_x1[i];
     if (end > most) most = end;
   }
   int card_w = most + kPad + 4;
   if (card_w > width) card_w = width;
-  int card_h = 2 * kPad + content.count * kRow - (kRow - kBadgeHeight);
+  int card_h = 2 * kPad + rows * kRow - (kRow - kBadgeHeight);
   if (card_h > height) card_h = height;
 
   // The letters, white on black. The green of a pixel is its cover.
@@ -1081,21 +1566,21 @@ bool Raster(const Content& content, CardState* card) {
   }
   for (int i = 0; i < content.count; ++i) {
     const Line& line = content.line[i];
-    const int top = kPad + i * kRow;
     if (line.button[0] != 0) {
-      RECT r = {badge_x0[i], top, badge_x1[i], top + kBadgeHeight};
+      RECT r = {badge_x0[i], badge_top[i], badge_x1[i],
+                badge_top[i] + kBadgeHeight};
       SelectObject(g_dc, g_badge_font);
       DrawTextW(g_dc, line.button, -1, &r,
                 DT_SINGLELINE | DT_NOPREFIX | DT_CENTER | DT_VCENTER |
                     DT_NOCLIP);
     }
     if (line.text[0] != 0) {
-      RECT r = {text_x0[i], top, card_w - kPad, top + kBadgeHeight};
+      RECT r = {text_x0[i], top[i], card_w - kPad,
+                top[i] + BlockHeight(fits[i].rows)};
       if (r.right > r.left) {
         SelectObject(g_dc, g_text_font);
-        DrawTextW(g_dc, line.text, -1, &r,
-                  DT_SINGLELINE | DT_NOPREFIX | DT_LEFT | DT_VCENTER |
-                      DT_END_ELLIPSIS | DT_NOCLIP);
+        text_fit::Draw(g_dc, line.text, r, DT_LEFT | DT_VCENTER | DT_NOCLIP,
+                       fits[i].rows, "hint card");
       }
     }
   }
@@ -1103,10 +1588,11 @@ bool Raster(const Content& content, CardState* card) {
 
   for (int y = 0; y < card_h; ++y) {
     const float py = static_cast<float>(y) + 0.5f;
-    const int row = (y - kPad) / kRow;
-    const bool in_row = y >= kPad && row >= 0 && row < content.count &&
-                        y < kPad + row * kRow + kBadgeHeight;
-    const bool badge_row = in_row && content.line[row].button[0] != 0;
+    int row = -1;
+    for (int i = 0; i < content.count; ++i) {
+      if (y >= badge_top[i] && y < badge_top[i] + kBadgeHeight) row = i;
+    }
+    const bool badge_row = row >= 0 && content.line[row].button[0] != 0;
     uint8_t* out = card->base + (y * width) * 4;
     const uint32_t* letters = g_bits + y * width;
     for (int x = 0; x < card_w; ++x, out += 4) {
@@ -1122,10 +1608,10 @@ bool Raster(const Content& content, CardState* card) {
       float alpha = kCardAlpha;
       Rgb ink = kTextColor;
       if (badge_row && x >= badge_x0[row] - 1 && x <= badge_x1[row]) {
-        const float top = static_cast<float>(kPad + row * kRow);
+        const float btop = static_cast<float>(badge_top[row]);
         const float badge_cover = RoundCover(
-            px, py, static_cast<float>(badge_x0[row]), top,
-            static_cast<float>(badge_x1[row]), top + kBadgeHeight,
+            px, py, static_cast<float>(badge_x0[row]), btop,
+            static_cast<float>(badge_x1[row]), btop + kBadgeHeight,
             kBadgeRadius);
         const Rgb& badge = kBadgeColor[content.line[row].tone & 3];
         color.r += (badge.r - color.r) * badge_cover;
@@ -1149,6 +1635,9 @@ bool Raster(const Content& content, CardState* card) {
       out[3] = static_cast<uint8_t>(255.0f * alpha + 0.5f);
     }
   }
+  if (pictures) {
+    PutPictures(content, card, false, kPad, top, fits, card_w, card_h);
+  }
   card->rect_w = card_w;
   card->rect_h = card_h;
   card->drawn = content;
@@ -1156,10 +1645,208 @@ bool Raster(const Content& content, CardState* card) {
   return true;
 }
 
+// The fonts of the scroll, one time. False keeps the plain look.
+bool ScrollStart() {
+  if (g_scroll_text_font != nullptr) return true;
+  if (g_scroll_failed) return false;
+  if (!card_scroll::Start(g_dc)) {
+    g_scroll_failed = true;
+    return false;
+  }
+  g_scroll_text_font = card_scroll::WordsFont(g_dc, kScrollTextCap);
+  g_scroll_seal_font = card_scroll::SealFont(g_dc, kScrollSealCap);
+  if (g_scroll_text_font == nullptr || g_scroll_seal_font == nullptr) {
+    g_scroll_failed = true;
+    ModLog("hint card    : GDI gave no font for the scroll, so the cards have "
+           "the plain look");
+    return false;
+  }
+  TEXTMETRICW metrics;
+  SelectObject(g_dc, g_scroll_text_font);
+  GetTextMetricsW(g_dc, &metrics);
+  g_scroll_text_ascent = metrics.tmAscent;
+  g_scroll_text_height = metrics.tmHeight;
+  SelectObject(g_dc, g_scroll_seal_font);
+  GetTextMetricsW(g_dc, &metrics);
+  g_scroll_seal_ascent = metrics.tmAscent;
+  g_scroll_seal_height = metrics.tmHeight;
+  return true;
+}
+
+// Draws the content into the base picture of the card as a scroll
+// (hint_card_style=1, card_scroll.h). The used part starts at 0, 0 and is
+// rect_w by rect_h. The grid of the rows is that of the plain look, inside
+// the margins of the rolls and the shadow.
+bool RasterScroll(const Content& content, CardState* card, int seed) {
+  const int width = static_cast<int>(kHintCardWidth);
+  const int height = static_cast<int>(kHintCardHeight);
+  int seal_x0[kMaxLines], seal_x1[kMaxLines], text_x0[kMaxLines];
+  int top[kMaxLines], seal_top[kMaxLines];
+  wchar_t seal_word[kMaxLines][24];
+  LineFit fits[kMaxLines] = {};
+  const bool pictures = HasPictures(content);
+  for (int i = 0; i < content.count; ++i) {
+    const Line& line = content.line[i];
+    int x = card_scroll::kWordsLeft;
+    if (pictures && line.button[0] != 0) {
+      x += hint_picture::kSize + hint_picture::kGap;
+    }
+    seal_x0[i] = seal_x1[i] = x;
+    seal_word[i][0] = 0;
+    if (line.button[0] != 0) {
+      wcsncpy_s(seal_word[i], line.button, _TRUNCATE);
+      CharUpperW(seal_word[i]);
+      int w = TextWidth(g_scroll_seal_font, seal_word[i]) + 2 * kScrollSealPad;
+      if (w < kScrollSealMin) w = kScrollSealMin;
+      seal_x1[i] = x + w;
+      x = seal_x1[i] + kBadgeGap;
+    }
+    text_x0[i] = x;
+  }
+  const int rows = FitLines(content, g_scroll_text_font, text_x0,
+                            width - card_scroll::kWordsRight, fits);
+  LineTops(content, fits, card_scroll::kPaperTop + kPad, top);
+  int most = 0;
+  for (int i = 0; i < content.count; ++i) {
+    const Line& line = content.line[i];
+    seal_top[i] = top[i] + (BlockHeight(fits[i].rows) - kBadgeHeight) / 2;
+    int end = text_x0[i] + fits[i].width;
+    if (line.text[0] == 0 && line.button[0] != 0) end = seal_x1[i];
+    if (end > most) most = end;
+  }
+  int card_w = most + card_scroll::kWordsRight;
+  if (card_w > width) card_w = width;
+  const int body_h = 2 * kPad + rows * kRow - (kRow - kBadgeHeight);
+  int card_h = card_scroll::kPaperTop + body_h + card_scroll::kPaperBottom;
+  if (card_h > height) card_h = height;
+  const int text_right = card_w - card_scroll::kWordsRight;
+
+  // The paper, the rolls and the seals.
+  const card_scroll::Picture picture = {card->base, width, card_w, card_h};
+  card_scroll::Paper(picture, card_scroll::kEdgeLeft, card_scroll::kPaperTop,
+                     card_w - card_scroll::kEdgeRight,
+                     card_scroll::kPaperTop + body_h, seed);
+  for (int i = 0; i < content.count; ++i) {
+    if (seal_word[i][0] == 0) continue;
+    card_scroll::Seal(picture, seal_x0[i], seal_top[i], seal_x1[i],
+                      seal_top[i] + kBadgeHeight, content.line[i].tone & 3,
+                      seed + 50 + i * 7);
+  }
+
+  // The words, white on black, with the capital letter in the middle of the
+  // row (or of the two rows). Then the ink.
+  for (int y = 0; y < card_h; ++y) {
+    memset(g_bits + y * width, 0, static_cast<size_t>(card_w) * 4);
+  }
+  SelectObject(g_dc, g_scroll_text_font);
+  for (int i = 0; i < content.count; ++i) {
+    const Line& line = content.line[i];
+    if (line.text[0] == 0 || text_right <= text_x0[i]) continue;
+    // The baseline of the first line of the text. One line has its capital
+    // letter in the middle of the row. Two lines, one pitch apart, have
+    // their middle in the middle of the two rows.
+    const int block = BlockHeight(fits[i].rows);
+    int baseline = top[i] + (kBadgeHeight + kScrollTextCap) / 2;
+    if (fits[i].rows > 1) {
+      const int pitch =
+          text_fit::LinePitch(g_dc, g_scroll_text_font, fits[i].step);
+      const int cap =
+          kScrollTextCap * text_fit_math::kStepPercent[fits[i].step] / 100;
+      baseline = top[i] + (block - pitch + cap) / 2;
+    }
+    const int box_h = fits[i].rows > 1 ? block : g_scroll_text_height;
+    RECT r = {text_x0[i], baseline - g_scroll_text_ascent, text_right,
+              baseline - g_scroll_text_ascent + box_h};
+    text_fit::Draw(g_dc, line.text, r, DT_LEFT | DT_TOP | DT_NOCLIP,
+                   fits[i].rows, "hint card");
+  }
+  GdiFlush();
+  card_scroll::Ink(picture, g_bits, 0, 0, card_w, card_h, seed);
+
+  // The seal words, each in the box of its seal.
+  SelectObject(g_dc, g_scroll_seal_font);
+  for (int i = 0; i < content.count; ++i) {
+    if (seal_word[i][0] == 0) continue;
+    const int stop = seal_top[i];
+    for (int y = stop; y < stop + kBadgeHeight && y < card_h; ++y) {
+      memset(g_bits + y * width + seal_x0[i], 0,
+             static_cast<size_t>(seal_x1[i] - seal_x0[i]) * 4);
+    }
+    const int baseline = stop + (kBadgeHeight + kScrollSealCap) / 2;
+    RECT r = {seal_x0[i], baseline - g_scroll_seal_ascent, seal_x1[i],
+              baseline - g_scroll_seal_ascent + g_scroll_seal_height};
+    DrawTextW(g_dc, seal_word[i], -1, &r,
+              DT_SINGLELINE | DT_NOPREFIX | DT_CENTER | DT_TOP | DT_NOCLIP);
+  }
+  GdiFlush();
+  for (int i = 0; i < content.count; ++i) {
+    if (seal_word[i][0] == 0) continue;
+    card_scroll::SealInk(picture, g_bits, seal_x0[i], seal_top[i],
+                         seal_x1[i], seal_top[i] + kBadgeHeight,
+                         content.line[i].tone & 3);
+  }
+  if (pictures) {
+    PutPictures(content, card, true, card_scroll::kWordsLeft, top, fits,
+                card_w, card_h);
+  }
+
+  card->rect_w = card_w;
+  card->rect_h = card_h;
+  card->drawn = content;
+  card->staged_fade = -1.0f;
+  return true;
+}
+
+// Draws the content into the base picture of the card, in the look of
+// hint_card_style. It measures the time of each redraw, and with
+// hint_card_save_test=1 it saves the new picture.
+bool Raster(const Content& content, CardState* card) {
+  if (!RasterStart()) return false;
+  LARGE_INTEGER t0, t1, frequency;
+  QueryPerformanceFrequency(&frequency);
+  QueryPerformanceCounter(&t0);
+  const int hand = static_cast<int>(card - g_cards);
+  const bool scroll = g_style != 0 && ScrollStart();
+  const bool ok = scroll ? RasterScroll(content, card, hand * 17 + 3)
+                         : RasterPlain(content, card);
+  QueryPerformanceCounter(&t1);
+  if (!ok) return false;
+  const double ms =
+      (t1.QuadPart - t0.QuadPart) * 1000.0 / static_cast<double>(frequency.QuadPart);
+  ++g_draws;
+  g_draw_ms += ms;
+  if (ms > g_draw_most_ms) g_draw_most_ms = ms;
+  if (g_draw_logs < kMaxDrawLogs) {
+    ++g_draw_logs;
+    int pictures = 0;
+    for (int i = 0; i < content.count; ++i) {
+      if (content.line[i].picture > 0) ++pictures;
+    }
+    ModLog("hint card    : frame %llu, a new picture of the card of the %s "
+           "in the %s look, %d by %d px, with %d pictures of buttons, "
+           "took %.2f ms", g_frame,
+           hand == kPointing ? "pointing hand"
+           : hand == kOther  ? "other hand"
+                             : "a button",
+           scroll ? "scroll" : "plain", card->rect_w, card->rect_h, pictures,
+           ms);
+  }
+  if (g_save_test && g_saved_draws < kMaxSavedDraws) {
+    char name[48];
+    _snprintf_s(name, _TRUNCATE, "hintcard-draw-%03d", g_saved_draws++);
+    EyeCaptureSaveUi(name, g_frame, 1, card->base,
+                     static_cast<int>(kHintCardWidth) * 4,
+                     static_cast<uint32_t>(card->rect_w),
+                     static_cast<uint32_t>(card->rect_h));
+  }
+  return true;
+}
+
 // The staged picture is the base picture at the fade of this frame.
 void Stage(CardState* card) {
   if (card->staged_fade == card->fade) return;
   card->staged_fade = card->fade;
+  card->serial = bwvr::XrScreen::NewCardSerial();
   const int width = static_cast<int>(kHintCardWidth);
   const int scale = static_cast<int>(card->fade * 256.0f + 0.5f);
   for (int y = 0; y < card->rect_h; ++y) {
@@ -1457,6 +2144,316 @@ struct Plan {
   bool show;
 };
 
+// --- the cards of the buttons (hint_style=2, hint_model.cpp) ---------------------
+
+// THE CONTROLLER IN THE HAND. A hand with a model of its controller has one
+// small card for each lit button, beside the controller, in place of the card
+// at the wrist. The words of a card are the lines of that button. The lit
+// button shows which button it is, so the seal of a line goes when the word
+// is only the name of the button. A word with " x2" or " hold" keeps its
+// seal, so the player sees the double press or the hold. The lines with no
+// button, and the lines of a button that the model has no node for (the menu
+// button of a Touch controller), are one card with no line of ink, with
+// their seals. The cards have no drawn pictures of the buttons.
+//
+// THE SLOTS. The hand that points takes its own slot (kPointing) and then the
+// slots of the buttons. The other hand takes kOther and then the slots that
+// are left. A hand keeps its last cards while they fade out.
+struct ModelHand {
+  int count;
+  Content group[kHintModelCards];
+  int control[kHintModelCards];
+  int slot[kHintModelCards];
+  bool visible;
+  Content logged[kHintModelCards];
+  int logged_count;
+};
+ModelHand g_model_hand[kHands] = {};
+uint64_t g_model_frames[kHands] = {0, 0};
+uint64_t g_model_hidden[kHands] = {0, 0};
+
+// The groups of a content: the card with no button first, then one card for
+// each control, in the order of the lines.
+int ModelGroups(const Content& content, bool left, Content group[],
+                int control[]) {
+  const int side = left ? 0 : 1;
+  const int kind = KindOfSide(side);
+  int count = 0;
+  int free_group = -1;
+  for (int i = 0; i < content.count; ++i) {
+    Line line = content.line[i];
+    line.picture = 0;
+    bool plain = false;
+    int c = hint_model::ControlOfWord(kind, left, line.button, &plain);
+    if (c >= 0 && !HintModelHasControl(side, c)) c = -1;
+    int at = -1;
+    for (int g = 0; g < count; ++g) {
+      if (control[g] == c) at = g;
+    }
+    if (at < 0) {
+      if (count >= kHintModelCards) {
+        // More groups than cards: the line goes to the card with no button.
+        if (free_group < 0) continue;
+        at = free_group;
+        c = -1;
+      } else {
+        at = count++;
+        control[at] = c;
+        group[at].count = 0;
+        if (c < 0) free_group = at;
+      }
+    }
+    if (c >= 0 && plain) line.button[0] = 0;
+    if (line.button[0] == 0) line.tone = kToneNone;
+    if (line.button[0] == 0 && line.text[0] == 0) continue;
+    Content& g = group[at];
+    if (g.count < kMaxLines) g.line[g.count++] = line;
+  }
+  // The card with no button goes first.
+  if (free_group > 0) {
+    const Content keep = group[free_group];
+    for (int g = free_group; g > 0; --g) {
+      group[g] = group[g - 1];
+      control[g] = control[g - 1];
+    }
+    group[0] = keep;
+    control[0] = -1;
+  }
+  int kept = 0;
+  for (int g = 0; g < count; ++g) {
+    if (group[g].count == 0) continue;
+    group[kept] = group[g];
+    control[kept] = control[g];
+    ++kept;
+  }
+  return kept;
+}
+
+void ModelCardsOff() {
+  for (int h = 0; h < kHands; ++h) {
+    HintModelPlaced placed;
+    HintModelPlace(h, nullptr, 0, false, 1.0f, &placed);
+    g_model_hand[h].count = 0;
+    g_model_hand[h].visible = false;
+  }
+}
+
+void ModelCards(Content content[kHands], Plan plan[kHands],
+                const bool use_model[kHands], const float head[3], float dt,
+                int shown) {
+  const float size = g_size_pct * 0.01f;
+  bool slot_used[kSlots] = {};
+  for (int h = 0; h < kHands; ++h) {
+    if (!use_model[h]) slot_used[h] = true;  // the card at the wrist
+  }
+  struct Placed {
+    bool have;
+    int count;
+    hint_card_math::Card card[kHintModelCards];
+    float width[kHintModelCards];
+    float height[kHintModelCards];
+  };
+  Placed placed_cards[kHands] = {};
+  bool show_hand[kHands] = {false, false};
+  for (int h = 0; h < kHands; ++h) {
+    if (!use_model[h]) continue;
+    Plan& p = plan[h];
+    ModelHand& mh = g_model_hand[h];
+    const bool show = content[h].count > 0;
+    show_hand[h] = show;
+    if (show) {
+      Content group[kHintModelCards];
+      int control[kHintModelCards];
+      const int count = ModelGroups(content[h], p.left, group, control);
+      mh.count = count;
+      for (int i = 0; i < count; ++i) {
+        mh.group[i] = group[i];
+        mh.control[i] = control[i];
+      }
+    }
+    // The slots: the own slot of the hand first.
+    for (int i = 0; i < mh.count; ++i) {
+      int slot = -1;
+      if (!slot_used[h]) {
+        slot = h;
+      } else {
+        for (int s = 2; s < kSlots && slot < 0; ++s) {
+          if (!slot_used[s]) slot = s;
+        }
+      }
+      mh.slot[i] = slot;
+      if (slot >= 0) slot_used[slot] = true;
+    }
+    // A new picture for each card with new words. A card that does not
+    // raster, or that has no slot, drops out.
+    {
+      int kept = 0;
+      for (int i = 0; i < mh.count; ++i) {
+        if (mh.slot[i] < 0) continue;
+        CardState& c = g_cards[mh.slot[i]];
+        if (!SameContent(mh.group[i], c.drawn) && !Raster(mh.group[i], &c)) {
+          continue;
+        }
+        mh.group[kept] = mh.group[i];
+        mh.control[kept] = mh.control[i];
+        mh.slot[kept] = mh.slot[i];
+        ++kept;
+      }
+      mh.count = kept;
+    }
+    HintModelCard cards[kHintModelCards];
+    for (int i = 0; i < mh.count; ++i) {
+      const CardState& c = g_cards[mh.slot[i]];
+      cards[i].control = mh.control[i];
+      hint_card_math::CardSize(c.rect_w, c.rect_h, kPixelsPerMeter / size,
+                               kMostWidth * size, &cards[i].width,
+                               &cards[i].height);
+    }
+    HintModelPlaced where;
+    const bool have = mh.count > 0 &&
+                      HintModelPlace(h, cards, mh.count, show, dt, &where);
+    if (!have) {
+      if (mh.count == 0) HintModelPlace(h, nullptr, 0, false, dt, &where);
+      for (int i = 0; i < mh.count; ++i) {
+        g_cards[mh.slot[i]].fade = 0.0f;
+        g_cards[mh.slot[i]].visible = false;
+      }
+      mh.visible = false;
+      continue;
+    }
+    Placed& pc = placed_cards[h];
+    pc.have = true;
+    pc.count = mh.count;
+    for (int i = 0; i < mh.count; ++i) {
+      for (int k = 0; k < 3; ++k) pc.card[i].center[k] = where.center[i][k];
+      for (int k = 0; k < 4; ++k) {
+        pc.card[i].orientation[k] = where.orientation[i][k];
+      }
+      pc.width[i] = cards[i].width;
+      pc.height[i] = cards[i].height;
+    }
+  }
+  // A card must not hide the other hand. The cards of the other hand do not
+  // show where they overlap a card of the hand that points.
+  bool hide[kHands][kHintModelCards] = {};
+  for (int h = 0; h < kHands; ++h) {
+    const Placed& pc = placed_cards[h];
+    if (!pc.have) continue;
+    const Plan& other = plan[1 - h];
+    for (int i = 0; i < pc.count; ++i) {
+      if (other.have_hand &&
+          hint_card_math::CardCoversAny(pc.card[i], pc.width[i], pc.height[i],
+                                        kOtherHandMargin, head, other.outline,
+                                        hint_card_math::kOutlinePoints)) {
+        hide[h][i] = true;
+      }
+      if (h != kOther || !placed_cards[kPointing].have) continue;
+      const Placed& mine = placed_cards[kPointing];
+      for (int j = 0; j < mine.count; ++j) {
+        if (hint_card_math::CardsOverlap(mine.card[j], mine.width[j],
+                                         mine.height[j], pc.card[i],
+                                         pc.width[i], pc.height[i], head)) {
+          hide[h][i] = true;
+        }
+      }
+    }
+  }
+  for (int h = 0; h < kHands; ++h) {
+    const Placed& pc = placed_cards[h];
+    ModelHand& mh = g_model_hand[h];
+    if (!pc.have) continue;
+    bool any = false;
+    for (int i = 0; i < pc.count; ++i) {
+      CardState& c = g_cards[mh.slot[i]];
+      const bool show = show_hand[h] && !hide[h][i];
+      if (hide[h][i] && show_hand[h]) ++g_model_hidden[h];
+      c.fade = hint_card_math::FadeStep(
+          c.fade, show, dt,
+          show ? (g_timing != 0 ? kFadeInTargetSeconds : kFadeInSeconds)
+               : kFadeOutSeconds);
+      if (c.fade <= 0.0f) {
+        c.visible = false;
+        c.fade = 0.0f;
+        continue;
+      }
+      any = true;
+      Stage(&c);
+      bwvr::CardLayer layer = {};
+      layer.visible = true;
+      layer.pixels = c.staged;
+      layer.texture_width = kHintCardWidth;
+      layer.texture_height = kHintCardHeight;
+      layer.rect[2] = c.rect_w;
+      layer.rect[3] = c.rect_h;
+      for (int k = 0; k < 3; ++k) layer.position[k] = pc.card[i].center[k];
+      for (int k = 0; k < 4; ++k) {
+        layer.orientation[k] = pc.card[i].orientation[k];
+      }
+      layer.width = pc.width[i];
+      layer.height = pc.height[i];
+      layer.serial = c.serial;
+      bwvr::XrScreen::StageCard(CardOfSlot(mh.slot[i]), layer);
+      ++c.frames_shown;
+      c.visible = true;
+      if (g_capture) {
+        char name[48];
+        _snprintf_s(name, _TRUNCATE, "hintcard-%s-button%d",
+                    plan[h].left ? "left" : "right", i);
+        EyeCaptureSaveUi(name, g_frame, 1, c.staged,
+                         static_cast<int>(kHintCardWidth) * 4,
+                         static_cast<uint32_t>(c.rect_w),
+                         static_cast<uint32_t>(c.rect_h));
+      }
+    }
+    if (any) ++g_model_frames[h];
+    // The last cards of a hint that ended free their slots when they are
+    // gone.
+    if (!any && !show_hand[h]) {
+      mh.count = 0;
+      mh.visible = false;
+      continue;
+    }
+    // The log: one line each time the cards of a hand change.
+    bool changed = !mh.visible || mh.logged_count != mh.count;
+    for (int i = 0; i < mh.count && !changed; ++i) {
+      changed = !SameContent(mh.logged[i], mh.group[i]);
+    }
+    mh.visible = any;
+    if (any && show_hand[h] && (changed || g_capture) &&
+        (g_logs < kMaxLogs || g_capture)) {
+      ++g_logs;
+      mh.logged_count = mh.count;
+      char all[900] = "";
+      for (int i = 0; i < mh.count; ++i) {
+        mh.logged[i] = mh.group[i];
+        char words[320];
+        Describe(mh.group[i], words, sizeof(words));
+        char one[480];
+        _snprintf_s(one, _TRUNCATE, "%s%s (%s, %.1f by %.1f cm, at %.3f %.3f "
+                    "%.3f m%s)", i > 0 ? "; " : "", words,
+                    mh.control[i] >= 0 ? kControlWord[mh.control[i]]
+                                       : "no button",
+                    pc.width[i] * 100.0f, pc.height[i] * 100.0f,
+                    pc.card[i].center[0], pc.card[i].center[1],
+                    pc.card[i].center[2],
+                    hide[h][i] ? ", hidden: it would cover the other hand"
+                               : "");
+        strncat_s(all, one, _TRUNCATE);
+      }
+      ModLog("hint card    : frame %llu, the controller of the %s hand has %d "
+             "cards: %s%s%s", g_frame, plan[h].left ? "left" : "right",
+             mh.count, all, shown != kCtxNone ? ". The prompt is for " : "",
+             shown != kCtxNone ? kContextName[shown] : "");
+    }
+  }
+  // A slot that no card uses now is gone at once.
+  for (int s = 0; s < kSlots; ++s) {
+    if (slot_used[s]) continue;
+    g_cards[s].fade = 0.0f;
+    g_cards[s].visible = false;
+  }
+}
+
 // --- the lines that the player knows: the frame ------------------------------------
 
 // CameraHelp::EnabledFeatures: the camera controls of the game that a script
@@ -1702,6 +2699,14 @@ void HintCardLatchContext(int eye) {
   g_facts_frame = g_frame;
   g_have_facts = HandDirectGlowFacts(point, &length, &g_facts_mode,
                                      &g_facts_holding, &now_eye, &frame);
+  g_facts_held = nullptr;
+  bool active = false;
+  const uint8_t* hand =
+      static_cast<const uint8_t*>(HandDirectHand(&active));
+  if (g_have_facts && g_facts_holding && hand != nullptr &&
+      !IsBadReadPtr(hand + kHandHeldObject, sizeof(void*))) {
+    g_facts_held = *reinterpret_cast<void* const*>(hand + kHandHeldObject);
+  }
 }
 
 static void PollTimingKey();
@@ -1721,10 +2726,11 @@ void HintCardEndFrame() {
   if (!g_route || g_route_frame != g_frame) {
     // The hints are in the eye pictures, or no controller points. The cards
     // are gone at once, so a hint never shows at two places.
-    for (int h = 0; h < kHands; ++h) {
+    for (int h = 0; h < kSlots; ++h) {
       g_cards[h].fade = 0.0f;
       g_cards[h].visible = false;
     }
+    ModelCardsOff();
     g_game.count = 0;
     g_game_age = 0;
     hint_card_math::PromptStep(&g_prompt_state, kCtxNone, now,
@@ -1735,6 +2741,9 @@ void HintCardEndFrame() {
     g_fetch_prompt = false;
     g_fetch_kept = false;
     g_owned_count = 0;
+    g_hold_object = nullptr;
+    g_held_words_object = nullptr;
+    g_held_gap = false;
     return;
   }
 
@@ -1785,15 +2794,53 @@ void HintCardEndFrame() {
     // game has a new hint for the object in the Hand.
     void* coming_object = nullptr;
     float coming_from[3];
-    const bool coming = FarGrabGlideOrigin(&coming_object, coming_from);
+    bool coming = FarGrabGlideOrigin(&coming_object, coming_from);
     fetch = context == kCtxFar && FarTargetIsFetch();
+    // THE OBJECT OF A FETCH (hint_held_latch): the fetch in work ends in
+    // the frame in which the Hand holds the object, and it does not start
+    // while the Hand holds one. The words of the mod for the object start in
+    // that frame (HoldWords).
+    void* held = g_have_facts && g_facts_frame == g_frame && g_facts_holding
+                     ? g_facts_held
+                     : nullptr;
+    const bool fetch_before =
+        g_fetch_keep.on || (g_prompt_shown == kCtxFar && g_fetch_prompt);
+    const bool waits =
+        g_held_latch == 0 && context == kCtxHolding &&
+        hint_card_math::FetchWaits(stale, NewGripHint(), coming);
     const hint_card_math::TakeKeepOut fetch_keep =
         hint_card_math::FetchKeepStep(
-            &g_fetch_keep, fetch, empty,
-            context == kCtxHolding &&
-                hint_card_math::FetchWaits(stale, NewGripHint(), coming),
-            coming, g_prompt_shown == kCtxFar && g_fetch_prompt, grip, now,
+            &g_fetch_keep, fetch, empty, waits, coming,
+            g_prompt_shown == kCtxFar && g_fetch_prompt, grip, now,
             kLingerSeconds, kTakeKeepSeconds);
+    if (g_hold_object != nullptr &&
+        (held != g_hold_object || NewGripHint() ||
+         now - g_hold_since > kTakeKeepSeconds)) {
+      if (g_held_logs < kMaxHeldLogs) {
+        ++g_held_logs;
+        ModLog("hint card    : frame %llu, the words of the mod for %p end "
+               "after %llu frames: %s (hint_held_latch=1)", g_frame,
+               g_hold_object, g_frame - g_hold_frame,
+               held != g_hold_object ? "the Hand does not hold it now"
+               : NewGripHint()       ? "the game gives its hint for the grip"
+                                     : "the time limit passed");
+      }
+      g_hold_object = nullptr;
+    }
+    if (g_held_latch != 0 && held != nullptr && fetch_before &&
+        context == kCtxHolding && !NewGripHint() && g_hold_object != held) {
+      g_hold_object = held;
+      g_hold_since = now;
+      g_hold_frame = g_frame;
+      ++g_holds;
+      if (g_held_logs < kMaxHeldLogs) {
+        ++g_held_logs;
+        ModLog("hint card    : frame %llu, the Hand holds %p, the object of "
+               "the fetch, and the game gives no new hint for the grip yet. "
+               "The prompt of the fetch goes now, and the card has the words "
+               "of the mod for the object (hint_held_latch=1)", g_frame, held);
+      }
+    }
     if (g_words >= 3) {
       if (fetch_keep.started) {
         g_fetch_keep_frame = g_frame;
@@ -1869,7 +2916,7 @@ void HintCardEndFrame() {
     // hint of the game, which comes a few frames later, must not change the
     // words.
     if (context != kCtxNone && context != kCtxMiracle &&
-        context != kCtxVillage &&
+        context != kCtxVillage && context != kCtxBook && context != kCtxMark &&
         !(g_words != 0 && IsTargetContext(context))) {
       Content probe[kHands] = {g_game, {}};
       AddPrompts(probe, context, false);
@@ -1886,7 +2933,8 @@ void HintCardEndFrame() {
         &g_prompt_state, context, now,
         hint_card_math::TargetRule(kRules[context], target, at_once),
         hint_card_math::PromptAlways(target, at_once, g_prompts == 2) ||
-            context == kCtxMiracle || context == kCtxVillage);
+            context == kCtxMiracle || context == kCtxVillage ||
+            context == kCtxBook || context == kCtxMark);
     if (shown != kCtxNone && shown != g_prompt_shown) {
       ++g_prompt_shows[shown];
     }
@@ -1904,18 +2952,22 @@ void HintCardEndFrame() {
   // The hints of the game are for the hand that points. Each prompt goes to
   // the card of the hand that holds its control.
   Content content[kHands] = {g_game, {}};
-  if (shown == kCtxMiracle || shown == kCtxVillage) {
+  if (shown == kCtxMiracle || shown == kCtxVillage || shown == kCtxBook ||
+      shown == kCtxMark) {
     // A MIRACLE IN THE HAND: the lines of the mod say what the controls do,
     // so the hints of the game for a button go, and one line of its text
     // stays (the name of the miracle). Then the three lines of the mod fit.
     // The click prompt stays in the place of that line: the trigger is the
-    // click while a text waits.
+    // click while a text waits. The open spell book has its own words for
+    // the item under the hand, so no text of the game stays: a name of the
+    // game that the card holds for a few frames (kHoldFrames) would join
+    // the words of the book.
     Content& game = content[kPointing];
     int kept = 0;
     for (int i = 0; i < game.count && kept < 1; ++i) {
       if (game.line[i].click) game.line[kept++] = game.line[i];
     }
-    for (int i = 0; i < game.count && kept < 1; ++i) {
+    for (int i = 0; i < game.count && kept < 1 && shown != kCtxBook; ++i) {
       if (game.line[i].button[0] != 0) continue;
       game.line[kept++] = game.line[i];
     }
@@ -1950,6 +3002,12 @@ void HintCardEndFrame() {
     game.count = kept;
   }
   AddPrompts(content, shown, first_show);
+  // THE OBJECT OF A FETCH (hint_held_latch): the line of the grip for the
+  // object in the Hand, until the game gives its hint for it.
+  if (g_hold_object != nullptr) {
+    AddPrompt(content, kWordGrab, HoldWords(), kToneGrab);
+    ++g_hold_frames;
+  }
   // THE CLICK PROMPT (text_click.cpp): while it shows, each press of its
   // button is the click. AddPrompt adds no line for the same button. A line
   // for two presses or for a hold of that button ("Trigger x2") goes too.
@@ -1981,6 +3039,8 @@ void HintCardEndFrame() {
   // The ring is open at the other hand, and its picture is there. The card
   // of that hand comes back when the ring closes.
   if (RadialMenuOpen()) content[kOther].count = 0;
+  // The same for the spell book over that hand.
+  if (SpellBookOpen()) content[kOther].count = 0;
   // AGAINST A FLICKER: the words of a target stay a moment after it goes,
   // when nothing else shows.
   if (g_timing != 0) {
@@ -1991,6 +3051,46 @@ void HintCardEndFrame() {
                hint_card_math::LingerOpen(g_target_time, now,
                                           kLingerSeconds)) {
       for (int h = 0; h < kHands; ++h) content[h] = g_target_words[h];
+    }
+  }
+  // THE SAME OBJECT IN THE HAND (hint_held_latch): a frame with no words on
+  // the pointing card keeps the words of the last frame with words for the
+  // same object, for kHeldGapSeconds at most.
+  {
+    void* held = g_have_facts && g_facts_frame == g_frame && g_facts_holding
+                     ? g_facts_held
+                     : nullptr;
+    if (held != nullptr && content[kPointing].count > 0) {
+      g_held_words = content[kPointing];
+      g_held_words_object = held;
+      g_held_words_time = now;
+      g_held_gap = false;
+    } else if (g_held_latch != 0 && held != nullptr &&
+               held == g_held_words_object &&
+               content[kPointing].count == 0 &&
+               now - g_held_words_time < kHeldGapSeconds) {
+      content[kPointing] = g_held_words;
+      ++g_held_gap_frames;
+      if (!g_held_gap) {
+        g_held_gap = true;
+        g_held_gap_start = g_frame;
+        ++g_held_gaps;
+        if (g_held_logs < kMaxHeldLogs) {
+          ++g_held_logs;
+          char words[320];
+          Describe(g_held_words, words, sizeof(words));
+          ModLog("hint card    : frame %llu, the pointing card keeps \"%s\": "
+                 "the Hand holds the same object %p, and this frame has no "
+                 "words for it. The context is %s, the prompt is %s, and the "
+                 "game gives %d lines, %d of them on the card "
+                 "(hint_held_latch=1)",
+                 g_frame, words, held, kContextName[raw_context],
+                 kContextName[shown], g_noted.count, g_game.count);
+        }
+      }
+    } else {
+      if (held == nullptr) g_held_words_object = nullptr;
+      g_held_gap = false;
     }
   }
   if ((!SameContent(content[kPointing], g_timing_words) &&
@@ -2018,6 +3118,8 @@ void HintCardEndFrame() {
   const float size = g_size_pct * 0.01f;
   Plan plan[kHands] = {};
   float head[3] = {0.0f, 0.0f, 0.0f};
+  bool use_model[kHands] = {false, false};
+  HintModelPollKey();
   for (int h = 0; h < kHands; ++h) {
     Plan& p = plan[h];
     CardState& c = g_cards[h];
@@ -2026,13 +3128,28 @@ void HintCardEndFrame() {
                                       head_now, &p.left);
     if (p.have_hand) {
       for (int i = 0; i < 3; ++i) head[i] = head_now[i];
-      hint_card_math::HandFromGrip(p.grip_position, p.grip_orientation, p.left,
-                                   hand_m, &p.hand);
-      hint_card_math::HandOutline(p.grip_position, p.grip_orientation, p.left,
-                                  hand_m, p.outline);
+      // The hand has its own angle on the controller (hand_angle).
+      float turn[4];
+      if (!ControllersHandOrientation(h, turn)) {
+        for (int i = 0; i < 4; ++i) turn[i] = p.grip_orientation[i];
+      }
+      hint_card_math::HandFromGrip(p.grip_position, turn, p.left, hand_m,
+                                   &p.hand);
+      hint_card_math::HandOutline(p.grip_position, turn, p.left, hand_m,
+                                  p.outline);
+    }
+    // THE CONTROLLER IN THE HAND (hint_style=2): a hand with a model has
+    // the cards of its buttons (ModelCards), and no card at the wrist. The
+    // model loads at the first routed frame, before the first hint.
+    use_model[h] = false;
+    if (p.have_hand && HintModelStyle() == 2 &&
+        HintModelReady(p.left ? 0 : 1)) {
+      use_model[h] = true;
+      continue;
     }
     if (content[h].count > 0 && !p.have_hand) ++c.frames_no_hand;
     p.show = content[h].count > 0 && p.have_hand;
+    if (p.show) SetPictures(&content[h], p.left);
     if (p.show && !SameContent(content[h], c.drawn)) {
       if (!Raster(content[h], &c)) return;
     }
@@ -2054,12 +3171,13 @@ void HintCardEndFrame() {
     // A card at the face is not readable, and it hides the view.
     if (p.eye_distance < kMinEyeDistance) p.placed = false;
   }
+  ModelCards(content, plan, use_model, head, dt, shown);
   // A card must not hide the other hand, and the two cards must not overlap.
   // The card of the hand that points wins.
   for (int h = 0; h < kHands; ++h) {
     Plan& p = plan[h];
     const Plan& other = plan[1 - h];
-    if (!p.show || !p.placed) continue;
+    if (use_model[h] || !p.show || !p.placed) continue;
     bool hides = other.have_hand &&
                  hint_card_math::CardCoversAny(
                      p.card, p.width, p.height, kOtherHandMargin, head,
@@ -2078,6 +3196,7 @@ void HintCardEndFrame() {
   for (int h = 0; h < kHands; ++h) {
     Plan& p = plan[h];
     CardState& c = g_cards[h];
+    if (use_model[h]) continue;
     const bool show = p.show && p.placed;
     c.fade = hint_card_math::FadeStep(
         c.fade, show, dt,
@@ -2102,6 +3221,7 @@ void HintCardEndFrame() {
     for (int i = 0; i < 4; ++i) layer.orientation[i] = p.card.orientation[i];
     layer.width = p.width;
     layer.height = p.height;
+    layer.serial = c.serial;
     bwvr::XrScreen::StageCard(
         h == kPointing ? bwvr::kCardHintPointing : bwvr::kCardHintOther,
         layer);
@@ -2151,6 +3271,77 @@ void HintCardEndFrame() {
                        static_cast<uint32_t>(c.rect_h));
     }
   }
+}
+
+// THE SAVE OF THE GAME (hint_card_saving, docs/controller-hints.md, "The
+// card of a save"). The game writes a save on its own thread and gives no
+// frame until the save is over, so no card can change in that time.
+// mod_main.cpp asks for this card at the start of the save, and
+// XrScreen::HoldCard puts it into the layers of the last frame, which the
+// hold sends again until the game gives a frame. The card of the pointing
+// hand has one line, "Saving...", at the place of the card of the last
+// frame. False when the cards did not show in the last frame.
+bool HintCardSavingLayer(bwvr::CardLayer* out) {
+  ReadSettings();
+  CardsStart();
+  if (!g_saving || !g_on || g_toggled_off || g_raster_failed) return false;
+  if (!g_route || g_route_frame != g_frame) return false;
+  CardState& c = g_cards[kPointing];
+  Content content = {};
+  SetLine(&content.line[0], nullptr, L"Saving...", kToneNone, 0);
+  content.count = 1;
+  if (!SameContent(content, c.drawn) && !Raster(content, &c)) return false;
+  Plan p = {};
+  float head[3] = {0.0f, 0.0f, 0.0f};
+  p.have_hand = ControllersCardPose(kPointing, p.grip_position,
+                                    p.grip_orientation, head, &p.left);
+  if (!p.have_hand || c.rect_w <= 0 || c.rect_h <= 0) return false;
+  const float hand_length = ControllersHandCm() * 0.01f *
+                            (ControllersHandScalePct() * 0.01f);
+  const float hand_m = hand_length > 0.05f ? hand_length : 0.19f;
+  const float size = g_size_pct * 0.01f;
+  float turn[4];
+  if (!ControllersHandOrientation(kPointing, turn)) {
+    for (int i = 0; i < 4; ++i) turn[i] = p.grip_orientation[i];
+  }
+  hint_card_math::HandFromGrip(p.grip_position, turn, p.left, hand_m,
+                               &p.hand);
+  hint_card_math::HandOutline(p.grip_position, turn, p.left, hand_m,
+                              p.outline);
+  hint_card_math::CardSize(c.rect_w, c.rect_h, kPixelsPerMeter / size,
+                           kMostWidth * size, &p.width, &p.height);
+  if (!c.visible || p.left != c.side_left_hand) c.side = 0;
+  c.side_left_hand = p.left;
+  if (!hint_card_math::CardPose(p.hand, p.outline,
+                                hint_card_math::kOutlinePoints, head, p.width,
+                                kGap, kSideExcess, c.last_right, c.side,
+                                p.left ? -1 : 1, &p.card)) {
+    return false;
+  }
+  for (int i = 0; i < 3; ++i) c.last_right[i] = p.card.right[i];
+  c.side = p.card.side;
+  c.fade = 1.0f;
+  Stage(&c);
+  c.visible = true;
+  bwvr::CardLayer layer = {};
+  layer.visible = true;
+  layer.pixels = c.staged;
+  layer.texture_width = kHintCardWidth;
+  layer.texture_height = kHintCardHeight;
+  layer.rect[2] = c.rect_w;
+  layer.rect[3] = c.rect_h;
+  for (int i = 0; i < 3; ++i) layer.position[i] = p.card.center[i];
+  for (int i = 0; i < 4; ++i) layer.orientation[i] = p.card.orientation[i];
+  layer.width = p.width;
+  layer.height = p.height;
+  layer.serial = c.serial;
+  *out = layer;
+  ModLog("hint card    : frame %llu, the game saves: the card of the %s hand "
+         "says \"Saving...\", %.1f by %.1f cm at %.3f %.3f %.3f m, until the "
+         "game gives a frame again (hint_card_saving=1)", g_frame,
+         p.left ? "left" : "right", p.width * 100.0f, p.height * 100.0f,
+         p.card.center[0], p.card.center[1], p.card.center[2]);
+  return true;
 }
 
 // The switches of the debug page (debug_menu.h) can change only while the
@@ -2318,6 +3509,78 @@ int HintCardMovesValue() {
   return g_moves;
 }
 
+// The switch "Card look" of the debug page: hint_card_style between the
+// scroll (1) and the plain card (0). Each card draws its picture again in
+// the next frame.
+void HintCardStyleToggle(const char* by) {
+  ReadSettings();
+  if (!CardsCanShow()) return;
+  g_style = g_style != 0 ? 0 : 1;
+  for (int h = 0; h < kSlots; ++h) g_cards[h].drawn.count = -1;
+  ControllersGesturePulse(0.5f, g_style != 0 ? 0.30f : 0.08f);
+  ModLog("test key     : %s: hint_card_style is %d now (%s)", by, g_style,
+         g_style != 0 ? "the cards are scrolls" : "the cards are plain");
+}
+
+// The debug page: hint_card_pictures changes between 1 and 0. Each card
+// draws its picture again in the next frame.
+void HintCardPicturesToggle(const char* by) {
+  ReadSettings();
+  if (!CardsCanShow()) return;
+  g_pictures = g_pictures != 0 ? 0 : 1;
+  for (int h = 0; h < kSlots; ++h) g_cards[h].drawn.count = -1;
+  ControllersGesturePulse(0.5f, g_pictures != 0 ? 0.30f : 0.08f);
+  ModLog("test key     : %s: hint_card_pictures is %d now (%s)", by,
+         g_pictures,
+         g_pictures != 0 ? "a line of a button has a picture of the button"
+                         : "the lines have the button words only");
+}
+
+int HintCardPicturesValue() {
+  if (!CardsCanShow()) return kDebugCannot;
+  return g_pictures;
+}
+
+// The settings window (settings_panel.cpp): hint_learn and
+// hint_card_style at once. Each card draws its picture again in the next
+// frame.
+void HintCardSetLearn(int learn, const char* by) {
+  ReadSettings();
+  g_learn = learn != 0 ? 1 : 0;
+  for (int h = 0; h < kSlots; ++h) g_cards[h].drawn.count = -1;
+  ModLog("hint card    : %s: hint_learn is %d now (%s)", by, g_learn,
+         g_learn != 0 ? "a line goes away after its action 3 times"
+                      : "each line always shows");
+}
+
+void HintCardFollowTooltips(int tooltip_level) {
+  ReadSettings();
+  if (!g_learn_game || tooltip_level == g_learn_level) return;
+  g_learn_level = tooltip_level;
+  const int learn = hint_learn_math::LearnOfTooltips(tooltip_level);
+  if (learn != g_learn) {
+    g_learn = learn;
+    for (int h = 0; h < kSlots; ++h) g_cards[h].drawn.count = -1;
+  }
+  ModLog("hint card    : the ToolTips option of the game is %d, so %s",
+         tooltip_level,
+         g_learn != 0 ? "a line goes away after its action 3 times"
+                      : "each line always shows (All ToolTips)");
+}
+
+void HintCardSetStyle(int style, const char* by) {
+  ReadSettings();
+  g_style = style != 0 ? 1 : 0;
+  for (int h = 0; h < kSlots; ++h) g_cards[h].drawn.count = -1;
+  ModLog("hint card    : %s: hint_card_style is %d now (%s)", by, g_style,
+         g_style != 0 ? "the cards are scrolls" : "the cards are plain");
+}
+
+int HintCardStyleValue() {
+  if (!CardsCanShow()) return kDebugCannot;
+  return g_style;
+}
+
 void HintCardToggle() {
   ReadSettings();
   if (!g_on) {
@@ -2343,7 +3606,18 @@ void HintCardLearnDone(int skill, const char* how) {
 }
 
 void HintCardReport() {
+  HintModelReport();
   if (g_frames_routed == 0) return;
+  if (g_model_frames[0] + g_model_frames[1] > 0) {
+    ModLog("hint card    : the cards of the buttons showed in %llu frames of "
+           "the pointing hand and %llu of the other hand. %llu cards of the "
+           "pointing hand and %llu of the other hand did not show, because "
+           "they would cover the other hand or a card of the pointing hand",
+           g_model_frames[0], g_model_frames[1], g_model_hidden[0],
+           g_model_hidden[1]);
+    g_model_frames[0] = g_model_frames[1] = 0;
+    g_model_hidden[0] = g_model_hidden[1] = 0;
+  }
   const CardState& a = g_cards[kPointing];
   const CardState& b = g_cards[kOther];
   if (g_learn != 0) {
@@ -2381,12 +3655,29 @@ void HintCardReport() {
          g_words, g_empty_hints, g_owned_hints, g_take_keeps,
          g_take_keep_frames, g_fetch_keeps, g_fetch_keep_frames,
          g_stale_hints);
+  ModLog("hint card    : hint_held_latch=%d: the card kept its words for the "
+         "same object in the Hand in %llu gaps (%llu frames), the card had the "
+         "words of the mod for the object of a fetch %llu times (%llu "
+         "frames), and a far target with no lock was no context on %llu "
+         "frames with an object in the Hand", g_held_latch, g_held_gaps,
+         g_held_gap_frames, g_holds, g_hold_frames, g_far_held_frames);
   ModLog("hint card    : %llu and %llu frames had words and no tracked hand. "
          "%llu and %llu frames a card did not show, because it was on the "
          "other hand or on the other card. The cards changed side %llu and "
          "%llu times (the pointing hand first)",
          a.frames_no_hand, b.frames_no_hand, a.frames_hidden, b.frames_hidden,
          a.side_changes, b.side_changes);
+  if (g_draws > 0) {
+    ModLog("hint card    : %llu new pictures of the cards in the %s look, %.2f "
+           "ms each on average and %.2f ms at the most. %llu new pictures of "
+           "buttons (hint_card_pictures=%d)",
+           g_draws, g_style != 0 && !g_scroll_failed ? "scroll" : "plain",
+           g_draw_ms / static_cast<double>(g_draws), g_draw_most_ms, g_bakes,
+           g_pictures);
+    g_draws = 0;
+    g_bakes = 0;
+    g_draw_ms = g_draw_most_ms = 0.0;
+  }
   if (g_click_shown != 0 || g_click_hidden != 0) {
     ModLog("hint card    : the prompt of a text that waits for a click showed "
            "on %llu frames and did not show on %llu (text_click=%d)",
@@ -2426,4 +3717,49 @@ void HintCardReport() {
     g_cards[h].side_changes = 0;
   }
   for (int i = 0; i < kContexts; ++i) g_prompt_shows[i] = 0;
+}
+
+// THE CHECK of the words (text_fit_test=1): a line of text in the box of a
+// line of a card, in each look, with the badge of a button before it, as
+// RasterPlain and RasterScroll place it. See text_fit.h.
+void HintCardCheckLine(const wchar_t* text) {
+  if (!RasterStart()) return;
+  const int width = static_cast<int>(kHintCardWidth);
+  for (int look = 0; look < 2; ++look) {
+    if (look == 1 && !ScrollStart()) break;
+    int x0, right;
+    HFONT font;
+    if (look == 0) {
+      x0 = kPad + TextWidth(g_badge_font, L"Grip") + 2 * kBadgePad + kBadgeGap;
+      right = width - kPad - 4;
+      font = g_text_font;
+    } else {
+      int seal = TextWidth(g_scroll_seal_font, L"GRIP") + 2 * kScrollSealPad;
+      if (seal < kScrollSealMin) seal = kScrollSealMin;
+      x0 = card_scroll::kWordsLeft + seal + kBadgeGap;
+      right = width - card_scroll::kWordsRight;
+      font = g_scroll_text_font;
+    }
+    text_fit::Check(g_dc, font, text, right - x0, BlockHeight(2), 2,
+                    look == 0 ? "hint card (plain)" : "hint card (scroll)");
+  }
+}
+
+void HintCardTextFitTest() {
+  // The lines of the mod that are longest, and a long line of the length of
+  // a long tooltip of the game.
+  const wchar_t* const kTexts[] = {
+      L"Close and swing to slap",
+      L"Put the leash on",
+      L"Open to stop",
+      L"Tap to cancel, or shake",
+      L"Use the miracle",
+      L"Hold to collect",
+      L"Pull farther to take it",
+      L"Open to put it back",
+      L"Put your hand on a miracle",
+      L"No miracle to ask for now",
+      L"Your Creature learns from what you do and from what you let it do",
+  };
+  for (const wchar_t* text : kTexts) HintCardCheckLine(text);
 }

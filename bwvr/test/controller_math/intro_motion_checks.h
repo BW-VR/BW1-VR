@@ -319,6 +319,28 @@ inline void IntroMotionChecks() {
   const float far_orb[3] = {14.0f, 0.0f, 0.0f};
   Check(!DragPoint(rest, hand_moved, 3.0f, far_orb, delta),
         "an orb past the radius stays", 0, 0);
+  // A HAND THAT IS STILL IN THE ROOM (intro_push_room): the same pose, and
+  // the same pose through a change of the scale, are still. A move of 1 mm
+  // or a turn of 0.01 degrees is a motion.
+  {
+    const HandPose room = {{0.1f, -0.3f, 0.5f},
+                           {1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f,
+                            1.0f}};
+    Check(HandStill(room, room), "the same pose in the room is still", 1, 1);
+    HandPose scaled = room;
+    for (int k = 0; k < 3; ++k) {
+      scaled.position[k] = (room.position[k] * 37.3f) / 37.3f;
+    }
+    Check(HandStill(room, scaled), "the same pose after a change of the "
+          "scale is still", 1, 1);
+    HandPose stepped = room;
+    stepped.position[2] += 0.001f;
+    Check(!HandStill(room, stepped), "a move of 1 mm is a motion", 0, 0);
+    HandPose twisted = room;
+    twisted.rotation[1] = 0.00018f;  // 0.01 degrees
+    twisted.rotation[3] = -0.00018f;
+    Check(!HandStill(room, twisted), "a turn of 0.01 degrees is a motion", 0, 0);
+  }
   // A turn of the hand of 90 degrees about z, in place: an orb 1 unit along
   // x of the hand goes to 1 unit along y.
   HandPose hand_turned = rest;

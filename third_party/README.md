@@ -14,13 +14,15 @@ The full license texts that go out with the mod are in
 | `Vulkan-Headers/include/` | The C headers of Vulkan (`vulkan/*.h`, `vk_video/*.h`), no C++ headers | tag `vulkan-sdk-1.4.357.0` | Apache-2.0 or MIT (`LICENSE.md`, `LICENSES/`) | https://github.com/KhronosGroup/Vulkan-Headers |
 | `cgltf/` | cgltf, the glTF reader for a hand model file (`cgltf.h`) | v1.14 | MIT (`LICENSE`) | https://github.com/jkuhlmann/cgltf |
 | `openxr-android/` | The OpenXR loader of Khronos for Android, `libopenxr_loader.so` for `arm64-v8a` and `x86_64`, for the headset app (`bwvr/docs/android.md`) | release 1.1.43 | Apache-2.0 OR MIT (`LICENSE` has the text of Apache-2.0) | the AAR `org.khronos.openxr:openxr_loader_for_android:1.1.43` of Maven Central |
+| `fonts/alegreya/`, `fonts/alegreyasc/` | Alegreya (`Alegreya[wght].ttf`, a variable font) and Alegreya SC Bold (`AlegreyaSC-Bold.ttf`), the fonts of the scroll cards. The installer puts them in `bwvr-fonts` of the game folder | google/fonts commit `24ddc1f` | SIL OFL 1.1 (`OFL.txt` in each folder) | https://github.com/google/fonts (`ofl/alegreya`, `ofl/alegreyasc`) |
 
 ## The binaries are pinned
 
 `bwvr/tools/package.ps1` holds the SHA-256 of `openxr_loader.dll`,
-`dxwrapper.dll` and the `ddraw.dll` stub, and it stops when a file is not
-the recorded one. So a binary here changes only together with its hash in
-that script, in one commit that says where the new file is from.
+`dxwrapper.dll`, the `ddraw.dll` stub and the two font files, and it stops
+when a file is not the recorded one. So a binary here changes only together
+with its hash in that script, in one commit that says where the new file is
+from.
 
 ## How the OpenXR loader was built
 

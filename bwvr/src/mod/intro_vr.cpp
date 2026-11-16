@@ -53,7 +53,10 @@
 // THE PUSH IN 3D. In the first eye pass, after the sky and before the effect
 // moves and draws the orbs, each hand takes the orbs in its reach with its
 // own motion, one to one (Push3d, intro_push_3d). Then the spring of the
-// effect pulls them back to their homes. The overlay draws the hand models of
+// effect pulls them back to their homes. A hand moves orbs only when the
+// player moved it in the room (intro_push_room): the pose against the camera
+// also changes when the camera turns, the head moves or the scale of the
+// room changes, and that is no motion of the hand. The overlay draws the hand models of
 // the game in each eye pass, and a hand shows while it moves (HandsFrame,
 // intro_hand_show).
 //
@@ -111,6 +114,8 @@
 #include "controllers.h"
 #include "intro_motion_math.h"
 #include "xr_input.h"
+#include "eye_cant_math.h"
+#include "head_lag_math.h"
 
 extern void ModLog(const char* format, ...);
 
@@ -118,6 +123,10 @@ extern void ModLog(const char* format, ...);
 void StereoIntroPrepareView(bool to_headset);
 bool StereoIntroAllowed();
 bool StereoHeadTrackingOn();
+// The head of a frame and the turn of each view from it (canted views).
+bool StereoSolveViews(const float view0[4], const float view1[4],
+                      bool declare_roll, float head[4], float declared[2][4],
+                      float turn[2][4]);
 bool StereoIsHeadless();
 bool StereoCaptureIntervalDue();
 void StereoMarkPresented();
@@ -152,6 +161,10 @@ bool GpuBridgeReady();
 void* GpuBridgeCaptureEye(int eye);
 bool GpuBridgeKeepTake(int eye);
 bool GpuBridgeKeepGive(int eye);
+// The same, with the kept picture moved: the pixel (u, v) of the target takes
+// the pixel of the keep that is x half widths to the right and y half
+// heights up from it.
+bool GpuBridgeKeepGiveShifted(int eye, float x, float y);
 void GpuBridgeKeepFree();
 uint64_t GpuBridgeKeepCopies();
 bool EyeCaptureWanted(uint64_t stereo_frame);
@@ -223,6 +236,7 @@ int g_speed_pct = 100;         // intro_speed_pct: the speed of the effect clock
 float g_distance_m = 3.0f;     // intro_distance_cm: the logo plane, from the head
 float g_model_distance_m = 2.0f;  // intro_model_distance_cm, intro_motion=2
 bool g_eye_trails = true;      // intro_eye_trails: each eye has its trails
+bool g_keep_turn = true;       // intro_keep_turn: the keep turns with the head
 bool g_text_place = true;      // intro_text_place: the flat text has a place
 bool g_push_once = true;       // intro_push_once: one push for each frame
 bool g_controller = true;      // intro_controller: the aim moves the pointer
@@ -230,6 +244,7 @@ int g_hand_push_pct = 100;     // intro_hand_push_pct: the hand pushes the orbs
 int g_hand_push_set_pct = 100; // the value of the ini, for the test key
 bool g_hand_point = true;      // intro_hand_point: the pointer is at the hand
 bool g_push_3d = true;         // intro_push_3d: each hand pushes in 3D
+bool g_push_room = true;       // intro_push_room: only a motion in the room
 float g_push_radius_m = 0.30f; // intro_push_radius_cm
 int g_hand_show = 1;           // intro_hand_show: 0 off, 1 while moving, 2 on
 bool g_hand_depth = true;      // intro_hand_depth: hands before the orbs
@@ -244,6 +259,10 @@ bwvr::XrScreen* g_screen = nullptr;
 
 // The state of the pair that is running.
 int g_eye = -1;                // the eye pass that is running, or -1
+// The turn of each view from the head of this frame, and true when a view is
+// canted (StereoSolveViews).
+float g_eye_turn[2][4] = {{0, 0, 0, 1}, {0, 0, 0, 1}};
+bool g_eye_canted = false;
 bool g_to_headset = false;
 uint32_t g_pass_delta = 0;     // what StartFrame must leave in g_delta_time
 bool g_pass_delta_valid = false;
@@ -253,6 +272,21 @@ bool g_eye_sent = false;       // the picture reached the headset
 float g_eye_position[2][3] = {{0, 0, 0}, {0, 0, 0}};
 float g_eye_orientation[2][4] = {{0, 0, 0, 1}, {0, 0, 0, 1}};
 bool g_have_eyes = false;
+// THE KEPT PICTURE AND A TURN OF THE HEAD (intro_keep_turn). The declared
+// view of each eye in this pair, the view that the kept picture of each eye
+// was drawn with, and the move of the kept picture for the eye pass that
+// runs, in units of the half width and the half height, x to the right and
+// y up (head_lag_math.h, KeptPictureShift).
+float g_eye_declared[2][4] = {{0, 0, 0, 1}, {0, 0, 0, 1}};
+float g_kept_view[2][4] = {{0, 0, 0, 1}, {0, 0, 0, 1}};
+bool g_kept_valid[2] = {false, false};
+float g_pass_shift[2] = {0.0f, 0.0f};
+uint64_t g_shift_passes = 0;     // eye passes with a move of the keep
+double g_shift_sum = 0.0;        // the sum of the moves, half widths
+float g_shift_most = 0.0f;
+float g_fake_view_before[4] = {0, 0, 0, 1};  // the invented head, pair before
+bool g_have_fake_before = false;
+int g_step_lines = 0;
 float g_separation_m = 0.0668f;  // the eyes, in meters
 float g_scale = 0.0f;          // units per meter in the intro, 0 until known
 float g_saved_scale = 0.0f;    // the scale of the world, put back at the end
@@ -314,6 +348,16 @@ bool g_hand_now_valid[2] = {false, false};
 bool g_hand_before_valid[2] = {false, false};
 uint64_t g_hand_pose_pair = 0;
 float g_hand_units = 0.0f;       // world units in a meter of the room
+float g_hand_units_before = 0.0f;
+// The pose of each hand in the room (ControllersOverlayHandsRoom), in
+// meters, for this pair and the pair before: a hand moves orbs only when
+// this pose changed (intro_motion::HandStill).
+intro_motion::HandPose g_room_now[2];
+intro_motion::HandPose g_room_before[2];
+bool g_room_now_valid[2] = {false, false};
+bool g_room_before_valid[2] = {false, false};
+uint64_t g_still_skips = 0;      // pairs of a still hand that moved no orb
+bool g_still_said = false;
 intro_motion::HandShow g_show[2];
 float g_show_opacity[2] = {0.0f, 0.0f};
 bool g_overlay_on = false;       // the overlay built the hands of this pair
@@ -430,7 +474,9 @@ void __cdecl h_StartFrame() {
 // Process3dEngineBody in stereo.cpp.
 void UpdateHead() {
   g_have_eyes = false;
+  g_eye_canted = false;
   if (!StereoHeadTrackingOn()) return;
+  const bool declare_roll = HeadCameraRollEnabled() || !HeadCameraEnabled();
   if (g_to_headset) {
     const bwvr::EyeView& left = g_screen->eye(0);
     const bwvr::EyeView& right = g_screen->eye(1);
@@ -451,20 +497,19 @@ void UpdateHead() {
     const float ipd = sqrtf(dx * dx + dy * dy + dz * dz);
     if (ipd > 0.03f && ipd < 0.12f) g_separation_m = ipd;
     HeadPoseSetHead(center);
-    HeadPoseUpdate(center, left.orientation);
+    // The head is the mean of the two views, and each eye turns from it by
+    // the turn of its view.
+    float head[4];
+    float declared[2][4];
+    g_eye_canted = StereoSolveViews(left.orientation, right.orientation,
+                                    declare_roll, head, declared, g_eye_turn);
+    HeadPoseUpdate(center, head);
     // This frame draws from this frame's pose, so that is the pose to
-    // declare. The scene of stereo.cpp draws from the pose of the frame
-    // before, because its camera call runs before the frame begins.
-    const bool declare_roll = HeadCameraRollEnabled() || !HeadCameraEnabled();
+    // declare: RunPair begins the frame of the headset before the head.
     for (int e = 0; e < 2; ++e) {
-      float orientation[4];
-      if (declare_roll) {
-        memcpy(orientation, g_eye_orientation[e], sizeof(orientation));
-      } else {
-        HeadPoseStripRoll(g_eye_orientation[e], orientation);
-      }
-      g_screen->SetRenderPose(e, g_eye_position[e], orientation);
+      g_screen->SetRenderPose(e, g_eye_position[e], declared[e]);
     }
+    memcpy(g_eye_declared, declared, sizeof(g_eye_declared));
     g_have_eyes = true;
   } else if (XrInputOn()) {
     // The eyes of the input channel of the headset app (xr_input=1), as the
@@ -497,8 +542,46 @@ void UpdateHead() {
     for (int e = 0; e < 2; ++e) {
       HeadPoseFakeEye(e, g_eye_position[e], g_eye_orientation[e]);
     }
-    HeadPoseUpdate(center, g_eye_orientation[0]);
+    float head[4];
+    float declared[2][4];
+    g_eye_canted =
+        StereoSolveViews(g_eye_orientation[0], g_eye_orientation[1],
+                         declare_roll, head, declared, g_eye_turn);
+    HeadPoseUpdate(center, head);
+    memcpy(g_eye_declared, declared, sizeof(g_eye_declared));
     g_have_eyes = true;
+    // A STEP OF THE INVENTED HEAD in a desktop run: this pair is the first
+    // that draws with the new head over the kept pictures of the old one.
+    // With test_keys it saves the pictures of the pair.
+    if (g_have_fake_before) {
+      const float turned =
+          head_lag_math::AngleDeg(g_fake_view_before, declared[0]);
+      if (turned >= head_lag_math::kStepDeg) {
+        float x = 0.0f, y = 0.0f;
+        const bw::tech::InfoTransform* info =
+            reinterpret_cast<const bw::tech::InfoTransform*>(
+                bw::tech::kInfoTransform);
+        if (!IsBadReadPtr(info, sizeof(*info))) {
+          head_lag_math::KeptPictureShift(
+              g_fake_view_before, declared[0], info->inv_half_tan_fov_x,
+              info->inv_half_tan_fov_y, &x, &y);
+        }
+        if (g_test_keys) EyeCaptureArmNow(kCaptureBase + g_pairs);
+        if (g_step_lines < 20) {
+          ++g_step_lines;
+          ModLog("intro        : the invented head turned %.1f degrees at "
+                 "pair %llu. The kept picture of each eye is %s by %.3f of "
+                 "the half width and %.3f of the half height "
+                 "(intro_keep_turn=%d, intro_eye_trails=%d)%s",
+                 turned, g_pairs,
+                 g_keep_turn && g_eye_trails ? "moved" : "not moved", x, y,
+                 g_keep_turn ? 1 : 0, g_eye_trails ? 1 : 0,
+                 g_test_keys ? ". The pictures of this pair are saved" : "");
+        }
+      }
+    }
+    memcpy(g_fake_view_before, declared[0], sizeof(g_fake_view_before));
+    g_have_fake_before = true;
   }
 }
 
@@ -812,7 +895,41 @@ void RunEye(int eye, uint32_t delta, uint32_t game_time_inc) {
   g_eye_sent = false;
   // The effect draws over the picture that is in the render target. That
   // must be the last picture of this eye. See "THE TRAILS" at the top.
-  if (g_eye_trails) GpuBridgeKeepGive(eye);
+  //
+  // THE KEEP TURNS WITH THE HEAD (intro_keep_turn). The kept picture is in
+  // the pixels of the view that drew it. After a turn of the head, the same
+  // pixels are a different direction, and the trail of each orb shows as a
+  // second, weaker orb that goes with the head. So the kept picture moves by
+  // the turn of the view of this eye since that picture, before the effect
+  // draws over it. Each thing of the trail is then in its direction in the
+  // room again. The move is the move of the middle of the view: the roll and
+  // the edges of a large turn are not corrected. Where the moved picture
+  // leaves a strip, the strip keeps the picture as it was.
+  g_pass_shift[0] = g_pass_shift[1] = 0.0f;
+  if (g_eye_trails && g_keep_turn && g_have_eyes && g_kept_valid[eye]) {
+    const bw::tech::InfoTransform* info =
+        reinterpret_cast<const bw::tech::InfoTransform*>(
+            bw::tech::kInfoTransform);
+    float x = 0.0f, y = 0.0f;
+    if (!IsBadReadPtr(info, sizeof(*info)) &&
+        head_lag_math::KeptPictureShift(
+            g_kept_view[eye], g_eye_declared[eye], info->inv_half_tan_fov_x,
+            info->inv_half_tan_fov_y, &x, &y)) {
+      g_pass_shift[0] = x;
+      g_pass_shift[1] = y;
+      const float size = sqrtf(x * x + y * y);
+      if (size > 0.0f) {
+        ++g_shift_passes;
+        g_shift_sum += size;
+        if (size > g_shift_most) g_shift_most = size;
+      }
+    }
+  }
+  if (g_eye_trails) GpuBridgeKeepGiveShifted(eye, g_pass_shift[0],
+                                             g_pass_shift[1]);
+  // The picture of this pass is drawn with the view of this pair.
+  g_kept_valid[eye] = g_have_eyes;
+  memcpy(g_kept_view[eye], g_eye_declared[eye], sizeof(g_kept_view[eye]));
   // backend=vulkan: the pixels of the CPU are not the picture, so a frame
   // that saves the eyes also asks the renderer for the picture of the walk
   // (bwvr-vk-left-M.bmp, M = 10 times the number of the capture plus the
@@ -979,7 +1096,24 @@ void HandsFrame(float dt) {
                     hands.units_per_meter > 0.0f;
   const bool next = g_hand_pose_pair + 1 == g_pairs;
   g_hand_pose_pair = g_pairs;
+  g_hand_units_before = g_hand_units;
   if (have) g_hand_units = hands.units_per_meter;
+  OverlayHands room;
+  const bool have_room = ControllersOverlayHandsRoom(&room);
+  for (int h = 0; h < 2; ++h) {
+    g_room_before[h] = g_room_now[h];
+    g_room_before_valid[h] = next && g_room_now_valid[h];
+    g_room_now_valid[h] = have_room && room.hand[h].valid &&
+                          room.units_per_meter > 0.0f;
+    if (g_room_now_valid[h]) {
+      for (int k = 0; k < 3; ++k) {
+        g_room_now[h].position[k] =
+            room.hand[h].position[k] / room.units_per_meter;
+      }
+      memcpy(g_room_now[h].rotation, room.hand[h].rotation,
+             sizeof(g_room_now[h].rotation));
+    }
+  }
   bool any_shows = false;
   for (int h = 0; h < 2; ++h) {
     g_hand_before[h] = g_hand_now[h];
@@ -1033,6 +1167,29 @@ void Push3d() {
     // give each orb a small move of the rounding.
     if (memcmp(&g_hand_before[h], &g_hand_now[h], sizeof(g_hand_now[h])) ==
         0) {
+      continue;
+    }
+    // A HAND THAT IS STILL IN THE ROOM (intro_push_room) moves no orb. Its
+    // pose against the camera changed, but the player did not move it.
+    if (g_push_room && g_room_now_valid[h] && g_room_before_valid[h] &&
+        intro_motion::HandStill(g_room_before[h], g_room_now[h])) {
+      ++g_still_skips;
+      if (!g_still_said) {
+        g_still_said = true;
+        float shift[3];
+        for (int k = 0; k < 3; ++k) {
+          shift[k] = g_hand_now[h].position[k] - g_hand_before[h].position[k];
+        }
+        const float units = g_hand_units > 0.0f ? g_hand_units : 1.0f;
+        ModLog("intro        : the %s hand is still in the room, so it moves "
+               "no orb, clock %.2f. Its pose against the camera moved %.2f "
+               "cm of the room, and the room has %.2f units a meter now and "
+               "%.2f in the pair before (intro_push_room=1)",
+               h == 0 ? "left" : "right", *Clock(),
+               sqrtf(shift[0] * shift[0] + shift[1] * shift[1] +
+                     shift[2] * shift[2]) / units * 100.0f,
+               g_hand_units, g_hand_units_before);
+      }
       continue;
     }
     intro_motion::HandPose before = g_hand_before[h];
@@ -1249,11 +1406,26 @@ void __cdecl h_RunAlexFx(int mode) {
              "hand showed in %llu frames (intro_hand_show=%d)",
              g_push_3d_frames, g_push_3d_orbs, g_push_3d_most,
              g_push_3d ? 1 : 0, g_show_frames, g_hand_show);
+      ModLog("intro        : a hand that was still in the room moved no orb "
+             "on %llu pairs, while its pose against the camera changed "
+             "(intro_push_room=%d)", g_still_skips, g_push_room ? 1 : 0);
+      ModLog("intro        : the kept picture moved with a turn of the head in "
+             "%llu eye passes, by %.4f of the half width or height in the "
+             "mean and %.4f at the most (intro_keep_turn=%d)",
+             g_shift_passes,
+             g_shift_passes > 0
+                 ? g_shift_sum / static_cast<double>(g_shift_passes)
+                 : 0.0,
+             g_shift_most, g_keep_turn ? 1 : 0);
     }
+    g_kept_valid[0] = g_kept_valid[1] = false;
+    g_have_fake_before = false;
     g_hand.have = false;
     g_have_hand_point = false;
     g_hand_now_valid[0] = g_hand_now_valid[1] = false;
     g_hand_before_valid[0] = g_hand_before_valid[1] = false;
+    g_room_now_valid[0] = g_room_now_valid[1] = false;
+    g_room_before_valid[0] = g_room_before_valid[1] = false;
     g_overlay_on = false;
     return;
   }
@@ -1460,7 +1632,13 @@ void IntroCameraBuilt() {
     }
   }
   const float roll = HeadCameraRoll();
-  if (roll > 0.0005f || roll < -0.0005f) {
+  if (g_have_eyes && g_eye_canted) {
+    // A canted view: the roll, then the turn of the view of this eye.
+    float h[9];
+    float offset[3];
+    eye_cant::EyeMatrix(g_eye_turn[g_eye], roll, d, h, offset);
+    EyeCameraSetPose(h, offset, false);
+  } else if (roll > 0.0005f || roll < -0.0005f) {
     const float c = cosf(roll), s = sinf(roll);
     const float rz[9] = {c, s, 0.0f, -s, c, 0.0f, 0.0f, 0.0f, 1.0f};
     const float offset[3] = {d, 0.0f, 0.0f};
@@ -1535,6 +1713,24 @@ int IntroPassEye() { return g_eye_trails ? g_eye : -1; }
 // For mod_main.cpp: an eye pass of the intro runs. Its FinishFrame is not a
 // screen with no scene (vk_stream_screens).
 bool IntroInPass() { return g_eye >= 0; }
+// For vk_scene.cpp: the move of the kept picture of the eye pass that runs,
+// x half widths to the right and y half heights up (intro_keep_turn). 0 and
+// 0 for no move.
+void IntroPassShift(float* x, float* y) {
+  const bool on = g_eye >= 0 && g_eye_trails;
+  *x = on ? g_pass_shift[0] : 0.0f;
+  *y = on ? g_pass_shift[1] : 0.0f;
+}
+
+// intro_keep_turn: the kept picture of each eye moves with a turn of the
+// head. See RunEye.
+void IntroSetKeepTurn(bool on) {
+  g_keep_turn = on;
+  ModLog("intro        : intro_keep_turn=%d. %s", on ? 1 : 0,
+         on ? "The kept picture of each eye moves with a turn of the head"
+            : "The kept picture of each eye stays in its pixels when the "
+              "head turns");
+}
 
 // For controllers.cpp: while the intro draws in stereo, a controller must not
 // press a mouse button. Any click ends the logo (DoLogo tests both main
@@ -1596,6 +1792,10 @@ void IntroSetHands(bool push_3d, int radius_cm, int hand_show,
   g_hand_depth = hand_depth;
 }
 
+// intro_push_room: a hand moves orbs only when its pose in the room changed.
+// false lets each change of its pose against the camera move orbs.
+void IntroSetPushRoom(bool on) { g_push_room = on; }
+
 void IntroInstall() {
   if (!g_on || g_installed) return;
   if (!CodeIsWhatWeExpect()) return;
@@ -1623,13 +1823,13 @@ void IntroInstall() {
          "intro_motion=2), the clock of the effect runs at %d percent, "
          "intro_eye_trails=%d, intro_text_place=%d, intro_push_once=%d, "
          "controller %s, intro_hand_push_pct=%d, intro_hand_point=%d, "
-         "intro_push_3d=%d with a reach of %.0f cm, intro_hand_show=%d, "
-         "intro_hand_depth=%d",
+         "intro_push_3d=%d with a reach of %.0f cm, intro_push_room=%d, "
+         "intro_hand_show=%d, intro_hand_depth=%d",
          g_motion, MotionText(g_motion), g_distance_m, g_model_distance_m,
          g_speed_pct, g_eye_trails ? 1 : 0, g_text_place ? 1 : 0,
          g_push_once ? 1 : 0, g_controller ? "on" : "off", g_hand_push_pct,
          g_hand_point ? 1 : 0, g_push_3d ? 1 : 0, g_push_radius_m * 100.0f,
-         g_hand_show, g_hand_depth ? 1 : 0);
+         g_push_room ? 1 : 0, g_hand_show, g_hand_depth ? 1 : 0);
   if (g_test_keys) {
     ModLog("intro        : test_keys=1: while the logo plays in stereo, Shift "
            "and Page Up step intro_motion, Shift and Page Down switch "

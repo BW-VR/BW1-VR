@@ -66,6 +66,7 @@ bool D3D9BackendDxvk();
 #include "thread_wait.h"
 #include "ui_panel.h"
 #include "vk_scene.h"
+#include "head_lag_math.h"
 
 extern void ModLog(const char* format, ...);
 // comfort_camera.cpp: true for a moment after a snap turn or a jump.
@@ -1525,6 +1526,35 @@ bool GpuBridgeKeepGive(int eye) {
     g_keep_failed = true;
     return false;
   }
+  ++g_keep_copies;
+  return true;
+}
+
+// The same, with the kept picture moved (intro_vr.cpp, intro_keep_turn): the
+// pixel (u, v) of the target takes the pixel of the keep that is x half
+// widths to the right and y half heights up from it. The whole keep goes
+// first, so the strip that the move leaves keeps the picture as it was.
+bool GpuBridgeKeepGiveShifted(int eye, float x, float y) {
+  int px = 0, py = 0;
+  head_lag_math::ShiftPixels(x, y, g_keep_desc.Width, g_keep_desc.Height, &px,
+                             &py);
+  if (!GpuBridgeKeepGive(eye)) return false;
+  if (px == 0 && py == 0) return true;
+  head_lag_math::CopyRect r;
+  if (!head_lag_math::ShiftCopy(px, py, g_keep_desc.Width, g_keep_desc.Height,
+                                &r)) {
+    return true;
+  }
+  const RECT source = {r.src_x, r.src_y,
+                       r.src_x + static_cast<LONG>(r.width),
+                       r.src_y + static_cast<LONG>(r.height)};
+  const RECT target = {r.dst_x, r.dst_y,
+                       r.dst_x + static_cast<LONG>(r.width),
+                       r.dst_y + static_cast<LONG>(r.height)};
+  const HRESULT hr = g_device->StretchRect(g_keep[eye], &source,
+                                           g_keep_target, &target,
+                                           D3DTEXF_NONE);
+  if (FAILED(hr)) return true;  // the keep went in unmoved
   ++g_keep_copies;
   return true;
 }

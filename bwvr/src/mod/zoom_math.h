@@ -71,6 +71,34 @@ inline float ZoomLevel(float land_room_y, float head_y, float nearest_m,
   return land_room_y;
 }
 
+// THE LEVEL OF A ZOOM OVER DEEP LAND (god_zoom_far_level). A zoom keeps the
+// level at its height in the room and scales the heights about it. A land
+// that is d meters below the level goes to d times the ratio of the scales,
+// so a zoom in about a level over the land moves the land farther down:
+//
+//     depth' = level + (depth - level) * s / s'      s' < s for a zoom in
+//
+// With keep_far, a zoom in (direction 1) over a land more than farthest_m
+// below the head takes the land itself as the level, so the land keeps its
+// height in the room. A zoom out (direction -1) keeps the level of
+// ZoomLevel, so a deep land comes up toward the range. Without keep_far
+// both directions take ZoomLevel.
+inline float ZoomLevelFor(float land_room_y, float head_y, float nearest_m,
+                          float farthest_m, int direction, bool keep_far) {
+  if (keep_far && direction > 0 && land_room_y < head_y - farthest_m) {
+    return land_room_y;
+  }
+  return ZoomLevel(land_room_y, head_y, nearest_m, farthest_m);
+}
+
+// How far below the head a land is after a zoom from the scale `from` to the
+// scale `to` about a level: both depths in meters below the head.
+inline float DepthAfterZoom(float level_depth, float land_depth, float from,
+                            float to) {
+  if (!(to > 0.0f)) return land_depth;
+  return level_depth + (land_depth - level_depth) * from / to;
+}
+
 // WHERE THE POINT OF A ZOOM IS ACROSS THE ROOM. out is a room point, in
 // meters, and the zoom uses its x and its z. Returns the kind of the point.
 //
@@ -181,6 +209,54 @@ inline float FrameRatio(float push, float step, float step_seconds,
   if (push > 1.0f) push = 1.0f;
   if (push < -1.0f) push = -1.0f;
   return powf(step, -push * seconds / step_seconds);
+}
+
+// THE LOWEST SCALE OF THE ZOOM (god_near_units_per_meter_x10), in units of
+// the world for each meter of the room. The key is in tenths of a unit. A
+// villager is about kVillagerUnits high: the body that the hand pick finds
+// has a half height of 0.70 to 0.85 units, and the game holds a villager
+// with a height of 1.66 units. So at 1 unit for each meter a villager is as
+// high as a player, and his eyes are at the eyes of a player who stands with
+// the land at his feet. A key of 75 gives the life size scale, and 0 takes
+// that scale from head_units_per_meter_x10 (life). The zoom in then stops at
+// it.
+const int kLowestTenths = 10;
+const float kVillagerUnits = 1.6f;
+
+inline float LowestScale(int tenths, float life) {
+  if (tenths <= 0) return life > 0.0f ? life : 7.5f;
+  return static_cast<float>(tenths) * 0.1f;
+}
+
+// A ZOOM THAT STOPS SHORT OF A SOLID (god_zoom_solid_stop). clear(t) is the
+// clearance of the head from the solids, in meters of the room, after the
+// share t of a step: 0 is no step and 1 is the whole step. The step goes as
+// far as the clearance stays at need or more. A head that is already nearer
+// than need may go on while it does not come nearer. Gives the share of the
+// step, from 0 to 1. Twenty halvings find the limit within a millionth of
+// the step.
+//
+// Only a step in can stop. A step out makes the world smaller about the
+// point of the zoom and lifts the head over the land, so it always goes: the
+// player must be able to zoom out of each place. MayStop gives true for the
+// ratio of a step in (less than 1).
+inline bool MayStop(float ratio) { return ratio < 1.0f; }
+
+template <typename Clear>
+inline float StepShare(Clear clear, float need) {
+  const float now = clear(0.0f);
+  const float floor = now < need ? now : need;
+  if (clear(1.0f) >= floor) return 1.0f;
+  float lo = 0.0f, hi = 1.0f;
+  for (int i = 0; i < 20; ++i) {
+    const float mid = 0.5f * (lo + hi);
+    if (clear(mid) >= floor) {
+      lo = mid;
+    } else {
+      hi = mid;
+    }
+  }
+  return lo;
 }
 
 // How many zoom steps a change of the scale is, for the log: 1 for a change

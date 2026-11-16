@@ -122,11 +122,56 @@ struct PanelQuad {
 //                      (docs/ui-layer.md, "The subtitle card")
 //   kCardRing          the ring of the hand that does not point, fixed in the
 //                      room while it is open (docs/controllers.md, "The ring")
+//   kCardKeyboard      the keyboard under the menu panel while a text box of
+//                      the game has the focus (docs/ui-layer.md, "The
+//                      keyboard in the headset"). It also shows over a screen.
+//   kCardBubble        the bubble of a miracle that the pointing hand pulls
+//                      out of the spell book (docs/miracles.md, "The pull")
+//   kCardHintButton0   to kCardHintButton0 + kHintButtonCards - 1: with
+//                      hint_style=2 each lit button of a controller has a
+//                      card of its own. These cards and the two hint cards
+//                      above are the cards of the buttons
+//                      (docs/controller-hints.md, "The controller in the
+//                      hand")
+//   kCardRay           the ray of the pointing hand while it ends on a panel
+//                      in the room, over all the other quads (docs/ui-layer.md,
+//                      "The ray over the panels")
+//   kCardRayTip        the glow at the end of that ray, over the ray
+//                      (docs/hand-model.md, "The glow at the end of the menu
+//                      ray")
+//   kCardCreature      the Creature panel over the head of the Creature
+//                      (docs/ui-layer.md, "The Creature panel")
+//   kCardRingRight     the picture of the ring or of the spell book for the
+//                      right eye, while a hand is in front of it. Then
+//                      kCardRing is for the left eye only, and each picture
+//                      has holes where the hand is in front of the page for
+//                      its eye (hand_cut.cpp, docs/ui-layer.md, "A hand in
+//                      front of a card")
+//   kCardSheet         the sheet of the gestures over the palm of the hand
+//                      that does not point (docs/miracles.md, "The sheet of
+//                      the gestures")
 const int kCardHintPointing = 0;
 const int kCardHintOther = 1;
 const int kCardSubtitles = 2;
 const int kCardRing = 3;
-const int kCards = 4;
+const int kCardKeyboard = 4;
+const int kCardBubble = 5;
+const int kCardHintButton0 = 6;
+const int kHintButtonCards = 4;
+const int kCardRay = 10;
+const int kCardRayTip = 11;
+const int kCardCreature = 12;
+const int kCardRingRight = 13;
+const int kCardSheet = 14;
+const int kCards = 15;
+
+// True for a card that holds hints: the two hint cards and the cards of
+// the buttons.
+inline bool IsHintCard(int card) {
+  return card == kCardHintPointing || card == kCardHintOther ||
+         (card >= kCardHintButton0 &&
+          card < kCardHintButton0 + kHintButtonCards);
+}
 
 // The picture of a hint card.
 const uint32_t kHintCardWidth = 768;
@@ -145,6 +190,18 @@ struct CardLayer {
   float orientation[4];  // x y z w, the front of the quad is its +z side
   float width;           // meters
   float height;
+  // A number that changes with each new picture in `pixels`
+  // (XrScreen::NewCardSerial). 0 when the card does not say: then a copy of
+  // the pixels for the view for videos goes out at each present.
+  uint32_t serial;
+  // The picture is a panel in the room of panel_kit (the panel of places,
+  // the settings window, the debug window, the welcome page) on the quad of
+  // this card, for the report of the view for videos.
+  bool room_panel;
+  // The eyes that see the quad: 0 both, 1 the left eye only, 2 the right
+  // eye only (XrCompositionLayerQuad::eyeVisibility). The view for videos
+  // shows a quad of the left eye or of both eyes.
+  int eye;
 };
 
 // THE CUT SCENE WINDOW of one frame (docs/cutscene-window.md). All poses are
@@ -164,6 +221,11 @@ struct CardLayer {
 //   mask   The frame keeps its projection layer. Four black quads go over
 //           all its layers, as walls around an opening. `alpha` is how black
 //           they are, 0 to 1.
+//   rect    With `screen`: when the width is above 0, each eye quad shows
+//           only this part of its picture (x, y, width, height in pixels),
+//           and crop and edge do not count. The menus in the room use it
+//           for a frame with no scene (docs/ui-layer.md, "The menus in the
+//           room").
 struct WindowLayer {
   bool screen;
   bool mask;
@@ -176,6 +238,62 @@ struct WindowLayer {
   float wall_position[4][3];  // the center of each wall
   float wall_size[4][2];      // its width and height
   float alpha;
+  int32_t rect[4];
+};
+
+// THE LAYERS FOR THE VIDEO (video_view_layers, docs/backend.md, "The view
+// for videos"). The quad layers of one frame over the left eye picture, in
+// the order that the runtime composes them (the first one under the
+// others). The mod draws them into the view for videos in the window.
+const int kVideoPanel = 0;  // a quad of the interface panel
+const int kVideoCard = 1;   // a card
+const int kVideoWall = 2;   // a wall of the cut scene window: black, alpha
+const int kVideoLayers = 2 + kPanelQuads + kCards + 4;
+
+struct VideoQuad {
+  int kind;   // kVideoPanel, kVideoCard or kVideoWall
+  int index;  // the panel quad (kPanelMenu ...) or the card (kCardRing ...)
+  float position[3];     // meters, in the LOCAL space
+  float orientation[4];  // x y z w, the front of the quad is its +z side
+  float width;           // meters
+  float height;
+  // The part of the picture that shows: x, y, width, height in pixels of a
+  // picture of texture_width by texture_height.
+  int32_t rect[4];
+  uint32_t texture_width;
+  uint32_t texture_height;
+  // A card: the pixels of the CPU (as CardLayer::pixels, valid until the
+  // mod stages the card again), and in a session with Vulkan a VkImageView
+  // of a copy of the card on the GPU, in the layout
+  // VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, in the format `view_format`
+  // (a VkFormat). 0: no copy, so the mod copies the pixels.
+  const uint8_t* pixels;
+  uint64_t view;
+  uint32_t view_format;
+  uint32_t serial;  // as CardLayer::serial
+  bool room_panel;  // as CardLayer::room_panel
+  // A panel quad: the VkImage of the panel (SetPanelVulkan), 0 when the
+  // panel went out from a texture of Direct3D 11.
+  uint64_t panel_image;
+  float alpha;  // a wall
+};
+
+struct VideoLayers {
+  uint64_t serial;  // one more for each frame that made a record
+  // A frame with the world (a projection layer), or a screen: the left eye
+  // picture on a quad in the room (the cut scene window, the menus in the
+  // room). Then the quads go over that screen.
+  bool screen;
+  float screen_position[3];
+  float screen_orientation[4];
+  float screen_width;
+  float screen_height;
+  // The part of the left eye picture that the screen shows: x0, y0, x1, y1
+  // from 0 to 1.
+  float screen_part[4];
+  float eye_position[3];  // the left eye, for a screen
+  int count;
+  VideoQuad quads[kVideoLayers];
 };
 
 // THE VULKAN OF A SESSION WITH VULKAN (XrScreen::UseVulkan). The runtime
@@ -441,12 +559,60 @@ class XrScreen {
   // go back to the eye pictures.
   static void StageCard(int card, const CardLayer& layer);
   static bool CardFailed(int card);
+  // HOW A CARD GOES INTO ITS SWAPCHAIN (docs/ui-layer.md, "The edge and the
+  // mip levels of a card", card_send_math.h). clear_edge: the swapchain
+  // holds the picture with clear texels around it, and the quad shows some
+  // of them, so its edge is clear (card_edge_clear). mips: the swapchain has
+  // mip levels that the CPU makes after each new picture (card_mips). A
+  // change takes effect at the next swapchain of a card. Before Start, and
+  // static so the mod can set it with no XrScreen at hand. Both are on when
+  // the mod does not call it (the x64 host).
+  static void SetCardSending(bool clear_edge, bool mips);
+  // THE TEST PICTURES (card_send_test_save=N). For the first N new pictures
+  // of the cards, StageCard makes the levels of the picture as SendCard
+  // does, also with no session, and gives two pictures to `save`: the
+  // levels side by side (over_checker: with alpha, to show over a
+  // checkerboard), and a model of the view of the headset the old way and
+  // with the clear edge and the levels. The facts go to `log`, as one line
+  // for each picture.
+  typedef void (*CardSaveFn)(const char* name, const uint8_t* bgra,
+                             int pitch_bytes, uint32_t width,
+                             uint32_t height, bool over_checker);
+  static void SetCardTestSave(int count, CardSaveFn save, LogFn log);
+  // A new number for CardLayer::serial, for a card that drew a new picture.
+  // Each call on each thread gives a new number, never 0.
+  static uint32_t NewCardSerial();
+  // THE CARD OF A LONG WAIT. A frame thread that will give no frame for a
+  // time (a save of the game) puts a card into the layers that the hold
+  // sends again (SetHoldMs), in place of that card of the last frame. So the
+  // headset shows the card until the game gives a frame again. False with no
+  // hold, with no world in the last frame, and when the card cannot go out.
+  bool HoldCard(int card, const CardLayer& layer);
+  // True after the runtime refused a frame with a quad of the interface
+  // panel. Then the menus must go back to the eye pictures.
+  static bool PanelFailed();
+
+  // THE LAYERS FOR THE VIDEO. With WantVideoLayers(true) each frame that
+  // goes to the runtime keeps a record of its quad layers, and in a session
+  // with Vulkan each card also goes into a copy on the GPU for the video.
+  // VideoLayersOf gives the record of the last frame, false when there is
+  // none. With no session, RecordVideoLayers makes the record from what the
+  // mod staged for this frame, in the order of a frame with a runtime, and
+  // the staged cards and window are then used. eye_position is the left eye,
+  // and width by height the eye picture (for a screen). Static, so the mod
+  // can call them with no XrScreen at hand. All on the frame thread.
+  static void WantVideoLayers(bool on);
+  static bool VideoLayersOf(VideoLayers* out);
+  static void RecordVideoLayers(const float eye_position[3], uint32_t width,
+                                uint32_t height);
 
   // THE CUT SCENE WINDOW. Stage it before EndFrame, and EndFrame uses it in
   // that frame only. Static, so the mod can stage with no XrScreen at hand.
   // When the runtime gives no swapchain for the walls, the frame goes out
   // with no walls.
   static void StageWindow(const WindowLayer& layer);
+  // Takes back a window that was staged for a frame that did not begin.
+  static void DropStagedWindow();
 
   // THE STAGED LAYERS FOR THE HEADSET APP (src/mod/xr_layers.cpp). With
   // xr_input=1 the mod has no session, and the app shows the layers. At the
@@ -485,6 +651,13 @@ class XrScreen {
   // display period of the runtime, in nanoseconds. False before the first
   // frame and after a failed wait.
   bool LastDisplayTime(int64_t* time, int64_t* period) const;
+
+  // Where the runtime predicts each eye at a display time in nanoseconds, in
+  // the same space as eye(). It does not change eye(). The mod calls it
+  // before xrWaitFrame of a frame, for the display time that it expects that
+  // frame to get. False with the bridge, with no session, or when the
+  // runtime gives no valid position and orientation.
+  bool LocateViewsAt(int64_t time, EyeView views[2]) const;
 
   // Mono convenience: one call does a whole frame.
   bool SubmitBgra(const void* pixels, int pitch);
@@ -543,6 +716,12 @@ class XrScreen {
   void SetRenderPose(int index, const float position[3],
                      const float orientation[4]);
 
+  // The view that the projection layer of this frame declares for an eye:
+  // the pose from SetRenderPose (or the pose of BeginFrame), and the frustum
+  // of the render (SetRenderHalfAngle and the aspect of the eye picture).
+  // The layer takes its views from here. False when the eye has no pose.
+  bool DeclaredView(int index, EyeView* out) const;
+
   // True once after the headset recentered its own space, for example from
   // the Quest menu, when the poses of this frame are in the new space. The
   // mod keeps its own origin, so it has to recenter too. See head_pose.cpp.
@@ -560,6 +739,12 @@ class XrScreen {
   // The interaction profile the runtime chose for a hand, for example
   // "oculus/touch_controller". Empty when nothing is bound.
   const char* HandProfile(int index) const;
+  // The name of the headset that the runtime gives (XrSystemProperties), or
+  // an empty string. The bridge does not send it.
+  const char* SystemName() const;
+  // The name of the OpenXR runtime (XrInstanceProperties), for example
+  // "VirtualDesktopXR", or an empty string. The bridge does not send it.
+  const char* RuntimeName() const;
 
   // True while the session has input focus. The headset menu takes it away.
   bool InputFocused() const;

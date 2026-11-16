@@ -24,6 +24,10 @@ void ControllerHintsPass(int eye);
 // True while the words of the controller replace the mouse in the hints.
 bool ControllerHintsActive();
 
+// The profile of the test key hint_profile, or "" for the profile that the
+// runtime reports. The page Controls draws the kind of a forced profile.
+const char* ControllerHintsForcedProfile();
+
 // The word for a mouse button code of the game (1 left, 2 right, 4 middle,
 // 8 and 0x10 the wheel). Null when the controller has no such input, and then
 // the hint is hidden. The pointer stays valid for the whole frame.
@@ -44,6 +48,7 @@ enum ControllerWord {
   kWordWalk,     // the stick of the other hand: it moves the player
   kWordCommand,  // the trigger that commands the Creature: the trigger of the
                  // pointing hand, or of the other hand with left_leash=1
+  kWordBook,     // the first face button of the other hand: the spell book
 };
 const wchar_t* ControllerHintWord(int word);
 // True when the button of the game menu is on the controller of the pointing

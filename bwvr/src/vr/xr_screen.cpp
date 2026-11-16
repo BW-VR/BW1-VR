@@ -23,6 +23,7 @@
 #include <openxr/openxr_platform.h>
 
 #include "../common/version.h"
+#include "card_send_math.h"
 #include "refresh_rate_math.h"
 #include "finger_curl_math.h"
 
@@ -238,14 +239,44 @@ bool g_have_staged_quad = false;
 // The cards of this frame, set by the mod before EndFrame (xr_screen.h, THE
 // CARDS).
 CardLayer g_staged_card[kCards] = {};
-bool g_have_staged_card[kCards] = {false, false, false, false};
-bool g_card_failed[kCards] = {false, false, false, false};
+bool g_have_staged_card[kCards] = {};
+bool g_card_failed[kCards] = {};
 const char* const kCardName[kCards] = {
     "hint card of the pointing hand", "hint card of the other hand",
-    "subtitle card", "ring"};
+    "subtitle card", "ring", "keyboard", "bubble card",
+    "first card of a button", "second card of a button",
+    "third card of a button", "fourth card of a button",
+    "ray card", "card of the end of the ray", "Creature card",
+    "ring of the right eye", "sheet of the gestures"};
+static_assert(kCardSheet + 1 == kCards,
+              "each card has a name");
 // What a card holds, for the line that says where it goes after a failure.
 const char* const kCardHolds[kCards] = {"hints", "hints", "subtitles",
-                                        "items of the ring"};
+                                        "items of the ring", "keys",
+                                        "pulled miracles", "hints", "hints",
+                                        "hints", "hints",
+                                        "rays over the panels",
+                                        "ends of the rays over the panels",
+                                        "Creature panels",
+                                        "hands in front of the ring",
+                                        "gestures of the miracles"};
+// The runtime refused a frame with a quad of the interface panel.
+bool g_panel_refused = false;
+
+// HOW A CARD GOES INTO ITS SWAPCHAIN (XrScreen::SetCardSending,
+// card_send_math.h).
+bool g_card_clear_edge = true;
+bool g_card_mips = true;
+// The runtime refused a swapchain of a card with mip levels, so each card
+// has one level from then on.
+bool g_card_mips_refused = false;
+// THE TEST PICTURES (XrScreen::SetCardTestSave).
+int g_card_test_left = 0;
+XrScreen::CardSaveFn g_card_test_save = nullptr;
+LogFn g_card_test_log = nullptr;
+uint32_t g_card_test_serial[kCards] = {};
+uint32_t g_card_test_last[kCards] = {};
+int g_card_test_number = 0;
 
 // The cut scene window of this frame, set by the mod before EndFrame
 // (xr_screen.h, THE CUT SCENE WINDOW).
@@ -254,6 +285,77 @@ bool g_have_staged_window = false;
 bool g_mask_failed = false;
 // The picture of the walls: one color, so it is small.
 const uint32_t kMaskSize = 16;
+
+// THE LAYERS FOR THE VIDEO (XrScreen::WantVideoLayers). Only the frame
+// thread writes and reads them.
+bool g_video_wanted = false;
+VideoLayers g_video = {};
+bool g_have_video = false;
+
+void VideoBegin(bool screen) {
+  g_video.count = 0;
+  g_video.screen = screen;
+}
+
+VideoQuad* VideoAdd(int kind, int index) {
+  if (g_video.count >= kVideoLayers) return nullptr;
+  VideoQuad* q = &g_video.quads[g_video.count++];
+  *q = {};
+  q->kind = kind;
+  q->index = index;
+  q->orientation[3] = 1.0f;
+  return q;
+}
+
+void VideoCard(int card, const CardLayer& layer, uint64_t view,
+               uint32_t view_format) {
+  // The view for videos is the left eye.
+  if (layer.eye == 2) return;
+  VideoQuad* q = VideoAdd(kVideoCard, card);
+  if (q == nullptr) return;
+  for (int i = 0; i < 3; ++i) q->position[i] = layer.position[i];
+  for (int i = 0; i < 4; ++i) q->orientation[i] = layer.orientation[i];
+  q->width = layer.width;
+  q->height = layer.height;
+  for (int i = 0; i < 4; ++i) q->rect[i] = layer.rect[i];
+  q->texture_width = layer.texture_width;
+  q->texture_height = layer.texture_height;
+  q->pixels = layer.pixels;
+  q->view = view;
+  q->view_format = view_format;
+  q->serial = layer.serial;
+  q->room_panel = layer.room_panel;
+}
+
+// The walls of a cut scene window with walls.
+void VideoWalls(const WindowLayer& window) {
+  for (int k = 0; k < 4; ++k) {
+    VideoQuad* q = VideoAdd(kVideoWall, k);
+    if (q == nullptr) return;
+    for (int i = 0; i < 3; ++i) q->position[i] = window.wall_position[k][i];
+    for (int i = 0; i < 4; ++i) q->orientation[i] = window.orientation[i];
+    q->width = window.wall_size[k][0];
+    q->height = window.wall_size[k][1];
+    q->alpha = window.alpha > 1.0f ? 1.0f : window.alpha;
+  }
+}
+
+void VideoEnd() {
+  ++g_video.serial;
+  g_have_video = true;
+}
+
+// The checks of SendCard on a card, with no swapchain.
+bool CardShape(const CardLayer& card) {
+  const int32_t x = card.rect[0], y = card.rect[1];
+  const int32_t w = card.rect[2], h = card.rect[3];
+  return card.pixels != nullptr && card.texture_width > 0 &&
+         card.texture_height > 0 && card.texture_width <= 8192 &&
+         card.texture_height <= 8192 && x >= 0 && y >= 0 && w > 0 && h > 0 &&
+         x + w <= static_cast<int32_t>(card.texture_width) &&
+         y + h <= static_cast<int32_t>(card.texture_height) &&
+         card.width > 0.0f && card.height > 0.0f;
+}
 
 // THE VULKAN OF A SESSION WITH VULKAN (XrScreen::UseVulkan). The runtime
 // makes the instance and the device at the first Start with Vulkan. They
@@ -286,6 +388,8 @@ const uint32_t kMaskSize = 16;
   X(vkResetFences)                        \
   X(vkCreateImage)                        \
   X(vkDestroyImage)                       \
+  X(vkCreateImageView)                    \
+  X(vkDestroyImageView)                   \
   X(vkGetImageMemoryRequirements)         \
   X(vkAllocateMemory)                     \
   X(vkFreeMemory)                         \
@@ -370,6 +474,225 @@ const FormatChoice kFormats[] = {
 };
 const int kFormatCount = 4;
 
+// THE TEST PICTURES (XrScreen::SetCardTestSave). The levels of a new picture
+// of a card as SendCard makes them, and a model of the view of the headset:
+// the old way (one level, the rect of the picture with what the picture
+// holds past it) and the new way (the clear edge and the levels).
+//
+// It takes a picture that stays for two frames, so a step of a fade or the
+// ray (a new picture in each frame) gives none. The model views the card
+// straight on at two distances: 0.35 and 0.60 m for a card of the hints,
+// 0.60 and 1.00 m for a panel. A Quest 3 through Virtual Desktop renders
+// about 21.2 pixels a degree at the middle of the view (2688 pixels for the
+// tangents from -54 to 40 degrees).
+const float kTestPixelsPerDegree = 21.2f;
+
+void TestCardSend(int card, const CardLayer& layer) {
+  // A picture that stays for two frames in a row, so not a step of a fade.
+  const bool steady = layer.serial == g_card_test_last[card];
+  g_card_test_last[card] = layer.serial;
+  if (g_card_test_save == nullptr || !layer.visible || !steady ||
+      layer.pixels == nullptr || layer.serial == 0 ||
+      layer.serial == g_card_test_serial[card] || !CardShape(layer)) {
+    return;
+  }
+  g_card_test_serial[card] = layer.serial;
+  --g_card_test_left;
+  const int number = ++g_card_test_number;
+  int levels = g_card_mips ? card_send_math::kMostLevels : 1;
+  uint32_t chain_w = 0, chain_h = 0;
+  card_send_math::ChainSize(layer.texture_width, layer.texture_height,
+                            g_card_clear_edge, levels, &chain_w, &chain_h);
+  levels = card_send_math::LevelsFor(chain_w, chain_h, levels);
+  card_send_math::Layout l;
+  if (!card_send_math::LayoutOf(layer.texture_width, layer.texture_height,
+                                layer.rect, g_card_clear_edge, levels, &l)) {
+    return;
+  }
+  static std::vector<uint8_t> buffer;
+  buffer.assign(card_send_math::LevelsBytes(l), 0);
+  LARGE_INTEGER hz, t0, t1;
+  QueryPerformanceFrequency(&hz);
+  QueryPerformanceCounter(&t0);
+  int32_t y0 = 0, y1 = 0;
+  if (l.padded) {
+    card_send_math::Fill(l, layer.pixels, layer.texture_width * 4, false,
+                         false, buffer.data(), &y0, &y1);
+    card_send_math::BuildLevels(l, buffer.data(), y0, y1);
+  }
+  QueryPerformanceCounter(&t1);
+  const double build_ms = static_cast<double>(t1.QuadPart - t0.QuadPart) *
+                          1000.0 / static_cast<double>(hz.QuadPart);
+  if (!l.padded) {
+    // The old way: the swapchain gets the rect only.
+    const size_t row = static_cast<size_t>(l.rect[2]) * 4;
+    for (int32_t r = 0; r < l.rect[3]; ++r) {
+      memcpy(buffer.data() + r * row,
+             layer.pixels + (static_cast<size_t>(l.rect[1] + r) *
+                                 layer.texture_width +
+                             l.rect[0]) * 4,
+             row);
+    }
+  }
+  const uint32_t straight = card_send_math::StraightTexels(l, buffer.data());
+
+  // The levels side by side.
+  char name[64];
+  {
+    int32_t width = 0;
+    for (int k = 0; k < l.levels; ++k) width += (l.box[2] >> k) + 4;
+    const int32_t height = l.box[3];
+    std::vector<uint8_t> sheet(static_cast<size_t>(width) * height * 4, 0);
+    int32_t at = 0;
+    for (int k = 0; k < l.levels; ++k) {
+      const int32_t w = l.box[2] >> k, h = l.box[3] >> k;
+      const uint8_t* level = buffer.data() + card_send_math::LevelOffset(l, k);
+      for (int32_t r = 0; r < h; ++r) {
+        memcpy(&sheet[(static_cast<size_t>(r) * width + at) * 4],
+               level + static_cast<size_t>(r) * w * 4,
+               static_cast<size_t>(w) * 4);
+      }
+      at += w + 4;
+    }
+    _snprintf_s(name, _TRUNCATE, "cardsend-%02d-levels", number);
+    g_card_test_save(name, sheet.data(), width * 4,
+                     static_cast<uint32_t>(width),
+                     static_cast<uint32_t>(height), true);
+  }
+
+  // The model of the view.
+  card_send_math::Image old_chain[1] = {
+      {layer.pixels, static_cast<int32_t>(layer.texture_width),
+       static_cast<int32_t>(layer.texture_height)}};
+  const float old_part[4] = {
+      static_cast<float>(layer.rect[0]), static_cast<float>(layer.rect[1]),
+      static_cast<float>(layer.rect[2]), static_cast<float>(layer.rect[3])};
+  card_send_math::Image new_chain[card_send_math::kMostLevels];
+  for (int k = 0; k < l.levels; ++k) {
+    new_chain[k].bgra = buffer.data() + card_send_math::LevelOffset(l, k);
+    new_chain[k].width = l.box[2] >> k;
+    new_chain[k].height = l.box[3] >> k;
+  }
+  const float new_part[4] = {static_cast<float>(l.image_rect[0] - l.box[0]),
+                             static_cast<float>(l.image_rect[1] - l.box[1]),
+                             static_cast<float>(l.image_rect[2]),
+                             static_cast<float>(l.image_rect[3])};
+  const bool hint = IsHintCard(card);
+  const float distances[2] = {hint ? 0.35f : 0.60f, hint ? 0.60f : 1.00f};
+  const float texels_per_meter =
+      static_cast<float>(layer.rect[2]) / layer.width;
+  const float meters_per_degree = tanf(3.14159265f / 180.0f);
+  float tpp[2], shimmer_old[2], shimmer_new[2], shimmer_ideal[2];
+  float edge_old[2], edge_new[2];
+  for (int d = 0; d < 2; ++d) {
+    tpp[d] = texels_per_meter * distances[d] * meters_per_degree /
+             kTestPixelsPerDegree;
+    int32_t columns = 0, rows = 0, blocks = 0;
+    card_send_math::ShimmerSize(new_part, tpp[d], &columns, &rows, &blocks);
+    std::vector<float> scratch(static_cast<size_t>(columns + 2) * (rows + 2) *
+                               3);
+    std::vector<float> low(blocks + 1), high(blocks + 1);
+    shimmer_old[d] = card_send_math::Shimmer(old_chain, 1, old_part, tpp[d],
+                                             8, 0.5f, scratch.data(),
+                                             low.data(), high.data());
+    shimmer_new[d] = card_send_math::Shimmer(new_chain, l.levels, new_part,
+                                             tpp[d], 8, 0.5f, scratch.data(),
+                                             low.data(), high.data());
+    shimmer_ideal[d] = card_send_math::Shimmer(new_chain, 0, new_part, tpp[d],
+                                               8, 0.5f, scratch.data(),
+                                               low.data(), high.data());
+    edge_old[d] = edge_new[d] = 0.0f;
+    for (int s = 0; s < 4; ++s) {
+      const float t = 0.25f * s;
+      const float a =
+          card_send_math::EdgeAlpha(old_chain, 1, old_part, tpp[d], t, t);
+      const float b = card_send_math::EdgeAlpha(new_chain, l.levels, new_part,
+                                                tpp[d], t, t);
+      if (a > edge_old[d]) edge_old[d] = a;
+      if (b > edge_new[d]) edge_new[d] = b;
+    }
+  }
+  // The sheet of the views: a row for each distance and each shift (0 and
+  // half a pixel), the old way at the left and the new way at the right.
+  // A panel shows its top left part only, at most 480 by 360 texels.
+  {
+    // The frame of clear texels of the new way, 0 with no clear edge.
+    const float frame = static_cast<float>(l.content[0] - l.image_rect[0]);
+    float crop_new[4] = {new_part[0], new_part[1], new_part[2], new_part[3]};
+    float crop_old[4] = {old_part[0], old_part[1], old_part[2], old_part[3]};
+    if (crop_new[2] > 480.0f) crop_new[2] = 480.0f;
+    if (crop_new[3] > 360.0f) crop_new[3] = 360.0f;
+    if (crop_old[2] > crop_new[2] - 2.0f * frame) {
+      crop_old[2] = crop_new[2] - 2.0f * frame;
+    }
+    if (crop_old[3] > crop_new[3] - 2.0f * frame) {
+      crop_old[3] = crop_new[3] - 2.0f * frame;
+    }
+    const int32_t gap = 6;
+    int32_t cell_w = 0, height = gap;
+    int32_t cell_h[2];
+    for (int d = 0; d < 2; ++d) {
+      const int32_t c = static_cast<int32_t>(crop_new[2] / tpp[d]) + 1;
+      if (c > cell_w) cell_w = c;
+      cell_h[d] = static_cast<int32_t>(crop_new[3] / tpp[d]) + 1;
+      height += 2 * (cell_h[d] + gap);
+    }
+    const int32_t width = 2 * cell_w + 3 * gap;
+    std::vector<uint8_t> sheet(static_cast<size_t>(width) * height * 4, 255);
+    std::vector<float> view(static_cast<size_t>(cell_w) *
+                            (cell_h[0] > cell_h[1] ? cell_h[0] : cell_h[1]) *
+                            3);
+    int32_t top = gap;
+    for (int d = 0; d < 2; ++d) {
+      for (int s = 0; s < 2; ++s) {
+        for (int way = 0; way < 2; ++way) {
+          const int32_t columns = cell_w, rows = cell_h[d];
+          // The old quad is the frame smaller at each side, so it starts
+          // one frame in, as it does in the room.
+          const float inset = way == 0 ? frame / tpp[d] : 0.0f;
+          card_send_math::View(way == 0 ? old_chain : new_chain,
+                               way == 0 ? 1 : l.levels,
+                               way == 0 ? crop_old : crop_new, tpp[d],
+                               0.5f * s - inset, 0.5f * s - inset, columns,
+                               rows, 0.5f, view.data());
+          const int32_t left = gap + way * (cell_w + gap);
+          for (int32_t r = 0; r < rows; ++r) {
+            for (int32_t c = 0; c < columns; ++c) {
+              const float* p = &view[(static_cast<size_t>(r) * columns + c) * 3];
+              uint8_t* o =
+                  &sheet[(static_cast<size_t>(top + r) * width + left + c) * 4];
+              for (int i = 0; i < 3; ++i) {
+                const float v = p[i] < 0.0f ? 0.0f : (p[i] > 1.0f ? 1.0f : p[i]);
+                o[i] = static_cast<uint8_t>(v * 255.0f + 0.5f);
+              }
+              o[3] = 255;
+            }
+          }
+        }
+        top += cell_h[d] + gap;
+      }
+    }
+    _snprintf_s(name, _TRUNCATE, "cardsend-%02d-views", number);
+    g_card_test_save(name, sheet.data(), width * 4,
+                     static_cast<uint32_t>(width),
+                     static_cast<uint32_t>(height), false);
+  }
+  if (g_card_test_log != nullptr) {
+    g_card_test_log(
+        "card send    : picture %d, the %s, %d by %d px, %d level(s), %s: "
+        "made ready in %.2f ms, %u straight texels. At %.2f m (%.2f texels a "
+        "pixel) the shimmer is %.2f the old way and %.2f now (%.2f for the "
+        "ideal sampler), the edge %.2f and %.2f. At %.2f m (%.2f texels a "
+        "pixel) the shimmer is %.2f and %.2f (%.2f), the edge %.2f and %.2f",
+        number, kCardName[card], layer.rect[2], layer.rect[3], l.levels,
+        g_card_clear_edge ? "a clear edge" : "no clear edge", build_ms,
+        straight, distances[0], tpp[0], shimmer_old[0], shimmer_new[0],
+        shimmer_ideal[0], edge_old[0], edge_new[0], distances[1], tpp[1],
+        shimmer_old[1], shimmer_new[1], shimmer_ideal[1], edge_old[1],
+        edge_new[1]);
+  }
+}
+
 }  // namespace
 
 struct XrScreen::Impl {
@@ -379,6 +702,8 @@ struct XrScreen::Impl {
   XrSystemId system = XR_NULL_SYSTEM_ID;
   // From StartSystem, for LogSystem.
   char system_name[XR_MAX_SYSTEM_NAME_SIZE] = {0};
+  // From xrGetInstanceProperties, for RuntimeName.
+  char runtime_name[XR_MAX_RUNTIME_NAME_SIZE] = {0};
   uint32_t max_w = 0;
   uint32_t max_h = 0;
   XrSession session = XR_NULL_HANDLE;
@@ -508,14 +833,54 @@ struct XrScreen::Impl {
     XrSwapchain swapchain = XR_NULL_HANDLE;
     ID3D11Texture2D** images = nullptr;
     uint32_t image_count = 0;
+    // The size of the pictures of the card. With the clear edge or the mip
+    // levels the swapchain is larger (card_send_math::ChainSize).
     uint32_t width = 0;
     uint32_t height = 0;
+    uint32_t chain_width = 0;
+    uint32_t chain_height = 0;
+    int levels = 1;           // the mip levels of the swapchain
+    bool clear_edge = false;  // the swapchain was made for the clear edge
+    bool vulkan_upload = false;  // the swapchain was made for UploadVulkan
+    // THE LEVELS (card_send_math.h): the picture with its clear texels and
+    // its levels, in the byte order of the swapchain, for the layout of the
+    // last picture. built_serial is the serial of that picture.
+    uint8_t* levels_data = nullptr;
+    size_t levels_bytes = 0;
+    card_send_math::Layout layout = {};
+    bool have_layout = false;
+    uint32_t built_serial = 0;
+    bool said_straight = false;
     uint8_t* swizzle = nullptr;  // for a swapchain with red first
     bool logged = false;
     uint64_t layers = 0;  // for the report
     int misses = 0;       // frames in a row with no image for the card
+    // THE COPY FOR THE VIDEO (WantVideoLayers): an image of the size of the
+    // picture that each upload with Vulkan also writes, for the view for
+    // videos. It is in the layout SHADER_READ_ONLY_OPTIMAL after the first
+    // write.
+    VkImage mirror = VK_NULL_HANDLE;
+    VkDeviceMemory mirror_memory = VK_NULL_HANDLE;
+    VkImageView mirror_view = VK_NULL_HANDLE;
+    VkFormat mirror_format = VK_FORMAT_UNDEFINED;
+    bool mirror_written = false;
+    bool mirror_failed = false;
+    bool mirror_fresh = false;  // the last SendCard wrote the image
   };
   CardChain cards[kCards];
+  bool MakeMirror(CardChain& chain, VkFormat image_format);
+  void FreeMirror(CardChain& chain);
+  // A card that went out in this frame, into the record of the video, with
+  // its copy on the GPU when SendCard wrote it.
+  void VideoOfCard(int card) {
+    const CardChain& chain = cards[card];
+    VideoCard(card, g_staged_card[card],
+              chain.mirror_fresh ? (uint64_t)chain.mirror_view : 0,
+              static_cast<uint32_t>(chain.mirror_format));
+  }
+  // The panel image of this frame (SetPanelVulkan, a late frame), for the
+  // record of the video.
+  uint64_t video_panel_image = 0;
 
   // The walls of the cut scene window: one swapchain, made at the first
   // frame with walls, and four quads of it.
@@ -527,6 +892,7 @@ struct XrScreen::Impl {
   int32_t logged_window_crop = 0;
   int32_t logged_window_edge = 0;
   bool logged_window_card = false;
+  bool logged_menu_screen = false;
   uint64_t mask_frames = 0;    // for the report
   uint64_t window_frames = 0;
 
@@ -594,12 +960,13 @@ struct XrScreen::Impl {
     XrCompositionLayerQuad walls[4];
     XrCompositionLayerQuad quads[2];
     XrCompositionLayerQuad subtitle_quad;
-    const XrCompositionLayerBaseHeader* layers[1 + kPanelQuads + kCards + 4];
+    const XrCompositionLayerBaseHeader* layers[2 + kPanelQuads + kCards + 4];
     uint32_t layer_count;
     XrTime display_time;
     bool world;               // a projection layer, and not a screen
     bool with_card[kCards];
     bool with_subtitles;      // a screen with the subtitle card
+    bool with_panel;          // a quad of the interface panel
     LARGE_INTEGER waited_at;  // the end of xrWaitFrame of this frame
     LARGE_INTEGER begun_at;   // the end of BeginFrame of this frame
     LARGE_INTEGER before;     // the start of BuildFrame
@@ -752,9 +1119,36 @@ struct XrScreen::Impl {
   // The rect x, y, w, h of `pixels` (rows of `pitch` bytes, 4 bytes for each
   // pixel) into the acquired image `image` of the swapchain, at the same
   // place. swap_red_blue swaps bytes 0 and 2 of each pixel.
+  // mirror: with an image of the size of the swapchain, the rect goes into
+  // it too (THE COPY FOR THE VIDEO). *mirror_written is false for an image
+  // with no write yet, and true after this one.
   bool UploadVulkan(XrSwapchain chain, uint32_t image, const uint8_t* pixels,
                     uint32_t pitch, int32_t x, int32_t y, int32_t w,
-                    int32_t h, bool swap_red_blue);
+                    int32_t h, bool swap_red_blue,
+                    VkImage mirror = VK_NULL_HANDLE,
+                    bool* mirror_written = nullptr);
+  // The levels of a card (CardChain::levels_data, in the byte order of the
+  // swapchain) into the acquired image `image`: the box of each level, at
+  // its place. mirror: the rect of the picture of level 0 goes into it at
+  // the place of the rect in the picture (THE COPY FOR THE VIDEO).
+  bool UploadVulkanLevels(XrSwapchain chain, uint32_t image,
+                          const CardChain& card, VkImage mirror,
+                          bool* mirror_written);
+  // A buffer of the CPU that the GPU can read, for the slot `slot` of the
+  // copies, with at least `bytes` bytes. False when it cannot be made.
+  bool StageBuffer(int slot, VkDeviceSize bytes);
+  // Makes the levels of a new picture of a card (THE LEVELS), when the
+  // picture or its layout changed. For the report: the builds and their
+  // time.
+  void BuildCardLevels(CardChain& chain, const CardLayer& card,
+                       const card_send_math::Layout& layout, bool red_first,
+                       int index);
+  uint64_t card_builds = 0;
+  uint64_t card_build_ticks = 0;
+  uint64_t card_build_most_ticks = 0;
+  uint64_t card_build_rows = 0;
+  uint64_t card_build_all_rows = 0;
+  uint64_t card_level_uploads = 0;
   void FreeStages();
 
   bool CreateInput();                  // Start, after the LOCAL space
@@ -1258,6 +1652,16 @@ const char* XrScreen::HandProfile(int index) const {
   return impl_->profile[index ? 1 : 0];
 }
 
+const char* XrScreen::SystemName() const {
+  if (remote_) return "";
+  return impl_->system_name;
+}
+
+const char* XrScreen::RuntimeName() const {
+  if (remote_) return "";
+  return impl_->runtime_name;
+}
+
 bool XrScreen::InputFocused() const {
   if (remote_) return remote_->healthy() && remote_->packet->state.focus != 0;
   return impl_->input_ready && impl_->focused;
@@ -1453,6 +1857,7 @@ bool XrScreen::StartInstance(LogFn log) {
 
   XrInstanceProperties properties = {XR_TYPE_INSTANCE_PROPERTIES};
   if (XR_SUCCEEDED(xrGetInstanceProperties(s.instance, &properties))) {
+    strcpy_s(s.runtime_name, properties.runtimeName);
     s.log("  openxr: runtime \"%s\" version %u.%u.%u", properties.runtimeName,
           static_cast<unsigned>(XR_VERSION_MAJOR(properties.runtimeVersion)),
           static_cast<unsigned>(XR_VERSION_MINOR(properties.runtimeVersion)),
@@ -2250,11 +2655,61 @@ void XrScreen::StageCard(int card, const CardLayer& layer) {
   if (card < 0 || card >= kCards) return;
   g_staged_card[card] = layer;
   g_have_staged_card[card] = true;
+  if (g_card_test_left > 0) TestCardSend(card, layer);
+}
+
+void XrScreen::SetCardSending(bool clear_edge, bool mips) {
+  g_card_clear_edge = clear_edge;
+  g_card_mips = mips;
+}
+
+void XrScreen::SetCardTestSave(int count, CardSaveFn save, LogFn log) {
+  g_card_test_left = save != nullptr && count > 0 ? count : 0;
+  g_card_test_save = save;
+  g_card_test_log = log;
+}
+
+uint32_t XrScreen::NewCardSerial() {
+  static volatile LONG serial = 0;
+  LONG n = InterlockedIncrement(&serial);
+  if (n == 0) n = InterlockedIncrement(&serial);
+  return static_cast<uint32_t>(n);
 }
 
 bool XrScreen::CardFailed(int card) {
   return card < 0 || card >= kCards || g_card_failed[card];
 }
+
+// The layers of the last frame are in Impl::built, and the hold sends them
+// again while the game gives no frame. The card goes into its own swapchain
+// here, on the frame thread, with the second thread at rest and hold_lock
+// held, so no frame of the hold reads the layers while they change.
+bool XrScreen::HoldCard(int card, const CardLayer& layer) {
+  if (remote_ || card < 0 || card >= kCards || !running_) return false;
+  Impl& s = *impl_;
+  if (s.hold_ms <= 0 || !s.session_running || !layer.visible) return false;
+  Join();
+  Impl::HoldGuard hold(s);
+  Impl::Built& b = s.built;
+  const uint32_t most = static_cast<uint32_t>(sizeof(b.layers) /
+                                              sizeof(b.layers[0]));
+  if (!b.world || b.layer_count == 0 ||
+      (!b.with_card[card] && b.layer_count >= most)) {
+    return false;
+  }
+  XrCompositionLayerQuad quad;
+  if (!s.SendCard(card, layer, &quad)) return false;
+  b.card_quads[card] = quad;
+  if (!b.with_card[card]) {
+    b.layers[b.layer_count++] =
+        reinterpret_cast<const XrCompositionLayerBaseHeader*>(
+            &b.card_quads[card]);
+    b.with_card[card] = true;
+  }
+  return true;
+}
+
+bool XrScreen::PanelFailed() { return g_panel_refused; }
 
 void XrScreen::Impl::DestroyCard(int index) {
   CardChain& chain = cards[index];
@@ -2264,15 +2719,70 @@ void XrScreen::Impl::DestroyCard(int index) {
   chain.image_count = 0;
   delete[] chain.swizzle;
   chain.swizzle = nullptr;
+  delete[] chain.levels_data;
+  chain.levels_data = nullptr;
+  chain.levels_bytes = 0;
+  chain.have_layout = false;
+  chain.built_serial = 0;
   chain.width = 0;
   chain.height = 0;
+  chain.chain_width = 0;
+  chain.chain_height = 0;
+  chain.levels = 1;
+  FreeMirror(chain);
+  chain.mirror_failed = false;
+}
+
+void XrScreen::Impl::BuildCardLevels(CardChain& chain, const CardLayer& card,
+                                     const card_send_math::Layout& layout,
+                                     bool red_first, int index) {
+  const bool same =
+      chain.have_layout && card_send_math::SameLayout(chain.layout, layout);
+  // The same picture as the last build: the buffer holds its levels.
+  if (same && card.serial != 0 && card.serial == chain.built_serial) return;
+  LARGE_INTEGER t0, t1;
+  QueryPerformanceCounter(&t0);
+  const size_t bytes = card_send_math::LevelsBytes(layout);
+  if (chain.levels_bytes < bytes) {
+    delete[] chain.levels_data;
+    chain.levels_data = new uint8_t[bytes];
+    chain.levels_bytes = bytes;
+    chain.have_layout = false;
+  }
+  int32_t y0 = 0, y1 = 0;
+  card_send_math::Fill(layout, card.pixels, card.texture_width * 4, red_first,
+                       same && chain.have_layout, chain.levels_data, &y0, &y1);
+  card_send_math::BuildLevels(layout, chain.levels_data, y0, y1);
+  chain.layout = layout;
+  chain.have_layout = true;
+  chain.built_serial = card.serial;
+  QueryPerformanceCounter(&t1);
+  const uint64_t ticks = static_cast<uint64_t>(t1.QuadPart - t0.QuadPart);
+  ++card_builds;
+  card_build_ticks += ticks;
+  if (ticks > card_build_most_ticks) card_build_most_ticks = ticks;
+  card_build_rows += static_cast<uint64_t>(y1 - y0);
+  card_build_all_rows += static_cast<uint64_t>(layout.box[3]);
+  // A picture with the color not multiplied by the alpha shows a dark or a
+  // bright fringe at the edge of each shape. The first picture of each card
+  // says whether it has such texels.
+  if (!chain.said_straight) {
+    chain.said_straight = true;
+    const uint32_t straight =
+        card_send_math::StraightTexels(layout, chain.levels_data);
+    log("  openxr: the first picture of the %s has %u texels with more color "
+        "than alpha%s", kCardName[index], straight,
+        straight == 0 ? ", so its color is multiplied by its alpha"
+                      : ". ITS COLOR IS NOT MULTIPLIED BY ITS ALPHA");
+  }
 }
 
 // One card of this frame: the pixels go into the next image of its
 // swapchain, and `quad` gets the layer. The swapchain is made at the first
-// layer of the card, with the size of its picture. Each image of the
-// swapchain holds an older picture, so each frame writes the part that
-// shows. False when the card cannot go out.
+// layer of the card, with the size of its picture, or larger for the clear
+// edge and the mip levels (card_send_math.h). Each image of the swapchain
+// holds an older picture, so each frame writes the part that shows. False
+// when the card cannot go out.
 bool XrScreen::Impl::SendCard(int index, const CardLayer& card,
                               XrCompositionLayerQuad* quad) {
   if (g_card_failed[index] || card.pixels == nullptr) return false;
@@ -2287,10 +2797,27 @@ bool XrScreen::Impl::SendCard(int index, const CardLayer& card,
     return false;
   }
   CardChain& chain = cards[index];
-  // A picture of a new size needs a new swapchain.
+  // The mip levels need a copy of each level into the swapchain image: with
+  // Vulkan, or into a swapchain of Direct3D 11. The relay of Direct3D 11 in
+  // a session with Vulkan copies level 0 only, so it gets one level.
+  const bool vulkan_upload = vulkan && (vk_upload || device == nullptr);
+  const bool levels_can = !vulkan || vulkan_upload;
+  const bool clear_edge = g_card_clear_edge;
+  uint32_t want_width = 0, want_height = 0;
+  int want_levels = g_card_mips && levels_can && !g_card_mips_refused
+                        ? card_send_math::kMostLevels
+                        : 1;
+  card_send_math::ChainSize(card.texture_width, card.texture_height,
+                            clear_edge, want_levels, &want_width,
+                            &want_height);
+  want_levels = card_send_math::LevelsFor(want_width, want_height, want_levels);
+  // A picture of a new size, or a change of the way, needs a new swapchain.
   if (chain.swapchain != XR_NULL_HANDLE &&
       (chain.width != card.texture_width ||
-       chain.height != card.texture_height)) {
+       chain.height != card.texture_height ||
+       chain.clear_edge != clear_edge ||
+       (chain.levels > 1 && chain.vulkan_upload != vulkan_upload) ||
+       (chain.levels != want_levels && !g_card_mips_refused))) {
     DestroyCard(index);
   }
   if (chain.swapchain == XR_NULL_HANDLE) {
@@ -2298,21 +2825,36 @@ bool XrScreen::Impl::SendCard(int index, const CardLayer& card,
     info.usageFlags = ChainUsage();
     info.format = ChainFormat();
     info.sampleCount = 1;
-    info.width = card.texture_width;
-    info.height = card.texture_height;
+    info.width = want_width;
+    info.height = want_height;
     info.faceCount = 1;
     info.arraySize = 1;
-    info.mipCount = 1;
-    if (!Check(xrCreateSwapchain(session, &info, &chain.swapchain),
-               "xrCreateSwapchain(card)")) {
+    info.mipCount = static_cast<uint32_t>(want_levels);
+    XrResult made = xrCreateSwapchain(session, &info, &chain.swapchain);
+    if (XR_FAILED(made) && want_levels > 1) {
+      // A runtime that takes no mip levels for a quad: one level for each
+      // card from now on.
+      g_card_mips_refused = true;
+      log("  openxr: the runtime refused a swapchain of the %s with %d mip "
+          "levels (%d), so each card has one level", kCardName[index],
+          want_levels, static_cast<int>(made));
+      want_levels = 1;
+      card_send_math::ChainSize(card.texture_width, card.texture_height,
+                                clear_edge, 1, &want_width, &want_height);
+      info.width = want_width;
+      info.height = want_height;
+      info.mipCount = 1;
+      made = xrCreateSwapchain(session, &info, &chain.swapchain);
+    }
+    if (!Check(made, "xrCreateSwapchain(card)")) {
       chain.swapchain = XR_NULL_HANDLE;
       g_card_failed[index] = true;
       log("  openxr: no swapchain for the %s, so the %s stay in the eye "
           "pictures", kCardName[index], kCardHolds[index]);
       return false;
     }
-    chain.images = ChainImages(chain.swapchain, card.texture_width,
-                               card.texture_height, &chain.image_count);
+    chain.images = ChainImages(chain.swapchain, want_width, want_height,
+                               &chain.image_count);
     if (chain.images == nullptr) {
       DestroyChain(&chain.swapchain);
       g_card_failed[index] = true;
@@ -2322,8 +2864,24 @@ bool XrScreen::Impl::SendCard(int index, const CardLayer& card,
     }
     chain.width = card.texture_width;
     chain.height = card.texture_height;
-    log("  openxr: the %s has its own swapchain, %u by %u, %u images",
-        kCardName[index], chain.width, chain.height, chain.image_count);
+    chain.chain_width = want_width;
+    chain.chain_height = want_height;
+    chain.levels = want_levels;
+    chain.clear_edge = clear_edge;
+    chain.vulkan_upload = vulkan_upload;
+    chain.have_layout = false;
+    log("  openxr: the %s has its own swapchain, %u by %u, %d mip level(s), "
+        "%s, %u images", kCardName[index], chain.chain_width,
+        chain.chain_height, chain.levels,
+        clear_edge ? "a clear edge of 8 texels around the picture"
+                   : "no clear edge",
+        chain.image_count);
+  }
+  card_send_math::Layout layout;
+  if (!card_send_math::LayoutOf(card.texture_width, card.texture_height,
+                                card.rect, chain.clear_edge, chain.levels,
+                                &layout)) {
+    return false;
   }
 
   // A card that cannot go out must not take its words away for good. After
@@ -2349,9 +2907,47 @@ bool XrScreen::Impl::SendCard(int index, const CardLayer& card,
   const bool red_first = format == DXGI_FORMAT_R8G8B8A8_UNORM_SRGB ||
                          format == DXGI_FORMAT_R8G8B8A8_UNORM;
   const bool with_vulkan = UploadsWithVulkan(chain.swapchain);
-  if (waited && image < chain.image_count && with_vulkan) {
-    UploadVulkan(chain.swapchain, image, card.pixels, chain.width * 4, x, y, w,
-                 h, red_first);
+  // THE COPY FOR THE VIDEO: in the byte order of the swapchain, as UNORM.
+  const bool mirror =
+      g_video_wanted && with_vulkan &&
+      MakeMirror(chain, red_first ? VK_FORMAT_R8G8B8A8_UNORM
+                                  : VK_FORMAT_B8G8R8A8_UNORM);
+  chain.mirror_fresh = false;
+  if (waited && image < chain.image_count && layout.padded) {
+    // THE LEVELS: the clear texels and the mip levels, made one time for
+    // each new picture, then the box of each level into the image.
+    BuildCardLevels(chain, card, layout, red_first, index);
+    if (with_vulkan) {
+      const bool sent = UploadVulkanLevels(
+          chain.swapchain, image, chain,
+          mirror ? chain.mirror : VK_NULL_HANDLE, &chain.mirror_written);
+      chain.mirror_fresh = mirror && sent;
+    } else if (context != nullptr) {
+      for (int k = 0; k < layout.levels; ++k) {
+        int32_t b[4];
+        card_send_math::LevelBox(layout, k, b);
+        D3D11_BOX box;
+        box.left = static_cast<UINT>(b[0]);
+        box.top = static_cast<UINT>(b[1]);
+        box.front = 0;
+        box.right = static_cast<UINT>(b[0] + b[2]);
+        box.bottom = static_cast<UINT>(b[1] + b[3]);
+        box.back = 1;
+        context->UpdateSubresource(
+            chain.images[image],
+            D3D11CalcSubresource(static_cast<UINT>(k), 0,
+                                 static_cast<UINT>(layout.levels)),
+            &box, chain.levels_data + card_send_math::LevelOffset(layout, k),
+            static_cast<UINT>(b[2]) * 4, 0);
+      }
+      ++card_level_uploads;
+    }
+  } else if (waited && image < chain.image_count && with_vulkan) {
+    const bool sent = UploadVulkan(
+        chain.swapchain, image, card.pixels, chain.width * 4, x, y, w, h,
+        red_first, mirror ? chain.mirror : VK_NULL_HANDLE,
+        &chain.mirror_written);
+    chain.mirror_fresh = mirror && sent;
   } else if (waited && image < chain.image_count && context != nullptr) {
     const uint32_t pitch = chain.width * 4;
     const uint8_t* source = card.pixels;
@@ -2390,15 +2986,23 @@ bool XrScreen::Impl::SendCard(int index, const CardLayer& card,
   // multiplied by the alpha, which is what the card holds.
   quad->layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
   quad->space = space;
-  quad->eyeVisibility = XR_EYE_VISIBILITY_BOTH;
+  quad->eyeVisibility = card.eye == 1   ? XR_EYE_VISIBILITY_LEFT
+                        : card.eye == 2 ? XR_EYE_VISIBILITY_RIGHT
+                                        : XR_EYE_VISIBILITY_BOTH;
   quad->subImage.swapchain = chain.swapchain;
-  quad->subImage.imageRect.offset = {x, y};
-  quad->subImage.imageRect.extent = {w, h};
+  // With the clear edge the quad shows the picture and its frame of clear
+  // texels. The quad grows by the share of the frame, so the picture keeps
+  // its size, and the frame is the same at each side, so the picture keeps
+  // its place.
+  quad->subImage.imageRect.offset = {layout.image_rect[0],
+                                     layout.image_rect[1]};
+  quad->subImage.imageRect.extent = {layout.image_rect[2],
+                                     layout.image_rect[3]};
   quad->subImage.imageArrayIndex = 0;
   quad->pose.position = {card.position[0], card.position[1], card.position[2]};
   quad->pose.orientation = {card.orientation[0], card.orientation[1],
                             card.orientation[2], card.orientation[3]};
-  quad->size = {card.width, card.height};
+  quad->size = {card.width * layout.scale[0], card.height * layout.scale[1]};
   ++chain.layers;
   if (!chain.logged) {
     chain.logged = true;
@@ -2429,6 +3033,82 @@ bool XrScreen::TakeStagedPanelQuad(PanelQuad* out, bool clear) {
   *out = g_staged_quad;
   if (clear) g_have_staged_quad = false;
   return have;
+}
+
+void XrScreen::DropStagedWindow() { g_have_staged_window = false; }
+
+void XrScreen::WantVideoLayers(bool on) {
+  g_video_wanted = on;
+  if (!on) g_have_video = false;
+}
+
+bool XrScreen::VideoLayersOf(VideoLayers* out) {
+  if (!g_video_wanted || !g_have_video || out == nullptr) return false;
+  *out = g_video;
+  return true;
+}
+
+// A frame with no runtime: the layers that a frame of BuildFrame would have,
+// with no panel (the panel quads need a session) and with the pixels of the
+// CPU for each card.
+void XrScreen::RecordVideoLayers(const float eye_position[3], uint32_t width,
+                                 uint32_t height) {
+  if (!g_video_wanted) return;
+  const bool window_staged = g_have_staged_window;
+  const WindowLayer window = g_staged_window;
+  g_have_staged_window = false;
+  const bool screen = window_staged && window.screen;
+  VideoBegin(screen);
+  if (screen) {
+    for (int k = 0; k < 3; ++k) {
+      g_video.screen_position[k] = window.position[k];
+      g_video.eye_position[k] = eye_position[k];
+    }
+    for (int k = 0; k < 4; ++k) {
+      g_video.screen_orientation[k] = window.orientation[k];
+    }
+    g_video.screen_width = window.width;
+    g_video.screen_height = window.height;
+    float part[4] = {0.0f, 0.0f, 1.0f, 1.0f};
+    if (window.rect[2] > 0 && window.rect[3] > 0 && width > 0 && height > 0) {
+      const float w = static_cast<float>(width), h = static_cast<float>(height);
+      part[0] = static_cast<float>(window.rect[0]) / w;
+      part[1] = static_cast<float>(window.rect[1]) / h;
+      part[2] = static_cast<float>(window.rect[0] + window.rect[2]) / w;
+      part[3] = static_cast<float>(window.rect[1] + window.rect[3]) / h;
+    }
+    for (int k = 0; k < 4; ++k) g_video.screen_part[k] = part[k];
+    const int over[2] = {kCardSubtitles, kCardKeyboard};
+    for (int i = 0; i < 2; ++i) {
+      const int card = over[i];
+      if (g_have_staged_card[card] && g_staged_card[card].visible &&
+          !g_card_failed[card] && CardShape(g_staged_card[card])) {
+        VideoCard(card, g_staged_card[card], 0, 0);
+      }
+    }
+  } else {
+    const int card_order[kCards] = {
+        kCardSubtitles,       kCardCreature,        kCardHintPointing,
+        kCardHintOther,
+        kCardHintButton0,     kCardHintButton0 + 1, kCardHintButton0 + 2,
+        kCardHintButton0 + 3, kCardSheet,           kCardRing,
+        kCardRingRight,       kCardBubble,          kCardKeyboard,
+        kCardRay,             kCardRayTip};
+    for (int i = 0; i < kCards; ++i) {
+      const int card = card_order[i];
+      if (g_have_staged_card[card] && g_staged_card[card].visible &&
+          !g_card_failed[card] && CardShape(g_staged_card[card])) {
+        VideoCard(card, g_staged_card[card], 0, 0);
+      }
+    }
+    bool walls = window_staged && window.mask && window.alpha > 0.004f;
+    for (int k = 0; k < 4 && walls; ++k) {
+      walls = window.wall_size[k][0] > 0.0f && window.wall_size[k][1] > 0.0f;
+    }
+    if (walls) VideoWalls(window);
+  }
+  for (int i = 0; i < kCards; ++i) g_have_staged_card[i] = false;
+  VideoEnd();
 }
 
 void XrScreen::Impl::DestroyMask() {
@@ -2582,6 +3262,7 @@ void XrScreen::SetPanelVulkan(uint64_t image) {
   if (s.Check(s.CopyVulkan(s.panel_swapchain, image, 0),
               "the copy of a Vulkan panel")) {
     s.panel_acquired = 0;
+    s.video_panel_image = image;
   }
 }
 
@@ -2637,6 +3318,26 @@ void XrScreen::ReportUpload(uint64_t frames) {
     s.vk_uploads = 0;
     s.vk_upload_ticks = 0;
   }
+  if (s.card_builds > 0) {
+    LARGE_INTEGER hz_now;
+    QueryPerformanceFrequency(&hz_now);
+    const double to_ms = 1000.0 / static_cast<double>(hz_now.QuadPart);
+    s.log("  cards        : %llu new pictures of the cards made ready for "
+          "their swapchains (card_edge_clear=%d, card_mips=%d), %.3f ms each "
+          "on average and %.3f ms at the most. %llu of their %llu rows "
+          "changed, and %llu copies of the levels went to the GPU",
+          s.card_builds, g_card_clear_edge ? 1 : 0, g_card_mips ? 1 : 0,
+          static_cast<double>(s.card_build_ticks) * to_ms /
+              static_cast<double>(s.card_builds),
+          static_cast<double>(s.card_build_most_ticks) * to_ms,
+          s.card_build_rows, s.card_build_all_rows, s.card_level_uploads);
+    s.card_builds = 0;
+    s.card_build_ticks = 0;
+    s.card_build_most_ticks = 0;
+    s.card_build_rows = 0;
+    s.card_build_all_rows = 0;
+    s.card_level_uploads = 0;
+  }
   if (s.panel_frames > 0) {
     s.log("  ui panel     : %llu menu and %llu help quad layers over the "
           "projection in %llu frames, and %llu Creature panel quad "
@@ -2655,6 +3356,17 @@ void XrScreen::ReportUpload(uint64_t frames) {
     s.cards[kCardHintPointing].layers = 0;
     s.cards[kCardHintOther].layers = 0;
   }
+  {
+    uint64_t buttons = 0;
+    for (int i = 0; i < kHintButtonCards; ++i) {
+      buttons += s.cards[kCardHintButton0 + i].layers;
+      s.cards[kCardHintButton0 + i].layers = 0;
+    }
+    if (buttons > 0) {
+      s.log("  hint card    : %llu quad layers of the cards of the buttons "
+            "over the projection", buttons);
+    }
+  }
   if (s.cards[kCardSubtitles].layers > 0) {
     s.log("  subtitles    : %llu quad layers of the subtitle card over the "
           "projection", s.cards[kCardSubtitles].layers);
@@ -2664,6 +3376,11 @@ void XrScreen::ReportUpload(uint64_t frames) {
     s.log("  ring         : %llu quad layers of the ring over the projection",
           s.cards[kCardRing].layers);
     s.cards[kCardRing].layers = 0;
+  }
+  if (s.cards[kCardKeyboard].layers > 0) {
+    s.log("  keyboard     : %llu quad layers of the keyboard",
+          s.cards[kCardKeyboard].layers);
+    s.cards[kCardKeyboard].layers = 0;
   }
   if (s.age_frames > 0 && s.frequency.QuadPart != 0) {
     const double to_ms = 1000.0 / static_cast<double>(s.frequency.QuadPart);
@@ -2782,6 +3499,26 @@ void XrScreen::SetRenderPose(int index, const float position[3],
   have_render_pose_ = render_views_[0].valid && render_views_[1].valid;
 }
 
+bool XrScreen::DeclaredView(int index, EyeView* out) const {
+  const int eye = (index >= 1) ? 1 : 0;
+  // Declare what was rendered, which is not always the newest pose known.
+  const EyeView& from = have_render_pose_ ? render_views_[eye] : views_[eye];
+  if (!from.valid) return false;
+  *out = from;
+  // The frustum reported has to be the frustum rendered, not the one the
+  // runtime asked for. The game renders a symmetric view, so the caller
+  // tells us the half angle it used and both sides get it (LayerFov, the
+  // same angles as the back channel to the headset app).
+  const uint32_t w = width(), h = height();
+  float fov[4];
+  LayerFov(w > 0 && h > 0 ? render_half_angle_ : 0.0f, w, h, views_[eye], fov);
+  out->fov_left = fov[0];
+  out->fov_right = fov[1];
+  out->fov_up = fov[2];
+  out->fov_down = fov[3];
+  return true;
+}
+
 void XrScreen::EndFrame() {
   if (remote_) {
     if (!impl_->frame_open) return;
@@ -2849,6 +3586,7 @@ bool XrScreen::BuildFrame() {
   b.display_time = s.frame_state.predictedDisplayTime;
   b.world = false;
   b.with_subtitles = false;
+  b.with_panel = false;
   for (int i = 0; i < kCards; ++i) b.with_card[i] = false;
 
   // PROJECTION, OR A SCREEN.
@@ -2876,9 +3614,11 @@ bool XrScreen::BuildFrame() {
     for (int eye = 0; eye < 2; ++eye) {
       XrCompositionLayerProjectionView& v = eye_views[eye];
       v = {XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW};
-      // Declare what was rendered, which is not always the newest pose known.
-      const EyeView& from =
-          have_render_pose_ ? render_views_[eye] : views_[eye];
+      // The pose that was rendered and the frustum of the render
+      // (DeclaredView). The check of the view (view_check.cpp) reads the
+      // same view, so it tests what the layer declares.
+      EyeView from;
+      if (!DeclaredView(eye, &from)) from = views_[eye];
       v.pose.position.x = from.position[0];
       v.pose.position.y = from.position[1];
       v.pose.position.z = from.position[2];
@@ -2886,15 +3626,10 @@ bool XrScreen::BuildFrame() {
       v.pose.orientation.y = from.orientation[1];
       v.pose.orientation.z = from.orientation[2];
       v.pose.orientation.w = from.orientation[3];
-      // The frustum reported has to be the frustum rendered, not the one the
-      // runtime asked for. The game renders a symmetric view, so the caller
-      // tells us the half angle it used and both sides get it (LayerFov).
-      float fov[4];
-      LayerFov(render_half_angle_, s.width, s.height, views_[eye], fov);
-      v.fov.angleLeft = fov[0];
-      v.fov.angleRight = fov[1];
-      v.fov.angleUp = fov[2];
-      v.fov.angleDown = fov[3];
+      v.fov.angleLeft = from.fov_left;
+      v.fov.angleRight = from.fov_right;
+      v.fov.angleUp = from.fov_up;
+      v.fov.angleDown = from.fov_down;
       v.subImage.swapchain = s.swapchain[eye];
       v.subImage.imageRect.offset = {0, 0};
       v.subImage.imageRect.extent = {static_cast<int32_t>(s.width),
@@ -2918,6 +3653,9 @@ bool XrScreen::BuildFrame() {
     uint32_t layer_count = 0;
     layers[layer_count++] =
         reinterpret_cast<const XrCompositionLayerBaseHeader*>(&projection);
+    // THE LAYERS FOR THE VIDEO: each quad below goes into the record too,
+    // in the same order.
+    if (g_video_wanted) VideoBegin(false);
 
     // THE INTERFACE PANELS, over the world. OpenXR draws a later layer over
     // an earlier one. Without the unpremultiplied flag the runtime reads the
@@ -2956,8 +3694,23 @@ bool XrScreen::BuildFrame() {
         layers[layer_count++] =
             reinterpret_cast<const XrCompositionLayerBaseHeader*>(&quad);
         ++s.panel_layers[i];
+        VideoQuad* video = g_video_wanted ? VideoAdd(kVideoPanel, i) : nullptr;
+        if (video != nullptr) {
+          for (int k = 0; k < 3; ++k) video->position[k] = q.position[k];
+          for (int k = 0; k < 4; ++k) video->orientation[k] = q.orientation[k];
+          video->width = q.width;
+          video->height = q.height;
+          video->rect[0] = x;
+          video->rect[1] = y;
+          video->rect[2] = w;
+          video->rect[3] = h;
+          video->texture_width = s.width;
+          video->texture_height = s.height;
+          video->panel_image = s.video_panel_image;
+        }
       }
       if (layer_count > 1) {
+        b.with_panel = true;
         ++s.panel_frames;
         if (!s.logged_panel) {
           s.logged_panel = true;
@@ -2973,10 +3726,19 @@ bool XrScreen::BuildFrame() {
     // frame that staged it. The subtitle card is the far one, so it goes
     // first, and the hint cards at the hands draw over it. The ring is open
     // only while the player holds its control, so it draws over all of them.
+    // The spell book uses the quad of the ring, and the bubble that the hand
+    // pulls out of the book draws over the book. The ray of the pointing
+    // hand over the panels goes after them, because it ends on a panel or on
+    // the keyboard. The glow at its end goes last, over the ray.
     XrCompositionLayerQuad* card_quads = b.card_quads;
     bool* with_card = b.with_card;
-    const int card_order[kCards] = {kCardSubtitles, kCardHintPointing,
-                                    kCardHintOther, kCardRing};
+    const int card_order[kCards] = {
+        kCardSubtitles,       kCardCreature,        kCardHintPointing,
+        kCardHintOther,
+        kCardHintButton0,     kCardHintButton0 + 1, kCardHintButton0 + 2,
+        kCardHintButton0 + 3, kCardSheet,           kCardRing,
+        kCardRingRight,       kCardBubble,          kCardKeyboard,
+        kCardRay,             kCardRayTip};
     for (int i = 0; i < kCards; ++i) {
       const int card = card_order[i];
       if (g_have_staged_card[card] && g_staged_card[card].visible &&
@@ -2985,6 +3747,7 @@ bool XrScreen::BuildFrame() {
             reinterpret_cast<const XrCompositionLayerBaseHeader*>(
                 &card_quads[card]);
         with_card[card] = true;
+        if (g_video_wanted) s.VideoOfCard(card);
       }
       g_have_staged_card[card] = false;
     }
@@ -2997,7 +3760,10 @@ bool XrScreen::BuildFrame() {
         layers[layer_count++] =
             reinterpret_cast<const XrCompositionLayerBaseHeader*>(&walls[k]);
       }
+      if (g_video_wanted) VideoWalls(window);
     }
+    if (g_video_wanted) VideoEnd();
+    s.video_panel_image = 0;
 
     ++presented_;
     for (int eye = 0; eye < 2; ++eye) s.acquired[eye] = -1;
@@ -3026,6 +3792,22 @@ bool XrScreen::BuildFrame() {
     edge = 0;
   }
   const int32_t shown = static_cast<int32_t>(s.width) - crop - 2 * edge;
+  // A part of each picture (the menus in the room), clamped to the picture.
+  // A rect outside the image is an error for the whole frame.
+  int32_t part[4] = {0, 0, 0, 0};
+  if (as_screen && window.rect[2] > 0 && window.rect[3] > 0) {
+    part[0] = window.rect[0] < 0 ? 0 : window.rect[0];
+    part[1] = window.rect[1] < 0 ? 0 : window.rect[1];
+    part[2] = window.rect[2];
+    part[3] = window.rect[3];
+    if (part[0] + part[2] > static_cast<int32_t>(s.width)) {
+      part[2] = static_cast<int32_t>(s.width) - part[0];
+    }
+    if (part[1] + part[3] > static_cast<int32_t>(s.height)) {
+      part[3] = static_cast<int32_t>(s.height) - part[1];
+    }
+    if (part[2] <= 0 || part[3] <= 0) part[2] = part[3] = 0;
+  }
 
   const float aspect =
       static_cast<float>(s.height) / static_cast<float>(s.width);
@@ -3041,8 +3823,13 @@ bool XrScreen::BuildFrame() {
                              : (eye == 0 ? XR_EYE_VISIBILITY_LEFT
                                          : XR_EYE_VISIBILITY_RIGHT);
     quad.subImage.swapchain = s.swapchain[eye];
-    quad.subImage.imageRect.offset = {(eye == 0 ? crop : 0) + edge, 0};
-    quad.subImage.imageRect.extent = {shown, static_cast<int32_t>(s.height)};
+    if (part[2] > 0) {
+      quad.subImage.imageRect.offset = {part[0], part[1]};
+      quad.subImage.imageRect.extent = {part[2], part[3]};
+    } else {
+      quad.subImage.imageRect.offset = {(eye == 0 ? crop : 0) + edge, 0};
+      quad.subImage.imageRect.extent = {shown, static_cast<int32_t>(s.height)};
+    }
     quad.subImage.imageArrayIndex = 0;
     if (as_screen) {
       // The screen of the cut scene window, where the mod staged it.
@@ -3061,11 +3848,48 @@ bool XrScreen::BuildFrame() {
     layers[layer_count] =
         reinterpret_cast<const XrCompositionLayerBaseHeader*>(
             &quads[layer_count]);
+    // THE LAYERS FOR THE VIDEO: the screen that the left eye picture is on.
+    if (g_video_wanted && eye == 0) {
+      VideoBegin(true);
+      g_video.screen_position[0] = quad.pose.position.x;
+      g_video.screen_position[1] = quad.pose.position.y;
+      g_video.screen_position[2] = quad.pose.position.z;
+      for (int k = 0; k < 3; ++k) {
+        g_video.eye_position[k] = views_[0].position[k];
+      }
+      g_video.screen_orientation[0] = quad.pose.orientation.x;
+      g_video.screen_orientation[1] = quad.pose.orientation.y;
+      g_video.screen_orientation[2] = quad.pose.orientation.z;
+      g_video.screen_orientation[3] = quad.pose.orientation.w;
+      g_video.screen_width = quad.size.width;
+      g_video.screen_height = quad.size.height;
+      const float sw = static_cast<float>(s.width);
+      const float sh = static_cast<float>(s.height);
+      const XrRect2Di& r = quad.subImage.imageRect;
+      g_video.screen_part[0] = static_cast<float>(r.offset.x) / sw;
+      g_video.screen_part[1] = static_cast<float>(r.offset.y) / sh;
+      g_video.screen_part[2] =
+          static_cast<float>(r.offset.x + r.extent.width) / sw;
+      g_video.screen_part[3] =
+          static_cast<float>(r.offset.y + r.extent.height) / sh;
+    }
     ++layer_count;
   }
+  const bool video_screen =
+      g_video_wanted && layer_count > 0 && s.acquired[0] >= 0;
 
   if (layer_count > 0) ++presented_;
-  if (as_screen && layer_count > 0) {
+  if (as_screen && layer_count > 0 && part[2] > 0) {
+    if (!s.logged_menu_screen) {
+      s.logged_menu_screen = true;
+      s.log("  openxr: a frame with no scene goes out as %u quad layer(s) of "
+            "the menus in the room, %.2f by %.2f m at %.2f %.2f %.2f m. Each "
+            "eye shows the part %d %d %d %d of its picture", layer_count,
+            window.width, window.height, window.position[0],
+            window.position[1], window.position[2], part[0], part[1],
+            part[2], part[3]);
+    }
+  } else if (as_screen && layer_count > 0) {
     ++s.window_frames;
     if (!s.logged_window || crop != s.logged_window_crop ||
         edge != s.logged_window_edge) {
@@ -3096,6 +3920,7 @@ bool XrScreen::BuildFrame() {
     layers[layer_count++] =
         reinterpret_cast<const XrCompositionLayerBaseHeader*>(&subtitle_quad);
     with_subtitles = true;
+    if (video_screen) s.VideoOfCard(kCardSubtitles);
     if (!s.logged_window_card) {
       s.logged_window_card = true;
       s.log("  openxr: the subtitle card goes out as one quad layer over the "
@@ -3104,7 +3929,20 @@ bool XrScreen::BuildFrame() {
             g_staged_card[kCardSubtitles].height);
     }
   }
+  // THE KEYBOARD goes over a screen too: the menus of a frame with no scene
+  // can have a text box (docs/ui-layer.md, "The keyboard in the headset").
+  if (as_screen && layer_count > 0 && g_have_staged_card[kCardKeyboard] &&
+      g_staged_card[kCardKeyboard].visible &&
+      s.SendCard(kCardKeyboard, g_staged_card[kCardKeyboard],
+                 &b.card_quads[kCardKeyboard])) {
+    layers[layer_count++] = reinterpret_cast<const XrCompositionLayerBaseHeader*>(
+        &b.card_quads[kCardKeyboard]);
+    b.with_card[kCardKeyboard] = true;
+    if (video_screen) s.VideoOfCard(kCardKeyboard);
+  }
   for (int i = 0; i < kCards; ++i) g_have_staged_card[i] = false;
+  if (video_screen) VideoEnd();
+  s.video_panel_image = 0;
 
   b.layer_count = layer_count;
   QueryPerformanceCounter(&b.built);
@@ -3141,7 +3979,11 @@ void XrScreen::FinishFrame() {
       // card of that frame must not go in the next one. The newest kind goes
       // first: the ring, then the subtitle card. A frame that fails with
       // neither takes the hint cards away.
-      if (b.with_card[kCardRing]) {
+      if (b.with_card[kCardKeyboard]) {
+        g_card_failed[kCardKeyboard] = true;
+        s.log("  openxr: the runtime refused a frame with the keyboard, so "
+              "the keyboard does not show");
+      } else if (b.with_card[kCardRing]) {
         g_card_failed[kCardRing] = true;
         s.log("  openxr: the runtime refused a frame with the ring, so the "
               "ring does not show. Its items still act");
@@ -3150,12 +3992,25 @@ void XrScreen::FinishFrame() {
         s.log("  openxr: the runtime refused a frame with the subtitle card, "
               "so the subtitles stay in the eye pictures");
       } else if (b.with_card[kCardHintPointing] ||
-                 b.with_card[kCardHintOther]) {
-        g_card_failed[kCardHintPointing] = true;
-        g_card_failed[kCardHintOther] = true;
+                 b.with_card[kCardHintOther] ||
+                 b.with_card[kCardHintButton0] ||
+                 b.with_card[kCardHintButton0 + 1] ||
+                 b.with_card[kCardHintButton0 + 2] ||
+                 b.with_card[kCardHintButton0 + 3]) {
+        for (int i = 0; i < kCards; ++i) {
+          if (IsHintCard(i)) g_card_failed[i] = true;
+        }
         s.log("  openxr: the runtime refused a frame with a hint card, so the "
               "hints stay in the eye pictures");
+      } else if (b.with_panel && !g_panel_refused) {
+        g_panel_refused = true;
+        s.log("  openxr: the runtime refused a frame with the interface "
+              "panel, so the menus go back to the eye pictures");
       }
+    } else if (b.with_card[kCardKeyboard]) {
+      g_card_failed[kCardKeyboard] = true;
+      s.log("  openxr: the runtime refused a frame of a screen with the "
+            "keyboard, so the keyboard does not show");
     } else if (b.with_subtitles) {
       // A refused frame shows nothing, so the card must not go in the next
       // one. The subtitles then stay in the picture of the window.
@@ -3241,6 +4096,7 @@ void XrScreen::EndFrameLate(const LateFrame& frame, bool on_thread) {
   if (!s.vulkan) s.late.panel_vulkan = 0;
   s.panel_acquired =
       s.late.panel_texture != nullptr || s.late.panel_vulkan != 0 ? 0 : -1;
+  s.video_panel_image = s.late.panel_vulkan;
   if (!BuildFrame()) return;
   ++s.late_frames;
   if (on_thread && s.StartSendThread()) {
@@ -3283,6 +4139,46 @@ bool XrScreen::LastDisplayTime(int64_t* time, int64_t* period) const {
   if (s.frame_state.predictedDisplayTime <= 0) return false;
   *time = s.frame_state.predictedDisplayTime;
   *period = s.frame_state.predictedDisplayPeriod;
+  return true;
+}
+
+bool XrScreen::LocateViewsAt(int64_t time, EyeView views[2]) const {
+  if (remote_ || time <= 0) return false;
+  const Impl& s = *impl_;
+  if (s.session == XR_NULL_HANDLE || !s.session_running ||
+      s.space == XR_NULL_HANDLE) {
+    return false;
+  }
+  XrViewLocateInfo locate = {XR_TYPE_VIEW_LOCATE_INFO};
+  locate.viewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
+  locate.displayTime = static_cast<XrTime>(time);
+  locate.space = s.space;
+  XrViewState view_state = {XR_TYPE_VIEW_STATE};
+  XrView raw_views[2] = {{XR_TYPE_VIEW}, {XR_TYPE_VIEW}};
+  uint32_t found = 0;
+  if (XR_FAILED(xrLocateViews(s.session, &locate, &view_state, 2, &found,
+                              raw_views)) ||
+      found < 2) {
+    return false;
+  }
+  if ((view_state.viewStateFlags & XR_VIEW_STATE_POSITION_VALID_BIT) == 0 ||
+      (view_state.viewStateFlags & XR_VIEW_STATE_ORIENTATION_VALID_BIT) == 0) {
+    return false;
+  }
+  for (int i = 0; i < 2; ++i) {
+    views[i].position[0] = raw_views[i].pose.position.x;
+    views[i].position[1] = raw_views[i].pose.position.y;
+    views[i].position[2] = raw_views[i].pose.position.z;
+    views[i].orientation[0] = raw_views[i].pose.orientation.x;
+    views[i].orientation[1] = raw_views[i].pose.orientation.y;
+    views[i].orientation[2] = raw_views[i].pose.orientation.z;
+    views[i].orientation[3] = raw_views[i].pose.orientation.w;
+    views[i].fov_left = raw_views[i].fov.angleLeft;
+    views[i].fov_right = raw_views[i].fov.angleRight;
+    views[i].fov_up = raw_views[i].fov.angleUp;
+    views[i].fov_down = raw_views[i].fov.angleDown;
+    views[i].valid = true;
+  }
   return true;
 }
 
@@ -3628,6 +4524,7 @@ void XrScreen::Stop() {
   }
   s.DestroyMask();
   if (was_started) g_have_staged_window = false;
+  g_have_video = false;
   // The action spaces go before the session.
   s.DestroyInput();
   if (s.view_space != XR_NULL_HANDLE) {
@@ -4488,6 +5385,96 @@ bool XrScreen::Impl::Push(VkChain& chain, uint32_t image) {
   return ok;
 }
 
+// THE COPY FOR THE VIDEO of a card: an image of the size of the card on the
+// GPU, which the view for videos samples. False when it cannot be made.
+// Then the view for videos copies the pixels of the CPU itself.
+bool XrScreen::Impl::MakeMirror(CardChain& chain, VkFormat image_format) {
+  if (chain.mirror != VK_NULL_HANDLE && chain.mirror_format == image_format) {
+    return true;
+  }
+  if (chain.mirror_failed) return false;
+  FreeMirror(chain);
+  VkImageCreateInfo info = {VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+  info.imageType = VK_IMAGE_TYPE_2D;
+  info.format = image_format;
+  info.extent = {chain.width, chain.height, 1};
+  info.mipLevels = 1;
+  info.arrayLayers = 1;
+  info.samples = VK_SAMPLE_COUNT_1_BIT;
+  info.tiling = VK_IMAGE_TILING_OPTIMAL;
+  info.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+  info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+  info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+  bool ok = vkf.vkCreateImage(g_vk.device, &info, nullptr, &chain.mirror) ==
+            VK_SUCCESS;
+  VkMemoryRequirements req = {};
+  if (ok) vkf.vkGetImageMemoryRequirements(g_vk.device, chain.mirror, &req);
+  uint32_t type = UINT32_MAX;
+  for (uint32_t i = 0; ok && i < g_vk.memory.memoryTypeCount; ++i) {
+    if ((req.memoryTypeBits & (1u << i)) != 0 &&
+        (g_vk.memory.memoryTypes[i].propertyFlags &
+         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) != 0) {
+      type = i;
+      break;
+    }
+  }
+  VkMemoryAllocateInfo allocate = {VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+  allocate.allocationSize = req.size;
+  allocate.memoryTypeIndex = type;
+  ok = ok && type != UINT32_MAX &&
+       vkf.vkAllocateMemory(g_vk.device, &allocate, nullptr,
+                            &chain.mirror_memory) == VK_SUCCESS &&
+       vkf.vkBindImageMemory(g_vk.device, chain.mirror, chain.mirror_memory,
+                             0) == VK_SUCCESS;
+  if (ok) {
+    VkImageViewCreateInfo view = {VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+    view.image = chain.mirror;
+    view.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    view.format = image_format;
+    view.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    ok = vkf.vkCreateImageView(g_vk.device, &view, nullptr,
+                               &chain.mirror_view) == VK_SUCCESS;
+  }
+  if (!ok) {
+    FreeMirror(chain);
+    chain.mirror_failed = true;
+    log("  openxr: no copy of a card for the view for videos, so the view "
+        "copies the pixels of the CPU");
+    return false;
+  }
+  chain.mirror_format = image_format;
+  chain.mirror_written = false;
+  return true;
+}
+
+// The view for videos can still read the image in the queue, so the queue
+// becomes idle first. This comes only at a new size of a card and at the end.
+void XrScreen::Impl::FreeMirror(CardChain& chain) {
+  if (chain.mirror == VK_NULL_HANDLE && chain.mirror_memory == VK_NULL_HANDLE) {
+    return;
+  }
+  {
+    QueueGuard guard(true);
+    vkf.vkDeviceWaitIdle(g_vk.device);
+  }
+  // The record of the last frame can name this view.
+  g_have_video = false;
+  if (chain.mirror_view != VK_NULL_HANDLE) {
+    vkf.vkDestroyImageView(g_vk.device, chain.mirror_view, nullptr);
+  }
+  if (chain.mirror != VK_NULL_HANDLE) {
+    vkf.vkDestroyImage(g_vk.device, chain.mirror, nullptr);
+  }
+  if (chain.mirror_memory != VK_NULL_HANDLE) {
+    vkf.vkFreeMemory(g_vk.device, chain.mirror_memory, nullptr);
+  }
+  chain.mirror = VK_NULL_HANDLE;
+  chain.mirror_memory = VK_NULL_HANDLE;
+  chain.mirror_view = VK_NULL_HANDLE;
+  chain.mirror_format = VK_FORMAT_UNDEFINED;
+  chain.mirror_written = false;
+}
+
 void XrScreen::Impl::FreeStages() {
   for (int i = 0; i < kVkSlots; ++i) {
     Stage& stage = vk_stage[i];
@@ -4506,10 +5493,67 @@ void XrScreen::Impl::FreeStages() {
 // of this copy, and the GPU copies the buffer into the image. The image is
 // in the layout of a color attachment after the acquire, and it has that
 // layout again before the release. The rest of the image keeps its pixels.
+// The buffer of the slot `slot` of the copies, made larger when it has less
+// than `bytes` bytes.
+bool XrScreen::Impl::StageBuffer(int slot, VkDeviceSize bytes) {
+  Stage& stage = vk_stage[slot];
+  if (stage.size >= bytes) return true;
+  if (stage.buffer != VK_NULL_HANDLE) {
+    vkf.vkDestroyBuffer(g_vk.device, stage.buffer, nullptr);
+  }
+  if (stage.memory != VK_NULL_HANDLE) {
+    vkf.vkFreeMemory(g_vk.device, stage.memory, nullptr);
+  }
+  memset(&stage, 0, sizeof(stage));
+  VkBufferCreateInfo info = {VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
+  info.size = bytes;
+  info.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+  info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+  bool ok = vkf.vkCreateBuffer(g_vk.device, &info, nullptr, &stage.buffer) ==
+            VK_SUCCESS;
+  VkMemoryRequirements req = {};
+  if (ok) vkf.vkGetBufferMemoryRequirements(g_vk.device, stage.buffer, &req);
+  uint32_t type = UINT32_MAX;
+  const VkMemoryPropertyFlags want = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                                     VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+  for (uint32_t i = 0; ok && i < g_vk.memory.memoryTypeCount; ++i) {
+    if ((req.memoryTypeBits & (1u << i)) != 0 &&
+        (g_vk.memory.memoryTypes[i].propertyFlags & want) == want) {
+      type = i;
+      break;
+    }
+  }
+  VkMemoryAllocateInfo allocate = {VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+  allocate.allocationSize = req.size;
+  allocate.memoryTypeIndex = type;
+  ok = ok && type != UINT32_MAX &&
+       vkf.vkAllocateMemory(g_vk.device, &allocate, nullptr,
+                            &stage.memory) == VK_SUCCESS &&
+       vkf.vkBindBufferMemory(g_vk.device, stage.buffer, stage.memory, 0) ==
+           VK_SUCCESS;
+  void* mapped = nullptr;
+  ok = ok && vkf.vkMapMemory(g_vk.device, stage.memory, 0, VK_WHOLE_SIZE, 0,
+                             &mapped) == VK_SUCCESS;
+  if (!ok) {
+    if (stage.buffer != VK_NULL_HANDLE) {
+      vkf.vkDestroyBuffer(g_vk.device, stage.buffer, nullptr);
+    }
+    if (stage.memory != VK_NULL_HANDLE) {
+      vkf.vkFreeMemory(g_vk.device, stage.memory, nullptr);
+    }
+    memset(&stage, 0, sizeof(stage));
+    return false;
+  }
+  stage.mapped = static_cast<uint8_t*>(mapped);
+  stage.size = bytes;
+  return true;
+}
+
 bool XrScreen::Impl::UploadVulkan(XrSwapchain chain, uint32_t image,
                                   const uint8_t* pixels, uint32_t pitch,
                                   int32_t x, int32_t y, int32_t w, int32_t h,
-                                  bool swap_red_blue) {
+                                  bool swap_red_blue, VkImage mirror,
+                                  bool* mirror_written) {
   LARGE_INTEGER start, done;
   QueryPerformanceCounter(&start);
   VkChain* c = FindChain(chain);
@@ -4522,59 +5566,12 @@ bool XrScreen::Impl::UploadVulkan(XrSwapchain chain, uint32_t image,
   const int slot = vk_slot;
   VkCommandBuffer cb = BeginCopy();
   if (cb == VK_NULL_HANDLE) return false;
-  Stage& stage = vk_stage[slot];
   const VkDeviceSize bytes = static_cast<VkDeviceSize>(w) * h * 4;
-  if (stage.size < bytes) {
-    if (stage.buffer != VK_NULL_HANDLE) {
-      vkf.vkDestroyBuffer(g_vk.device, stage.buffer, nullptr);
-    }
-    if (stage.memory != VK_NULL_HANDLE) {
-      vkf.vkFreeMemory(g_vk.device, stage.memory, nullptr);
-    }
-    memset(&stage, 0, sizeof(stage));
-    VkBufferCreateInfo info = {VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
-    info.size = bytes;
-    info.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
-    info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    bool ok = vkf.vkCreateBuffer(g_vk.device, &info, nullptr, &stage.buffer) ==
-              VK_SUCCESS;
-    VkMemoryRequirements req = {};
-    if (ok) vkf.vkGetBufferMemoryRequirements(g_vk.device, stage.buffer, &req);
-    uint32_t type = UINT32_MAX;
-    const VkMemoryPropertyFlags want = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-                                       VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
-    for (uint32_t i = 0; ok && i < g_vk.memory.memoryTypeCount; ++i) {
-      if ((req.memoryTypeBits & (1u << i)) != 0 &&
-          (g_vk.memory.memoryTypes[i].propertyFlags & want) == want) {
-        type = i;
-        break;
-      }
-    }
-    VkMemoryAllocateInfo allocate = {VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
-    allocate.allocationSize = req.size;
-    allocate.memoryTypeIndex = type;
-    ok = ok && type != UINT32_MAX &&
-         vkf.vkAllocateMemory(g_vk.device, &allocate, nullptr,
-                              &stage.memory) == VK_SUCCESS &&
-         vkf.vkBindBufferMemory(g_vk.device, stage.buffer, stage.memory, 0) ==
-             VK_SUCCESS;
-    void* mapped = nullptr;
-    ok = ok && vkf.vkMapMemory(g_vk.device, stage.memory, 0, VK_WHOLE_SIZE, 0,
-                               &mapped) == VK_SUCCESS;
-    if (!ok) {
-      if (stage.buffer != VK_NULL_HANDLE) {
-        vkf.vkDestroyBuffer(g_vk.device, stage.buffer, nullptr);
-      }
-      if (stage.memory != VK_NULL_HANDLE) {
-        vkf.vkFreeMemory(g_vk.device, stage.memory, nullptr);
-      }
-      memset(&stage, 0, sizeof(stage));
-      EndCopy(cb);
-      return false;
-    }
-    stage.mapped = static_cast<uint8_t*>(mapped);
-    stage.size = bytes;
+  if (!StageBuffer(slot, bytes)) {
+    EndCopy(cb);
+    return false;
   }
+  Stage& stage = vk_stage[slot];
   const size_t row_bytes = static_cast<size_t>(w) * 4;
   for (int32_t row = 0; row < h; ++row) {
     const uint8_t* in = pixels + static_cast<size_t>(y + row) * pitch +
@@ -4618,10 +5615,149 @@ bool XrScreen::Impl::UploadVulkan(XrSwapchain chain, uint32_t image,
   vkf.vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_TRANSFER_BIT,
                            VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, nullptr, 0,
                            nullptr, 1, &after);
+  // THE COPY FOR THE VIDEO: the same buffer into the image of the video.
+  // The view for videos reads it in a later submit to this queue, and the
+  // barrier before the copy waits for each read of the frame before.
+  if (mirror != VK_NULL_HANDLE && mirror_written != nullptr) {
+    VkImageMemoryBarrier to = {VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+    to.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    to.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    to.oldLayout = *mirror_written ? VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+                                   : VK_IMAGE_LAYOUT_UNDEFINED;
+    to.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    to.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    to.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    to.image = mirror;
+    to.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    vkf.vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                             VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
+                             nullptr, 1, &to);
+    vkf.vkCmdCopyBufferToImage(cb, stage.buffer, mirror,
+                               VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1,
+                               &region);
+    VkImageMemoryBarrier back = to;
+    back.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    back.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    back.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    back.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    vkf.vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                             VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, nullptr,
+                             0, nullptr, 1, &back);
+    *mirror_written = true;
+  }
   const bool ok = EndCopy(cb);
   QueryPerformanceCounter(&done);
   vk_upload_ticks += static_cast<uint64_t>(done.QuadPart - start.QuadPart);
   ++vk_uploads;
+  if (!ok && !vk_said_upload_failed) {
+    vk_said_upload_failed = true;
+    log("  openxr: a copy of the pixels of the CPU into a swapchain image "
+        "failed");
+  }
+  return ok;
+}
+
+bool XrScreen::Impl::UploadVulkanLevels(XrSwapchain chain, uint32_t image,
+                                        const CardChain& card, VkImage mirror,
+                                        bool* mirror_written) {
+  LARGE_INTEGER start, done;
+  QueryPerformanceCounter(&start);
+  VkChain* c = FindChain(chain);
+  const card_send_math::Layout& l = card.layout;
+  if (c == nullptr || image >= c->count || card.levels_data == nullptr ||
+      !card.have_layout || l.levels != card.levels) {
+    return false;
+  }
+  const int slot = vk_slot;
+  VkCommandBuffer cb = BeginCopy();
+  if (cb == VK_NULL_HANDLE) return false;
+  const VkDeviceSize bytes = card_send_math::LevelsBytes(l);
+  if (!StageBuffer(slot, bytes)) {
+    EndCopy(cb);
+    return false;
+  }
+  Stage& stage = vk_stage[slot];
+  memcpy(stage.mapped, card.levels_data, static_cast<size_t>(bytes));
+  VkImageMemoryBarrier before = {VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+  before.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+  before.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+  before.oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+  before.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+  before.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+  before.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+  before.image = c->images[image];
+  before.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0,
+                             static_cast<uint32_t>(l.levels), 0, 1};
+  vkf.vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                           VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
+                           nullptr, 1, &before);
+  VkBufferImageCopy regions[card_send_math::kMostLevels] = {};
+  for (int k = 0; k < l.levels; ++k) {
+    int32_t box[4];
+    card_send_math::LevelBox(l, k, box);
+    VkBufferImageCopy& region = regions[k];
+    region.bufferOffset = card_send_math::LevelOffset(l, k);
+    region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT,
+                               static_cast<uint32_t>(k), 0, 1};
+    region.imageOffset = {box[0], box[1], 0};
+    region.imageExtent = {static_cast<uint32_t>(box[2]),
+                          static_cast<uint32_t>(box[3]), 1};
+  }
+  vkf.vkCmdCopyBufferToImage(cb, stage.buffer, c->images[image],
+                             VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                             static_cast<uint32_t>(l.levels), regions);
+  VkImageMemoryBarrier after = before;
+  after.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+  after.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT |
+                        VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+  after.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+  after.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+  vkf.vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                           VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, nullptr, 0,
+                           nullptr, 1, &after);
+  // THE COPY FOR THE VIDEO: the rect of the picture, from level 0 of the
+  // buffer, into the image of the video at the place of the rect.
+  if (mirror != VK_NULL_HANDLE && mirror_written != nullptr) {
+    VkImageMemoryBarrier to = {VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+    to.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    to.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    to.oldLayout = *mirror_written ? VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+                                   : VK_IMAGE_LAYOUT_UNDEFINED;
+    to.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    to.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    to.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    to.image = mirror;
+    to.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    vkf.vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                             VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
+                             nullptr, 1, &to);
+    VkBufferImageCopy region = {};
+    region.bufferOffset =
+        (static_cast<VkDeviceSize>(l.content[1] - l.box[1]) * l.box[2] +
+         (l.content[0] - l.box[0])) * 4;
+    region.bufferRowLength = static_cast<uint32_t>(l.box[2]);
+    region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+    region.imageOffset = {l.rect[0], l.rect[1], 0};
+    region.imageExtent = {static_cast<uint32_t>(l.rect[2]),
+                          static_cast<uint32_t>(l.rect[3]), 1};
+    vkf.vkCmdCopyBufferToImage(cb, stage.buffer, mirror,
+                               VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1,
+                               &region);
+    VkImageMemoryBarrier back = to;
+    back.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    back.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    back.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    back.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    vkf.vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                             VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, nullptr,
+                             0, nullptr, 1, &back);
+    *mirror_written = true;
+  }
+  const bool ok = EndCopy(cb);
+  QueryPerformanceCounter(&done);
+  vk_upload_ticks += static_cast<uint64_t>(done.QuadPart - start.QuadPart);
+  ++vk_uploads;
+  ++card_level_uploads;
   if (!ok && !vk_said_upload_failed) {
     vk_said_upload_failed = true;
     log("  openxr: a copy of the pixels of the CPU into a swapchain image "

@@ -29,6 +29,7 @@
 
 #include "../common/exe_check.h"
 #include "../common/settings_table.h"
+#include "../common/large_address.h"
 #include "../common/update_check.h"
 #include "../common/version.h"
 
@@ -591,17 +592,12 @@ DWORD WINAPI AskForUpdate(void*) {
   return 0;
 }
 
-// Starts the ask when bwvr.ini has update_check=1. `test_tag` takes the
-// place of the answer, and `test_url` the place of the address. A picture
-// for a test (`picture`) asks only with one of them, so that the picture
-// does not change with the releases on GitHub.
+// Starts the ask each time the launcher opens. `test_tag` takes the place of
+// the answer, and `test_url` the place of the address. A picture for a test
+// (`picture`) asks only with one of them, so that the picture does not
+// change with the releases on GitHub.
 void StartUpdateCheck(bool picture, const char* test_tag,
                       const char* test_url) {
-  if (GetPrivateProfileIntA("bwvr", "update_check", 1, g_ini_path) == 0) {
-    strcpy_s(g_update.note, sizeof(g_update.note),
-             "Updates: off (update_check=0 in bwvr.ini).");
-    return;
-  }
   if (picture && test_tag == nullptr && test_url == nullptr) {
     strcpy_s(g_update.note, sizeof(g_update.note),
              "Updates: no ask for a picture of a test.");
@@ -996,6 +992,18 @@ void UpdateRendererRows(bool first) {
   if (!first) CheckEverything();
 }
 
+// Values that a kValues row does not offer. The mod still takes them from
+// bwvr.ini for a test. The row shows its default for them, so a save writes
+// the default.
+struct ShownAsDefault {
+  const char* key;
+  int value;
+};
+const ShownAsDefault kShownAsDefault[] = {
+    {"snap_turn", 0},   // no turn
+    {"move_stick", 0},  // no walk
+};
+
 void LoadAll() {
   for (int i = 0; i < kSettingCount; ++i) {
     const Setting& s = kSettings[i];
@@ -1019,9 +1027,6 @@ void LoadAll() {
         break;
       case kValues: {
         int value = ReadIni(s.key, s.fallback);
-        // The God view replaced the immersive mode, play mode 0. An older
-        // bwvr.ini can still hold 0, and it shows the God view.
-        if (strcmp(s.key, "play_mode") == 0 && value == 0) value = 4;
         SendMessageA(g_control[i], CB_SETCURSEL, ChoiceIndex(s.choices, value),
                      0);
         break;
@@ -1065,6 +1070,18 @@ void LoadAll() {
       }
       default:
         break;
+    }
+  }
+  for (const ShownAsDefault& hidden : kShownAsDefault) {
+    for (int i = 0; i < kSettingCount; ++i) {
+      const Setting& s = kSettings[i];
+      if (s.kind != kValues || g_control[i] == nullptr ||
+          strcmp(s.key, hidden.key) != 0 ||
+          ReadIni(s.key, s.fallback) != hidden.value) {
+        continue;
+      }
+      SendMessageA(g_control[i], CB_SETCURSEL,
+                   ChoiceIndex(s.choices, s.fallback), 0);
     }
   }
 }
@@ -1197,9 +1214,36 @@ void SaveAll() {
   WriteRegistryInt("ScreenD", 32);
 }
 
+// The flag LARGE_ADDRESS_AWARE of runblack.exe (large_address.h), as the row
+// "Use 4 GB of memory" asks. If Windows refuses the change, the game starts
+// with the file as it is. The result goes into bwvr.ini, and the mod writes
+// it in its log.
+void ApplyLargeAddressSetting() {
+  wchar_t dir[MAX_PATH];
+  if (MultiByteToWideChar(CP_ACP, 0, g_game_dir, -1, dir, MAX_PATH) == 0) {
+    return;
+  }
+  wchar_t exe[MAX_PATH];
+  wchar_t backup[MAX_PATH];
+  _snwprintf_s(exe, MAX_PATH, _TRUNCATE, L"%s\\runblack.exe", dir);
+  _snwprintf_s(backup, MAX_PATH, _TRUNCATE, L"%s\\%s", dir,
+               bwvr::kGameExeBackupName);
+  const bool want = ReadIni("large_address", 1) != 0;
+  const bwvr::LargeAddressReport r = bwvr::ApplyLargeAddress(exe, backup, want);
+  static const char* const kNames[] = {"already", "changed", "not v1.42",
+                                       "no rights", "in use", "failed"};
+  char text[160];
+  _snprintf_s(text, sizeof(text), _TRUNCATE, "%s, flag %s, error %lu",
+              kNames[static_cast<int>(r.result)], r.on_now ? "on" : "off",
+              r.error);
+  WritePrivateProfileStringA("launcher", "large_address_result", text,
+                             g_ini_path);
+}
+
 // Starts runblack.exe. With `process`, the caller gets the handle of the game
 // and closes it.
 bool StartGame(const char* parameters, HANDLE* process) {
+  ApplyLargeAddressSetting();
   char exe[MAX_PATH];
   _snprintf_s(exe, sizeof(exe), _TRUNCATE, "%s\\runblack.exe", g_game_dir);
   SHELLEXECUTEINFOA info = {sizeof(info)};
@@ -1217,9 +1261,18 @@ bool StartGame(const char* parameters, HANDLE* process) {
   return true;
 }
 
-void Play(bool new_game) {
+// The second way to play. With start_new_game=0 (the default) the game
+// continues the save of the exit, so the second button starts a new game
+// with -NEWGAME, and the start dialog of the fan patch opens first. With
+// start_new_game=1 the mod starts a new game, so the second button
+// continues the save of the exit with the word -CONTINUE of the mod.
+bool StartNewGameKey() { return ReadIni("start_new_game", 0) != 0; }
+
+void Play(bool second_way) {
   SaveAll();
-  if (StartGame(new_game ? "-NEWGAME" : nullptr, nullptr)) {
+  const char* word = nullptr;
+  if (second_way) word = StartNewGameKey() ? "-CONTINUE" : "-NEWGAME";
+  if (StartGame(word, nullptr)) {
     PostMessageA(g_window, WM_CLOSE, 0, 0);
   } else {
     SayStatus("Could not start runblack.exe.");
@@ -1615,8 +1668,9 @@ void BuildControls() {
       0, "BUTTON", "Play in VR", WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON, 0,
       0, 0, 0, g_window, reinterpret_cast<HMENU>(1), nullptr, nullptr);
   g_buttons[kButtonFresh] = CreateWindowExA(
-      0, "BUTTON", "Play, new game", WS_CHILD | WS_VISIBLE, 0, 0, 0, 0,
-      g_window, reinterpret_cast<HMENU>(2), nullptr, nullptr);
+      0, "BUTTON", StartNewGameKey() ? "Play, continue" : "Play, new game",
+      WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, g_window,
+      reinterpret_cast<HMENU>(2), nullptr, nullptr);
   g_buttons[kButtonSave] = CreateWindowExA(
       0, "BUTTON", "Save Config", WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, g_window,
       reinterpret_cast<HMENU>(3), nullptr, nullptr);
@@ -1646,8 +1700,24 @@ void BuildControls() {
   }
   SendMessageA(g_status, WM_SETFONT, reinterpret_cast<WPARAM>(g_font), TRUE);
   AddTip(g_status, g_status_tip);
+  AddTip(g_buttons[kButtonPlay],
+         StartNewGameKey()
+             ? "Start the game in the headset. A new game starts, and the "
+               "start dialog of the game opens first: skip the tutorial, or "
+               "keep your old Creature."
+             : "Start the game in the headset and continue the game that "
+               "you played last. The game loads the save that it made when "
+               "you quit, and opens its Main Menu. With no save, a new game "
+               "starts.");
   AddTip(g_buttons[kButtonFresh],
-         "Start a new game on the first island, skipping the menu.");
+         StartNewGameKey()
+             ? "Continue the game that you played last. The game loads the "
+               "save that it made when you quit, and opens its Main Menu. "
+               "\"Play in VR\" starts a new game with the start dialog: skip "
+               "the tutorial, or keep your old Creature."
+             : "Start a new game in the headset. The start dialog of the "
+               "game opens first: skip the tutorial, or keep your old "
+               "Creature.");
   AddTip(g_buttons[kButtonSave],
          "Write the settings without starting the game.");
   AddTip(g_buttons[kButtonPlain],

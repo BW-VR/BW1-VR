@@ -293,12 +293,16 @@ inline void WindowColumns(const ss::WindowBody& w, uint32_t width, int eye,
 struct FrameLayers {
   bool panel = false;
   ss::PanelBody panel_body = {};
-  bool card[bwvr::kCards] = {false, false, false, false};
+  bool card[bwvr::kCards] = {};
   ss::CardBody cards[bwvr::kCards] = {};
   bool window = false;
   ss::WindowBody window_body = {};
   bool Any() const {
-    return panel || window || card[0] || card[1] || card[2] || card[3];
+    if (panel || window) return true;
+    for (int c = 0; c < bwvr::kCards; ++c) {
+      if (card[c]) return true;
+    }
+    return false;
   }
 };
 
@@ -319,9 +323,10 @@ struct LayerRef {
   int kind;
   int index;
 };
-// The most layers of a frame: the projection layer, 3 panel quads, 4 cards,
-// 4 walls.
-constexpr int kMostLayers = 12;
+// The most layers of a frame: the projection layer, the panel quads, the
+// cards, 4 walls. A runtime can take fewer (the app keeps its count of the
+// system, maxLayerCount).
+constexpr int kMostLayers = 1 + bwvr::kPanelQuads + bwvr::kCards + 4;
 
 // THE ORDER of the layers of a frame (XrScreen::BuildFrame). world: the frame
 // shows in a projection layer (view_layer_math.h, ShowsProjection), and it is
@@ -343,8 +348,13 @@ inline int Order(const FrameLayers& f, bool world, bool panel_image,
         }
       }
     }
-    const int card_order[bwvr::kCards] = {bwvr::kCardSubtitles, bwvr::kCardHintPointing,
-                                          bwvr::kCardHintOther, bwvr::kCardRing};
+    // The order of XrScreen::BuildFrame: a later card draws over an earlier one.
+    const int card_order[bwvr::kCards] = {
+        bwvr::kCardSubtitles,       bwvr::kCardCreature,        bwvr::kCardHintPointing,
+        bwvr::kCardHintOther,       bwvr::kCardHintButton0,     bwvr::kCardHintButton0 + 1,
+        bwvr::kCardHintButton0 + 2, bwvr::kCardHintButton0 + 3, bwvr::kCardSheet,
+        bwvr::kCardRing,            bwvr::kCardRingRight,       bwvr::kCardBubble,
+        bwvr::kCardKeyboard,        bwvr::kCardRay,             bwvr::kCardRayTip};
     for (int i = 0; i < bwvr::kCards; ++i) {
       const int c = card_order[i];
       if (f.card[c] && card_picture[c] && CardShows(f.cards[c])) out[n++] = {kLayerCard, c};

@@ -104,6 +104,29 @@ inline void ZoomPointChecks() {
   Near("a deep valley gives a level 2.5 m below the head",
        ZoomLevel(-9.0f, -0.05f, 0.10f, 2.50f), -2.55, 1e-6);
 
+  // THE LEVEL OVER DEEP LAND (god_zoom_far_level). The head is at 0, and the
+  // land 4.01 m below it, as in a session at 4.41 units per meter.
+  Near("with the key a zoom in over deep land takes the land as its level",
+       ZoomLevelFor(-4.01f, 0.0f, 0.10f, 2.50f, 1, true), -4.01, 1e-6);
+  Near("with the key a zoom out over deep land keeps the level at 2.5 m",
+       ZoomLevelFor(-4.01f, 0.0f, 0.10f, 2.50f, -1, true), -2.50, 1e-6);
+  Near("without the key a zoom in keeps the level at 2.5 m",
+       ZoomLevelFor(-4.01f, 0.0f, 0.10f, 2.50f, 1, false), -2.50, 1e-6);
+  Near("with the key land in the range is its own level",
+       ZoomLevelFor(-0.60f, 0.0f, 0.10f, 2.50f, 1, true), -0.60, 1e-6);
+  Near("with the key a hill over the head still gives 10 cm",
+       ZoomLevelFor(1.20f, 0.0f, 0.10f, 2.50f, 1, true), -0.10, 1e-6);
+  // The zoom in from 4.41 to 1.00 units per meter. The old level puts that
+  // land 9.15 m below the head (his session), and the land level keeps it.
+  Near("a zoom in about a level 2.5 m down puts the land 9.15 m down",
+       DepthAfterZoom(2.50f, 4.01f, 4.41f, 1.00f), 9.159, 1e-3);
+  Near("a zoom in about the land keeps the land 4.01 m down",
+       DepthAfterZoom(4.01f, 4.01f, 4.41f, 1.00f), 4.01, 1e-5);
+  Near("a zoom out about a level 2.5 m down brings the land up",
+       DepthAfterZoom(2.50f, 4.01f, 4.41f, 17.64f), 2.8775, 1e-4);
+  Near("a zoom with no scale after it changes nothing",
+       DepthAfterZoom(2.50f, 4.01f, 4.41f, 0.0f), 4.01, 1e-6);
+
   // A HILL UNDER THE HEAD AFTER A ZOOM, at 100 units a meter. The waist point
   // has a height of 40 and is 60 cm under the recenter pose, and the head is
   // 5 cm under that pose. So land of a height of 40 is 55 cm below the head.
@@ -357,6 +380,106 @@ inline void ZoomPointChecks() {
   }
 }
 
+// THE LOWEST SCALE (god_near_units_per_meter_x10, zoom_math.h): the key, the
+// steps from the start scale and back to the life size scale, and the room
+// point of the zoom at 1 unit for each meter.
+inline void LowestChecks() {
+  using namespace table_math;
+  using namespace zoom_math;
+  printf("\nThe lowest scale of the God view\n");
+  Near("the default is 1 unit for each meter",
+       LowestScale(kLowestTenths, 7.5f), 1.0, 1e-6);
+  Near("a key of 75 gives the life size scale", LowestScale(75, 7.5f), 7.5,
+       1e-6);
+  Near("a key of 0 takes the life size scale of the head",
+       LowestScale(0, 7.5f), 7.5, 1e-6);
+  Near("a key of 0 with no scale of the head gives 7.5",
+       LowestScale(0, 0.0f), 7.5, 1e-6);
+  Near("at the lowest scale a villager is 1.6 m high in the room",
+       kVillagerUnits / LowestScale(kLowestTenths, 7.5f), 1.6, 1e-5);
+
+  // The steps in from the start scale of 100. Each step divides the scale by
+  // 1.5, and the last one stops at the lowest scale.
+  const float room[3] = {0.0f, -0.6f, 0.0f};
+  const float head[3] = {0.0f, 0.0f, 0.0f};
+  const float low = LowestScale(kLowestTenths, 7.5f), high = 4000.0f;
+  TablePose pose = {{2000.0f, 30.0f, 2500.0f}, 0.0f, 100.0f};
+  int steps = 0;
+  for (int i = 0; i < 40; ++i) {
+    TablePose next;
+    if (GodZoom(pose, room, head, 30.0f, 1.0f / 1.5f, low, high, &next) ==
+        1.0f) {
+      break;
+    }
+    pose = next;
+    ++steps;
+  }
+  Check(steps == 12, "12 steps in go from 100 to the lowest scale", steps, 12);
+  Near("the steps in stop at 1 unit for each meter", pose.scale, 1.0, 1e-6);
+  // From the lowest scale, 5 steps out pass the life size scale.
+  int out = 0;
+  while (pose.scale < 7.5f && out < 40) {
+    TablePose next;
+    GodZoom(pose, room, head, 30.0f, 1.5f, low, high, &next);
+    pose = next;
+    ++out;
+  }
+  Check(out == 5, "5 steps out go from the lowest scale past 7.5", out, 5);
+  Near("5 steps out give 7.59 units for each meter", pose.scale, 7.59375,
+       1e-4);
+  // A key of 75 keeps the zoom at the life size scale.
+  TablePose life = {{2000.0f, 30.0f, 2500.0f}, 0.0f, 7.5f};
+  TablePose next = life;
+  const float kept = GodZoom(life, room, head, 30.0f, 1.0f / 1.5f,
+                             LowestScale(75, 7.5f), high, &next);
+  Check(kept == 1.0f && next.scale == 7.5f,
+        "with a key of 75 a step in at 7.5 changes nothing", next.scale, 7.5);
+
+  // At 1 unit for each meter a zoom keeps its point in the room, and the
+  // land under the head keeps its height in the room.
+  TablePose at = {{2000.0f, 30.0f, 2500.0f}, 0.0f, 1.5f};
+  const float pivot[3] = {2000.4f, 30.0f, 2500.7f};
+  float before[3], after[3];
+  PoseRoom(at, room, pivot, before);
+  GodZoomAbout(at, pivot, 1.0f / 1.5f, low, high, &next);
+  PoseRoom(next, room, pivot, after);
+  float off = 0.0f;
+  for (int k = 0; k < 3; ++k) off += (after[k] - before[k]) * (after[k] - before[k]);
+  Check(sqrtf(off) < 1e-4f && next.scale == 1.0f,
+        "a step to the lowest scale keeps the point of the zoom in the room",
+        sqrtf(off) * 100.0f, 0);
+}
+
+// A ZOOM THAT STOPS SHORT OF A SOLID (StepShare): a clearance that goes down
+// along the step, a step with no solid in the way, and a head that is
+// already nearer than the limit.
+inline void StepShareChecks() {
+  using namespace zoom_math;
+  printf("\nA zoom step that stops short of a solid\n");
+  // The clearance goes from 30 cm to -20 cm along the step.
+  const auto falls = [](float t) { return 0.30f - 0.50f * t; };
+  Near("the step stops where the head is 5 cm out", StepShare(falls, 0.05f),
+       0.5, 1e-5);
+  const auto open = [](float t) { return 0.30f + 0.10f * t; };
+  Check(StepShare(open, 0.05f) == 1.0f, "a step with no solid in the way goes "
+        "all the way", StepShare(open, 0.05f), 1);
+  const auto at = [](float t) { return 0.05f - 0.20f * t; };
+  Check(StepShare(at, 0.05f) < 1e-5f, "a head at the limit with the solid "
+        "coming nearer does not move", StepShare(at, 0.05f), 0);
+  // A head 2 cm out already may go on while it does not come nearer.
+  const auto away = [](float t) { return 0.02f + 0.10f * t; };
+  Check(StepShare(away, 0.05f) == 1.0f, "a head nearer than the limit may go "
+        "away from the solid", StepShare(away, 0.05f), 1);
+  const auto worse = [](float t) { return 0.02f - 0.10f * t; };
+  Check(StepShare(worse, 0.05f) < 1e-5f, "a head nearer than the limit does "
+        "not go nearer", StepShare(worse, 0.05f), 0);
+  // Only a step in can stop. A step out always goes, also when it brings
+  // the head nearer to a solid.
+  Check(MayStop(1.0f / 1.5f), "a step in can stop at a solid", 1, 1);
+  Check(!MayStop(1.5f), "a step out never stops at a solid", 0, 0);
+  Check(!MayStop(1.0f), "no step does not stop", 0, 0);
+}
+
 inline void ZoomChecks() {
   using namespace table_math;
   using namespace zoom_math;
@@ -562,6 +685,8 @@ inline void ZoomChecks() {
           pose.scale, high);
   }
   ZoomPointChecks();
+  LowestChecks();
+  StepShareChecks();
 }
 
 }  // namespace zoom_checks

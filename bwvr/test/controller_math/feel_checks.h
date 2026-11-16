@@ -586,6 +586,98 @@ inline void FeelChecks() {
     Near("a finger that is in the body when it is open stays open",
          range.hi[2], 0.0, 1e-6);
   }
+
+  // THE OFFER OF THE PICK: the ball round the box of a building, through the
+  // matrix of the object.
+  {
+    // The Village Store: a box 15.5 units from its middle to a corner, the
+    // object turned a quarter turn about y and at the scale 1.
+    const float rows[9] = {0.0f, 0.0f, -1.0f, 0.0f, 1.0f, 0.0f,
+                           1.0f, 0.0f, 0.0f};
+    const float at[3] = {1000.0f, 20.0f, 2000.0f};
+    const float box_middle[3] = {2.0f, 4.0f, 0.0f};
+    float middle[3], radius = 0.0f;
+    const bool ok =
+        hf::OfferBall(box_middle, 15.5f, rows, at, 1.0f, middle, &radius);
+    Check(ok, "the ball of a box is a real place", ok ? 1 : 0, 1);
+    Near("the middle of the ball goes with the turn (x)", middle[0], 1000.0,
+         1e-4);
+    Near("the middle of the ball goes with the turn (y)", middle[1], 24.0,
+         1e-4);
+    Near("the middle of the ball goes with the turn (z)", middle[2], 1998.0,
+         1e-4);
+    Near("the radius of the ball", radius, 15.5, 1e-5);
+    float scaled = 0.0f;
+    hf::OfferBall(box_middle, 15.5f, rows, at, 2.0f, middle, &scaled);
+    Near("the radius of the ball goes with the scale of the object", scaled,
+         31.0, 1e-5);
+    // A hand 2 units from the wall of the store, and 17.5 units from its
+    // middle. The old test took the point of the object, 17.5 units away,
+    // which is more than the bound of 12 units at the scale of 13 units a
+    // meter. The gap to the ball is 2 units.
+    hf::OfferBall(box_middle, 15.5f, rows, at, 1.0f, middle, &radius);
+    const float hand[3] = {middle[0] + 17.5f, middle[1], middle[2]};
+    const float gap = hf::OfferGap(middle, radius, hand);
+    Near("a hand at the wall of a large building is near its ball", gap, 2.0,
+         1e-4);
+    Check(gap <= 12.0f, "so the store is offered to the pick", gap, 12.0);
+    float bad[3];
+    const float far_at[3] = {1e9f, 0.0f, 0.0f};
+    Check(!hf::OfferBall(box_middle, 15.5f, rows, far_at, 1.0f, bad, &radius),
+          "a matrix with a place out of the world gives no ball", 0, 0);
+  }
+
+  // THE HAND IN THE WATER.
+  {
+    const float per_cm = 1.0f;  // 100 units a meter
+    hf::WaterLook look = hf::WaterLookAt(2.0f, per_cm);
+    Check(look.tint == 0.0f && look.alpha == 1.0f,
+          "a point over the sea keeps its look", look.alpha, 1.0);
+    look = hf::WaterLookAt(0.0f, per_cm);
+    Check(look.tint == 0.0f && look.alpha == 1.0f,
+          "a point at the water line keeps its look", look.alpha, 1.0);
+    look = hf::WaterLookAt(-2.0f, per_cm);
+    Near("a point 2 cm in the water has half of the tint", look.tint,
+         0.5 * hf::kWaterTint, 1e-6);
+    Near("and half of the loss of alpha", look.alpha,
+         1.0 - 0.5 * (1.0 - hf::kWaterAlpha), 1e-6);
+    look = hf::WaterLookAt(-40.0f, per_cm);
+    Near("a point deep in the water has the full tint", look.tint,
+         hf::kWaterTint, 1e-6);
+    Near("and the alpha of the full depth", look.alpha, hf::kWaterAlpha,
+         1e-6);
+    // The depth is in cm of the room: at 13 units a meter 4 cm is 0.52
+    // units.
+    look = hf::WaterLookAt(-0.52f, 0.13f);
+    Near("the full depth is 4 cm of the room at each scale", look.tint,
+         hf::kWaterTint, 1e-5);
+    // The tint deeper in the water is not less.
+    float last = 0.0f;
+    bool more = true;
+    for (int i = 0; i <= 50; ++i) {
+      const hf::WaterLook l = hf::WaterLookAt(-0.1f * i, per_cm);
+      if (l.tint < last - 1e-6f) more = false;
+      last = l.tint;
+    }
+    Check(more, "the tint does not go down with the depth", more ? 1 : 0, 1);
+    float color[4] = {200.0f, 180.0f, 160.0f, 255.0f};
+    hf::WaterColor(hf::WaterLookAt(-40.0f, per_cm), color);
+    Near("the color goes to the color of the sea (blue)", color[0],
+         200.0 + hf::kWaterTint * (hf::kWaterColor[0] - 200.0), 1e-3);
+    Near("the alpha of the color goes down", color[3],
+         255.0 * hf::kWaterAlpha, 1e-3);
+    Check(hf::WaterLookAt(-1.0f, 0.0f).alpha == 1.0f,
+          "with no size of the room the look does not change", 1, 1);
+    // The ring of the game.
+    Near("a hand of the real size has the growth of a finger",
+         hf::RingGrowth(19.0f), hf::kRingGrowth, 1e-6);
+    Near("the growth goes with the hand", hf::RingGrowth(38.0f),
+         2.0 * hf::kRingGrowth, 1e-6);
+    Near("a small hand has the least growth", hf::RingGrowth(0.5f), 0.2,
+         1e-6);
+    Near("a large hand has the most growth", hf::RingGrowth(1000.0f), 5.0,
+         1e-6);
+  }
 }
 
 }  // namespace feel_checks

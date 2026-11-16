@@ -7,6 +7,10 @@
 
 #include <stdint.h>
 
+namespace bwvr {
+struct CardLayer;
+}
+
 // Once a stereo frame, before the eye passes (ui_panel.cpp passes it on).
 // to_headset: the frame goes to a headset. projection: as a projection layer.
 // capture: this frame saves the eye pictures, so it saves the card too.
@@ -30,6 +34,12 @@ void HintCardLatchContext(int eye);
 // After both eye passes: the card of this frame goes to the headset.
 void HintCardEndFrame();
 
+// The save of the game starts (mod_main.cpp): the card of the pointing hand
+// says "Saving...", at the place of its card in the last frame. The caller
+// gives the layer to XrScreen::HoldCard. False when the cards did not show in
+// the last frame, or with hint_card_saving=0.
+bool HintCardSavingLayer(bwvr::CardLayer* out);
+
 // The test key (Ctrl Shift F11 with ui_panel=0): the card, or the hints in
 // the eye pictures.
 void HintCardToggle();
@@ -48,5 +58,14 @@ void HintCardMovesToggle(const char* by);
 // world_grab.cpp, far_grab.cpp and creature_command.cpp. This file sees the
 // take, the drop and the ring itself.
 void HintCardLearnDone(int skill, const char* how);
+
+// controller_hints.cpp, once a frame: the ToolTips option of the game
+// (TOOLTIP_LEVEL, 0 to 3). With hints_follow_game=1 it chooses whether a line
+// of a card goes away when the player knows it (hint_learn_math.h).
+void HintCardFollowTooltips(int tooltip_level);
 // Once a report window.
 void HintCardReport();
+
+// The check of the words (text_fit_test=1, text_fit.h): `text` in the box of
+// a line of a card, in each look. spell_book.cpp gives its lines here too.
+void HintCardCheckLine(const wchar_t* text);

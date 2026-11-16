@@ -5,6 +5,8 @@
 
 #pragma once
 
+#include "button_map_math.h"
+
 // The fake controller, from the ini keys of docs/controllers.md,
 // "4. The fake controller for desktop tests".
 // The fake hand never moves continuously. It stands in one pose, and it steps
@@ -43,6 +45,8 @@ struct GestureSettings {
   // gesture_size_cm: this much hand motion is a third of the view height to
   // the game, the size of a gesture drawn with the mouse.
   int size_cm = 30;
+  // gesture_point: 1 the tip of the index finger draws, 0 the grip point.
+  int point = 1;
 };
 
 // What the draw needs from the last controllers frame.
@@ -51,6 +55,9 @@ struct GestureInput {
   bool button_down;       // the draw button is down
   const char* why;        // why held is false
   float grip_room[3];     // the pointing grip in the room, game units
+  float draw_room[3];     // the point of the draw in the room: the tip of the
+                          // index finger, or the grip point
+  bool draw_tip;          // draw_room is the tip (gesture_point=1)
   float head[9];          // the head matrix in the room, of the same sample
   float scale;            // game units per meter
   bool have_pixel;        // the controller's pointer pixel is on the render
@@ -58,6 +65,15 @@ struct GestureInput {
   float render_width;     // pixels
   float render_height;
   unsigned long long frame;  // the controllers frame
+  // The circle of a Storm or a shield with the ray (miracle_circle_aim=1):
+  // the land point of the ray draws, not the hand. have_land is false in a
+  // frame in which the ray meets no land.
+  bool aim;
+  bool aim_have_land;
+  float aim_land[3];       // in the world
+  float aim_direction[3];  // the direction of the ray, in the world
+  float aim_distance;      // world units from the start of the ray
+  float aim_units;         // world units in a meter of the room
 };
 
 // Move around by grabbing the world. See docs/god-view.md,
@@ -80,6 +96,12 @@ struct GrabSettings {
   int limit = 3400;        // units from the map center, (2560, 0, 2560)
   int min_height = 6;      // units above the land
   int max_speed = 0;       // units a second, 0 is no cap
+  // The gain of a grab with one hand in the God view (grab_gain_math.h):
+  // grab_boost 1 on, 0 the grab is 1:1. The reach in cm of the room and
+  // the largest gain of the distance part.
+  bool boost = true;       // grab_boost
+  int boost_reach_cm = 50; // grab_boost_reach_cm
+  int boost_most = 50;     // grab_boost_most
   bool probe = false;      // log the game's land drag gain
 };
 
@@ -154,9 +176,30 @@ struct ControllerHintState {
   int ring;             // 0 no ring, 1 a button opens it, 2 only the stick
   int layout;           // button_layout: 1 the menu button and Y, 0 Y and X
   bool walk;            // the stick of the other hand moves the player
+  bool book;            // the first face button of the other hand opens the
+                        // spell book (spell_book.cpp)
+  int map_hand[4];      // the map of the buttons of the controller of the
+  int map_other[4];     // Hand and of the other hand (button_map_math.h)
   char profile[64];     // of the pointing hand, "fake" for the fake controller
 };
 void ControllersHintState(ControllerHintState* out);
+
+// THE MAP OF THE BUTTONS (button_map_hand, button_map_other,
+// docs/controllers.md, "The map of the buttons"), for the page Controls of
+// the settings window (controls_page.cpp). c is a controller: 0 left, 1
+// right. The kind comes from the interaction profile of the controller
+// (button_map_math.h), and the map is the map that the page shows.
+int ControllersKindOf(int c);
+// True when the runtime gave the interaction profile of controller c (or the
+// fake controller runs), so ControllersKindOf is the kind of that
+// controller.
+bool ControllersProfileKnown(int c);
+int ControllersPointingSide();
+void ControllersButtonMapOf(int c, int map[4]);
+void ControllersButtonJobs(button_map::Jobs* out);
+// A new map for the controller of the Hand (role 0) or of the other hand
+// (role 1). It acts when each button of both controllers is up.
+void ControllersSetButtonMap(int role, const int map[4], const char* by);
 // For the hint card: a push of the stick of the hand that does not point
 // moves the player now (move_stick). That stick has the job of the walk, no
 // reason refuses a push, and the game's switch for the drag of the land is
@@ -210,12 +253,22 @@ bool ControllersOtherMotion(float grip_room_out[3]);
 // and the word "layoutkey" of the scripted controller.
 void ControllersButtonLayoutToggle(const char* by);
 
+// A recenter of the view from the controllers, as F11 does: the recenter hold
+// (recenter_hold) and the item "recenter" of the ring. by names the input for
+// the log. Both hands get a pulse.
+void ControllersRecenter(const char* by);
+
 // The overlay renderer: each hand's grip pose in the world, one to one. See
 // docs/hand-model.md, "Overlay renderer".
 struct OverlayHand {
   bool valid;          // active, with a grip pose that is tracked
   float position[3];   // the grip point in the world
-  float rotation[9];   // the grip axes in the world: L * M_grip
+  // The axes of the drawn hand in the world: L * M_hand, the grip axes with
+  // the turn of the hand (hand_angle, docs/hand.md, "The angle of the hand").
+  float rotation[9];
+  // The grip axes in the world, L * M_grip: the frame of the model of the
+  // controller (hint_model.cpp).
+  float controller[9];
   float trigger;       // 0 to 1
   float squeeze;       // 0 to 1
   // Finger tracking: the curl of each finger from the runtime, the thumb
@@ -230,8 +283,23 @@ struct OverlayHands {
   int free_hand;           // the hand of the leash and the walk
   float units_per_meter;   // world units in a meter of the room, at the scale now
   unsigned long long frame;  // the controllers frame
+  // The map of a point of the room (game units at the life size scale) into
+  // the world, as the hands use it:
+  //
+  //   world = map_eye + map_basis * (map_gain * point - map_head)
+  //
+  // The gain is 1 off the table. controller_math::RoomToWorld does it.
+  float map_eye[3];
+  float map_basis[9];
+  float map_head[3];       // the head in the room, with the gain applied
+  float map_gain;
 };
 bool ControllersOverlayHands(OverlayHands* out);
+// The same in a frame of the cut scene window (cutscene_hands=1): the hands in
+// the room of the hands (HeadPoseToRoom), which is the world of the overlay
+// then, and the aim ray of the pointing hand in that room.
+bool ControllersOverlayHandsRoom(OverlayHands* out);
+bool ControllersRoomAim(float origin[3], float direction[3]);
 
 // The teleport: the pointing hand's A and B buttons, and its aim. See
 // teleport.cpp and docs/god-view.md, "The teleport".
@@ -265,9 +333,23 @@ bool ControllersCommandAllowed(const char** why);
 bool ControllersCommandRay(float origin[3], float direction[3], float* units,
                            float eye[3]);
 
+// A point of the LOCAL space of OpenXR, in meters, in the world, with the map
+// of the aim of this frame. units is the world units in a meter of the room.
+bool ControllersLocalToWorld(const float local[3], float world[3],
+                             float* units);
+
 // The ray of the pointing hand while a dialog box is up and the controller
 // owns the pointer. The two ends are in the world. False when none is drawn.
 bool ControllersMenuRay(float from[3], float to[3], float* units);
+// True when that ray shows only for the circle of a Storm or a shield
+// (miracle_circle_aim=1, docs/miracles.md).
+bool ControllersRayIsMiracleAim();
+
+// The same ray in the LOCAL space of the runtime, in meters, while it can be
+// under a panel in the room (docs/ui-layer.md, "The ray over the panels").
+// False when no panel in the room is open. *on_panel is true when the ray
+// ends on a panel or on the keyboard, and false for a ray of 2 m.
+bool ControllersPanelRay(float from[3], float to[3], bool* on_panel);
 
 // The ring (radial_menu.cpp, docs/controllers.md, "The ring"): the hand that
 // does not point, from the last controllers frame. The poses are in the LOCAL
@@ -281,9 +363,14 @@ struct RingHand {
   bool button;        // the face button of the ring, by button_layout: Y or X,
                       // and B or A when the left hand points
   bool face_buttons;  // false for a controller with no face buttons
+  bool book_face;     // the first face button (X, or A) opens the spell book:
+                      // button_layout=1, and a controller with face buttons
+                      // that does not send Esc with it (spell_book.cpp)
+  bool book_button;   // that button is down
   bool stick_click;
   bool stick_live;    // false for a Vive pad that is not clicked
   float trigger;      // 0 to 1
+  float squeeze;      // the grip, 0 to 1
   float stick[2];     // x right, y forward
   float position[3];  // the grip point
   float head[3];      // the head center
@@ -292,3 +379,13 @@ bool ControllersRingHand(RingHand* out);
 
 // A TEST AID (remote_control.cpp): a stick of either hand is clicked now.
 bool ControllersAnyStickClick();
+// The aim ray of the pointing hand in this frame, in the LOCAL space (the
+// pose of UpdateAim), and the value of its trigger, 0 to 1. For the panel of
+// places (places_panel.cpp). False when the hand has no aim pose.
+bool ControllersPointingAim(float position[3], float orientation[4],
+                            float* trigger);
+
+// The stick of the pointing hand forward (positive) and back (negative), -1
+// to 1, for the scroll of the debug window (debug_window.cpp). False when
+// the hand is not active, or its pad is not clicked (a Vive wand).
+bool ControllersPointingStick(float* forward);

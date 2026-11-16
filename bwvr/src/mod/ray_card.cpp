@@ -1,0 +1,257 @@
+// The ray of the pointing hand over the panels in the room. See
+// docs/ui-layer.md, "The ray over the panels", and ray_card_math.h.
+//
+// WHY. A panel in the room is a quad layer, and the runtime draws a quad
+// layer over the eye pictures. So a panel hides the part of the ray in the
+// eye pictures that is in front of it, and the player cannot see where the
+// ray points on the panel.
+//
+// WHAT. overlay.cpp calls RayCardFrame once a frame, when it draws the ray of
+// the menu. While a panel in the room can hide that ray (ControllersPanelRay),
+// this file draws the ray into a picture of its own and stages it as the
+// quad layer kCardRay, which the runtime draws after all the panels. The
+// overlay then draws no ray in the eye pictures, so the player sees one ray.
+// The strip has the look of the ray in the eye pictures (ray_glow and
+// ray_glow_only). With ray_tip=1 (overlay.cpp) the end of the ray is a
+// round glow on the quad layer kCardRayTip, which faces the head
+// (ray_tip_math.h). With ray_tip=0 the strip has a round mark at its end.
+//
+//   ray_over_panels=1     0: the ray stays in the eye pictures, under the
+//                         panels
+//   ray_card_test_save=0  N: saves the first N pictures of the strip as
+//                         bwvr-raycard-<frame>.bmp over a checkerboard, and
+//                         the picture of the glow at the end once as
+//                         bwvr-raytip-<frame>.bmp (a test key)
+
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#include <math.h>
+#include <stdint.h>
+#include <stdio.h>
+
+#include "../vr/xr_screen.h"
+#include "controllers.h"
+#include "menu_room.h"
+#include "ray_card_math.h"
+#include "ray_tip_math.h"
+
+extern void ModLog(const char* format, ...);
+
+// eye_capture.cpp
+void EyeCaptureSaveUi(const char* name, uint64_t frame, int style,
+                      const void* pixels, int pitch, uint32_t width,
+                      uint32_t height);
+
+namespace {
+
+namespace rc = ray_card_math;
+
+bool g_on = true;
+int g_save = 0;
+int g_saved = 0;
+uint8_t g_pixels[rc::kAcross * rc::kAlong * 4];
+// The picture of the glow at the end. It is steady, so it is drawn again
+// only for a new color of the ray, with a new serial.
+uint8_t g_tip_pixels[ray_tip_math::kPixels * ray_tip_math::kPixels * 4];
+float g_tip_rgb[3] = {-1.0f, -1.0f, -1.0f};
+uint32_t g_tip_serial = 0;
+bool g_tip_saved = false;
+bool g_said_tip_failed = false;
+// The log: the first strip, each start and end of a run of frames with the
+// strip, and each frame in which the end of the ray goes onto a panel or off
+// it (40 lines at the most), and the count in each report.
+bool g_said_first = false;
+bool g_said_failed = false;
+bool g_was_on = false;
+bool g_was_on_panel = false;
+bool g_was_tip = false;
+uint64_t g_run_start = 0;
+int g_run_logs = 0;
+const int kMaxRunLogs = 40;
+uint64_t g_frames = 0;
+
+}  // namespace
+
+void RayCardSetOptions(bool on, int test_save) {
+  g_on = on;
+  g_save = test_save < 0 ? 0 : test_save;
+  ModLog("ray card     : ray_over_panels=%d: %s", on ? 1 : 0,
+         on ? "while a panel in the room is open, the ray of the pointing "
+              "hand goes out as a quad layer over the panels"
+            : "the ray stays in the eye pictures, and a panel in the room "
+              "hides the part of it in front of the panel");
+  if (g_save > 0) {
+    ModLog("ray card     : ray_card_test_save=%d (a test)", g_save);
+  }
+}
+
+int RayCardValue() { return g_on ? 1 : 0; }
+
+void RayCardChange(const char* by) {
+  g_on = !g_on;
+  ModLog("ray card     : %s: ray_over_panels=%d. %s", by, g_on ? 1 : 0,
+         g_on ? "The ray goes over the panels in the room"
+              : "The ray stays in the eye pictures, under the panels");
+}
+
+// The run of frames with the strip ends in this frame.
+void RayCardEndRun(uint64_t frame) {
+  if (!g_was_on) return;
+  g_was_on = false;
+  if (g_run_logs < kMaxRunLogs) {
+    ++g_run_logs;
+    ModLog("ray card     : the ray is no longer over the panels, frame %llu, "
+           "after %llu frames", frame, frame - g_run_start);
+  }
+}
+
+// Once a frame. ray: the ray of the menu shows in this frame. True when it is
+// on its own quad layer: then the caller draws no ray in the eye pictures.
+// glow_half_m and tube_radius_m are those of the ray in the eye pictures, rgb
+// its color, and seconds the clock of the glow of this frame. tip: the end
+// of the ray is the glow of ray_tip_math.h (ray_tip=1).
+bool RayCardFrame(bool ray, bool glow, bool only, bool tip, float glow_half_m,
+                  float tube_radius_m, const float rgb[3], float seconds,
+                  uint64_t frame) {
+  if (!ray || !g_on) {
+    RayCardEndRun(frame);
+    return false;
+  }
+  if (bwvr::XrScreen::CardFailed(bwvr::kCardRay)) {
+    if (!g_said_failed) {
+      g_said_failed = true;
+      ModLog("ray card     : the runtime refused the quad layer of the ray, "
+             "so the ray stays in the eye pictures, frame %llu", frame);
+    }
+    return false;
+  }
+  float from[3], to[3], head[3], head_q[4];
+  bool on_panel = false;
+  if (!ControllersPanelRay(from, to, &on_panel) ||
+      !MenuRoomHeadPose(head, head_q)) {
+    RayCardEndRun(frame);
+    return false;
+  }
+  // The glow at the end needs its own quad layer. When the runtime refuses
+  // it, the strip has the mark at its end.
+  if (tip && bwvr::XrScreen::CardFailed(bwvr::kCardRayTip)) {
+    tip = false;
+    if (!g_said_tip_failed) {
+      g_said_tip_failed = true;
+      ModLog("ray card     : the runtime refused the quad layer of the glow "
+             "at the end of the ray, so the strip has a mark at its end, "
+             "frame %llu", frame);
+    }
+  }
+  rc::Quad tip_quad = {};
+  float tip_distance = 0.0f;
+  if (tip && !ray_tip_math::Place(to, head, &tip_quad, &tip_distance)) {
+    tip = false;
+  }
+  const rc::Look look =
+      rc::LookOf(glow, only, glow_half_m, tube_radius_m, !tip);
+  rc::Quad quad;
+  float length = 0.0f;
+  if (!rc::Place(from, to, head, look, &quad, &length)) {
+    RayCardEndRun(frame);
+    return false;
+  }
+  if (tip) {
+    if (g_tip_serial == 0 || g_tip_rgb[0] != rgb[0] ||
+        g_tip_rgb[1] != rgb[1] || g_tip_rgb[2] != rgb[2]) {
+      ray_tip_math::Draw(rgb, g_tip_pixels);
+      for (int k = 0; k < 3; ++k) g_tip_rgb[k] = rgb[k];
+      g_tip_serial = bwvr::XrScreen::NewCardSerial();
+    }
+    bwvr::CardLayer end = {};
+    end.visible = true;
+    end.pixels = g_tip_pixels;
+    end.texture_width = ray_tip_math::kPixels;
+    end.texture_height = ray_tip_math::kPixels;
+    end.rect[2] = ray_tip_math::kPixels;
+    end.rect[3] = ray_tip_math::kPixels;
+    for (int i = 0; i < 3; ++i) end.position[i] = tip_quad.position[i];
+    for (int i = 0; i < 4; ++i) end.orientation[i] = tip_quad.orientation[i];
+    end.width = tip_quad.width;
+    end.height = tip_quad.height;
+    end.serial = g_tip_serial;
+    bwvr::XrScreen::StageCard(bwvr::kCardRayTip, end);
+    if (g_save > 0 && !g_tip_saved) {
+      g_tip_saved = true;
+      EyeCaptureSaveUi("raytip", frame, 1, g_tip_pixels,
+                       ray_tip_math::kPixels * 4, ray_tip_math::kPixels,
+                       ray_tip_math::kPixels);
+    }
+  }
+  rc::Draw(look, rgb, length, seconds, g_pixels);
+  bwvr::CardLayer layer = {};
+  layer.visible = true;
+  layer.pixels = g_pixels;
+  layer.texture_width = rc::kAcross;
+  layer.texture_height = rc::kAlong;
+  layer.rect[0] = 0;
+  layer.rect[1] = 0;
+  layer.rect[2] = rc::kAcross;
+  layer.rect[3] = rc::kAlong;
+  for (int i = 0; i < 3; ++i) layer.position[i] = quad.position[i];
+  for (int i = 0; i < 4; ++i) layer.orientation[i] = quad.orientation[i];
+  layer.width = quad.width;
+  layer.height = quad.height;
+  // The bands of the glow move, so each frame is a new picture.
+  layer.serial = bwvr::XrScreen::NewCardSerial();
+  bwvr::XrScreen::StageCard(bwvr::kCardRay, layer);
+  if (g_saved < g_save) {
+    ++g_saved;
+    EyeCaptureSaveUi("raycard", frame, 1, g_pixels, rc::kAcross * 4,
+                     rc::kAcross, rc::kAlong);
+  }
+  ++g_frames;
+  const bool start = !g_was_on;
+  const bool moved =
+      g_was_on && (on_panel != g_was_on_panel || tip != g_was_tip);
+  if (start) {
+    g_was_on = true;
+    g_run_start = frame;
+  }
+  g_was_on_panel = on_panel;
+  g_was_tip = tip;
+  if ((start || moved) && (!g_said_first || g_run_logs < kMaxRunLogs)) {
+    if (g_said_first) ++g_run_logs;
+    g_said_first = true;
+    const rc::Facing facing = rc::FacingOf(quad, from, to, head);
+    char end_look[200];
+    if (tip) {
+      sprintf_s(end_look, "a round glow %.1f cm across at the end, %.2f m "
+                "from the head, on a quad layer of its own that faces the "
+                "head", tip_quad.width * 100.0f, tip_distance);
+    } else {
+      sprintf_s(end_look, "a mark of %.1f cm at the end",
+                look.end_radius * 200.0f);
+    }
+    ModLog("ray card     : %s, frame %llu: from %.3f %.3f %.3f to %.3f %.3f "
+           "%.3f m (%.2f m). %s. A strip %.1f cm across and %.2f m long at "
+           "%.3f %.3f %.3f m. Its front is %.1f degrees from the best turn "
+           "to the head, and the head sees it at %.1f degrees from its plane "
+           "(90 is face on, a ray that points away from the head has less). "
+           "The look: %s, and %s. The eye pictures have no ray",
+           start ? "the ray goes over the panels as a quad layer"
+                 : "the end of the ray over the panels moves",
+           frame, from[0], from[1], from[2], to[0], to[1], to[2], length,
+           on_panel ? (tip ? "It ends on the panel, and the glow is there"
+                           : "It ends on the panel, and the mark is there")
+                    : "It meets no panel, so it is 2 m long",
+           quad.width * 100.0f, quad.height, quad.position[0],
+           quad.position[1], quad.position[2], facing.off_best_deg,
+           facing.sight_deg,
+           look.only ? "the glow alone"
+                     : (look.glow ? "a tube under a glow" : "a plain tube"),
+           end_look);
+  }
+  return true;
+}
+
+void RayCardReport() {
+  if (g_frames == 0) return;
+  ModLog("ray card     : %llu frames had the ray over the panels", g_frames);
+  g_frames = 0;
+}

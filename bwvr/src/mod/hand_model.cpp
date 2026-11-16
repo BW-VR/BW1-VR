@@ -45,7 +45,18 @@
 // format 0x1C4 that are projected on the CPU with the camera of the eye, and
 // each state put back after the draw. The texture is a surface of the mod.
 // Stage 0 multiplies it by the lit color, and the alpha of the texture makes
-// the wrist fade, as in the game. A triangle that faces away is not drawn.
+// the wrist fade, as in the game.
+//
+// BOTH SIDES (hand_two_sided=1). The mesh of the game is a thin shell: at
+// rest 28 pairs of triangles that share an edge turn more than 120 degrees
+// from each other, at the sides of the fingers and of the palm, and the
+// skin of one bone for each vertex folds triangles at the knuckles of a
+// curled finger. Seen along the hand, a triangle of such an edge shows its
+// back to the eye while it is in front. So the mod draws each triangle, also
+// one that faces away from the eye: those first, then the triangles that
+// face the eye. The depth test hides the inside of a hand that writes depth,
+// and a faint hand (no depth write) has its outside over its inside.
+// hand_two_sided=0 does not draw a triangle that faces away.
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -58,7 +69,10 @@
 #include <string.h>
 
 #include "../common/bw_addresses.h"
+#include "cutscene_hands_math.h"
 #include "debug_menu.h"
+#include "hand_feel.h"
+#include "hand_feel_math.h"
 #include "hand_model.h"
 
 extern void ModLog(const char* format, ...);
@@ -116,6 +130,7 @@ struct Settings {
   float yaw = hx::kRestYawDeg;
   float pitch = hx::kRestPitchDeg;
   float roll = hx::kRestRollDeg;
+  bool two_sided = true;   // hand_two_sided
   // Tests with no key press: the frames at which the look steps and at which
   // the model goes off and on.
   uint64_t look_frames[8] = {0};
@@ -164,6 +179,7 @@ struct Built {
   bool valid = false;
   float* world = nullptr;    // 3 floats a vertex
   uint32_t* color = nullptr;
+  uint8_t* level = nullptr;  // the light of the game, 0 to 255 a vertex
   float tip[3];
   float mirror = 1.0f;       // the sign of the map from the mesh to the world
 };
@@ -257,7 +273,12 @@ int IniFrames(const char* path, const char* key, uint64_t* out, int most) {
   return count;
 }
 
+// The keys are read one time: a switch of the debug page can come first.
+bool g_settings_read = false;
+
 void LoadSettings() {
+  if (g_settings_read) return;
+  g_settings_read = true;
   char path[MAX_PATH];
   if (!GameFolder(path, sizeof(path)) ||
       strlen(path) + 9 >= sizeof(path)) {
@@ -272,6 +293,8 @@ void LoadSettings() {
   g_set.yaw = IniFloat(path, "hand_mesh_yaw_deg", hx::kRestYawDeg);
   g_set.pitch = IniFloat(path, "hand_mesh_pitch_deg", hx::kRestPitchDeg);
   g_set.roll = IniFloat(path, "hand_mesh_roll_deg", hx::kRestRollDeg);
+  g_set.two_sided =
+      GetPrivateProfileIntA("bwvr", "hand_two_sided", 1, path) != 0;
   g_set.look_count = IniFrames(path, "hand_model_test_look",
                                g_set.look_frames, 8);
   g_set.swap_count = IniFrames(path, "hand_model_test_swap",
@@ -516,11 +539,14 @@ bool AllocateFrameBuffers() {
   for (int h = 0; h < 2; ++h) {
     free(g_built[h].world);
     free(g_built[h].color);
+    free(g_built[h].level);
     g_built[h].world = static_cast<float*>(malloc(v3));
     g_built[h].color = static_cast<uint32_t*>(
         malloc(static_cast<size_t>(vertices) * sizeof(uint32_t)));
+    g_built[h].level =
+        static_cast<uint8_t*>(malloc(static_cast<size_t>(vertices)));
     g_built[h].valid = false;
-    ok = ok && g_built[h].world && g_built[h].color;
+    ok = ok && g_built[h].world && g_built[h].color && g_built[h].level;
   }
   // The cut at the near plane makes at most two triangles of one.
   g_vertex_room = triangles * 2 * 3 * 2;
@@ -1153,17 +1179,64 @@ struct Corner {
 
 // The opacity of the hand that FillHand fills now (HandModelSetOpacity).
 float g_fill_opacity = 1.0f;
+// The look of the water for the hands of this draw (hand_feel_water_look):
+// on or off, and the size of the room in world units for each cm.
+bool g_water_on = false;
+float g_water_units_cm = 0.0f;
+bool g_water_shown = false;
+
+// THE FLOW ON THE HAND (HandModelSetFlow): the hand that takes it, the flow,
+// and true while FillHand fills the pass of the flow.
+int g_flow_hand = -1;
+HandFlowGlow g_flow = {};
+bool g_flow_pass = false;
+uint64_t g_flow_draws = 0;
+bool g_said_flow_draw = false;
+
+// A corner of the pass of the flow: the color of the flow times the light of
+// the game, as the game lights its mesh with the color of the flow, and the
+// texture point in the cell of the frame.
+void FlowCornerOf(const Built& built, int v, Corner* out) {
+  memcpy(out->c, g_camera + v * 3, sizeof(out->c));
+  const float level = static_cast<float>(built.level[v]) / 256.0f;
+  for (int k = 0; k < 3; ++k) {
+    out->color[k] =
+        static_cast<float>((g_flow.color >> (8 * k)) & 0xFFu) * level;
+  }
+  out->color[3] = static_cast<float>(g_flow.color >> 24) * g_fill_opacity;
+  out->uv[0] = g_mesh.uv[v * 2 + 0] * g_flow.scale + g_flow.du;
+  out->uv[1] = g_mesh.uv[v * 2 + 1] * g_flow.scale + g_flow.dv;
+}
 
 void CornerOf(const Built& built, int v, Corner* out) {
+  if (g_flow_pass) {
+    FlowCornerOf(built, v, out);
+    return;
+  }
   memcpy(out->c, g_camera + v * 3, sizeof(out->c));
   const uint32_t color = built.color[v];
   for (int k = 0; k < 4; ++k) {
     out->color[k] = static_cast<float>((color >> (8 * k)) & 0xFFu);
   }
   out->color[3] *= g_fill_opacity;
+  // A point under the plane of the sea takes the look of the water. The
+  // land hides a point under the land, so the plane of the sea counts
+  // everywhere.
+  if (g_water_on) {
+    const float y = built.world[v * 3 + 1];
+    if (y < 0.0f) {
+      hand_feel::WaterColor(hand_feel::WaterLookAt(y, g_water_units_cm),
+                            out->color);
+      g_water_shown = true;
+    }
+  }
   out->uv[0] = g_mesh.uv[v * 2 + 0];
   out->uv[1] = g_mesh.uv[v * 2 + 1];
 }
+
+// HandModelSetFrontDepth and HandModelSetRoomLight.
+bool g_front_depth = false;
+bool g_room_light = false;
 
 void Emit(const Corner& corner, float near_plane, float half_x, float half_y,
           Vertex* out) {
@@ -1171,6 +1244,7 @@ void Emit(const Corner& corner, float near_plane, float half_x, float half_y,
   out->y = (1.0f - corner.c[1] / corner.c[2]) * half_y;
   out->rhw = near_plane / corner.c[2];
   out->z = 1.0f - out->rhw;
+  if (g_front_depth) out->z = cutscene_hands_math::FrontDepth(out->z);
   uint32_t color = 0;
   for (int k = 0; k < 4; ++k) {
     float value = corner.color[k];
@@ -1222,7 +1296,10 @@ bool OffScreen(const Vertex* v, float half_x, float half_y) {
   return left || right || top || bottom;
 }
 
-// The vertices of one hand for one eye, after the ones that are there.
+// The vertices of one hand for one eye, after the ones that are there. With
+// hand_two_sided=1 the triangles that face away come first, and the
+// triangles that face the eye after them. A faint hand writes no depth, so
+// that order puts the outside of the hand over its inside.
 int FillHand(const Built& built, const float camera[12], float near_plane,
              float half_x, float half_y, int n) {
   for (int v = 0; v < g_mesh.vertices; ++v) {
@@ -1233,7 +1310,12 @@ int FillHand(const Built& built, const float camera[12], float near_plane,
                             camera[4], camera[5], camera[6], camera[7],
                             camera[8]};
   const float mirror = hm::Det3(camera3) < 0.0f ? -built.mirror : built.mirror;
-  for (int t = 0; t < g_mesh.triangles; ++t) {
+  // Pass 0: the triangles that face away. Pass 1: the triangles that face
+  // the eye.
+  const int count = g_mesh.triangles;
+  for (int i = g_set.two_sided ? 0 : count; i < 2 * count; ++i) {
+    const int pass = i < count ? 0 : 1;
+    const int t = i - pass * count;
     const uint32_t* index = g_mesh.index + t * 3;
     const float* c0 = g_camera + index[0] * 3;
     const float* c1 = g_camera + index[1] * 3;
@@ -1242,10 +1324,12 @@ int FillHand(const Built& built, const float camera[12], float near_plane,
                        (c1[2] < near_plane ? 1 : 0) +
                        (c2[2] < near_plane ? 1 : 0);
     if (behind == 3) continue;
-    if (!hm::FacesCamera(c0, c1, c2, mirror)) {
-      ++g_culled;
+    const bool faces = hm::FacesCamera(c0, c1, c2, mirror);
+    if (faces != (pass == 1)) {
+      if (pass == 1 && !g_set.two_sided) ++g_culled;
       continue;
     }
+    if (pass == 0) ++g_culled;
     Corner in[3], cut[4];
     for (int k = 0; k < 3; ++k) {
       CornerOf(built, static_cast<int>(index[k]), &in[k]);
@@ -1278,6 +1362,25 @@ void HandModelSwapChange(const char* by) {
 int HandModelSwapValue() {
   Load();
   return g_ready ? g_mode : kDebugCannot;
+}
+
+// The switch of hand_two_sided: 1 draws both sides of each triangle of the
+// mod's hands and of the mesh of the game's Hand (hand_exact.cpp), 0 not the
+// side that faces away.
+bool HandModelTwoSided() {
+  LoadSettings();
+  return g_set.two_sided;
+}
+int HandModelTwoSidedValue() { return HandModelTwoSided() ? 1 : 0; }
+void HandModelTwoSidedChange(const char* by) {
+  LoadSettings();
+  g_set.two_sided = !g_set.two_sided;
+  ControllersGesturePulse(0.5f, g_set.two_sided ? 0.30f : 0.08f);
+  ModLog("hand model   : %s: hand_two_sided is %d now, %s, frame %llu", by,
+         g_set.two_sided ? 1 : 0,
+         g_set.two_sided ? "the hands draw both sides of each triangle"
+                         : "the hands do not draw a triangle that faces away",
+         g_frame);
 }
 
 // Shift and the minus key of the number pad: the next look. The value is 0
@@ -1337,7 +1440,11 @@ bool HandModelBuild(int hand, const float position[3], const float rotation[9],
                 &built.mirror);
   // The direction to the light of the game, from the hand.
   float light[3] = {g_light[0], g_light[1], g_light[2]};
-  if (g_light_is_position) {
+  if (g_room_light) {
+    light[0] = 0.0f;
+    light[1] = 1.0f;
+    light[2] = 0.0f;
+  } else if (g_light_is_position) {
     for (int i = 0; i < 3; ++i) light[i] -= position[i];
   }
   if (!hx::Normalize(light)) {
@@ -1372,6 +1479,7 @@ bool HandModelBuild(int hand, const float position[3], const float rotation[9],
         hm::GameLightLevel(hx::Dot(normal, light)) * 255.0f);
     built.color[v] = alpha | ((red * level) >> 8) << 16 |
                      ((green * level) >> 8) << 8 | ((blue * level) >> 8);
+    built.level[v] = static_cast<uint8_t>(level > 255u ? 255u : level);
   }
   // The tip of the index finger: the origin of the rest mesh, on its last bone.
   memcpy(built.tip, o[hm::kFingerBones[1][hm::kChain - 1]], sizeof(built.tip));
@@ -1426,6 +1534,48 @@ bool HandModelIndexTip(int hand, float out[3]) {
 
 bool HandModelBuilt() { return g_built[0].valid || g_built[1].valid; }
 
+int HandModelWorldMesh(int hand, const float** points, const uint32_t** index,
+                       const uint8_t** alpha, int* vertices) {
+  if (hand < 0 || hand > 1 || !g_built[hand].valid || g_mesh.index == nullptr ||
+      g_mesh.uv == nullptr || g_texture_now == nullptr ||
+      g_mesh.vertices > kMaxVertices) {
+    return 0;
+  }
+  // The texture of the game fades the wrist with its alpha. Each vertex
+  // takes the alpha of its texel, times the opacity of the hand.
+  static uint8_t opacity[2][kMaxVertices];
+  const float hand_opacity = g_opacity[hand];
+  for (int v = 0; v < g_mesh.vertices; ++v) {
+    float u = g_mesh.uv[v * 2 + 0], t = g_mesh.uv[v * 2 + 1];
+    u -= floorf(u);
+    t -= floorf(t);
+    int x = static_cast<int>(u * 256.0f), y = static_cast<int>(t * 256.0f);
+    if (x > 255) x = 255;
+    if (y > 255) y = 255;
+    const uint32_t texel = g_texture_now[y * 256 + x];
+    opacity[hand][v] =
+        static_cast<uint8_t>(static_cast<float>(texel >> 24) * hand_opacity);
+  }
+  *points = g_built[hand].world;
+  *index = g_mesh.index;
+  *alpha = opacity[hand];
+  *vertices = g_mesh.vertices;
+  return g_mesh.triangles;
+}
+
+void HandModelSetRoomLight(bool on) { g_room_light = on; }
+
+void HandModelSetFrontDepth(bool on) { g_front_depth = on; }
+
+void HandModelSetFlow(int hand, const HandFlowGlow* flow) {
+  if (hand < 0 || hand > 1 || flow == nullptr) {
+    g_flow_hand = -1;
+    return;
+  }
+  g_flow_hand = hand;
+  g_flow = *flow;
+}
+
 void HandModelSetOpacity(int hand, float opacity) {
   if (hand < 0 || hand > 1) return;
   g_opacity[hand] = opacity < 0.0f ? 0.0f : opacity > 1.0f ? 1.0f : opacity;
@@ -1442,6 +1592,8 @@ int HandModelDraw(IDirect3DDevice7* device, const float camera[12],
   }
   int n = 0;
   int end[2] = {0, 0};  // the end of the vertices of each hand
+  g_water_on = HandFeelWaterLook(&g_water_units_cm);
+  g_water_shown = false;
   for (int h = 0; h < 2; ++h) {
     if (g_built[h].valid) {
       g_fill_opacity = g_opacity[h];
@@ -1450,6 +1602,7 @@ int HandModelDraw(IDirect3DDevice7* device, const float camera[12],
     }
     end[h] = n;
   }
+  if (g_water_shown) HandFeelWaterShown();
   if (n == 0) {
     g_draw_ticks += Now() - start;
     return 0;
@@ -1479,6 +1632,48 @@ int HandModelDraw(IDirect3DDevice7* device, const float camera[12],
                                      static_cast<DWORD>(count), 0);
     }
     if (!write) device->SetRenderState(D3DRENDERSTATE_ZWRITEENABLE, TRUE);
+  }
+  // THE FLOW ON THE HAND, over the hand that takes it: the same triangles at
+  // the same depth, with the material of the game's flow. It adds the
+  // texture times the color with the source alpha, and it writes no depth
+  // [V fn_0082ECD0]. The states go back to the ones of SetStates after it.
+  const int flow_hand = g_flow_hand;
+  g_flow_hand = -1;
+  if (SUCCEEDED(result) && flow_hand >= 0 && flow_hand <= 1 &&
+      g_built[flow_hand].valid && g_flow.texture != nullptr) {
+    const uint64_t culled = g_culled;
+    g_flow_pass = true;
+    g_fill_opacity = g_opacity[flow_hand];
+    const int count =
+        FillHand(g_built[flow_hand], camera, near_plane, half_x, half_y, 0);
+    g_fill_opacity = 1.0f;
+    g_flow_pass = false;
+    g_culled = culled;
+    if (count > 0) {
+      device->SetTexture(0, static_cast<IDirectDrawSurface7*>(g_flow.texture));
+      device->SetRenderState(D3DRENDERSTATE_DESTBLEND, D3DBLEND_ONE);
+      device->SetRenderState(D3DRENDERSTATE_ZWRITEENABLE, FALSE);
+      device->SetRenderState(D3DRENDERSTATE_ALPHATESTENABLE, FALSE);
+      for (int first = 0; first < count && SUCCEEDED(result);
+           first += kDrawVertices) {
+        const int part =
+            count - first < kDrawVertices ? count - first : kDrawVertices;
+        result = device->DrawPrimitive(D3DPT_TRIANGLELIST, kFvf,
+                                       g_vertices + first,
+                                       static_cast<DWORD>(part), 0);
+      }
+      device->SetRenderState(D3DRENDERSTATE_ALPHATESTENABLE, TRUE);
+      device->SetRenderState(D3DRENDERSTATE_ZWRITEENABLE, TRUE);
+      device->SetRenderState(D3DRENDERSTATE_DESTBLEND, D3DBLEND_INVSRCALPHA);
+      ++g_flow_draws;
+      if (!g_said_flow_draw) {
+        g_said_flow_draw = true;
+        ModLog("hand model   : the flow of a miracle is drawn on the %s hand, "
+               "frame %llu: %d triangles, the color 0x%08X, the cell at %.3f "
+               "%.3f", flow_hand == 0 ? "left" : "right", g_frame, count / 3,
+               g_flow.color, g_flow.du, g_flow.dv);
+      }
+    }
   }
   if (have_before) {
     device->SetTexture(0, before);
@@ -1567,12 +1762,20 @@ void HandModelReport() {
   if (g_draws == 0 && g_failed == 0) return;
   const double passes = g_draws > 0 ? static_cast<double>(g_draws) : 1.0;
   ModLog("hand model   : drawn in %llu eye passes, %.0f triangles a pass, "
-         "%.0f that face away not drawn, %llu passes failed. On the CPU: "
-         "%.3f ms a pass to project and draw, and %.3f ms a pass to skin and "
-         "light",
+         "%.0f triangles that face away (%s, hand_two_sided=%d), %llu passes "
+         "failed. "
+         "On the CPU: %.3f ms a pass to project and draw, and %.3f ms a "
+         "pass to skin and light",
          g_draws, static_cast<double>(g_triangles_drawn) / passes,
-         static_cast<double>(g_culled) / passes, g_failed,
+         static_cast<double>(g_culled) / passes,
+         g_set.two_sided ? "drawn too" : "not drawn",
+         g_set.two_sided ? 1 : 0, g_failed,
          Ms(g_draw_ticks) / passes, Ms(g_build_ticks) / passes);
+  if (g_flow_draws > 0) {
+    ModLog("hand model   : the flow of a miracle was on the pointing hand in "
+           "%llu eye passes", g_flow_draws);
+    g_flow_draws = 0;
+  }
   g_draws = g_triangles_drawn = g_culled = g_failed = 0;
   g_draw_ticks = g_build_ticks = 0;
   ++g_cost_frames;

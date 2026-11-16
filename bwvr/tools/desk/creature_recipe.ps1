@@ -20,6 +20,15 @@
 #   creature_recipe.ps1 -Name x16 -Dll <dll> -Kind look -Set "creature_look_head=0"
 #   (-Kind look sets creature_player_head=0, so that creature_look.cpp has the
 #   hook of Creature::LookAtCamera: docs/creature.md, section 5.6)
+#   creature_recipe.ps1 -Name x17 -Dll <dll> -Kind wide
+#   creature_recipe.ps1 -Name x18 -Dll <dll> -Kind wide -Set "hand_wide_creature=0"
+#   creature_recipe.ps1 -Name x19 -Dll <dll> -Kind walkstay
+#   creature_recipe.ps1 -Name x20 -Dll <dll> -Kind shake
+#   creature_recipe.ps1 -Name x21 -Dll <dll> -Kind shake -Set "leash_shake_mps=0.9"
+#   creature_recipe.ps1 -Name x22 -Dll <dll> -Kind ring
+#   creature_recipe.ps1 -Name x23 -Dll <dll> -Kind ring -Set "far_grab_max_m=1"
+#   creature_recipe.ps1 -Name x24 -Dll <dll> -Kind ring -Set "command_look=0"
+#   creature_recipe.ps1 -Name x25 -Dll <dll> -Kind touch -Set "subtitle_card_test=1"
 #
 #   creature_recipe.ps1 -Name x9 -Dll <dll> -Kind leash -NewGame
 #
@@ -57,9 +66,22 @@
 #   At 100 units a meter: the grip from a distance (the leash goes on), the
 #   aim on an object that a command can act on (the word "aimcmd"), and two
 #   short presses of the trigger: the Creature goes to the object, and the
-#   leash is tied to it. Then six times the word "seek", 300 frames apart:
-#   each one gives a log line with the place of the Creature, so the log
-#   shows its walk to the object.
+#   leash is tied to it. The aim goes on the object that holds the leash
+#   again (the word "aimcmd" takes only that object while the leash is
+#   tied), and a picture shows its ring. Then six times the word "seek", 300
+#   frames apart: each one gives a log line with the place of the Creature,
+#   so the log shows its walk to the object.
+# -Kind ring:
+#   The look of a target of a command (command_look, bwvr/docs/creature.md,
+#   "The look of a target"). The leash counts as on from frame 820
+#   (creature_command_test: no packet goes out), so the grab from a distance
+#   can take each object (no far_test_creature) to far_grab_max_m=2. The aim
+#   goes on an object that a command can act on (the word "aimcmd"),
+#   pictures at 930 and 1030, and a tap of the trigger at 1100. With the
+#   tree of the door of the Temple about 1.4 m from the head, the tree is a
+#   target of both: a gold glow, the green ring, and the card has a line for
+#   each button. With -Set "far_grab_max_m=1" the tree is past the range of
+#   the grip: the ring only, and the card says "Grip Too far to take".
 # -Kind walk:
 #   The walk mode of a command (creature_command_rule, bwvr/docs/creature.md,
 #   section 4.1). At 100 units a meter: the grip from a distance puts the
@@ -94,16 +116,16 @@
 # -Kind gift:
 #   The gift of an object to the Creature, with the leash on
 #   (bwvr/docs/creature.md, section 2.9). After two zoom steps in: the grip
-#   from a distance puts the leash on. The Hand's point goes to the nearest object
-#   that the Hand can hold (the place "hold" of seek_plan), and the grip
+#   from a distance puts the leash on. The Hand's point goes to the nearest pig
+#   (the place "hold" of seek_plan), and the grip
 #   closes for 200 frames. The hand goes back to its point and then to the
 #   body bone of the Creature (the place "creature"), and the grip opens
 #   there: the first gift. Then the same with a second object, and the Hand's
 #   point goes 9 cm of the room down from the body bone before the grip
 #   opens (the place "down", seek_step_cm=9): the second gift, with the Hand
-#   past the reach of the test of the game. -Set "seek_class=Pig,Pig" gives
-#   a class for each object. With -Set "creature_gift=0" the test of the game
-#   decides.
+#   past the reach of the test of the game. The recipe has
+#   seek_class=Pig,Pig, so each object is a pig. -Set "seek_class=..." gives
+#   other classes. With -Set "creature_gift=0" the test of the game decides.
 # -Kind giftfree:
 #   The same with no leash.
 # -Kind look:
@@ -136,6 +158,81 @@
 #   card does not have that line, the first press takes the leash off, the
 #   second press ends the first wait, the third press is dropped, and the
 #   second wait stays to the end of the run.
+# -Kind open:
+#   The Creature with no press (bwvr/docs/creature.md, "The stroke with the
+#   open hand"). After two zoom steps in, the Hand's point goes to the body
+#   of the Creature with the grip open. The Creature panel shows, and after
+#   0.1 s the mod holds the Action button of the game: the Creature state.
+#   Four strokes and a swing of the arm with the open hand (a slap, and with
+#   -Set "creature_open_slap=0" no slap). The
+#   hand goes back to its point at frame 1800, and the panel stays for 3 s:
+#   a picture at frame 1840 has it, and a picture at frame 2060 does not.
+#   Then the hand takes the nearest object that it can hold, for the hints of
+#   the game for an object in the Hand (help_test=1). With -NewGame the game
+#   also saves near frame 830: the card of a save. With
+#   -Set "creature_stroke_open=0;creature_panel_linger=0;hint_card_saving=0"
+#   the same steps give no press, no panel and no card of a save.
+# -Kind touch:
+#   The stroke and the slap with the open hand (bwvr/docs/creature.md, "The
+#   stroke with the open hand"). After two zoom steps in, the Hand's point
+#   goes to the body of the Creature with the grip open, and the mod holds the
+#   Action button of the game. Then 17 steps of 2 cm (the word "nudge"), 15
+#   frames apart: strokes, the first one with the first step in the Creature
+#   state. Then four steps to 12 cm on the other side (the word "slap"), 40
+#   frames apart. The first one goes from the body out to 12 cm (the wind
+#   up, no slap), and the next three go through the body (three slaps).
+#   Between them the hand waits about 9 cm out of the body, and the press
+#   stays. Then the Hand's point goes onto the body (a slap from 12 cm out),
+#   12 cm up, and 12 cm down in one frame: a slap from over the head. The
+#   hand goes away at frame 1650, and the Creature panel over the Creature
+#   stays for 3 s: a picture
+#   at frame 1700 has it, with the picture of the Creature card when the
+#   subtitle card runs (subtitle_card_test=1), and a picture at frame 1950
+#   does not. With -Set "creature_stroke_wait=1" the first stroke comes 2 s
+#   or more after the start of the state. With -Set "creature_open_slap=0;
+#   creature_touch_easy=0;creature_stroke_wait=1;creature_slap_height=0;
+#   creature_panel_over=0;creature_swing=0" the same steps give the old way:
+#   a press that ends at the wind up, no slap with the open hand, and the
+#   panel on the subtitle card. With the old timers the fake hand gives no
+#   stroke of the game in this recipe (creature.md, section 8).
+# -Kind wide:
+#   The grip on the Creature in the wide reach (hand_wide_creature,
+#   bwvr/docs/grab.md, "The Creature has the wide reach too"). After two zoom
+#   steps in, the Hand's point goes to the body bone of the Creature, and 4
+#   frames later 12 cm to the side (the word "slap"). The grip closes for 6
+#   frames there: the leash click puts the leash on. Then the point goes to
+#   the body bone again and 15 cm toward the head (the word "pull"), and
+#   the grip closes for 6 frames. A third time at 15 cm toward the head, the
+#   grip stays closed for 800 frames: the Creature state. A fourth time 12
+#   cm to the side, the grip stays closed for 600 frames: the Creature state.
+#   Then a grip of 6 frames with the Hand's point on the body bone, and a
+#   grip of 30 frames 15 cm toward the head: the leash click takes the leash
+#   off. The gap from the body is about 10 cm to the side and 11 cm toward
+#   the head: the lines "hand pick" and "hand press" give it. While the
+#   leash is on, the game starts its press on the Creature 17 to 22 frames
+#   after the grip closes (the line "a press on the Creature"), so a grip of
+#   6 frames gives no press and no leash click at each gap. With
+#   -Set "hand_wide_creature=0" no grip at a gap past 4 cm has the Creature
+#   as its target. A grip can then tap a scroll near the door.
+# -Kind walkstay:
+#   A stay that stops a walk (bwvr/docs/creature.md, section 5.3). At 100
+#   units a meter: the grip from a distance puts the leash on. The aim goes
+#   on an object (the word "aimcmd"), and a tap of the trigger sends the
+#   Creature to it. 180 frames later the hand aims at the Creature and holds
+#   the grip for 300 frames: the Creature stays. The lines "creature stay"
+#   give the place of the Creature at the start, how far it moved while the
+#   grip was closed, its place when it stands still, and 10 s after the stay
+#   if it goes on with its walk.
+# -Kind shake:
+#   A shake of the hand takes the leash off (bwvr/docs/creature.md, section
+#   4.4). At 100 units a meter: the grip from a distance puts the leash on.
+#   Then six steps of the word "pull", each one 15 cm in 11 frames with 1
+#   frame between them: strokes of 15 cm at about 0.8 m/s, 4 strokes in
+#   about 0.8 s. The leash comes off. Then the grip from a distance puts the
+#   leash on again, and six pulls of 15 cm in 23 frames each (about 0.4 m/s):
+#   no shake, and the leash stays on. With -Set "leash_shake_mps=0.9" the
+#   first shake is too slow too. The leash stays on, and the second grip
+#   from a distance takes it off.
 #
 # What to read in bwvr.log of the run (the folder desk-<Name>):
 #   hand creature: the body of the Creature ...     the body bone before a press
@@ -237,19 +334,62 @@ if ($Kind -eq 'stay') {
              'aimcmd@1140+1 shot@1200+1 ' +
              'aimcmd@1300+1 trigger@1320+6 aimcmd@1400+1 trigger@1420+60 shot@1500+1'
 } elseif ($Kind -eq 'gift' -or $Kind -eq 'giftfree') {
-    # The place "hold" needs no class by default: the nearest object that
-    # the Hand can hold. The grip opens 80 frames after the last step of the
-    # hand, so the opening is no throw. Each gift has 300 frames before the
-    # hand moves again.
+    # The place "hold" takes an object of the class of seek_class: a pig for
+    # each gift. With no class it takes the nearest object that the Hand can
+    # hold, and at the door of the Temple that can be a fish farm below the
+    # view, so the press is dropped. The grip opens 80 frames after the last
+    # step of the hand, so the opening is no throw. Each gift has 300 frames
+    # before the hand moves again.
     $new = 80
     $watch = 0
-    $keys = 'seek_step_cm=9;' + $keys.Replace('seek_plan=creature', 'seek_plan=hold,creature,hold,creature,down')
+    $keys = 'seek_step_cm=9;seek_class=Pig,Pig;' + $keys.Replace('seek_plan=creature', 'seek_plan=hold,creature,hold,creature,down')
     $leash = ''
     if ($Kind -eq 'gift') { $leash = 'aimfar@930+1 grip@950+6 ' }
     $steps = 'stick_up@800+10 stick_up@830+10 look@860+2700 point@900+1 ' + $leash +
              'seek@1020+1 grip@1030+200 point@1120+1 seek@1150+1 shot@1540+1 ' +
              'point@1560+1 seek@1600+1 grip@1610+200 point@1700+1 seek@1720+1 seek@1730+1 ' +
              'shot@2150+1'
+} elseif ($Kind -eq 'open') {
+    # The Creature with no press. The seek comes four times, 15 frames apart,
+    # because the Creature walks until the press stops it. The strokes and
+    # the swing of the arm come with the grip open. Then the hand goes back
+    # to its point, and the panel stays for 3 s. Then the hand takes the
+    # nearest object that it can hold (the place "hold"), so the card has the
+    # hints of the game for an object in the Hand (help_test=1). A new game
+    # also saves near frame 830, so -NewGame shows the card of a save.
+    $new = 80
+    $watch = 0
+    # The head looks 25 degrees down, so the Creature at the door is in the
+    # view also at a render of 3600 by 2880: the draw offers only an object
+    # that the render shows.
+    $keys = 'help_test=1;hint_card_save_test=1;fake_head_pitch=-25;' +
+            $keys.Replace('seek_plan=creature', 'seek_plan=creature,creature,creature,creature,hold')
+    $steps = 'stick_up@800+10 stick_up@830+10 look@860+2600 point@900+1 ' +
+             'seek@930+1 seek@945+1 seek@960+1 seek@975+1 ' +
+             'nudge@1260+1 nudge@1310+1 nudge@1360+1 nudge@1410+1 ' +
+             'slap@1580+1 slap@1660+1 point@1800+1 shot@1840+1 shot@2060+1 ' +
+             'seek@2150+1 grip@2160+300 point@2300+1'
+} elseif ($Kind -eq 'touch') {
+    # The seek comes four times, 15 frames apart, because the Creature walks
+    # until the press stops it. Each "nudge" steps 2 cm to the other side:
+    # about 0.2 m/s over the 100 ms of the speed, a stroke. Each "slap" steps
+    # to 12 cm on the other side of the middle. The 17 nudges leave the hand
+    # 2 cm to one side, in the body, so the first "slap" goes out of the body
+    # (the wind up), and the next three go through it. The fifth seek puts
+    # the point on the body again (from 12 cm out: a slap too),
+    # the sixth 12 cm up and the seventh 12 cm down (seek_step_cm=12). No
+    # picture comes in the press: the frame of a picture can take 250 ms, and
+    # the controller then lets go of its buttons.
+    $new = 80
+    $watch = 0
+    $keys = 'fake_head_pitch=-25;seek_step_cm=12;' +
+            $keys.Replace('seek_plan=creature', 'seek_plan=creature,creature,creature,creature,creature,up,down')
+    $nudges = (0..16 | ForEach-Object { "nudge@$(1000 + 15 * $_)+1" }) -join ' '
+    $steps = 'stick_up@800+10 stick_up@830+10 look@860+1200 point@900+1 ' +
+             "seek@930+1 seek@945+1 seek@960+1 seek@975+1 $nudges " +
+             'slap@1330+1 slap@1370+1 slap@1450+1 slap@1490+1 ' +
+             'seek@1530+1 seek@1545+1 seek@1560+1 ' +
+             'point@1650+1 shot@1700+1 shot@1950+1'
 } elseif ($Kind -eq 'tie') {
     # The second press of the trigger comes 17 frames after the first one: a
     # double press. The walk takes about 1500 frames, so a new game runs
@@ -257,8 +397,50 @@ if ($Kind -eq 'stay') {
     $new = 75
     $watch = 0
     $steps = 'look@800+2600 point@860+1 aimfar@890+1 grip@910+6 aimcmd@1000+1 shot@1010+1 ' +
-             'trigger@1020+6 trigger@1037+6 seek@1100+1 seek@1400+1 seek@1700+1 seek@2000+1 ' +
+             'trigger@1020+6 trigger@1037+6 aimcmd@1070+1 shot@1090+1 ' +
+             'seek@1100+1 seek@1400+1 seek@1700+1 seek@2000+1 ' +
              'seek@2300+1 seek@2600+1 shot@2610+1'
+} elseif ($Kind -eq 'ring') {
+    # The leash counts as on, with no packet, so the grip at the Creature
+    # does not need far_test_creature. The steps need no grip. The key
+    # creature_command_test counts the frames of the log, which start about
+    # 730 frames after the frames of the steps, so 90 is before aimcmd@900.
+    $watch = 0
+    $keys = $keys.Replace('far_test_creature=1;', '').Replace('far_grab_max_m=0;', 'far_grab_max_m=2;') +
+            ';creature_command_test=90'
+    $steps = 'look@800+600 point@860+1 aimcmd@900+1 shot@930+1 aimcmd@1000+1 shot@1030+1 ' +
+             'trigger@1100+6 shot@1200+1'
+} elseif ($Kind -eq 'wide') {
+    # The seek can step the hand 2 frames after the word, and it clears the
+    # step to the side, so the word "slap" or "pull" comes 4 frames after it.
+    # A pull stays until the next pull steps the hand back, so the hand goes
+    # to its point first: an open hand in the body of the Creature presses
+    # on it after 0.2 s (creature_stroke_open). The grip closes 12 frames
+    # after the step, when the pick has the new gap. No picture comes in a
+    # grip.
+    $watch = 0
+    $steps = 'stick_up@800+10 stick_up@830+10 look@860+2800 point@900+1 ' +
+             'seek@930+1 slap@934+1 grip@946+6 shot@970+1 point@1000+1 ' +
+             'seek@1050+1 pull@1054+1 grip@1066+6 shot@1090+1 point@1120+1 pull@1130+1 ' +
+             'seek@1200+1 pull@1204+1 grip@1216+800 shot@2040+1 point@2050+1 pull@2060+1 ' +
+             'seek@2100+1 slap@2104+1 grip@2116+600 shot@2740+1 point@2750+1 ' +
+             'seek@2800+1 grip@2806+6 point@2816+1 ' +
+             'seek@2900+1 pull@2904+1 grip@2916+30 point@2960+1 pull@2970+1 shot@2990+1'
+} elseif ($Kind -eq 'walkstay') {
+    # The tap is 6 frames, under creature_command_hold_ms. No picture in the
+    # hold.
+    $steps = 'look@800+1000 point@860+1 aimfar@890+1 grip@910+6 ' +
+             'aimcmd@1000+1 shot@1010+1 trigger@1020+6 shot@1150+1 ' +
+             'aimfar@1190+1 grip@1200+300 shot@1560+1 shot@1700+1'
+} elseif ($Kind -eq 'shake') {
+    # Each pull starts 1 frame after the one before it ends. A picture can
+    # take 250 ms, and a gap of 0.1 s in the samples ends the row of strokes,
+    # so no picture comes in a shake.
+    $watch = 0
+    $fast = (0..5 | ForEach-Object { "pull@$(1000 + 12 * $_)+11" }) -join ' '
+    $slow = (0..5 | ForEach-Object { "pull@$(1300 + 24 * $_)+23" }) -join ' '
+    $steps = "look@800+800 point@860+1 aimfar@890+1 grip@910+6 shot@960+1 $fast shot@1100+1 " +
+             "aimfar@1180+1 grip@1200+6 $slow shot@1480+1"
 } else {
     # The Creature state starts 30 to 230 frames after the press, when the
     # Creature has ended its body action. So the strokes start at 1260.
@@ -286,7 +468,8 @@ $pattern = '^hand creature: (the body of|a press|the Creature state|the hand of|
            '^hand pick    : the target is|^hand press   : the grip pressed on|' +
            '^far grab    : (the grip closed|the grip opened|the hand cannot)|^creature stay: |' +
            '^creature head: (the Creature turns|the Creature looks|creature_player_head|Ctrl)|' +
-           '^creature cmd : (the leash|a short press|a double press|the trigger opens|test: aimcmd)|' +
+           '^creature cmd : (the leash|a short press|a double press|the trigger opens|test: aimcmd|a shake)|' +
+           '^hand pick    : the \w+ [0-9A-F]+ is [\d.]+ cm of the room from the Hand|' +
            '^creature look: |^text click   : |^hint card    : (frame \d+, the game gives its prompt|the prompt of a text)|' +
            '^controllers  : the left button press started off view|' +
            '^hand pick    : seek plan: the Creature|' +
@@ -297,8 +480,30 @@ if ($Kind -eq 'gift' -or $Kind -eq 'giftfree') {
                '^grip         : the (pick up is over|grip opens|click to let go|object left)|' +
                '^hand creature: the body of|^hooks        : the (packet with|hand-over)'
 }
+if ($Kind -eq 'touch') {
+    $pattern = '^hand creature: (a press|the Creature state|a stroke|a slap|a hard slap|the press ends|the hand went into|' +
+               'creature_stroke_wait|creature_swing|creature_slap_height|\d+ presses with no camera)|' +
+               '^controllers  : (creature_stroke_open|creature_open_slap|creature_touch_easy|the open hand|the press of the open hand)|' +
+               '^ui panel     : (creature_panel_over|the Hand is at|the Hand left|the Creature panel (goes|drew|was over))|' +
+               '^ui panel     : frame \d+, the Creature card|^subtitles    : frame \d+, the subtitle card:|' +
+               '^hint card    : frame \d+, the pointing card now says|^hand pick    : seek plan'
+}
+if ($Kind -eq 'open') {
+    $pattern = '^hand creature: (a press|the Creature state|a stroke|a slap|a hard slap|the press ends|the hand went into)|' +
+               '^controllers  : (creature_stroke_open|creature_open_slap|creature_touch_easy|the open hand|the press of the open hand)|' +
+               '^ui panel     : (creature_panel_linger|creature_panel_over|the Hand is at|the Hand left|the Creature panel (goes|drew|was over))|' +
+               '^save card    : |^hooks        : GameOSFile|^hint card    : (hint_card_saving|frame \d+, the game saves|frame \d+, the pointing card now says)|' +
+               '^hand pick    : seek plan'
+}
+if ($Kind -eq 'ring' -or $Kind -eq 'tie') {
+    $pattern = '^creature cmd : (command_look|the aim is on|the Hand is on|the target \w+ has the ring|the trigger|' +
+               'a double press|the leash|test: aimcmd)|' +
+               '^far grab    : (the \w+ \w+ in the cone holds|the grip closed|the grip opened|target [0-9A-F]+ )|' +
+               '^hand pick    : grip_skips_tied|^hand glow    : a halo|' +
+               '^hint card    : frame \d+, the pointing card now says'
+}
 if ($Kind -eq 'walk') {
-    $pattern = '^creature cmd : (creature_command_rule|the leash|the aim is on|the trigger|a double press|test: aimcmd)|' +
+    $pattern ='^creature cmd : (creature_command_rule|the leash|the aim is on|the trigger|a double press|test: aimcmd)|' +
                '^far grab    : (the grip closed|the grip opened)|' +
                '^hint card    : frame \d+, the pointing card now says'
 }

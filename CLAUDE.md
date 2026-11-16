@@ -38,7 +38,9 @@ is in git, not in the docs.
 
 - No motion that the player did not make. No automatic sway, glide or bob,
   not even as a test aid. Verify with still poses and steps.
-- The Hand is the real hand, 1:1 in size and place. Never an extended reach.
+- The Hand is the real hand, 1:1 in size and place, over the land. A real
+  hand in the land is drawn on the land, straight over the real hand. Never
+  an extended reach.
 - Use the game's own way (its packets, states and tests). Find what the
   plain game does with the mouse first.
 - Each change of behavior has an ini key with the old behavior as a value,

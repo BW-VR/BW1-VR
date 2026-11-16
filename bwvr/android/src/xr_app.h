@@ -979,6 +979,11 @@ class XrApp {
   // foveation.
   bool foveation_on_[5] = {};
   bool runtime_fov_tracked_ = false;
+  // The most layers of a frame that the runtime takes (maxLayerCount), and the
+  // layers of the mod that did not fit.
+  uint32_t max_layers_ = 16;
+  uint64_t layers_dropped_ = 0;
+  bool said_layers_ = false;
   std::atomic<uint64_t> density_direct_{0}, density_copied_{0};
   void DensityProbe(uint32_t width, uint32_t height);
   float max_anisotropy_ = 0.0f;

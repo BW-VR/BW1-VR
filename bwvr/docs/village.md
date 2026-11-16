@@ -29,6 +29,8 @@ the Temple).
   the grip. The rules for the grip are in `grab.md`.
 - A villager that a script turns to "camera position" turns to the head
   of the player. A villager turns his whole body and has no pitch.
+- The job icon over a villager is 2 times the size of the game, and the card
+  of the name of a villager is 1.5 times its size.
 - The door of the Temple and the leash posts are targets of a tap. The mod
   adds the posts as candidates, because the game offers them to the pick as
   invisible balls.
@@ -258,11 +260,8 @@ puts the fake hand at a pixel pair of the two eye pictures. At a scale of
 29.6 units a meter, one pixel of disparity is about 17 cm at 3.4 m of the
 room, so the picture limits that test and not the body.
 
-**Only the headset can show:**
-
-- If 10 cm is a good reach for a real hand at each scale.
-- If the glow and the halo show at each scroll that a player could not start
-  before.
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 **Not proven, and suspects:**
 
@@ -357,8 +356,11 @@ from 0 to 1.
   ghost there. The value of the town does not slide: only the picture does.
 
 In state 5 the Hand of the game is on the top of the pole. The mesh of the
-game's Hand is hidden (`hand_hide_game=1`), and the mod draws its hands at the
-real hands. With `totem_take=1` the totem stays in the pick record while the
+game's Hand is hidden (`hand_hide_game=1` and `hand_hide_all=1`, hand.md,
+"The exact Hand"), and the mod draws its hands at the real hands. With
+`hand_hide_all=0` the game draws its Hand on the pole too, while the real
+hand moves the pole. The report of `hand exact` counts the hidden draws in
+the Totem state. With `totem_take=1` the totem stays in the pick record while the
 grip is closed, so the game keeps the totem while the hand goes away from it,
 and the opening of the grip ends the action (see "The mod: the totem is the
 source of a take").
@@ -464,7 +466,10 @@ No press acts on them.
 - The Hand can take a scaffold that is not planted, or one whose building
   site has no work done (`Scaffold::ValidForPlaceInHand` `0x006E96A0`).
 - While the Hand carries it, `Scaffold::ProcessInHand` `0x006E8570` shows the
-  building that it would make at the place of the Hand.
+  building that it would make at the place of the Hand. The plain game turns
+  that building by itself, a step each game turn, and no key or mouse input
+  turns it. With the controller the roll of the wrist turns it ("The
+  building of a scaffold and the wrist").
 - A scaffold that the Hand lets go over a second scaffold joins it
   (`Scaffold::ValidToApplyThisToObject` `0x006E9900`, `Combine`
   `0x006E9B60`). The count of the scaffolds sets the kind of the building
@@ -482,6 +487,36 @@ No press acts on them.
 - A tap on a scaffold of two or more takes it apart
   (`Scaffold::InterfaceValidToTap` `0x006E9D80`, `InterfaceTap`
   `0x006E9DD0`).
+
+**The building of a scaffold and the wrist** (`scaffold_wrist_turn=1`).
+The angle of the building is `Scaffold+0x80`, in radians from 0 to 2 pi.
+`Scaffold::ProcessInHand` adds the speed of `GScaffoldInfo+0x114` (the info
+at `Scaffold+0x28`) to it each game turn, unless flag `0x200` of
+`Scaffold+0x88` is set, and tests the place with that angle
+(`MapCoords::IsSuitableForFixed`). `Scaffold::BuildBuilding` `0x006E9250`
+gives the angle to the planned building at the release, and
+`Scaffold::DrawInHand` `0x005181A0` draws the building at the angle plus the
+part of the speed of the game turn that is gone (the ms of `GGame+0x25053C`).
+A larger angle turns the building to the left as the head sees it from
+above.
+
+While the Hand carries a scaffold and the controller owns the Hand, the mod
+keeps the angle of the take, and each frame adds the roll of the wrist of
+that frame: the change of the bank of the aim of the pointing hand (the
+angle of its right axis below the level), or its turn about its own forward
+axis when the hand points almost straight down or up (`village_math.h`,
+`RollStep`). A turn of the aim to the side or up and down is no roll, so a
+hand that carries the scaffold over the land does not turn the building. A
+clockwise roll of the wrist, as the player sees it along the arm, turns the
+building clockwise as the head sees it from above, one to one, with no step.
+Before each call of `ProcessInHand` the mod writes the angle less the add of
+the game, and after the call the angle itself. For the draw it takes away
+the part of the speed that the draw adds, and puts the angle back after the
+draw. So the building does not turn by itself, and the place test, the
+picture and the building at the release have the angle of the wrist. With
+`scaffold_wrist_turn=0` the game turns the building by itself, as in the
+plain game. The switch "Scaffold turn" of the debug window (group Creature)
+changes the key in play.
 
 **A villager and a job.** While the Hand carries a villager,
 `Villager::InHand` `0x0076ADE0` looks for the objects near the villager each
@@ -557,6 +592,47 @@ to the game's camera, as in the plain game. A turn has no pitch, so the
 villager turns his body to the player and does not look up. The Creature
 and a group of things get the head too, because the word gives them the
 same point.
+
+### The job icon and the name over a villager [V]
+
+**The icon.** The game shows the job icon over one villager only: the
+villager in the Hand, else the villager under the Hand.
+`GInterface::PreDrawProcess` `0x005CE9E0` gives him to
+`Villager::ShowDiscipleIcon` `0x00756170`, which keeps his 3D object at
+`0x00EB99E4` and his icon at `0x00EB99E8`. The draw of his object calls
+`fn_008241B0`, which fills the sprite at `0x00EB99D8` and gives it to the Z
+sort (`LH3DSprite::AddDrawing` `0x00840C70`, the call at `0x008243E2`). The
+middle of the icon is 2.5 radii of the villager over the top of his
+bounding sphere. Its half size is the distance from the camera times
+8 / half_res_x. So the icon has one angle at each distance, and a larger
+render makes it smaller: 0.51 degrees across at a render of 3600 by 2880,
+0.67 degrees at 2760 by 2208.
+
+With `job_icon_scale_pct=200` a hook of `AddDrawing` acts only on that call
+(`job_icon.cpp`, `job_icon_math.h`). It makes the half size and the offsets
+of the sprite 2 times larger. It moves the middle up along the up of the
+sprite in the camera plane (with the turn of `sprite_world_up`), so the
+lower edge stays where the game puts it and the icon does not go into the
+head. The game computes the size again in each eye pass, and the hook scales
+each pass one time.
+
+**The name.** `VillagerName::Add` `0x007629E0` makes the card of the name of
+a person of a quest (the action Show Villager Names, bit `0x20000` of
+`g_game + 0x14`) and the card of the details of a villager (Show Villager
+Details). Its text is 16 px of the render high at full fade: the fade times
+the 16.0 at `0x008AB6E8`. The edge of the text is the fade times the 6.0 at
+`0x008AB35C`, and the box comes from the text and the edge. So a card has
+one angle at each distance too. At the size of the game a capital letter is
+about 10 px, 0.6 degrees at 17 px in a degree. That is the least that reads
+at a glance.
+
+With `villager_name_scale_pct=150` the two multiplications of `Add`
+(`0x00762BA5`, `0x00762BBF`) read floats of the mod, 1.5 times 16 and 6, so
+the game makes the whole card larger with its own layout. A capital is then
+about 15 px, 0.9 degrees. The game does not move the cards of near
+villagers apart, so a larger scale makes them overlap more. At 200 the cards
+of near villagers overlap each other, and the column of cards over far
+villagers reaches the top of the view.
 
 ### What the real hand can do
 
@@ -706,6 +782,9 @@ The count of the villagers is the count of the game
 | `totem_hold` | 1 | 0: after the release the pole jumps back to the value that it showed before and slides to the new value, 5.2 s for each 1.0 of change, as in the plain game |
 | `hold_target`, `hold_target_cm` | 1, 6 | See `grab.md`, "An object in the Hand that goes onto a thing". The code also reads the old names `scaffold_join` and `scaffold_join_cm` as the defaults |
 | `villager_look_head` | 1 | 1: in the God view a script that turns a villager to the camera turns him to your head. 0: he turns to the game's camera |
+| `job_icon_scale_pct` | 200 | The size of the job icon over a villager in the Hand or under it, in percent of the size of the game, 50 to 400. Its lower edge stays in place. 100: the size of the game |
+| `villager_name_scale_pct` | 150 | The size of the card of the name and of the details of a villager, in percent of the size of the game, 50 to 400. 100: the size of the game |
+| `scaffold_wrist_turn` | 1 | 1: the roll of the wrist turns the building of a scaffold in the Hand, one to one, and the building does not turn by itself. 0: the game turns it by itself |
 
 The keys are read from `bwvr.ini`. They are not in the launcher.
 
@@ -788,6 +867,14 @@ The tag `villager look` has the turns to the camera:
 - One line each report window: the turns to the head, the turns to the game
   camera in the God view, and the turns in a cut scene.
 
+The tag `job icon` has the key at the start and the first four draws of the
+icon: the distance, the half size and the angle and the pixels across as the
+game gives them and as the mod draws them, and how far the middle moved
+up. One line each report window has the count of the draws and the last
+angle. The tag `names` has the same for the first four name cards: the
+lines, the depth, the height of a line in pixels and in degrees, and the
+pixels in a degree.
+
 The lines of a miracle in the Hand have the tag `miracle`, and they say
 "from a Worship Site". A press with the miracle at its icon gives "the game
 takes ... back at the ... of its Worship Site".
@@ -845,6 +932,18 @@ height and no ghost. With `totem_hold=0` the pole is back at 0.00 when the
 locked select ends, with the ghost at the new value, and it comes to the new
 value after 100 frames (0.44) and 44 frames (0.22).
 
+The job icon and the names (`village_run.ps1 -Kind job`, render 2760 by
+2208, 16.9 px in a degree): the icon over a villager in the Hand, 75 units
+from the camera, is 0.67 degrees across (13.7 px) with
+`job_icon_scale_pct=100` and 1.34 degrees (27.3 px) with 200, with its
+middle 0.44 units higher, one old half size. The fake hand of that recipe
+holds the villager out of the view, so no eye picture shows the icon. With
+the details of the villagers on (the ring item `details`), a line of a card
+is 16.0 px (0.95 degrees) at 100 and 32.0 px (1.90 degrees) at 200, and a
+capital letter is about 10 px and 19 px. The math test
+(`job_icon_checks.h`) covers the size, the lower edge with an aspect,
+offsets and a turn of the draw, and the angles of the log.
+
 **Not run on the desktop:**
 
 - A person of a quest at a scroll who waves to the player
@@ -856,21 +955,8 @@ value after 100 frames (0.44) and 44 frames (0.22).
 - A scaffold of three or more.
 - A left handed player, and a multiplayer game.
 
-**Needs the headset:**
-
-- Whether a person of a quest that turns his body to the head reads as a
-  look at the player. The game has no pitch for a villager, so he does not
-  look up.
-
-- Whether the pole feels held: the mod's hand stays where the grip closed on
-  the pole, and the pole moves with it.
-- Whether the totem from a distance is easy to set: the pole follows the
-  height of the hand, and the hand is not at the pole.
-- Whether 18 cm for the whole travel is easy to set to a wanted count.
-- Whether a real draw of the spiral and of the second gesture fits the
-  templates of the game.
-- Whether a tap of the grip on an icon is easy to hit: the icons of one site
-  are 4 to 8 cm of the room apart.
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 **Limits.** The pole follows the height of the hand only: the hand can move
 away sideways while the grip is closed. The mod does not change the game's
@@ -971,14 +1057,17 @@ yet" when that is so. The lines of each press are the lines of `hand press`.
 Desktop runs (the God view, `fake_controller=2`, Land 1, the choice "Keep
 your old Creature", `temple_run.ps1 -NoEnter`) have shown a tap at each post
 (the chosen post changes and the packet kind follows) and at the door (the
-player is in the hall 3 frames later).
+player is in the hall 3 frames later). The recipe of the taps on the posts
+is in the header of `temple_run.ps1`: each tap changes the chosen post 3 to
+7 frames after the press, and the card has the lines of the mod ("[Grip] Tap
+for the Leash of Aggression", then "The Leash of Aggression is chosen").
 
-**Not tested, and what needs the headset:**
+**Not tested:**
 
-1. A real hand at the posts: they are small at the scale of the start, and
-   the nearest one wins. Whether a player hits the one that he wants.
-2. A tap on the chosen post (the game sets -1 and sends nothing).
-3. The door before the story turns it on: the card says "Tap to go into the
+1. A tap on the chosen post (the game sets -1 and sends nothing).
+2. The door before the story turns it on: the card says "Tap to go into the
    Temple" then too. The log has the state of the door.
-4. The grab from a distance on a post or on the door.
-5. The lines of the card of the mod: no run had the hints of the game off.
+3. The grab from a distance on a post or on the door.
+
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.

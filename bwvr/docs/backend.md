@@ -42,20 +42,24 @@ Other docs: `software-tnl.md` (the CPU transform and the camera matrix),
 | `src/mod/draw_merge.cpp` | One draw call for a row of draw calls of the game with one state (`draw_merge`) |
 | `src/mod/present_watch.cpp` | Skips the copy to the monitor |
 | `src/mod/file_read_ahead.cpp` | The read ahead of the files of `LHFile`: a small read comes from a copy of the file (`file_read_ahead`) |
+| `src/mod/save_store.cpp`, `save_store_math.h` | The calls of a save in the VirtualStore of the user, when Windows refuses them in Program Files (`save_virtual_store`) |
+| `src/mod/snapshot_guard.cpp`, `save_picture_math.h` | The save picture in VR: the game reads a surface of the mod with the eye picture (`save_picture`) |
 | `src/mod/stereo.cpp` | The scene walk twice, the hotkeys, the view setup |
 | `src/mod/head_camera.cpp`, `head_pose.cpp`, `eye_camera.cpp` | The head on the camera, the per eye matrix |
+| `src/mod/head_lag.cpp`, `head_lag_math.h` | The measure of the age of the head pose of a picture, the math of the head pose of the frame, and the move of a kept intro picture |
 | `src/mod/fov.cpp` | `LH3DTech::ChangeFov` hook |
 | `src/mod/pointer_map.cpp` | The pointer in render pixels, the head lock of the cursor |
 | `src/mod/cursor_trace.cpp` | A test aid: the log names each caller that touches the cursor of Windows or takes the front |
 | `src/mod/exit_test.cpp` | A test aid: the game ends by itself at one frame, and its writes to the registry are dropped. The same guard from the start of the mod, for a run that loads a test save |
-| `src/mod/game_start.cpp` | A test aid: one line of the log says how the game started (a new game or a saved game) and how long the start took |
+| `src/mod/game_start.cpp` | The start of the game: a new game with the start dialog of the fan patch, or the save of the exit (`start_new_game`). One line of the log says how the game started and how long the start took |
 | `src/mod/comfort_camera.cpp` | Snap turns, jumps, zoom steps |
 | `src/mod/script_camera.cpp` | The camera of the story |
 | `src/mod/draw_hooks.cpp` | Hints, tooltips, subtitles, interface depth and size |
 | `src/mod/eye_clean.cpp` | The frame before of each eye: the clean of each eye pass, and the keeps of the eye pictures |
 | `src/mod/bubble_card.cpp` | A speech bubble of the game as one card at the depth of its sign, and the name of a villager as one card at the depth of the villager |
 | `src/mod/note_depth.cpp` | A note of the game over a thing (the percent of a lesson over the Creature) at the depth of its place |
-| `src/mod/sky_detail.cpp`, `water_mode.cpp` | Clouds, the moon, sun glare, detail distance, the sea |
+| `src/mod/sky_detail.cpp`, `water_mode.cpp`, `sea_depth.cpp` | Clouds, the moon, sun glare, detail distance, the sea, the sea with depth |
+| `src/mod/cull_distance.cpp`, `cull_math.h` | The model cull distance and the fog that follows it |
 | `src/mod/sprite_up.cpp`, `sprite_math.h` | Smoke, fire and the other sprites with world up |
 | `src/mod/spirit_anchor.cpp` | The advisors |
 | `src/mod/near_plane.cpp` | The near plane |
@@ -75,10 +79,13 @@ Other docs: `software-tnl.md` (the CPU transform and the camera matrix),
 | `src/mod/stall_watch.cpp`, `stall_math.h` | The module list at a stall (`stall_modules`, `stall_addrs`), and the test spin (`test_stall_ms`). The math checks are in `test/controller_math/stall_checks.h` |
 | `src/mod/crash_report.cpp` | The report of a crash in the log, and the dump `bwvr-crash.dmp` (`crash_report`) |
 | `src/mod/block_watch.cpp`, `large_block_math.h` | The large blocks of the heap and of VirtualAlloc with their places, for the line of the address space (`memory_blocks`) |
-| `src/mod/memory_watch.cpp` | The line of the address space each 20 s, on a thread of its own (`memory_log`, `address_space_math.h`) |
+| `src/mod/memory_watch.cpp` | The line of the address space each 20 s, on a thread of its own (`memory_log`, `memory_watch_math.h`) |
+| `src/mod/address_space.cpp`, `address_space_math.h` | The address space of the process in the log |
 | `src/mod/vk_ddraw.cpp` | DirectDraw 7 and Direct3D 7 of the mod on Vulkan (`backend=vulkan`) |
 | `src/mod/render_chain.cpp`, `render_chain_math.h` | The way of a draw to the headset app: the calls that change nothing, the thread of the stream, the table of the surfaces, and the times of the steps (`vk_state_skip`, `vk_stream_worker`, `vk_stream_surface_cache`, `render_chain_time`) |
 | `src/mod/vk_window.cpp` | The swapchain of Vulkan on the window of the game (`vk_window`) |
+| `src/mod/video_view.cpp`, `video_view_math.h` | The view for videos in the window of the game, and its corner marks in the headset (`video_view`) |
+| `src/mod/vk_video.cpp`, `vk_video.vert`, `vk_video.frag`, `video_layers_math.h` | The quad layers of the headset in the view for videos (`video_view_layers`) |
 | `src/mod/vk_fallback.cpp` | The file of the fall back of `backend=vulkan` (`vulkan_fallback`) |
 | `src/common/exe_check.h`, `version.h` | The build check and the product name |
 
@@ -252,6 +259,76 @@ The cached camera forward at `0x00EA1DD4` (written by
 `LH3DTech::UpdateWorldToCamera` at `0x00819773`) is read by the water at
 `0x008799F6` and `0x008799FF`, only as a sub pixel swell. `LH3DSky::Draw`
 (`0x0086B010`) is ordinary world geometry from `data\weathersystem\sky.l3d`.
+
+### The sea with depth
+
+`GLandscape::Draw` draws the sky, the reflection of the land (`fn_007FF4F0`,
+with no depth write), the light of the Hand on the water (`fn_005E3F70`,
+`0x005E4E6B`), the sea (`0x005E4E8C`), and then the land (`fn_007FF610`,
+`0x005E4E96`) [V]. The sea has the depth test ALWAYS and no depth write, so
+it is a translucent background, and the land draws over it. The land draw
+`fn_00874AA0` gives a vertex the height of its altitude byte times 0.67. A
+byte of 3 or less is sea, and the vertex is at the height 0, in the plane of
+the sea. In a block with water (block `+0x928`) a vertex with a byte of 0 or
+1 gets an alpha of 0 in its specular color, and a vertex with a byte of 2 or
+3 stays opaque [V]. The land and the waves on the coast (the material
+`0x00E9CD64`, a second pass of the same vertices) take their alpha from that
+color [V]. So the coast of the game is a flat band of land on the plane of
+the sea that fades into the sea. The land has no sea floor under the plane:
+the data has only the four bytes of the sea.
+
+With `sea_depth=1` (`sea_depth.cpp`, `sea_depth_math.h`) the draws keep
+their order, and the land of the sea in a block with water changes:
+
+- A vertex of the sea goes under the plane of the sea, by the game's step
+  of 0.67 units for each byte under 4: the byte 3 is at -0.67 and the byte 0
+  at -2.68. A stub takes the place of the load of 0.0 in each vertex loop
+  (`0x00874BB3`, `0x0087508B`). The land then crosses the water 80 percent
+  along the edge from a vertex of the byte 4 to a vertex of the byte 3.
+- The alpha of a vertex of the sea falls with its depth: 170 for the byte 3,
+  85 for the byte 2, and 0 for the bytes 1 and 0, as in the game. The test of
+  the cut (`cmp eax, 1` at `0x00874BBB` and `0x00875095`) tests 3, and a
+  stub takes the place of the cut (`0x00874BC0`, `0x0087509A`).
+- The light of the Hand (a square of 120 units at the height 0, additive,
+  with the depth test ALWAYS) draws with no depth write. Its depth would
+  hide the land under the water in that square, and the square would show
+  as a bright tile with hard edges in the water. The sea draws over it, as
+  in the game.
+
+So the land goes on down under the water, and it fades into the sea that
+draws behind it. In each eye the floor near the coast is at its depth under
+the water, and the deeper floor shows less and the sea more. The sea and the
+land have no depth test between them, so the coast has the soft fade of the
+game and no hard line at the water line. The waves on the coast draw on the
+same vertices, so the foam lies on the land and on the floor under the
+water, and it fades with the alpha of the floor. A block with no water flag
+keeps the game's heights and alphas. The reflection pass keeps the game's
+tables (the call at `0x005E48DD`). The game logic does not change:
+`GetAltitude` still gives 0 for the sea.
+
+The sea stays a background with no depth test. It is one flat quad with
+one alpha, so a depth test against the land would cut it on a hard line at
+the water line. The foam is a pass over the land, so it cannot hide such a
+line.
+
+Both renderers get the same draws, because the change is in the draws of
+the game. There is no new draw. The stubs add a few instructions to each
+vertex of the sea. The changes need the x87 path of the land draw
+(`0x00EA9EB4` at 0). The game takes its SSE path (`fn_007A1800`) only on a
+Pentium 4, and then the coast stays flat. With `sea_depth=0` the stubs give
+the game's values, and the light of the Hand writes its depth. The debug
+window has the switch "Sea depth" (Picture). Each report window has one
+line:
+
+```
+sea depth    : 450 frames, 450 with the floor under the water, 450 draws of the light of the Hand on the water, 450 of them with no depth write
+```
+
+The light of the Hand draws only at night and only near the sea. Open: a
+thing that the game draws before the sea with a depth under the plane (a
+villager in the water) hides the floor behind it, as a thing in the water
+does. An object that draws after the land shows down to the floor under the
+water with no tint of the sea.
 
 ### Where the Hand comes from
 
@@ -504,12 +581,15 @@ scene walks take 9 ms or more, the frame thread alone is over the 11.1 ms of
 a frame at 90 Hz.
 
 Not known: why `xrEndFrame` is slower on the second thread, and the age of a
-frame with the values 0 and 1. Not run: the value 1 in a headset (its code
-also runs when the device is for one thread, or when the second thread does
-not start), and the value 2 with a headset or a runtime other than a Quest 3
-through Virtual Desktop. A desktop run sends no frame to a runtime. With
+frame with the values 0 and 1. The code of the value 1 also runs when the
+device is for one thread, or when the second thread does not start. Not run:
+the value 2 with a headset or a runtime other than a Quest 3 through Virtual
+Desktop. A desktop run sends no frame to a runtime. With
 `test_keys=1`, Ctrl, Shift and the slash key of the number pad step the value
 while the game runs.
+
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ### The hold of the last frame
 
@@ -530,6 +610,14 @@ A frame that the game began and that stays open for three times
 frame (the frame is "taken"). `BuildFrame` then waits for a new frame of the
 runtime and sends the new pictures in it. A slow frame of the game that is
 shorter does not wait for a second frame of the runtime.
+
+`XrScreen::HoldCard` puts a card into the layers of the last frame before a
+long stop of the frame thread: the card of a save ("Saving...",
+`controller-hints.md`, 9.12). It waits for the second thread to have no
+frame, takes `hold_lock`, writes the picture into the swapchain of the card
+and puts the quad in place of that card of the last frame, or after the other
+layers. Each frame of the hold then shows the card. With `xr_hold_ms=0`
+there is no hold, and the card cannot show.
 
 The frame thread holds `hold_lock` while it reads the events, begins a frame
 and makes its layers. The second thread only tries to take the lock, so it
@@ -554,8 +642,10 @@ part of such a frame.
 Known limit: when the game copies a new eye picture into its swapchain image
 before it makes its layers (a flat frame or the intro in stereo with
 `backend=vulkan`), a frame of the hold in that time shows the new picture
-with the pose of the old one. Only a headset can show the hold: a desktop
-run has no runtime.
+with the pose of the old one.
+
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ### The self test
 
@@ -742,7 +832,8 @@ monitor:
 .\bwvr\tools\desk\spawn_run.ps1 -Name vsh -Dll <build>\src\mod\Release\ddraw.dll -Save temple -Seconds 150 -Set "vr=1;stereo_headless=0;vr_start=1;vr_start_test_hang_try=2;vr_start_test_hang_ms=60000"
 ```
 
-A desktop run cannot show a session that starts: only a headset can.
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ## The x64 host for Steam Frame
 
@@ -854,7 +945,7 @@ them. The game also writes `MemoryLeaks.txt` in the game folder.
 - The OpenXR session and the instance must be destroyed before step 6. A
   runtime that has a session at the end of the process is the likely cause of
   the fault `0xc0000409` in `VirtualDesktop.LibOVRRT32_1.dll`. No run has
-  shown this: only a headset session can.
+  shown this.
 
 ### What the mod does
 
@@ -941,8 +1032,76 @@ recorded. The launcher removes the key from `bwvr.ini` on each save.
 A desktop run has no OpenXR session. With `capture_every_seconds`, the self
 test of the bridge makes the shared textures on a Direct3D 11 device of its
 own. So a run shows the fault of the device with `exit_shutdown=0`, and a
-clean end with 1. Only a headset session shows the end of the OpenXR session
-and the record of `VirtualDesktop.LibOVRRT32_1.dll`.
+clean end with 1.
+
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
+
+### The start of the game
+
+**The start dialog of a new game [V].** `GGame::OnNewGame` (`0x005538E0`)
+calls `GGame::DoYesNoSkipTutorialRequestersIfNecessary` (`0x0054CBD0`). The
+fan patch v1.42 put NOPs over the test in that function, so the start dialog
+(`SkipBox`, at `0x00CD0634`) shows at each new game. It has four choices:
+"Start the game normally", "Skip straight to the Creature select", "Skip
+all of the Creature tutorial" and "Keep your old Creature". Esc does not
+close it (`SkipBox::CanESCOut` gives 0). The dialog shows only in a new
+game. `GGame::Init` is the only caller of `OnNewGame`: the case of the mode 1
+(`0x0054F780`) calls `GSetup::LoadMapScript` and then `OnNewGame`.
+
+**The plain game.** With no word on the command line, the game loads the
+save of the exit (slot 20, "Auto Save On Exit") and opens its Main Menu over
+it ("A test save"). Continue Game starts the play. With no save in slot 20,
+the start is a new game, and the start dialog is the first menu. A game in
+Program Files with no administrator rights never has that save, because
+Windows refuses the rename of `20.sav.tmp` ("A save in the VirtualStore").
+So the plain game there shows the start dialog at each start. With
+`save_virtual_store=1` the save of the exit works.
+
+**The new game of the Main Menu [V].** No button of the first tab of the
+Main Menu starts a new game. The tab of the profiles (`ProfileEditor`) has
+the button for it. The path to the start dialog:
+
+1. Button 4 of the tab (the test at `0x0053EFAB`) opens a box that asks for
+   a yes (`SetupBox::MessageBoxA`) and keeps the request 5 at `0x00CD0B3C`.
+2. The yes (control `0x2712`) with the request 5 sets the state 1 in
+   `GGame+0x250180` (`0x0053F023`).
+3. `GGame::Loop` ends when the state is not 0. It writes the save of the
+   exit to slot 20, as at each end of the loop.
+4. `pc_main` calls `GGame::Close`, and its switch gives the state 1 the mode
+   1. Then it calls `GGame::StartGame` again.
+5. `GGame::Init` with the mode 1 calls `OnNewGame`, and the start dialog
+   opens.
+
+**What the mod does.** With `start_new_game=0` (the default) the mod does
+not change the start: the game loads the save of the exit and opens its
+Main Menu. The launcher button "Play, new game" gives the word `-NEWGAME`, so
+the start is a new game, and the start dialog is the first menu.
+
+With `start_new_game=1` each start is a new game, as in the plain game in
+Program Files. In `DllMain`, before `WinMain`, `game_start.cpp` sets the
+byte of the word `-NEWGAME` (`0x00D46AB9`). `ScanParameters` writes only a 1
+to that byte, and only `pc_main` reads it, one time, for the mode of the
+first start. `ScanParameters` does not take `-MULTIPLAYER` after `-NEWGAME`.
+So the mod does not set the byte when the command line has `-MULTIPLAYER`,
+`-SKIRMISH`, `-NEWGAME` or `-CONTINUE`. The game does not know the word
+`-CONTINUE`. With the key at 1 it is the word of the second launcher button,
+"Play, continue": the game then loads the save of the exit and opens its
+Main Menu. The save of the exit stays in slot 20 until the game writes the
+next one at its exit.
+
+The start dialog goes to the menu panel in the room, as each menu over the
+scene does (`ui-layer.md`, section 20). With "Play, no VR" (`vr=0`) the mod
+does not change the start.
+
+The log, one line from `DllMain` and the line of the first frame:
+
+```
+game start   : start_new_game=0. With no word on the command line the game loads the save of the exit (slot 20) and opens its Main Menu over it. ...
+game start   : start_new_game=1. The mod gives the game the word -NEWGAME, so the game starts a new game and the first menu is the start dialog of the fan patch: ...
+game start   : start_new_game=1, and the command line has the word -CONTINUE, so the mod does not change the start
+game start   : a new game starts, frame N (game mode 1, land 1), T s after the start of the game process. The word -NEWGAME came from the mod (start_new_game=1)
+```
 
 ### A test save
 
@@ -957,8 +1116,8 @@ reads it in a switch at `0x0054F6EF`:
 
 | Mode | When | What `GGame::Init` does |
 | --- | --- | --- |
-| 0 | No word on the command line | `GameOSFile::AutoLoad` (`0x00563FF0`) loads `Saved Games\20\20.sav` of the profile. When the load fails, the mode becomes 1 |
-| 1 | `-NEWGAME`, or no saved game in slot 20 | A new game: `GSetup::LoadMapScript` and `GGame::OnNewGame` (`0x005538E0`) |
+| 0 | No word on the command line (with `start_new_game=1`, the word `-CONTINUE`, "The start of the game") | `GameOSFile::AutoLoad` (`0x00563FF0`) loads `Saved Games\20\20.sav` of the profile. When the load fails, the mode becomes 1 |
+| 1 | `-NEWGAME`, `start_new_game=1`, or no saved game in slot 20 | A new game: `GSetup::LoadMapScript` and `GGame::OnNewGame` (`0x005538E0`) |
 | 2 | After a load in play (the Temple, or the quick load, which calls `fn_00793380(19)`) | `GameOSFile::LoadAllGame` (`0x005587B0`) with the file name at `0x00D01838` |
 
 Slot 20 is the saved game that the game writes each time its loop ends
@@ -1012,7 +1171,8 @@ the mod. The mod drops each write to a key under `Lionhead Studios Ltd`, and
 the log names each one with its key (lines `registry test`). A write to a
 different key passes, as in each other run. The log names the first 6 and
 counts each one. The log also names each file that the process opens for a
-write. `desk_run.ps1 -Save` gives a run this key.
+write. `desk_run.ps1 -Save` gives a run this key, and `start_new_game=0`
+when the run does not give that key, so the game loads the test save.
 
 **The line of the start.** `game_start.cpp` writes one line at the first
 frame of the scene:
@@ -1036,6 +1196,229 @@ the frame rate (one for each 450 frames), and the line of
 that ends with the word `exit` leaves a saved game of that frame in the
 profile folder, and `make_test_save.ps1` keeps a copy of it before the
 profile goes back.
+
+## A save in the VirtualStore
+
+The game is a 32 bit program with no manifest. When it has no administrator
+rights and its folder is in Program Files, Windows virtualizes its files. A
+write that the folder refuses goes to the same path in
+`%LOCALAPPDATA%\VirtualStore`. The profile of the player is then only in the
+VirtualStore (`tools/desk/README.md`, "What a run does to your PC").
+
+### The calls of a save [V]
+
+`SaveGameRoom::InstantSaveGame` (`0x00792FB0`) makes each save: a save of the
+Save Game Room, an auto save and the save of slot 20 on the exit path. The
+calls to Windows go through `LHOSFile`, in this order:
+
+1. `SaveGameRoom::SaveGameInfo` (`0x00792910`) writes `SaveGame.inf` of the
+   slot: the land, the name and the date. `InstantSaveGame` does not read its
+   result.
+2. `GameOSFile::SaveAllGame` (`0x00558160`) writes `<slot>.sav.tmp`.
+3. When each write worked, it deletes `<slot>.sav` (`LHOSFile::Delete`,
+   `DeleteFileA`) and renames `<slot>.sav.tmp` to `<slot>.sav`
+   (`LHOSFile::Rename`, `MoveFileA`, at `0x00558568`). Then it does the same
+   for `Script_<slot>.sav.tmp` (`0x005585DC`, `0x00558651`).
+
+`LHOSFile::Open` (`0x007BC730`) asks `LHOSFile::Exists` (`0x007BC6A0`,
+`GetFileAttributesA`) first. Mode 0 writes a file: `TRUNCATE_EXISTING` when
+the file is there, else `CREATE_ALWAYS`. Mode 1 opens a file that is there
+with `GENERIC_READ | GENERIC_WRITE` and `OPEN_ALWAYS`. Mode 2 reads.
+
+The Save Game Room shows a slot only when it can open `<slot>.sav` and then
+`SaveGame.inf` with mode 1 (`fn_00792A20`, called for each slot folder at
+`0x0079003A`). A slot with no `<slot>.sav` or no `SaveGame.inf` looks empty,
+and the player cannot load it. The load of slot 20 at the start needs only
+`20.sav` ("A test save").
+
+### What Windows refuses [R]
+
+A 32 bit test program with no manifest, started with no administrator
+rights, made the calls of a save in a folder of Program Files that was only
+in the VirtualStore:
+
+| Call | Result |
+| --- | --- |
+| `CreateFileA` of `SaveGame.inf`, mode 0 | Error 5 (`ERROR_ACCESS_DENIED`) |
+| `CreateFileA` of `SaveGame.inf`, mode 1, when the VirtualStore has the file | Error 5 |
+| `GetFileAttributesA` of that `SaveGame.inf` | Error 2: the file is not there |
+| `CreateFileA` of `0.sav.tmp` | Works. The file goes to the VirtualStore |
+| `MoveFileA` of `0.sav.tmp` to `0.sav` | Error 3 (`ERROR_PATH_NOT_FOUND`) |
+| `DeleteFileA` of `0.sav` when the VirtualStore has it | Works |
+| `FindFirstFileA` in the folder of the slot | Shows the files of the VirtualStore, `SaveGame.inf` too |
+
+Windows does not virtualize a file with the extension `.inf`. So the game can
+never write or read `SaveGame.inf` in Program Files with no administrator
+rights. The rename fails only when the folder of the slot is not in the real
+folder. In a folder that is in both places, it works.
+
+So each save of the plain game in such a profile leaves `<slot>.sav.tmp`,
+`Script_<slot>.sav.tmp` and no `SaveGame.inf`. A save over a slot that has a
+`<slot>.sav` deletes it first. The slot then looks empty, and slot 20 loses
+the game that the start loads. The mod changes none of these calls with
+`save_virtual_store=0`, so the game with the mod and that key does the same.
+
+### What the mod does
+
+`save_virtual_store=1` (the default, `save_store.cpp`, `save_store_math.h`).
+The mod puts its own functions in four calls of `LHOSFile` to Windows. It
+changes only the address in each instruction, as the read ahead does:
+
+| Address | Function | Call |
+| --- | --- | --- |
+| `0x007BC6CA` | `LHOSFile::Exists` | `GetFileAttributesA` |
+| `0x007BC79B` | `LHOSFile::Open` | `CreateFileA` |
+| `0x007BCC45` | `LHOSFile::Delete` | `DeleteFileA` |
+| `0x007BCC2A` | `LHOSFile::Rename` | `MoveFileA` |
+
+Each function makes the call of the game first. When Windows refuses it with
+error 2, 3 or 5, the process is virtualized and the file is in Program Files,
+Program Files (x86), ProgramData or Windows, the mod makes the same call
+again. The second call uses the path of the VirtualStore copy:
+`%LOCALAPPDATA%\VirtualStore` and the path of the file with no drive. A
+delete goes again only when the VirtualStore has the file. When the second
+call fails too, the game gets the first result. A call that Windows does not
+refuse stays as it is. A process with administrator rights is not
+virtualized, and the mod changes none of its calls.
+
+So `SaveGame.inf`, `<slot>.sav` and `Script_<slot>.sav` go into the
+VirtualStore beside the other files of the save, and the Save Game Room
+reads them there. The same test program with the functions of the mod made
+two saves of one slot in a folder that was only in the VirtualStore. Each
+save made `0.sav`, `Script_0.sav` and `SaveGame.inf`, and the second save
+replaced the first. The reads of the Save Game Room found both files.
+
+The log has one line at the start, and one line for each call that the mod
+made again (60 lines at most). A lookup of `GetFileAttributesA` gets no line.
+
+```
+save store   : save_virtual_store=1. Windows virtualizes the files of the game process. When Windows refuses a call of LHOSFile to a file in Program Files, ProgramData or Windows, the mod makes the call again on the copy of the file in C:\Users\<user>\AppData\Local\VirtualStore
+save store   : Windows refused CreateFileA(<slot folder>\SaveGame.inf, CREATE_ALWAYS) with error 5. The call on the VirtualStore copy worked
+save store   : Windows refused MoveFileA(<slot folder>\0.sav.tmp, <slot folder>\0.sav) with error 3. The rename in the VirtualStore worked (error 0)
+```
+
+**Known limits.**
+
+- A desktop run shows the save in the VirtualStore only when the scripts
+  run with no administrator rights. An elevated game is not virtualized and
+  writes its profile in the real game folder.
+- A slot that a save of the plain game left with only `.tmp` files stays so.
+  The mod does not rename such files. The next save in that slot replaces
+  them.
+
+## The save picture
+
+### What the game does [V]
+
+`ScriptedScreenShot::Request` (`0x00828E90`) asks for a picture and calls
+`ScriptedScreenShot::Process` (`0x00821750`) at once. `GGame::Loop` calls
+`Process` each frame too, before `FlipScreen`. The callers of `Request`:
+
+| Caller | When |
+| --- | --- |
+| `SaveGameRoom::InstantSaveGame` (`0x00793006`) | Each save: the Save Game Room, the quick save, the auto saves and the save of slot 20 on the exit path |
+| `GGame::GoInsideCitadel` (`0x00553FF5`) | The player goes from the land into the Temple (the place of the game `0x00BEC284` is 7) |
+| `CreatureRoom::TakeScreenShot`, `fn_00784690` | The pictures of the Creature Room |
+
+A save asks for the half picture: `Process` locks the primary surface and
+reads 256 by 128 points of it, with a step of `LHScreen::width / 256` and
+`LHScreen::height / 128`. It writes them into the top half of the texture
+`Saved Games\Pictures\save_game_picture_temporary.raw` of the profile
+(`LoadTextureCitadel` `0x0082AB40`, `SaveTextureCitadel` `0x0082A8E0`), and a
+thumbnail of 128 by 64 into the bottom half. The texture is an `LH3DCT`: DXT1
+blocks of 256 by 256 pixels, 32896 bytes in the file. `SaveTextureCitadel`
+makes the blocks with a `Blt` from a texture of 16 bit RGB pixels. Then
+`fn_007923D0` copies the two halves into the pictures of the slot
+(`save_game_picture_hires_N.raw`, `save_game_picture_lores_N.raw`) with two
+`Blt` between DXT1 textures with rects (`0 0 256 128` and `0 128 128 192`),
+and the Save Game Room loads its pictures again (`fn_007928D0`,
+`fn_00792850`). The full picture (`TakeFullScreen` `0x00821370`) reads 400
+by 300 points in the same way.
+
+Each point is one pixel of the screen, at
+`ftol(row * height / 128)` and `ftol(column * width / 256)`. Then the game
+mixes each pixel of the 256 by 128 with its neighbors at the right, below and
+below at the right, at half weight (`fn_00821D50`, three calls in
+`0x00821B7E` to `0x00821C4F`), and `SaveTextureCitadel` keeps the result as
+16 bit pixels and then as DXT1 blocks. So the picture of a slot that the
+Save Game Room shows is 256 by 128 pixels of DXT1 (4 bits a pixel) for a
+view of 4 by 3. That is the limit of the game: the mod cannot give the room
+a larger or a sharper picture without a change of the texture of the game.
+
+`Process` takes the base pointer, the pitch and the format from the locked
+surface, and the extent from `LHScreen::width` and `height`. It clamps
+nothing. In VR the primary surface is the window, which is not the size of
+the render, so the read walks off the end of a row. A square render in a
+window stops the game with an access violation. And the window does not hold
+the picture that the player sees.
+
+### What the mod does
+
+`save_picture=1` (the default, `snapshot_guard.cpp`, `save_picture_math.h`).
+While VR runs, a hook on `Process` gives the game a primary surface of the
+mod for the call, with pixels of 32 bits, and `LHScreen::width` and `height`
+of its size. The pixels are the middle of the eye picture of the last frame:
+the middle 0.6 of its width, in the shape of 4 by 3, each pixel the mean of
+its box. With `save_picture_fit=1` (the default) the surface has the size of
+the read of the game: 256 by 128 for a save, 400 by 300 for the full
+picture. So each point that the game reads is the mean of all of its box of
+the eye picture, about 6.5 by 9.7 pixels of the eye of a Quest 3 at 2760 by
+2208, and no edge is cut into steps. With `save_picture_fit=0` the surface is
+512 by 384, and the game takes one pixel of each 2 by 3 of it. The game then makes the picture, the texture and the
+thumbnail with its own code, and the call puts the primary surface and the
+size back. The eye picture comes from:
+
+| Backend | The eye picture |
+| --- | --- |
+| `backend=vulkan` | The left eye of the picture of the window (`VkSceneReadPicture`): a copy of the part to the CPU that waits for the GPU |
+| dxwrapper, a frame of one walk | The left half of the wide target (`OneWalkReadEye`) |
+| dxwrapper, two walks | The render target of the game (`FrameSourceBegin`): the eye of the last walk |
+
+With no eye picture the call is skipped, and the save has no new picture.
+The eye picture has no interface: the interface of the game is on its own
+layer in VR. In the Temple the picture is the room, as the screen of the
+plain game is then the room.
+
+`save_picture=0` skips the call while VR runs and clears the request flag
+(`0x00EB99B4`) as the original does. The save then has no new picture.
+`skip_snapshot=0` gives each call to the game with its own screen, also in
+VR.
+
+With `backend=vulkan` the textures of the picture are surfaces of the mod
+(`vk_ddraw.cpp`). `vk_blt_blocks=1` (the default) makes the two copies that
+the game needs: a `Blt` from RGB pixels into DXT1 blocks makes the blocks
+(`EncodeDxt1Block`: the ends of the box of the colors of a block, along the
+diagonal that follows the colors, and the nearest of the four colors for
+each pixel), and a `Blt` between two textures of one DXT format copies the
+blocks of its rects (`blt_copy::CopyBlocks`). With `vk_dxt_fit=1` (the
+default) each block then gets up to two steps of least squares on its two
+colors (`FitDxt1Block`). A step stays only when it brings the colors nearer
+to the pixels, so the fit is never worse. On 2000 test blocks of gradients
+with noise the squared error is 30 percent less, and a block of black and
+white comes back exact (the box alone is 16 of 255 off). `vk_blt_blocks=0` refuses the
+first `Blt` and copies all the bytes of the source in the second, so a save
+with the picture of the mod writes over the pictures of the other slots of
+the texture. With dxwrapper the copies go as in "The copy to the monitor"
+(`blt_texture_copy`), and the first one goes to `D3DXLoadSurfaceFromSurface`.
+
+The log has one line for each of the first 12 pictures, and the report of
+`vk_ddraw` counts the copies of blocks:
+
+```
+snapshot     : save_picture=1. The game makes each save picture from a surface of the mod with the middle of the left eye picture, because its screen in VR is not the picture that the player sees. save_picture_fit=1: the surface has the size of the read of the game, 256 x 128 for a save and 400 x 300 for a full picture, so each pixel of the save is the mean of its box
+vk ddraw     : vk_dxt_fit=1. The DXT1 blocks of a save picture get the two colors of least squares when they are nearer to the pixels
+snapshot     : the game made a save picture from the left eye of the Vulkan renderer (save_picture=1): the middle 60% of the width of 2064 x 2208, at 256 x 128 (the size of the read of the game, save_picture_fit=1). Its mean light is 0.38, and 0.2% of it is black. The eye picture took 14.2 ms and the call of the game 6.1 ms. The texture is .\Profiles\<profile>\Saved Games\Pictures\save_game_picture_temporary.raw
+vk ddraw     : 2 copies from RGB into DXT1 blocks, and 2 copies of the blocks of a rect (vk_blt_blocks=1)
+```
+
+`save_picture_test_dump=1`, a test key: after each picture, the picture of
+the mod goes to `bwvr-save-picture-N.bmp` beside `runblack.exe`, and a copy
+of the texture that the game wrote goes to `bwvr-save-picture-N.raw`.
+
+**Not known.** The look of the picture of a save in the Save Game Room in
+the headset (a desktop run shows the files and the room). The save of slot
+20 on the exit path has no frame after it, so it takes the eye picture of
+the last frame of the game.
 
 ## The depth buffer
 
@@ -1144,6 +1527,12 @@ view. At other times it is the life size scale. The game's value stays when it i
 nearer. 0 for a key keeps the game's near plane. Play modes 1 and 2 keep the
 game's near plane, because the hands are not in the world there.
 
+A desktop run (`hand_run.ps1 -Kind near`, six zoom steps in to 8.8 units a
+meter) has the near plane at 0.439 units (5.0 cm). The Hand at 20, 10, 7 and
+5 cm from the eye is whole in both eyes. With `near_plane_cm=0` the game's
+3.5 units (39.9 cm) cut both hands away. At 100 units a meter the game's
+value is 0.96 units (1.0 cm), so the key does not act there.
+
 Why 10 cm at 16 bit: 0.75 units (10 cm at the life size scale) is the near plane
 that the game uses with its camera 2.8 units over the land (`0.3 + 0.16 * h`).
 At 900 units a 16 bit step is then 16 units. It is 3.5 units with the game's 3.5
@@ -1242,8 +1631,8 @@ present      : the mod copies with a texture. Destination 256 x 256, ...
 present      : the mod made N copies between two textures, and M failed
 ```
 
-`blt_texture_copy=0` gives each copy to dxwrapper. Not known: whether a save
-picture looks right in the Save Game Room.
+`blt_texture_copy=0` gives each copy to dxwrapper. The copies of a save
+picture are in "The save picture".
 
 Full screen is not an alternative. It would flip instead of copy, but it crashes
 the game (one fault at offset `0xdededede`, a freed pointer, and one inside the
@@ -1388,10 +1777,8 @@ draw calls and the runs of a frame, the causes that start a run, and the calls
 of the game that set a state. The count has hooks on 13 more calls of the
 device, so the times of a frame are a little longer than with `profile=1`.
 
-In a headset session, set `profile=1` in `bwvr.ini` after the last save of the
-launcher, because the launcher removes the key (see "Testing without a
-headset"). The windows then give the parts that only a headset has: the wait,
-the copy to the bridge and the frame to the runtime.
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ### The measure on the desktop
 
@@ -1751,7 +2138,11 @@ fault that no handler takes then writes one block of lines with the tag
 - up to 32 return addresses on the stack of the thread, the nearest first.
   Each one is a word of the stack that is in a module, after a call,
 - the frame, the frame of the Hand, the Hand state, the hand mode, the object
-  in the Hand and the object of the next pick record, each with its class.
+  in the Hand and the object of the next pick record, each with its class,
+- the address space in use, the free part and its largest block ("The
+  address space"). A dump that fails with `0x80070008`
+  (`ERROR_NOT_ENOUGH_MEMORY`) and a small largest block say that the process
+  had no address space left.
 
 Then the filter writes a small minidump, `bwvr-crash.dmp`, beside
 `runblack.exe` (`MiniDumpWriteDump` of `dbghelp.dll`, with the threads, their
@@ -2052,12 +2443,11 @@ The proof that the picture is the same, from a desktop run of the six scenes:
   two frames of one kind, 0.5 to 1.2 percent differ: the villagers, the smoke
   and the clouds move.
 
-Not run: the merge in a headset, and the check of the triangles in the Temple,
-in a story, in a fight of Creatures and with the effect of a miracle. The
-check runs in each eye pass of the scene, so one session with
-`draw_merge_test=1` in the ini gives that proof: the line `draw merge   : the
-check of the triangles` of the log has the count of the eye passes with a
-different checksum. The check takes time of each frame.
+The check of the triangles runs in each eye pass of the scene, and it takes
+time of each frame.
+
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ### The slow frames
 
@@ -2102,8 +2492,6 @@ at the most in the same windows. The runtime of Virtual Desktop (VDXR) sets
 no timeout in these calls. It waits in `ovr_WaitToBeginFrame` and in
 `ovr_EndFrame` of the Virtual Desktop Streamer. So the cause is in the
 streamer or in the link to the headset, and not in the files of the game.
-Not known: whether a session with Direct3D 11 (`xr_vulkan=0`) has these
-frames too, and whether a turn of the head starts them.
 
 For each 450 frames the log of a session has this line:
 
@@ -2115,9 +2503,8 @@ It gives the longest call of `xrWaitFrame`, of `xrBeginFrame`, of
 `xrEndFrame` and of the copies to the swapchain images (with their acquire and
 wait) in the window, and the count of the calls of 20 ms or more.
 
-Only a headset session can show what the wait, the copy to the bridge and the
-frame to the runtime cost in a slow frame. Only a person can say if a sound
-that stops sounds the same with `audio_stop_wait` 0 and 1.
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ### The long game turn
 
@@ -2716,8 +3103,10 @@ Creature pens, `backend=vulkan`, `profile=1`), one with each value:
 
 `file_read_ahead=0` gives each read to `ReadFile`, as the plain game does.
 With `test_keys=1`, Shift Q changes the value while the game runs. Each open
-file gives its position back to Windows at its next call. Not shown: a
-session in a headset, and a load of a saved game with the read ahead.
+file gives its position back to Windows at its next call.
+
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ### The clock of the game and the hooks of dxwrapper
 
@@ -2959,6 +3348,11 @@ has more objects in view.
 The interface in the eye pictures is a part of the render. With a margin it
 is that much larger, and that much farther from the middle.
 
+No desktop run can show the margin: `PrepareHeadView` applies it only to the
+eye views of a runtime, so a desktop run keeps the view of
+`fov_absolute_deg`. The check is in `headset-checks.md`, "Play as normal and
+send the log".
+
 ### What it saves
 
 One desktop run at 2208 by 2208, a new game to the island, a story and the
@@ -2996,7 +3390,9 @@ The scene time of one walk holds the copies for the right eye, 0.29 to
   was seen.
 - Not with a pose for each eye (`head_camera=0` with head tracking). Then the
   frame has two walks.
-- Only a headset can show the feel of it.
+
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 `one_walk_check=1`: on a frame that saves pictures, the right eye also gets
 its own walk, and its picture is saved as `walk2` beside the right eye of one
@@ -3967,10 +4363,13 @@ a frame, `render_thread=1`, on a Radeon RX 7900 XTX:
 | The frame (the frame thread sets it on the desktop) | 4.85 to 5.1 ms | 5.0 to 5.2 ms |
 
 The pictures of frame 3001 with DXVK and with Windows differ in 1.7 percent of
-the pixels, a little at edges and in the filter of textures. Not run: a
-session in a headset with DXVK, a PC with two GPUs, a GPU of NVIDIA or Intel.
+the pixels, a little at edges and in the filter of textures. Not run: a PC
+with two GPUs, a GPU of NVIDIA or Intel.
 The share needs DXVK and the OpenXR session on the same GPU. DXVK takes a
 dedicated GPU before an integrated one.
+
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ## The Vulkan renderer
 
@@ -4160,6 +4559,48 @@ textures in each frame: in the cut scene after the rescue of the boy at
 the start of a new game the renderer reads about 3 textures a frame again
 (1350 reads in a window of 450 frames).
 
+**A surface that goes away** (`vk_texture_forget`, 1 is the default). The
+renderer finds the texture of a surface by the address of the surface. With
+`backend=vulkan` the surface tells the renderer when the game releases it
+(`VkSceneSurfaceGone`), and the renderer marks its texture. The next walk
+gives the image and the descriptor sets of the texture to its slot, which
+frees them after its fence, and takes the texture out of the table. So a new
+surface at the same address gets a new texture and is read at its first use.
+With 0 the texture stays in the table with its image until the game writes
+the new surface. The report of each 450 frames counts the textures that the
+renderer forgot.
+
+**A read with no new image.** A read of a texture can give no image: the
+`Lock` fails, the surface has a format that the renderer does not read (a
+FourCC format such as DXT, a palette), there is no memory of the CPU for the
+pixels, Vulkan gives no image or no staging memory, or the table of 4096
+textures is full. The draw then has the image of the read before, or the
+white texel when the texture has no image. The log has a line for each of
+the first 12 such reads, with the reason, the surface, its size and its
+pixel format:
+
+```
+vk scene     : a texture with no new image (1 of 12): <reason> (0x00000000). The surface 0C1F2A40, 256 by 256, pixel format flags 0x41, 16 bits. The draw has the white texel
+```
+
+The report counts these reads for each reason, and it has the memory of
+Vulkan: the images and buffers in device memory, the buffers in host memory
+(mapped in the address space of the process, see "The address space"), and
+the allocations and maps that failed since the start.
+
+**A new image for a texture that the game wrote** (`vk_upload_keep`, 1 is
+the default). The renderer makes the new image and copies the pixels into
+it first. Only then do the old image and its descriptor sets go to the slot
+of the walk. So when Vulkan gives no image (no memory), the draw keeps the
+old picture of the texture, and the next use tries again. With 0 the old
+image goes first, and a failed upload gives the white texel.
+
+**The room of a slot.** A slot has room for 4096 retired images and for
+32768 retired descriptor sets, as many as the table and the pool can hold.
+So the renderer never frees an image or a set that the GPU can still read.
+If a slot is full all the same, the image is not freed, and the report
+counts it ("images not freed").
+
 **The uploads of a walk** (`vk_upload_queue`, 1 is the default). The copy
 of a texture to the GPU goes into a command buffer of the slot of the walk,
 and the end of the walk submits it before the buffer of the walk, in one
@@ -4243,7 +4684,10 @@ left eye is 29.6. The hall has the light of the chandeliers and dark
 corners, as the picture of Direct3D 9 of the same scene in a run with
 dxwrapper (mean luma 33.3, the shadow test at frame 2600). With
 `vk_stage1=0` the mean luma is 83.8: the walls and the floor have the full
-colour of their texture and no shadow. Not run: a headset session.
+colour of their texture and no shadow.
+
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 A row of a locked surface goes into a buffer of the CPU with streaming
 loads of SSE4.1 (MOVNTDQA) before the conversion, because a `Lock` of
@@ -4455,7 +4899,16 @@ vertex buffer. `LHScreen::GetAvailableVidMem` asks for `IDirectDraw2` and
 calls it with no test of the result.
 
 **The objects.** A surface keeps its pixels in the memory of the CPU, so a
-`Lock` of the game and of the renderer reads and writes that memory. A
+`Lock` of the game and of the renderer reads and writes that memory. The
+pixels come from the heap of the process at the first `Lock` or `Blt`
+(`vk_surface_heap`, 1 is the default), with each byte 0. A texture with mip
+levels has a surface for each level, and most levels are smaller than 64
+KB. With `vk_surface_heap=0` each surface takes a block of `VirtualAlloc`,
+and each block takes 64 KB of the address space at the least ("The address
+space"). The report of each 450 frames has the surfaces with pixels, their
+bytes and the address space that they take. The first 8 allocations of
+pixels that fail give a line each, and the game then gets
+`DDERR_OUTOFMEMORY`. A
 `Blt` copies in that memory with a change of the format, decodes DXT1 to
 DXT5 block by block, and fills with a color. The `Blt` to the primary is
 the present: the picture of the last walk of the left eye goes to the
@@ -4574,8 +5027,8 @@ after that gets no picture of the renderer (`VkSceneEyesWanted`,
 `VkScenePanelFor` and `VkSceneLastPicture` are false), and the log says so.
 Then start the game with the headset ready.
 
-**Only a headset can show:** the colors and the flicker of the eye
-pictures with the device of the session.
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 **Not run yet:** a video, the Main Menu, a saved game, the Temple.
 
@@ -4690,14 +5143,201 @@ With `vk_window=0` a frame was 2.3 ms.
 
 In a session in the headset the mod makes no copy to the monitor
 (`skip_desktop_present=1`, "The copy to the monitor"), so the window gets no
-present and no swapchain. Not run: a session in the headset with
-`skip_desktop_present=0`.
+present and no swapchain. With `video_view=1` the window gets the view for
+videos ("The view for videos").
+
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 `vk_window=0` is the way through the CPU and GDI. With `test_keys=1`,
 Shift D changes it from the next present: a change to 0 takes the
 swapchain and the surface away, so GDI can draw into the window again. The
 report of each 450 frames has the presents through the swapchain and the
 presents with no free image.
+
+### The view for videos
+
+`video_view=1` (`video_view.cpp`, `video_view_math.h`) puts a 16:9 area of
+the left eye picture into the window of the game on the PC. A capture tool
+(OBS or a similar tool) records that window while the headset plays. The
+player of this game looks down most of the time, with the head and with the
+eyes. A capture of the headset records the middle of the view, so it cuts
+off what the player looks at. The area of this view can be lower.
+
+**The area.** Once a frame, before the eye passes, the mod latches the area
+of the frame. The area is `video_view_fov_deg` wide at the middle of the
+eye picture (90 degrees), with the shape 16:9. Its middle is
+`video_view_down_pct` percent of the height of the eye picture below the
+middle of the picture (20). The projection of the game (`InfoTransform`)
+gives the pixels of a tangent. An area that is too large for the picture
+becomes smaller. A move down that takes the area past the bottom is less.
+The marks of both eye passes and the window use the area of the frame.
+
+**The smoothed head.** A smoothed direction follows the forward direction
+of the head with the time constant `video_view_smooth_ms` (150 ms). The area
+moves in the eye picture to where that direction is, so it moves against a
+shake of the head. The smoothed direction stays within 3 degrees of the
+head, so a fast turn moves the video with the head. Only the video has the
+smoothing. The headset shows the eye pictures 1:1 with the head. The area
+cannot turn, so a roll of the head is in the video. The math test has a
+shake of 1 degree at 8 Hz (the video moves less than 0.2 degrees), a step
+of 20 degrees (the video lags by 3 degrees, and is on the head 1 s later)
+and a turn of 10 degrees a second (a lag of about 1.5 degrees).
+
+**The marks.** With `video_view_marks=1` (the default) the mod draws faint
+white corner marks around the area in each eye pass, after the vignette and
+before the interface of the game: two bars at each corner, 2 px thick and 1
+px more for each 1000 px of height, with an alpha of 0.35. The marks are
+fixed to the head. Their place is the area with no smoothing, grown by the
+largest move of the smoothing (3 degrees) and a gap of 3 px. So the marks do
+not move by themselves, and the area never has a mark in it. The vertices
+have rhw 1, as the vignette has, so one walk puts each mark at the same
+pixel in both eyes.
+
+**The window.** In a headset session the mod does not copy the frame to the
+window (`skip_desktop_present`, "The copy to the monitor"). With
+`video_view=1` and a swapchain of the window (`backend=vulkan`,
+`vk_window=1`) the copy goes out. `VkWindowPresent` clears the swapchain
+image to black and blits the area into the largest 16:9 rect in the middle
+of the client area, with a linear filter. The mod does not change the size
+of the window. A picture with no eye pass (a menu with no scene) goes into
+the same place with its own shape. With `test_frame_rate` the copy goes out
+too, and the frame then waits, as in a session. With dxwrapper the view does
+not show, and the log says so one time (see "The view for videos with
+dxwrapper").
+
+**The layers in the video.** The quad layers of the headset are not in the
+eye pictures: the hint cards, the subtitle card, the ring (with the panels
+of `panel_kit.cpp` on it: the places, the settings and the debug window),
+the keyboard, the bubble of a miracle, the ray over the panels
+(`ui-layer.md`, "The ray over the panels"), the panels of the interface (the
+menus, the help and the Creature panel, `ui_panel=1`) and the walls of the
+cut scene window. With `video_view_layers=1` (the default) the mod draws
+them over the area in the window, at the place and the size where the left
+eye sees them, in the order of the runtime, with their alpha. With
+`video_view_layers=0` the window shows the eye picture only. The Hand, the
+hands, the land, the speech bubbles and the names of the villagers are in
+the eye picture.
+
+- The record. In a session each frame keeps a record of its quad layers as
+  `BuildFrame` gives them to the runtime (`XrScreen::WantVideoLayers`): the
+  panels, the cards in their order, then the walls. With no headset no
+  frame takes the staged layers, so the mod makes the record after the eye
+  passes (`XrScreen::RecordVideoLayers`). That record has the cards and the
+  walls, but no panel: the panel quads need a session.
+- The place. Each corner of a quad goes to the left eye picture
+  (`video_layers_math.h`). In a frame of the world the map is the pose of
+  the left eye that the pictures are drawn from, with the projection of the
+  game (`InfoTransform`). For a screen in the room (the cut scene window,
+  the menus in the room) the map takes a point to the place on the screen
+  where the left eye sees it, and from there to the part of the eye
+  picture that the screen shows. Then the corner goes to the area, and to
+  the rect of the area in the window. Each map is linear in homogeneous
+  coordinates, so the GPU draws the texture with the perspective of the
+  eye. The GPU cuts a quad 1 cm in front of the eye, and a scissor cuts it
+  at the edge of the area.
+- The textures. In a session with Vulkan each upload of a card into its
+  swapchain (`xr_vulkan_upload=1`) also copies the same buffer into an
+  image of the card on the GPU, so the view has no copy on the CPU. A card
+  with no such image (a desktop run, a session with the relay of Direct3D
+  11) comes from the pixels of the CPU: the view copies the part that shows
+  into an image of its own. With `video_view_copy_changed=1` (the default)
+  it copies a card only when the card has a new picture. Each card gives a
+  new number with each new picture (`CardLayer::serial`), and the image of
+  the card keeps the number of its last copy. The ring, the spell book and
+  the panels of `panel_kit.cpp` give a new number when they draw. A hint
+  card gives one when its picture or its fade changes, the bubble card at
+  each draw of the bubble, and the keyboard at each new picture and at a
+  change between the dark card and the parchment. The game draws the help
+  text of the subtitle card again in each frame, so its copy compares each
+  row with the row of the last copy, and only a changed row or a new size
+  gives a new number. A panel 1024 by 1024 px is 4 MB for each copy, and
+  the keyboard is 1.5 MB. A panel quad samples the panel image of the
+  Vulkan renderer, which has `VK_IMAGE_USAGE_SAMPLED_BIT` for this. A wall
+  is black with its alpha.
+- The draw (`vk_video.cpp`, `vk_video.vert`, `vk_video.frag`). After the
+  blit of the area, one draw of a strip of 4 vertices for each quad goes
+  into the swapchain image, with the blend ONE and ONE_MINUS_SRC_ALPHA: the
+  cards and the panels hold the color multiplied by the alpha. The
+  swapchain gets `VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT` for this. A window
+  whose swapchain cannot have it shows no layers, and the log says so one
+  time. The SPIR-V is in `vk_video_vert.h` and `vk_video_frag.h`. RenderDoc
+  has the compiler: `"C:\Program Files\RenderDoc\plugins\spirv\glslangValidator.exe"
+  -V --target-env vulkan1.3 --vn kVkVideoVert -o vk_video_vert.h
+  vk_video.vert`, and the same for `vk_video.frag` with `kVkVideoFrag`.
+  The build does not need the compiler.
+- Known limits. The window is UNORM, so the blend is in the gamma of the
+  picture. The runtime blends in linear light, so the soft edges of a card
+  can be a little darker in the headset. With the x64 host for Steam Frame
+  the layers go to the host, and the video has none.
+
+**The cost.** The report of each 450 frames has the time of a present of
+the window on the frame thread and on the GPU (two timestamps in its command
+buffer). In a session this is the cost of the view, because with
+`video_view=0` the window gets no present. The time of the GPU includes the
+draws of the layers. The line `vk video` has the time of the draws on the
+frame thread and the copies of the pixels of the CPU. The marks are one
+draw of 48 vertices in each eye pass.
+
+**The log and the pictures.** At the start, one line with the keys, and at
+the first frame one line with the size of the eye picture and of the area.
+A head that turns faster than the smoothing gives a line at the start and
+at the end of the lag. The report has the frames with the area, the area
+now and the largest lag. The first draw of each card, of a panel and of a
+wall gives a line with its place in the area and its texture. The report
+also has the windows with layers and the quads that were drawn and that
+were outside the area. A panel of `panel_kit.cpp` on the quad of the ring
+(the places, the settings, the debug window, the welcome page) counts as a
+panel in the room, apart from the panels of the interface. A frame that saves pictures also writes
+`bwvr-vk-video-N.bmp` at the next present of the window: the area of the
+left eye at the pixels of the eye picture, with the quad layers over it, as
+the window shows it.
+
+```
+video view   : video_view=1. The window of the game shows a 16:9 area of the left eye picture, ...
+video view   : the eye picture is W by H, the area is w by h at x, y (its middle N px below the middle of the picture), ...
+video view   : the head turns faster than the smoothing, the area is 3.00 degrees behind the head, frame N
+video view   : the area is on the head again (0.09 degrees) after N frames, frame M
+video view   : the ring is in the video for the first time, frame N, from x0, y0 to x1, y1 of the area (0 to 1 across and down), over the world, from its copy on the GPU
+video view   : N windows with quad layers, N quads drawn (N cards, N panels: N of the interface and N in the room, N walls), N quads outside the area
+vk window    : the picture of the video of frame N has N quad layers
+vk window    : N presents through the swapchain of the window (N of a part, for the view for videos, N with quad layers), ... A present takes X ms on the frame thread and Y ms on the GPU
+vk video     : N windows with quad layers, N quads drawn, N with no texture, N copies of the pixels of the CPU (X KB each), N draws with no copy because the picture did not change, X ms on the frame thread for each window
+```
+
+The launcher has the rows "Video Capture Mode" and "Lower capture window"
+(`launcher.md`). With `debug_menu=1` the debug window has the switches
+"Video view", "Video marks", "Video layers" and the row "Video height", which moves the area
+5 percent up or down (`controllers.md`, 10.8).
+
+### The view for videos with dxwrapper
+
+With dxwrapper the view does not show in a session. The copy to the
+monitor goes through dxwrapper, and it costs about 8 ms of each frame at
+1920 by 1080 ("The copy to the monitor"). The mod cannot change how
+dxwrapper makes that copy.
+
+A cheaper copy is possible, but it is not built. In a session the GPU
+bridge has the left eye picture in a texture of the Direct3D 11 device of
+the session (`gpu_bridge.cpp`). A DXGI swapchain with the flip model on the
+window of the game could take the area of that texture with
+`CopySubresourceRegion` and present it with no wait for the monitor. That
+is a copy on the GPU of some MB, so it is much less than 1 ms. These points
+stop it now:
+
+- The immediate context of Direct3D 11 is not safe on two threads. With
+  `frame_send=2` or the hold, the second thread uses it for the copies and
+  `xrEndFrame` (`frame_send.cpp`). The copy to the window must then run on
+  that thread, or wait for it.
+- The window has the Direct3D 9 device of dxwrapper. A DXGI swapchain on
+  the same window must not meet a present of dxwrapper, for example a
+  desktop run or the frames before the session.
+- With the x64 host for Steam Frame the Direct3D 11 device is in the host
+  process.
+- No desktop run can show it: a desktop run has no Direct3D 11 device of a
+  session. Only a session in the headset can.
+
+`backend=vulkan` is the default, and it has the view with its layers.
 
 ### The fall back of the renderer Vulkan
 
@@ -4784,8 +5424,101 @@ With `test_frame_rate=60` the mod makes no present to the window, so on the
 desktop the file stays until the end of the run.
 
 **Not run:** a PC with no Vulkan 1.3 or no `vulkan-1.dll`, a fault of the
-driver, and a session with Vulkan that does not start. Only a headset shows
-the first picture of a session with Vulkan that deletes the file.
+driver, and a session with Vulkan that does not start.
+
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
+
+### The address space
+
+The original `runblack.exe` (v1.42) has no `LARGE_ADDRESS_AWARE` flag (its
+characteristics are 0x10F). Its process then has 2 GB of address space,
+also on a Windows of 64 bits. The game, the mod, the driver of the GPU and
+the OpenXR runtime share these 2 GB. When no free block is large enough, an
+allocation fails. The mod cannot change the limit from inside the process,
+because Windows reads the flag from the file at the start of the process.
+
+**The flag** (`src/common/large_address.h`, with checks). The launcher row
+"Use 4 GB of memory" (`large_address`, 1 is the default) sets the flag in
+`runblack.exe` before each start. Windows of 64 bits then gives the process
+4 GB. With `large_address=0` the launcher clears the flag, and the file is
+the original again, byte for byte. The flag is bit 0x0020 of the
+characteristics. The checksum of the file is 0, so the launcher writes only
+these two bytes. Before the first change it keeps a copy of the original as
+`runblack.exe.before-bwvr`. After each change it compares the SHA-1 of the
+file with the two known values (`exe_check.h`). If the file is not one of
+them, the launcher puts the copy back. A game that runs holds its file, and
+then the launcher starts it as it is. The launcher writes the result in
+`bwvr.ini` (`[launcher] large_address_result`), and the mod writes it in
+its log with the flag and the size of the address space:
+
+```
+game         : runblack.exe is the v1.42 build, checked in 31 ms. It has the flag LARGE_ADDRESS_AWARE (large_address=1), so the game has 4096 MB of address space
+game         : the launcher and the flag before this start: changed, flag on, error 0
+```
+
+Setup gives the players the right to write `runblack.exe`, and the
+uninstaller puts the original back from the copy. The desktop scripts set
+the flag as the launcher does (`large_address` of the run, else of the
+player's ini, else 1), and put the flag of before the run back at the end.
+
+`test_high_memory=1` (a test key, 0 is the default) reserves each free
+block below 2 GB when the mod loads. Each allocation after that gets an
+address above 2 GB. A run with it shows if the game, the mod or a driver
+keeps an address in a signed number. It does nothing without the flag.
+
+**The line of each report window** (`address_space.cpp`). The report of
+each 450 frames has one line with the address space in use, the part of the
+modules, of the views (mapped files and shared memory) and of the private
+memory, the committed memory, the free part, its count of blocks and its
+largest block. A free block counts from its first multiple of 64 KB, because
+`VirtualAlloc` starts each block there (`address_space_math.h`, with
+checks). The walk of `VirtualQuery` runs on a thread of the pool, so the
+frame thread does not wait for it. The first window with a largest free
+block of less than 128 MB adds a line that says so:
+
+```
+address space: <used> MB of <2048 or 4096> MB in use (<modules> MB of modules, <views> MB of views, <private> MB of private memory, <committed> MB committed). <free> MB free in <n> blocks, the largest <largest> MB. <regions> regions, the walk took <ms> ms
+address space: the largest free block is less than 128 MB. A large allocation of the game, of the mod or of a driver can fail now
+```
+
+The report of a crash has the address space too ("The report of a crash").
+
+**The parts of the mod.** Two parts of the mod take address space that
+the log counts:
+
+- the pixels of the surfaces of `backend=vulkan` ("The backend of the mod on
+  Vulkan", "The objects"). With `vk_surface_heap=0` each surface takes a
+  block of `VirtualAlloc`, and each block takes 64 KB at the least. A
+  texture of 256 by 256 pixels of 16 bits with its 9 mip levels then takes
+  640 KB for 171 KB of pixels, and a texture of 32 by 32 with its 6 levels
+  takes 384 KB for 3 KB. The game has about 2100 surfaces in play. With
+  `vk_surface_heap=1` (the default) the pixels come from the heap, and each
+  surface takes about its own bytes.
+- the host memory of the Vulkan renderer, which stays mapped while its
+  buffer lives: the ring of the vertices (32 MB) and the ring of the staging
+  (32 MB) of each of the two slots, and the staging buffers of the reads
+  that do not go into the ring. The report has these buffers and the most
+  that one walk put into each ring. Device memory takes no address space of
+  the process.
+
+**Open question: crashes with no address space left.** Two faults of
+players with the original file agree with a process that has no address
+space left:
+
+- With `backend=vulkan` on an NVIDIA GPU, the game can stop at the choice
+  of the Creature with a write to address 0 in `nvoglv32.dll` (the Vulkan
+  driver of NVIDIA). The call of the mod is the `vkQueueSubmit` of
+  `XrScreen::Impl::EndCopy` (the copy of an eye picture into the swapchain).
+  Two registers hold addresses just under 2 GB.
+- With SteamVR and a render of 4096 by 3966, the game can stop with a read
+  of address 4 in `vrclient.dll` (the client of SteamVR in the process), on
+  a thread of SteamVR.
+
+In both, the dump fails with `0x80070008` (`ERROR_NOT_ENOUGH_MEMORY`).
+
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 With `vk_device=0` ("No Vulkan device of the mod") the mod has no Vulkan
 device, so it writes no file. The proxy still tests for `vulkan-1.dll` with
@@ -5240,8 +5973,11 @@ camera of the game on the desktop has about 70 degrees across, so a centre
 of 25 degrees on each side is 2717 by 2717 pixels of the picture: in a
 headset of about 110 degrees it is 1332 by 1332. The picture at frame 421
 has no edge between the two images, and with `foveation_show=1` the rect of
-the centre with its soft edge shows. Not run: a headset session, an eye
-tracker, the test key.
+the centre with its soft edge shows. Not run: an eye tracker, the test
+key.
+
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ### The middle as its own layer
 
@@ -5722,18 +6458,19 @@ longest frame of a window of 450 frames was 16 ms in most windows with the
 Vulkan eyes and 32 ms with the eyes of Direct3D 9. A window with a copy of
 a relay (a card, the panel, a menu) had 32 ms too.
 
-**Open: only a headset shows it.** Whether the eyes of the Creature have
-their eyeballs with the Vulkan eyes. In a session the renderer drew each
-draw of each window of 450 frames (0.0 not drawn, 3.5 to 12 draws a frame
-in another format of XYZRHW, "What it draws"). Whether a window with a card
-has no frames of 32 ms with `xr_vulkan_upload=1`. Whether the black flicker (at the start of a session, and while the Hand
-strokes the Creature) shows with `vk_scene_follow=1`. In desktop runs
-with 0 the left eye has the subtitle box and the Creature panel, and with
-1 it has neither ("The Vulkan renderer"). A session with Vulkan with
-SteamVR. The relays between Direct3D 11 and
-Vulkan on the drivers of NVIDIA and Intel. The frame time with the Vulkan
-eyes. The scenes that no desktop run compared yet: the
-story camera, the fades, the Temple and the game at night.
+In a session the renderer drew each draw of each window of 450 frames
+(0.0 not drawn, 3.5 to 12 draws a frame in another format of XYZRHW, "What
+it draws"). In desktop runs with `vk_scene_follow=0` the left eye has the
+subtitle box and the Creature panel, and with 1 it has neither ("The Vulkan
+renderer").
+
+**Open.** A session with Vulkan with SteamVR. The relays between Direct3D 11
+and Vulkan on the drivers of NVIDIA and Intel. The scenes that no desktop
+run compared yet: the story camera, the fades, the Temple and the game at
+night.
+
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ## How the threads wait
 
@@ -5784,8 +6521,11 @@ windows:
 With one physical core the spins of `thread_wait=0` take the cores from the
 frame thread. There the frames are 5.9 ms with no D3D7 thread and 8.7 ms with
 it. With 4, 6 and 16 cores the D3D7 thread makes each frame 0.05 to 0.14 ms
-shorter. Not run: a session in a headset with `thread_wait=1`, and the wait
-of the second thread for the GPU, which a desktop run does not have.
+shorter. A desktop run does not have the wait of the second thread for the
+GPU.
+
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ## The calls of DirectDraw and Direct3D 7 in a session
 
@@ -5977,6 +6717,67 @@ itself. The stored camera forward at `0x00EA1DD4` carries the head. It is read b
 particles, trees and the water, which draw. Its one getter, `fn_00442CE0`, has no
 caller.
 
+### The head pose of the frame
+
+The order of a frame of play with a headset:
+
+| Step | Where | The head |
+| --- | --- | --- |
+| 1 | `GGame::ProcessGraphicsEngine` `0x0054D850` calls `GCamera::Update` `0x00441F80`, which ends in `LH3DTech::UpdateCamera` `0x00819920` (the main camera call, `PlaceCamera` in `head_camera.cpp`) | The camera, the culling cone and the God view camera (`TabletopCamera`) take the head of `HeadPoseCurrent` |
+| 2 | `GGame::Process3dEngine` `0x0054DA80`, the scene hook of `stereo.cpp`: `XrScreen::BeginFrame` calls `xrWaitFrame`, `SyncInput` (the hands, at the display time of the frame), `xrBeginFrame` and `xrLocateViews` (at the display time of the frame) | The newest pose of the frame |
+| 3 | The head of the frame in `Process3dEngineBody` | The layer gets the pose of the camera of step 1 (`SetRenderPose`). The pose of step 2 goes to `HeadPoseCurrent` for the rest of the frame |
+| 4 | The eye passes, then `xrEndFrame` with the display time of the frame | The pictures have the camera of step 1 |
+
+Step 1 comes before `xrWaitFrame` of the frame. So with `head_pose_frame=0`
+the camera of a frame takes the pose that the frame before located: the pose
+for the display time of the frame before. The layer declares that pose, so the
+picture and the declared pose agree, and the runtime turns the picture to the
+head at the display. But the pose is one display step older than the display
+time of its picture: 8.3 ms at 120 Hz, or about 10 ms with the display times
+of Virtual Desktop. The hands of the frame have the display time of the frame,
+so they are one step newer than the head.
+
+With `head_pose_frame=1` (the default) the main camera call locates the views
+itself (`StereoHeadForCamera`, `XrScreen::LocateViewsAt`). The time is the
+display time that the frame will get: the display time of the frame before and
+the mean step of the display times (`head_lag_math.h`). The camera, the God
+view and the declared pose then take the pose of the display time of their
+picture, as in an OpenXR app that locates the views after `xrWaitFrame`. The
+hands are of the same time. `xrWaitFrame` stays in the scene hook, so the
+pacing does not change. When the locate fails (the bridge of Direct3D 11, or
+no valid pose), the camera takes the pose of the frame before.
+
+The runtime corrects only the turn of the head. Virtual Desktop sends the
+layer as `ovrLayerType_EyeFov` with the declared pose: the mod gives no depth,
+and the headset reprojects by rotation only (SSW is off). So a pose that is
+one step old shows as a lag of the world when the head moves: at 0.5 m/s, a
+step of 10 ms is 5 mm, which is 0.6 degrees at 50 cm (the land at the waist
+and the hands) and nothing to see on far land.
+
+With the invented head of a desktop run, a step of the head comes from the
+script of the fake controller in the frame functions, after the head of the
+frame. The declared view of the invented head (`StereoDeclaredView`) is the
+invented head at the time of the eye pass, so it has the step in that frame.
+With `head_pose_frame=1` the main camera call of the next frame has the step:
+the eye camera follows 1 frame after the declared eye. With
+`head_pose_frame=0` the camera has it one frame later: 2 frames after the
+declared eye. The first of these frames is in the invented head only. The
+step watch of the scale check gives the number (`controller-hints.md`, 9.16).
+
+The log line in each report window (`head_lag.cpp`), here of the invented
+head in a desktop run:
+
+```
+head lag     : head_pose_frame=1, the invented head. In 450 frames the camera of the game took the head pose of its own frame in 450 frames and the pose of the frame before in 0. The newest pose of the frame was 0.00 mm and 0.000 degrees from the pose of the camera in the mean, and 0.00 mm and 0.000 degrees at the most. 0 frames had a difference
+```
+
+With `head_pose_frame=0` the same window has "in 0 frames and the pose of
+the frame before in 450", and a step of 14.14 cm of the invented head gives
+"141.42 mm ... at the most". In a headset the line also gives the time of the
+pose of the camera before the display time of its picture, and the error of
+the guess of the display time. The frame cost of a desktop run is the same
+with each value of the key.
+
 ## The head on the camera
 
 ### Composition
@@ -6045,6 +6846,61 @@ The layer declares the pose of the runtime, because the render is built to match
 it. When the render leaves out the roll, the mod takes the roll out of the
 declared pose too. A level picture in a tilted frustum would tilt the world with
 the head.
+
+### Canted views
+
+Some headsets (Pimax) turn the view of each eye outward from the head by
+some degrees: the runtime gives each view its own orientation. On a Quest
+the two orientations are equal. The layer declares the orientation of each
+view, so each eye picture must come from the orientation of its own view.
+A picture of the right eye that has the orientation of the left eye shows
+turned by two times the cant, and the player sees a double picture.
+
+With `eye_cant=1` (default):
+
+- The head of the frame is the mean of the two view orientations
+  (`eye_cant_math.h`, `Mean`). The camera of the engine, the Hand, the
+  panels, the menu room and the cut scene window take this head.
+- Each eye pass turns its camera from the head by the turn of its declared
+  view (`Relative`). The per eye matrix is the roll, then that turn:
+  `h = R * C`. The eye stays on the right axis of the head, so the offset
+  in the frame of the eye is `d = offset_x * (row 0 of C)` (`EyeMatrix`).
+  The rendered half angle is the widest angle of either view about its own
+  orientation, so the outer edge of a canted view has a picture.
+- The turn of a frame comes from the same pose as the camera of the engine
+  of that frame (`g_rendered_turn`, `g_frame_turn` in `stereo.cpp`, "The
+  head pose of the frame"). The intro in stereo draws from the pose
+  of its own frame, and it takes the turn of that pose.
+- A frame with a canted view has a walk for each eye, because one walk
+  moves the vertices of the right eye sideways only ("One walk for both
+  eyes"). Below 0.1 degrees a view is not canted, and the frame keeps one
+  walk.
+
+With `eye_cant=0` the head is the view of eye 0, and both eye passes draw
+with its orientation.
+
+The first frame with two views logs the turn of each view from the mean,
+with each value of the key:
+
+```
+eye cant     : the view of eye 0 turns 10.00 degrees from the head (yaw 10.00 to the left, pitch 0.00 up, roll 0.00 to the right), and the view of eye 1 10.00 degrees (yaw -10.00, pitch 0.00, roll 0.00). The head is the mean of the two views
+eye cant     : eye_cant=1. The views are canted. Each eye pass turns its camera by the turn of its view, and the scene has a walk for each eye (no one walk)
+```
+
+`fake_eye_cant_deg` is a test key of the desktop runs. It turns each view
+of the invented head outward by that many degrees (`HeadPoseFakeEye`). With
+`eye_cant=1` the left eye picture then turns to the left and the right eye
+picture to the right. With `eye_cant=0` both pictures turn to the left.
+
+Known limits:
+
+- Only a headset with canted views can show that the two pictures fuse. A
+  player of a Pimax can also turn on "Parallel projections" in Pimax Play.
+  The runtime then gives two views with one orientation.
+- A flat batch of the interface that stays in an eye picture has the same
+  place in both eye pictures. The turn of a canted view does not move it.
+  With the panels, the cards and the subtitle card in the headset, few
+  such batches stay.
 
 ### Recenter
 
@@ -6340,7 +7196,8 @@ loads a saved game of the player.
 moves it.
 
 - **Snap turns in place** (`snap_turn`, default 2 for 45 degrees, steps 0, 30, 45
-  and 90). The game is told the middle mouse (action `0x10`) is up. The mod counts
+  and 90, and 4 for the smooth turn of the God view). The launcher and the
+  settings window do not offer 0. The game is told the middle mouse (action `0x10`) is up. The mod counts
   the mouse movement itself and turns once per 150 counts sideways. A turn key
   counts once per press, read from the key turn at `0x00C5B0C8` that
   `ProcessKeyMovement` fills after each camera update. A turn rotates the focus and
@@ -6671,6 +7528,33 @@ basis by `A` from the stored camera. The mod gives those rows the ratio of `A` f
 the table camera to `A` from the render head (`sky_math.h`, `MistScale`), so the
 shape of a cloud does not change with the head either.
 
+**A near sky cloud stays round** (`cloud_round_near`, default 1000). The engine
+divides the height of a sky cloud on the screen by up to its flatten term (`+0x8C`)
+when the cloud is near the horizon of the eye (`0x007FA4B7` to `0x007FA4DC`). That
+is the look of a far cloud from the high camera of the plain game. In a table frame
+the eye is low, and the sky clouds of a storm can hang near it. Then the engine
+flattens each one, and together they can make one flat grey band (B43 in the
+roadmap). In a table frame a sky cloud nearer
+than `cloud_round_near` units to the stored camera gets the flatten term 1 (round),
+the full term from 2 times that distance on, and a straight line between
+(`sky_math.h`, `NearFlatten`). The mod writes the term at `+0x8C` for the draw and
+puts the game's value back after it. 0 gives each cloud the flatten of the engine.
+The full view does not change.
+
+**A sky cloud at the eye fades** (`cloud_fade_near_cm` 15, `cloud_fade_far_cm` 60).
+In the God view the sky clouds of a storm hang 6 to 20 units from the eye, so a
+round one is a dark mass that fills the view. In a table frame the stored camera is
+the render head of the pass, so the mod measures the gap from the eye to the
+surface of the cloud there. The cloud is a ball 20 times its scale wide, and the
+gap is in cm of the room, so the rule acts the same at each zoom
+(`sky_math.h`, `CloudGapCm`, `CloudFade`). The eye in the cloud, or within the
+near distance of its surface: the mod does not draw it. From there to the far
+distance its draw goes from clear to whole in a smooth step: the mod gives the
+alpha of the color of the object (`+0x4C`) that share for the draw, and puts the
+game's color back after it. A far distance of 0 draws each cloud whole. The report
+has the count of the clear draws, of the draws with a part of their alpha with
+the mean share, and of the whole draws near the eye.
+
 `clouds_head_free` (default 1) picks the point in a table frame: 1 the table camera,
 0 the render head. The full view is the same with each value. The pole limit uses
 the distance to the point that the cloud faces.
@@ -6681,6 +7565,57 @@ second of the time step of the game (`0x00EA9EC0`) along the wind, and wraps a c
 at 8000 units. It reads no camera. In the second eye pass the time step is 0, and
 with one walk the right eye is a copy of the batches of the left eye, so a cloud is
 at the same place in both eyes.
+
+### A drifting cloud stays over the land
+
+The 70 clouds of `CloudInSky` are the drifting clouds. `CloudInSky::Open` gives
+each one a place 300 to 500 units up, x from -8000 to 8000 and z from -5000 to
+5000, a scale of 13 to 50 and a flatten of 2.5 to 5 (`0x005E2439` to
+`0x005E24E6`). `fn_005E25C0` turns that place by a fixed angle and adds
+(1280, 1280) for the draw. The first two are wide flat
+clouds at the far ends (scale 300, flatten 20, `0x005E26D0`). The entries are at
+`0x00D1A270`, 20 bytes each with the `LH3DMist` at `+0x10`, and `fn_005E25C0` moves
+as many as `0x00D1A278` holds. They are on each land.
+
+A dome that faces a camera near its height is a disc that stands up. It goes
+down from its place by its radius times `A`: up to 1000 units for a round cloud
+(`cloud_round_near` makes the near ones round), and up to 400 units with the
+flatten of the engine. The land is 0 to 171 units high and the sea is at y 0. So
+such a dome goes into the land and the sea, and the land cuts it with a hard line
+that moves with the cloud, as a sheet of fog that rolls through the hills. The eye
+of the God view is low, so most clouds are near its height.
+
+With `cloud_land=1` (default) the mod takes the rows of the basis as the engine
+will draw them (row 0 times the scale, rows 1 and 2 times `A`), and tests 37
+points of the half ball of the dome: 12 on each of the rings at 0, 30 and 60
+degrees over its base, and the pole (`sky_math.h`, `LandClearShare`). For each
+point under its place it asks the land under the point (`MapCoords::GetLHPoint`
+`0x00605C40`, the sea out of the map), and it makes rows 1 and 2 shorter by the
+share that keeps each point 10 units over the land or the sea. Row 0 is level, so
+the cloud keeps its width and gets flatter only as much as the land under it
+asks. The share is at least 0.05. The land is asked only when the lowest point of
+the dome (`DomeDrop`) is lower than 181 units. Between two test points the dome
+can go under the gap by less than 5 percent of its drop, at a wall of a hill. The
+shape changes only as the cloud drifts and as the table camera moves, so the mod
+adds no motion. The clouds of a Storm and the mists of the ground keep the rules
+above. `cloud_land=0` is the dome of the game, and `cloud_land=2` draws no
+drifting cloud (no fog that rolls over the land, and no clouds in the sky but
+those of the weather). The switch "Cloud land" of the debug page makes the same
+step.
+
+The report of each window has a line `cloud_land=N`: the draws of a drifting
+cloud, those that went into the land or the sea (measured with each value), the
+draws that were made flatter, the least share, the draws that value 2 did not
+draw, and the questions to the land with their time, in all and for each frame.
+
+A desktop run in the test save `temple` (Land 1, the God view, dxwrapper,
+`sky_test_land_frame`) shows it. With `cloud_land=0` a cloud behind the hills
+comes down to the ridge, and the ridge cuts it with a hard line. With 1 the same
+cloud ends over the ridge with a round lower edge. About 7 to 10 percent of the
+draws of a drifting cloud go into the land or the sea, and the least share is
+0.47 to 0.89. The test asks the land about 35 times a frame and takes 0.007 ms
+of a frame on the CPU. With `cloud_round_near=0` a near cloud is flat and ends
+over the horizon, so most of the cut comes from the round near clouds.
 
 `UpdateCamera` also builds a heading turn at `0x00EA1D88` from the stored camera. The
 draw at `0x0080DB30` turns billboard meshes at the lowest detail by it, so far trees
@@ -6711,7 +7646,7 @@ The sun disc (`fn_0086C140`) is a fixed quad and reads no camera turn. The dome
 (`fn_0086B6B0`) is a sphere about a fixed point. The sun glare has its own key (see
 "The sun glare").
 
-Three test keys are for desktop runs. The launcher removes them from `bwvr.ini` on
+Seven test keys are for desktop runs. The launcher removes them from `bwvr.ini` on
 each save.
 
 - `sky_test_frame=N`: at frame N of the scripted controller, `clouds_head_free` and
@@ -6725,8 +7660,33 @@ each save.
   hour H (`GLandAlignement::SetTime` `0x005E22E0`, and the visual time at
   `0x00BF3380`). The time then goes on as the game moves it. `LH3DAtmos::UpdateGame`
   gives the moon the height `1100 * cos(15 * t) - 150`, with `t` from the visual time
-  (`fn_0086A160`), so the moon shows at night. The time of day comes from the game
-  and not from the clock of the PC: the test save "pen" is at dusk.
+  (`fn_0086A160`), so the moon shows at night. The game takes the time of day
+  from the clock of the PC, so a desktop run at night shows the night sky. A run
+  that must show the day needs `sky_test_hour` (12 or 13). The count of the passes
+  that ask for a sun glare is the same at night, so it does not show the sun.
+- `sky_test_mist_log=1`: a line `sky mist` for each new mist that is not a sky cloud
+  (flag 2 at `+0x80` is clear: a mist of the weather, of a storm or of the ground),
+  up to 40 mists. It gives the place, the radius of the dome (20 times `+0x88`), the
+  pole (20 times `A`), the flatten, the flags, the distance to the point that the
+  mist faces and to the stored camera, and whether the pole limit acted. Each report
+  window has a line with the count of those draws, the nearest one and the widest
+  dome.
+- `sky_test_mist_hide=N`: from frame N of the scripted controller (a frame of the
+  steps in a test save) the mod does not draw a mist that is not a sky cloud, and
+  the log says so one time, at the first draw of any mist from that frame on.
+  Two eye pictures, before and after that frame, show what those mists draw.
+- `sky_test_mist_hide_all=M`: from frame M the mod draws no mist and no sky
+  cloud. The line of the report gives the draws that each key hid.
+- With `sky_test_mist_log=1` there is also a line `sky cloud` for each new sky
+  cloud, up to 80: its place, its distance from the stored camera and its height
+  over it, its width and its height on the screen, the flatten of the engine and
+  the flatten that it gets. Each report has the nearest and the lowest sky cloud,
+  and the count of the draws that `cloud_round_near` made rounder.
+- `sky_test_round_frame=N`: at frame N of the steps `cloud_round_near` goes to 0,
+  or from 0 to 1000, one time.
+- `sky_test_land_frame=N,M,...`: at each of up to 4 frames of the steps
+  `cloud_land` makes one step, as the switch of the debug page does (1, 2, 0,
+  1).
 
 ### Sprites with world up
 
@@ -6812,8 +7772,17 @@ Ruled out as the cause: the full screen quad that `LH3DRender::FinishFrame` draw
 `0x0082F617` (diffuse 0, a transparent fade) and `CloudInSky` (its per frame update at
 `0x005E25C0` drifts the 70 clouds in world space and reads no camera).
 
+A desktop run with the sun in the view (`sky_test_hour=13`, a head with a roll of
+25 degrees and a level head) has the glare on the disc of the sun in each pose,
+with `sun_glare` 0 and 1. With a still head the two values give the same sun:
+less than 0.2 percent of the pixels of the sun area differ by more than 6.
+
 Open: the sun bobs a little as the head moves in the headset. The sun glare is the
-best candidate, and it is not proven.
+best candidate, and it is not proven. Not run: `sun_glare=2`, and a head that
+moves.
+
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ### The eye camera after a camera of its own
 
@@ -6954,6 +7923,96 @@ about 800 to 900 units in clear weather.
 Open: the depth is measured along the view axis, not as a distance. An object at the
 edge of the view keeps more detail and can drop a level when the player turns to it.
 A hook on `0x00868C80` that uses the straight distance would fix it.
+
+### Models are drawn further out
+
+`GLandscape` fills its list of map objects (`fn_005E5CD0`) from a list of the land
+blocks in view, near to far. It stops at the first block that is not nearer than
+`[0x00C37200]`: 700 units (`0x005E5DE6`). So no tree, house or villager past 700
+units is drawn at all. The same distance ends the objects at `0x005E4A99` and the
+fade of the shadows (`fn_00874600`). Scripts change it through
+`SetVanishObjectDist`.
+
+The fog is computed on the CPU, linear in the depth from a start (`0x00C37220`) to
+an end (`0x00C37224`). The sky sets both once a frame through `fn_007FEAA0` (cdecl,
+the start and the end, plain `ret`). Its only caller is at `0x00869F59`. The
+function also keeps the end less the start at `0x00E9B6DC`, and the fog of the
+objects and of the land divides by that range. The sky asks for 400 to 900 units in
+clear weather, and down to 15 to 350 in rain. So in clear weather the far edge of
+the objects is 60 percent in the fog.
+
+`cull_distance` multiplies the 700. The key is 0 for the game's own, 1 for 2x, 2 for
+3x, 3 (default) for 5x and 4 for 10x. 10x is 7000 units, past the far corner of
+the map from its middle. `TabletopApplyFrame` writes the distance once a frame,
+also in the frames that the God view does not own. In the God view the gain of the
+view (`god-view.md`, section 8) comes on top, and on the table the distance is
+8000 while the table owns the frame. The value is at most 8000, and never less than
+the game's own value.
+
+`cull_fog=1` (default) moves the fog start and end of the sky out by the ratio of
+the map object distance with the cull factor to the distance without it
+(`cull_math::FogRatio`). A hook on `fn_007FEAA0` changes the two arguments, so the
+range at `0x00E9B6DC` stays correct. The far edge of the objects is then at the
+same share of the fog as without the setting, in each weather, and the far land is
+not in fog. A model that is far out goes into the fog, and the fade of the model
+detail (see above) takes the small ones out before that. Where the cap of 8000
+holds the distance with and without the factor, the ratio is 1 and the fog does
+not change. `cull_fog=0` keeps the fog of the game.
+
+| Scale (units per meter) | Gain of the view | Map objects stop, Game / 5x | Fog, Game / 5x |
+| --- | --- | --- | --- |
+| 1 (the nearest zoom) | 1 | 700 / 3500 | 400 to 900 / 2000 to 4500 |
+| 7.5 (life size) | 1 | 700 / 3500 | 400 to 900 / 2000 to 4500 |
+| 15 | 2 | 1400 / 7000 | 400 to 900 / 2000 to 4500 |
+| 22.5 and more | 3 and more | 2100 or more / up to 8000 | off / off |
+
+The God view has the fog off from a gain of 3 (`god-view.md`, section 8). So at
+the scales of a normal play (the start at 100 units per meter, the village at
+44.4) the fog is off with each value of the key, and the setting changes only the
+map object distance. From 11.4 times the life size scale (86 units per meter) the
+cap of 8000 holds the distance with and without the factor.
+
+The model detail distance still ends each model: a large model fades out between
+86.7 and 173.3 times the size cap of 5, times `detail_distance`. At 5x that is 2170
+to 4330 units. With `detail_distance=0` and a long cull distance, the large models
+stop at 870 units.
+
+The list of map objects holds 2999. A full list takes no more objects, and the
+list is filled near to far, so a full list loses the far objects and never the
+near ones. The sorted list of transparent objects holds 2048. Each pass counts
+both lists, a full list gets a log line `tabletop : a list is full`, and the
+report of the God view has the largest counts.
+
+Only with `play_mode=3` and 4, where `tabletop.cpp` writes the distances. The
+values of a frame are latched before the eye passes (`CullDistanceFrame`). The
+debug page has the switches "Cull distance" and "Cull fog".
+
+Each report window has a line:
+
+```
+cull         : cull_distance=3, map objects stop at 3500 units. cull_fog=1: the sky asked for the fog from 400 to 900 units, the game got 2000 to 4500. 900 of 900 fog sets scaled
+```
+
+Test keys: `cull_test_frame=N` steps the cull distance as the debug page does,
+from frame N of the controllers on, each `cull_test_period` frames (700). The
+frames count as the steps of the script count them, also with
+`fake_controller_play_frame`.
+
+Measured on Land 1, at 1 unit per meter with the head 100 m over the land near
+the Temple, at a render of 2760 by 2208: the game's value draws 957 of 2999 map
+objects, and 2x to 10x draw about 1040. The sorted list has 68 to 114 of 2048.
+The work of a frame is 2.74 to 2.96 ms with each value, and the draw calls grow by
+at most 93. At the scales of the bench (100, 44.4, 337.5 and 4000 units per meter)
+5x and the game's value give the same objects, draw calls and frame time.
+
+The default is 5x. It reaches 3500 units, which is most of a land from its middle.
+The God view already draws the map objects to 8000 units at the scales of a normal
+play, so 5x never asks for more objects than those scales do. A list that fills
+loses only the far objects.
+
+Open: a busy land (the large towns and forests of Land 2 to 5) is not measured.
+No test save of a later land exists, and `make_test_save.ps1` makes saves of Land 1
+only.
 
 ## Time, bars and the second eye pass
 
@@ -7198,8 +8257,10 @@ has `one_walk=0`.
 Open: no desktop run had a real lightning, of a storm or of a miracle. Only the
 test light is shown in a run, and no run had a light map of a particle. Not
 known: which effects have a particle with a light map, and whether the second
-eye pass has such a map by itself. The line of the window in the log of a
-session with such an effect shows it.
+eye pass has such a map by itself.
+
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ### The color over the picture at the end of a frame
 
@@ -7326,8 +8387,10 @@ Hotkeys read `GetAsyncKeyState` and work only while a window of the game process
 in front. The mod reads the keys and never takes them from the game.
 
 The column "Debug page" names the group and the item of the same switch on
-the debug page of the ring (`debug_menu=1`, `controllers.md`, 10.8). The item
-calls the same change function as the key. "None" is a key with no item.
+the debug page (`debug_menu=1`, `controllers.md`, 10.8): a tab and a row of
+the debug window, or a page and an item of the ring with `debug_window=0`.
+The item calls the same change function as the key. "None" is a key with no
+item.
 
 | Key | For | Effect | Debug page |
 | --- | --- | --- | --- |
@@ -7419,6 +8482,8 @@ calls the same change function as the key. "None" is a key with no item.
 | Ctrl Shift Period | `test_keys=1` | On the hint card, the lines of the walk with the stick and of A show only while they can move the player, or the card has no line for the walk and the line of A shows in each case. A long pulse and a short pulse (`prompt_moves`, `controller-hints.md`, 9.4) | Interface, Prompt moves |
 | Ctrl Shift H | `test_keys=1` | In the God view the Creature turns to and looks at the head of the player, or at the game's own camera. A long pulse and a short pulse (`creature_player_head`, `creature.md`, 5.4). Shift H with Ctrl up is a key of the render | None |
 | Ctrl Shift E | `test_keys=1` | After a camera of its own in an eye pass, the draws of the pass use the camera of the eye, or the camera that the game leaves. A long pulse and a short pulse (`eye_after_camera`, "The eye camera after a camera of its own"). Shift E with Ctrl up is a key of the render | Picture, Eye camera |
+| None | `debug_menu=1` | The look of the hint cards, of the ring and of the keyboard in the headset: the parchment scroll or the plain dark card. A long pulse and a short pulse (`hint_card_style`, `controller-hints.md`, 9.11) | Interface, Card look |
+| None | `debug_menu=1` | Each line of a button on a hint card has a picture of the button, or the button word only. A long pulse and a short pulse (`hint_card_pictures`, `controller-hints.md`, 9.13) | Interface, Card pictures |
 | Ctrl Shift Numpad Slash | `test_keys=1` | The mod waits for the GPU after each eye pass, one time a frame, or one time a frame on a second thread that also gives the frame to the runtime. A long pulse, a pulse of middle length and a short pulse (`frame_send`, "One wait a frame, and a second thread"). The slash key with Shift and no Ctrl is a key of the Temple, and with no Shift it is a key of the throw | Render, Frame send |
 | Ctrl Shift 7 | `test_keys=1` | With `backend=vulkan`: `gpu_mesh` is 1 or 0 (the meshes of the 3D parts on the GPU or on the CPU). With `gpu_mesh=0` in `bwvr.ini` the hooks go in at the first press. A long pulse for 1 and a short pulse for 0 (`gpu_mesh`, `software-tnl.md`, "The meshes on the GPU") | Render, GPU mesh |
 | Ctrl Shift 2 | `test_keys=1` | With `backend=vulkan`: the depth test EQUAL with the bias (`vk_equal_depth`) is on or off, for the draws that follow, also in the headset app. A long pulse for on and a short pulse for off | None |
@@ -7442,10 +8507,17 @@ calls the same change function as the key. "None" is a key with no item.
 | Ctrl Shift S | `test_keys=1` | With `game_sse_parts` not 0 and `game_sse_check=0`: from the end of the frame each part of the game reads the flag of the game (the old way), or the bit of `game_sse_parts`. A line `test key` in the log ("The SSE paths of the game, one at a time") | None |
 | Ctrl Menu key | `test_keys=1` | The layout of the buttons of the hand that does not point. The menu button of the left controller opens the game menu, Y opens the ring and the stick does not drive the ring, or Y opens the game menu and X and the stick open the ring. A long pulse and a short pulse on that hand (`button_layout`, `controllers.md`, 5.1). Shift must be up | View, Button layout |
 | Shift Menu key | `test_keys=1` | The walk with the stick of the hand that does not point steps from 1 to 2 to 0 and back: forward is the direction of the head, forward is the direction of that controller, or the stick does not move the player. A medium pulse, a long pulse and a short pulse (`move_stick`, `god-view.md`, section 5.7). Ctrl must be up | View, Stick walk |
+| None | `debug_menu=1` | The kind of move of the stick of the hand that does not point steps from the walk that follows the land, to the walk that keeps its height, to the fly, and back. A short, a medium and a long pulse (`move_type`, `move_stick_follow_land`, `god-view.md`, section 5.7). The debug page only | View, Move kind |
+| None | `debug_menu=1` | The speed ramp of a full push of the stick of the hand that does not point, off or on. A short and a long pulse (`move_stick_ramp`, `god-view.md`, section 5.7). The debug page only | View, Speed ramp |
+| None | `debug_menu=1` | A fly at a house, a rock or a tree trunk: it stops short of it, or it slides past it. A short and a long pulse (`fly_solid_slide`, `god-view.md`, section 5.7). The debug page only | View, Fly at solids |
+| None | `debug_menu=1` | A zoom in over a land more than 2.5 m below the head: about a level 2.5 m below the head, or about the land. A short and a long pulse (`god_zoom_far_level`, `god-view.md`, section 2). The debug page only | View, Deep zoom |
+| None | `debug_menu=1` | The speed of the walk and the fly with the stick: the same at each scale, or times the factor of the scale (4 at 1 unit per meter, 0.6 from 44 up). A short and a long pulse (`move_stick_scale`, `god-view.md`, section 5.7). The debug page only | View, Speed by scale |
+| None | `debug_menu=1` | The grab of the world with one hand: 1:1, or with the gain for land far below the hand and for a small scale. A short and a long pulse (`grab_boost`, `god-view.md`, section 5.1). The debug page only | View, Grab gain |
 
-The launcher shows `test_keys` as "Test keys", in a group named "Testing". It is off
-by default. The row "Debug menu" (`debug_menu`) under it puts the same switches on
-the ring.
+The launcher has no row for `test_keys`. It is off by default, and a tester or a
+desktop run writes it in `bwvr.ini` (a save of the launcher keeps it). The row
+"Debug menu" (`debug_menu`) in the group "Testing" puts the same switches in the
+debug window, which the ring opens.
 
 Why these keys. The game binds F1 to F9: F6 to F9 go to the Challenge Room, the Save
 Game Room, the Options Room and the Library (`ControlMap::LoadDefaults`,
@@ -7516,7 +8588,10 @@ keys that the launcher sets.
 | `eye_separation_milli` | 0 | 0 asks the headset |
 | `head_units_per_meter_x10` | 75 | World units per meter, in tenths |
 | `head_roll`, `water_simple` | 1, 1 | See "Roll and the sea" |
+| `sea_depth` | 0 | 1: the land of the sea goes on down under the water and fades into the sea by its depth, and the light of the Hand on the water writes no depth. 0: the flat coast of the game. See "The sea with depth" |
 | `head_camera` | 1 | The head on the camera |
+| `head_pose_frame` | 1 | 1: the main camera call locates the head for the display time of its frame, so the picture and the declared pose have the pose of their display time. 0: the camera takes the pose that the frame before located, one display step older. The debug page switch "Head pose". See "The head pose of the frame" |
+| `eye_cant` | 1 | 1: with canted views (Pimax) the head is the mean of the two views, and each eye pass turns its camera by the turn of its view. 0: the head is the view of eye 0, and both eyes draw with its orientation. No test key. See "Canted views" |
 | `hand_anchored` | 1 | The Hand keeps its place in the room |
 | `game_camera_rebuild` | 1 | See "The game camera's own screen" |
 | `pointer_scale`, `pointer_clip` | 1, 1 | See "The window is the input device" |
@@ -7524,13 +8599,17 @@ keys that the launcher sets.
 | `exit_shutdown` | 1 | 1: the mod shuts down on the exit path of the game. 0: in `DllMain`. See "The end of the mod" |
 | `exit_test_frame` | 0 | A test key of the desktop runs: the frame at which the game ends by itself. See "The test of the end" |
 | `registry_test_guard` | 0 | A test key of the desktop runs. 1: from the start of the mod, the mod drops each write of the game to its keys of the registry, and the log names each one. See "A test save" |
+| `start_new_game` | 0 | 0: with no word on the command line, the game loads the save of the exit and opens its Main Menu. `-NEWGAME` starts a new game with the start dialog of the fan patch first. 1: each start is a new game, and the word `-CONTINUE` loads the save of the exit. See "The start of the game" |
 | `menu_skip_test_frame` | 0 | A test key of the desktop runs: the frame at which the mod closes the Main Menu that the game opens over a saved game that it loads at its start, as the button "Continue Game" does. 0 is off. The launcher removes the key from `bwvr.ini` on each save. See "A test save" |
 | `window_width`, `window_height` | 0 | A forced window size |
 | `snap_turn`, `blink`, `instant_jumps`, `camera_glide` | 2, 0, 1, 0 | See "Moving around" |
 | `turn_help_degrees`, `god_turn_keeps_focus`, `tilt_help_degrees` | 5, 1, 3 | See `god-view.md`, "The turn lesson" |
 | `zoom_step` | 2 | See "Zoom in steps" |
-| `move_stick`, `move_stick_speed_cm` | 1, 150 | The walk with the stick of the hand that does not point, in the God view. See `god-view.md`, section 5.7 |
-| `move_stick_follow_land` | 1 | 1: in the walk with the stick, the height of the view follows the land under the head. 0: the view keeps its height. See `god-view.md`, section 5.7 |
+| `move_stick`, `move_stick_speed_cm` | 1, 150 | The walk or the fly with the stick of the hand that does not point, in the God view. See `god-view.md`, section 5.7 |
+| `move_type` | 0 | 0: the stick walks over the land. 1: the stick flies along the forward direction in 3D. See `god-view.md`, section 5.7 |
+| `move_stick_ramp`, `move_stick_ramp_most` | 1, 32 | The speed ramp of a full push of the stick, and its largest factor. See `god-view.md`, section 5.7 |
+| `fly_solid_slide` | 1 | 1: a fly slides past a house, a rock or a tree trunk. 0: it stops short of it. See `god-view.md`, section 5.7 |
+| `move_stick_follow_land` | 1 | 1: in the walk with the stick, the height of the view follows the land under the head. 0: the view keeps its height. A save of the launcher removes it. See `god-view.md`, section 5.7 |
 | `button_layout` | 1 | The layout of the buttons of the hand that does not point. See `controllers.md`, 5.1 |
 | `drag_smoothing_ms` | 35 | See "Smoother drags far out" |
 | `script_camera` and its keys | 2 | See "The story camera" |
@@ -7543,9 +8622,15 @@ keys that the launcher sets.
 | `spirit_anchor` | 1 | See "The advisors" |
 | `spirit_world_size` | 1 | The size of an advisor at a place of the world. See "The advisors" and `tabletop.md` |
 | `cloud_pole_pct`, `sun_glare`, `detail_distance` | 25, 0, 3 | See "Sky, clouds and detail" |
+| `cull_distance` | 3 | How far out map objects are drawn: 0 the game's 700 units, 1 2x, 2 3x, 3 5x, 4 10x. See "Models are drawn further out" |
+| `cull_fog` | 1 | 1: the fog start and end move out as far as `cull_distance` moves the map object distance out. 0: the fog of the game |
+| `cull_test_frame`, `cull_test_period` | 0, 700 | Test keys: from frame N of the controllers on, the cull distance steps each period. The launcher removes them from `bwvr.ini` |
+| `cloud_fade_near_cm`, `cloud_fade_far_cm` | 15, 60 | In the table and the God view a sky cloud is clear when the eye is in it or within the near distance of its surface, and whole from the far distance on, in cm of the room (see "Clouds"). A far distance of 0: each sky cloud is whole |
+| `cloud_round_near` | 1000 | In the table and the God view a sky cloud nearer than this many units keeps its round shape, and the flatten of the engine comes back to its full value at 2 times the distance (see "Clouds"). 0: each sky cloud has the flatten of the engine |
 | `clouds_head_free` | 1 | 1: in the table and the God view the clouds face the table camera, so a move of the head does not turn them. 0: they face the render head. See "Clouds" |
+| `cloud_land` | 1 | 1: a drifting cloud of the sky gets flatter where it must, so that it stays 10 units over the land and the sea. 0: the dome of the game, which the land cuts. 2: no drifting clouds. See "A drifting cloud stays over the land". The switch "Cloud land" of the debug page |
 | `moon_world_up` | 1 | 1: the moon turns with world up, so it stays fixed in the sky. 0: it turns with the camera of the head. See "The moon" |
-| `sky_test_frame`, `sky_test_trace`, `sky_test_hour` | 0, 0, -1 | Test keys of the desktop runs. See "The moon" |
+| `sky_test_frame`, `sky_test_trace`, `sky_test_hour`, `sky_test_mist_log`, `sky_test_mist_hide`, `sky_test_mist_hide_all`, `sky_test_round_frame`, `sky_test_land_frame` | 0, 0, -1, 0, 0, 0, 0, none | Test keys of the desktop runs. See "The moon" |
 | `sprite_world_up` | 1 | 1: smoke, fire and the other sprites keep world up, so they do not roll with the head. 0: they roll with the head. See "Sprites with world up" |
 | `sprite_test_frame`, `sprite_test_trace` | 0, 0 | Test keys of the desktop runs. See "Sprites with world up" |
 | `eye_after_camera` | 1 | 1: after a camera of its own in an eye pass, the draws of the pass use the camera of the eye again, so the clouds, the beams of light and the sprites roll with the world. 0: they use the camera that the game leaves, which has no roll and no eye offset. See "The eye camera after a camera of its own" |
@@ -7643,6 +8728,10 @@ keys that the launcher sets.
 | `vk_pace` | 0 | With `vk_device=0` and `xr_input=1`: 1 each frame of the game waits for the next write of the slot of the input channel (a frame of the session of the headset app), at most 5/4 of its display period, or one period of 72 Hz with no fresh slot. 0 no wait. There is no test key. See "No Vulkan device of the mod" and `android.md`, "The pace of the frames" |
 | `vk_window` | 1 | With `backend=vulkan`: 1 the window of the game gets the picture through a swapchain of Vulkan, 0 through the CPU and GDI. A test key: Shift D. See "The window with Vulkan" |
 | `vk_texture_reuse` | 1 | 1 a texture that a walk reads again goes into the image it has when it can, and its pixels into a ring of the slot, so a read makes no allocation of the GPU. 0 each read makes a new image and a staging buffer. See "The Vulkan renderer" |
+| `vk_upload_keep` | 1 | With `backend=vulkan`: 1 a texture that the game wrote keeps its old image until the new image has its pixels, so a failed upload does not make it white. 0 the old image goes first. See "The Vulkan renderer", "A new image for a texture that the game wrote" |
+| `vk_texture_forget` | 1 | With `backend=vulkan`: 1 the renderer forgets the texture of a surface that the game releases, so a new surface at the same address gets a new texture. 0 the texture stays with its image until the game writes the new surface. See "The Vulkan renderer", "A surface that goes away" |
+| `vk_blt_blocks` | 1 | With `backend=vulkan`: 1 a `Blt` from RGB pixels into DXT1 blocks makes the blocks, and a `Blt` between two textures of one DXT format copies the blocks of its rects. 0 the first is refused, and the second copies all the bytes. See "The save picture" |
+| `vk_surface_heap` | 1 | With `backend=vulkan`: 1 the pixels of a surface come from the heap of the process. 0 each surface takes a block of `VirtualAlloc`, at least 64 KB of the address space. See "The address space" |
 | `foveation` | 0 | 0 each pixel of the eye pictures has the full rate. 1 light, 2 medium, 3 strong (the launcher writes 1 and the two degrees of its sliders): the part around the centre of the fovea has the full rate, and the rest fewer shades. Only the eye pictures of the Vulkan renderer. The launcher has the row "Foveated rendering (test)". A test key: Shift O. See "Foveated rendering" |
 | `foveation_inner_deg`, `foveation_outer_deg` | 0, 0 | The degrees of the full rate and of 2 by 2 around the centre of the fovea. 0 takes the degrees of the level. See "Foveated rendering" |
 | `foveation_show` | 0 | A test key: 1 a colour over the coarse parts of the eye pictures, blue for 2 by 2 and red for 4 by 4. Shift O goes to it too. See "Foveated rendering" |
@@ -7671,12 +8760,24 @@ keys that the launcher sets.
 | `time_log` | 1 | 1: each 10 s one line in `bwvr.log` with the mean and the most of the frame, the scene walk, the write of the live stream, the wait of the pace and the rest. 0: no line. There is no test key. See "The time log of the mod" |
 | `one_walk_marks`, `one_walk_marks_test_frame` | 1, 0 | See "The cards and the marks of the mod" |
 | `skip_desktop_present` | 1 | See "The copy to the monitor" |
+| `video_view` | 0 | 1: with `backend=vulkan` the window of the game shows a 16:9 area of the left eye picture, also in a headset session. 0: the window shows the whole left eye picture, and a session does not copy it to the window. The switch "Video view" of the debug page. See "The view for videos" |
+| `video_view_down_pct` | 20 | The middle of the area is this many percent of the height of the eye picture below its middle, 0 to 40. The row "Video height" of the debug window. See "The view for videos" |
+| `video_view_fov_deg` | 90 | The width of the area in degrees at the middle of the eye picture, 40 to 110. See "The view for videos" |
+| `video_view_smooth_ms` | 150 | The time constant of the smoothed head of the video, 0 to 1000. 0: the area follows the head with no smoothing. See "The view for videos" |
+| `video_view_marks` | 1 | 1: faint corner marks in the eye pictures show the area in the headset. 0: no marks. The switch "Video marks" of the debug page. See "The view for videos" |
+| `video_view_layers` | 1 | 1: the quad layers of the headset (the cards, the ring, the panels and the walls of the cut scene window) are in the view for videos, where the left eye sees them. 0: the window shows the eye picture only. The switch "Video layers" of the debug page. See "The view for videos" |
+| `video_view_copy_changed` | 1 | 1: the view for videos copies the pixels of the CPU of a card only after the card drew a new picture. 0: it copies each such card at each present. See "The view for videos", "The layers in the video" |
 | `blt_texture_copy` | 1 | 1: the mod makes a copy with a texture and no stretch itself. 0: each copy goes to dxwrapper. See "The copy to the monitor" |
 | `test_frame_rate` | 0 | A test key of the desktop runs: the frame rate of a run with no copy to the monitor. See "The copy to the monitor" |
 | `anisotropy`, `force_mips` | 16, 1 | Texture filter. `force_mips` forces the mip filter |
-| `skip_snapshot` | 1 | |
+| `skip_snapshot` | 1 | 1: while VR runs, the mod decides the save picture (`save_picture`). 0: the game makes each save picture from its own screen, which reads past the end of a square window. See "The save picture" |
+| `save_picture` | 1 | 1: in VR the game makes each save picture from a surface of the mod with the middle of the left eye picture. 0: no save picture in VR. See "The save picture" |
+| `save_picture_fit` | 1 | 1: the surface of the save picture has the size of the read of the game (256 by 128, or 400 by 300 for the full picture), so each pixel is the mean of its box. 0: a surface of 512 by 384, of which the game reads one pixel of each 2 by 3. See "The save picture" |
+| `vk_dxt_fit` | 1 | With `backend=vulkan`: 1 each DXT1 block of a save picture gets the two colors of least squares when they are nearer to its pixels. 0 the ends of the box of its colors. See "The save picture" |
+| `save_picture_test_dump` | 0 | A test key: each save picture of the mod goes to `bwvr-save-picture-N.bmp`, and the texture of the game to `bwvr-save-picture-N.raw`, beside `runblack.exe` |
 | `test_keys` | 0 | The test keys |
 | `file_read_ahead` | 1 | 1: a read of less than 64 KB from a file that LHFile opens to read comes from a copy of the next 256 KB of the file. 0: each read goes to `ReadFile`, as in the plain game. A test key: Shift Q. See "The read ahead of the files of the game" |
+| `save_virtual_store` | 1 | 1: when Windows refuses a call of `LHOSFile` (exists, open, delete, rename) to a file in Program Files in a virtualized game process, the mod makes the call again on the VirtualStore copy of the file. So a save ends with `<slot>.sav` and `SaveGame.inf`. 0: each call goes to Windows as the game makes it. No test key. See "A save in the VirtualStore" |
 | `profile` | 0 | A test key. 1 is the frame cost measure with a timer on each Direct3D draw call, 2 is the measure with no such timer. See "The frame cost measure" |
 | `draw_probe`, `capture_every_seconds` | 0 | Reports and eye pictures |
 | `eye_test_luma` | 0 | A test key. 1: the log names each run of frames with one dark eye and each run of black frames. See "Testing without a headset" |
@@ -7687,6 +8788,7 @@ keys that the launcher sets.
 | `target_glow_pct`, `target_glow_anim` | 45, 3 | The strength of that glow, 0 to 200 percent of the halo color. Its animation: 0 steady, 1 the pulse, 2 the band of light that goes up the mesh, 3 both |
 | `target_glow_test_keys`, `target_glow_log` | none, 0 | Test keys of the desktop runs. See the same section |
 | `fake_head`, `fake_head_yaw`, `fake_head_pitch`, `fake_head_roll`, `fake_head_sweep`, `fake_head_fov`, `fake_head_layers`, `stereo_headless`, `fov_absolute_deg`, `head_fov_deg` | 0 | See "Testing without a headset" |
+| `fake_eye_cant_deg` | 0 | A test key of the desktop runs. Each view of the invented head turns outward by this many degrees. See "Canted views" |
 
 ## Ready to hand out
 
@@ -7737,11 +8839,6 @@ section, so the uninstaller can put them back.
 
 ## Open items
 
-- The end of the OpenXR session at the exit of the game (`XrScreen::Stop` on
-  the exit path) has run in no headset session. See "The end of the mod".
-- A session that starts after a try on the thread of the tries
-  (`vr_start=1`), and the fall back to `vr_start=0`, have run in no headset
-  session. See "The start of the headset session".
 - A device lost after the bridge has started is not tested.
 - The worst frames of 31 to 52 ms have no explanation.
 - The sun bobs a little in the headset.
@@ -7751,3 +8848,6 @@ section, so the uninstaller can put them back.
   (about 3 ms in a heavy scene), are open ideas.
 - An off centre projection for each eye would draw about a third less.
 - The game turn could move off the render thread if its spike is large.
+
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.

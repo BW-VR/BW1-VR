@@ -128,9 +128,9 @@ inline void MenuChecks() {
               "vk_device=0\r\n");
   menu.Load(ini);
   Check(menu.ValueOf("snap_turn") == 3, "a choice reads its index", 0, 0);
-  Check(menu.ValueOf("play_mode") == 0,
-        "play mode 0 of an old ini shows the God view (item 0)",
-        menu.ValueOf("play_mode"), 0);
+  Check(menu.ValueOf("play_mode") == -1,
+        "play_mode has no row: the mod plays in the God view",
+        menu.ValueOf("play_mode"), -1);
   Check(menu.ValueOf("resolution_pct") == 200,
         "a scale stops at its high end", menu.ValueOf("resolution_pct"), 200);
   Check(menu.ValueOf("one_walk") == 1, "a missing key is its default", 0, 0);
@@ -184,13 +184,13 @@ inline void MenuChecks() {
   menu.SetCursor(moving);
   menu.Select();
   items = menu.Items();
-  Check(menu.Label(items[0]) == "Turn in steps", "the first row of the page",
-        0, 0);
+  Check(menu.Label(items[0]) == "Turn", "the first row of the page", 0, 0);
   Check(menu.ValueText(items[0]) == "90 degrees", "snap_turn 3 is 90 degrees",
         0, 0);
   menu.SetCursor(0);
   menu.Step(1);
-  Check(menu.ValueOf("snap_turn") == 0, "a step past the end goes round",
+  Check(menu.ValueOf("snap_turn") == 0,
+        "a step past the end goes round, to the first item (Smooth)",
         menu.ValueOf("snap_turn"), 0);
   menu.Step(-1);
   Check(menu.ValueOf("snap_turn") == 3, "and a step back goes round too",
@@ -247,9 +247,9 @@ inline void MenuChecks() {
   Check(ini.GetInt("bwvr", "vr", 0) == 1 && ini.GetInt("bwvr", "stereo", 0) == 1 &&
             ini.GetInt("bwvr", "head_camera", 0) == 1,
         "vr, stereo and head_camera are 1", 0, 0);
-  Check(ini.GetInt("bwvr", "play_mode", 0) == 4,
-        "play_mode is the value of the item, 4", ini.GetInt("bwvr", "play_mode", 0),
-        4);
+  Check(!ini.Has("bwvr", "play_mode"),
+        "the save removes play_mode, a key that the launcher offered before", 0,
+        0);
   Check(ini.GetInt("bwvr", "keep_me", 0) == 7,
         "a key that is not in the table stays", 0, 0);
   Check(ini.GetInt("bwvr", "vk_device", 1) == 0,
@@ -262,7 +262,7 @@ inline void MenuChecks() {
   Menu again;
   again.Load(ini);
   Check(again.ValueOf("foveation_inner_deg") == 44 &&
-            again.ValueOf("snap_turn") == 3 && again.ValueOf("play_mode") == 0,
+            again.ValueOf("snap_turn") == 3,
         "a load of the save gives the same values", 0, 0);
 }
 

@@ -40,12 +40,25 @@ Marks, as in `tabletop.md`:
 - A note of the game over a thing (the percent of a lesson over the
   Creature) stays in the eye pictures, at the depth of its place (section
   19).
+- With `ui_panel=0` and `menu_room=1` (the default), the menus of the game
+  are on a panel that is fixed in the room, and the ray of the controller
+  points on it (section 20). While a text box has the focus, a keyboard
+  shows below that panel (section 21).
+- The item `places` of the ring opens a panel of the places of the game and
+  its 7 bookmarks in front of the player, fixed in the room. The ray and
+  the trigger press its buttons (section 22).
+- While a panel in the room is open, the ray of the pointing hand is a quad
+  layer over the panels, so a panel does not hide it (section 25).
+- Each card goes into its swapchain with a frame of clear texels and with
+  mip levels, so its edge is clear and its text does not shimmer when the
+  head moves (section 26).
 - In the headset app a controller points at a dialog box of a screen with no
   scene on the screen quad, the trigger clicks, and a box that takes text
   gets the keys of a keyboard of the app (section 6). In a frame of the
   scene a controller points at a dialog box on the panel quads in the same
-  way (section 5). With a session of the mod on the PC the pointer still
-  comes from the eye view.
+  way (section 5). With a session of the mod on the PC and `ui_panel=1` the
+  pointer on the panel is not built, and the pointer still comes from the
+  eye view.
 
 ## 1. Where the interface is drawn
 
@@ -154,6 +167,10 @@ whole render target through `SubmitTexture`, the same picture to both eyes
 
 The menu text is a fixed 20 to 35 px at any render size [M, `backend.md`],
 which is about 0.8 to 1.3 degrees at 26 px per degree.
+
+A frame with no scene that shows a menu does not take these routes: with
+`menu_room=1` it goes out as a screen at the place of the menu panel
+(section 20).
 
 ## 2. Drawing the interface to its own target
 
@@ -413,14 +430,16 @@ angle its pixels give it. The quad size sets the angle on the panel.
   35 px becomes 1.25 to 2.2 degrees. The texture is magnified 1.6 times, so
   the letters are a little soft. The other way is to draw the menus larger in
   the target and give the pointer the inverse scale (5.4), which is sharper.
-  An A/B in the headset decides.
 - **Help panel, 44 px per degree** (`ui_help_px_per_deg`, at a 2880 px tall
   render, scaled with the render height as the help text is). On the panel
   the help layer draws at the game's own size, 77 px letters at a 2880 px
   render [M], which is 1.75 degrees. The compositor then reduces the quad
   about 1.8 times with no mip levels, which can crawl [I]. The other way is
   to keep `ui_scale_pct` in the target and show the quad at about the display
-  density. An A/B in the headset decides.
+  density.
+
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ### 4.3 Normal placement
 
@@ -489,6 +508,9 @@ section 12).
 
 **With a session of the mod on the PC** (planned): the rest of this
 section. `ui_panel_pointer` is not in the code.
+
+The menus in the room (section 20) use the ray against a quad of 5.3 and the
+rules of 5.2 for their own panel.
 
 ### 5.1 One pointer, two surfaces
 
@@ -622,7 +644,7 @@ goes out as in 1.4.
   passes counts as pass 0 for the routing of 2.4. Whether `LoadSaveBox` runs
   its FinishFrame with the callbacks on is not checked [I].
 - The pointer is on the menu panel (5.2). A controller can then point in these
-  screens (`controllers.md`, open question 5).
+  screens, as it does on the menus in the room (section 20).
 
 Only `ui_panel=2` routes a FinishFrame outside the eye passes (12.2).
 
@@ -676,7 +698,9 @@ The biggest cost is memory, and it is small against a headset render.
    behind the menu [I]. The camera code would get the last world pixel (5.5),
    but the Hand would not.
 9. **Readers of the screen.** `ScriptedScreenShot::Process`, the save
-   picture, is skipped while VR runs [V, `snapshot_guard.cpp`].
+   picture, reads a surface of the mod with the middle of the left eye
+   picture while VR runs [V, `snapshot_guard.cpp`, backend.md, "The save
+   picture"].
    `CreatureRoom::TakeScreenShot`, `GScript::SnapShot` and
    `SaveCreatureSnapshot` also read the screen [V for the names, I for what
    they read]. Their pictures lose the interface, which is better. The copy to
@@ -690,31 +714,35 @@ The biggest cost is memory, and it is small against a headset render.
 | Part | State |
 | --- | --- |
 | The panel target, the switch, the share, the census and the captures (`ui_panel=2`) | built |
-| The panel layers in the headset (`ui_panel=1`): menu and help quads | built. Desktop runs with the input channel (`xr_input=1`) and the emulator, never with a session of the mod on the PC, never seen in a headset |
+| The panel layers in the headset (`ui_panel=1`): menu and help quads | built. A desktop run (`creature_recipe.ps1 -Kind open` with `ui_panel=1`) sends each batch to the panel (menu, help and the subtitle box) and none to the eyes, and no bind fails. Desktop runs with the input channel (`xr_input=1`) and the emulator. Never seen in a headset |
 | The Creature panel quad | built (section 13) |
 | The subtitle card | built (section 17) |
 | The pointer, the trigger and the keyboard of the app on the panel quads of the headset app in a frame of the scene (section 5) | built, desktop runs and the emulator, never seen in a headset |
-| Input on the panel with a session of the mod on the PC (section 5) | planned |
+| Input on the panel with a session of the mod on the PC (section 5) | planned for `ui_panel=1` |
 | The pointer, the trigger and the keyboard of the app on the screen quad of the headset app (section 6) | built, desktop runs and the emulator, never seen in a headset |
 | Screens with no scene on a screen quad in the headset app, `xr_input=1` (section 6) | built, desktop runs and the emulator, never seen in a headset |
-| Screens with no scene on a screen quad with a session of the mod (section 6) | planned |
+| Screens with no scene on a screen quad with a session of the mod (section 6) | planned. A screen with a menu goes to the place of the menu panel (section 20) |
+| The menus in the room (section 20) | built, math checks. A desktop run shows the Main Menu of the start on the panel and a click through it, with Vulkan and with dxwrapper. Never seen in a headset |
+| The keyboard in the headset (section 21) | built, math checks. A desktop run types into the box of a save name and closes it with Cancel, and saves the pictures of the parchment card and of the dark card. Never seen in a headset |
 | Tabletop placement of the panels (4.4) | planned |
 | A line from the controller to the panel hit | planned |
 | The panel over the monitor copy, when the monitor copy is on | planned |
 | The launcher: the interface size row changes meaning when `ui_panel` is 1, and says so | planned |
 
+With `ui_panel=1` the desktop run has the Creature panel and the subtitle in
+the capture of the panel, and neither in the eye picture of that frame.
 With `ui_panel=1` and the input channel (`xr_input=1`, the Vulkan renderer of
 the mod) desktop runs show the panel quads of each frame of the scene in the
 live stream (`android.md`, "The quad layers"), the eye pictures with no
 dialog box while the panel image has it, and clicks of the ray on a dialog
 box that is only on the panel (`controllers.md`, 13.5). The emulator shows
 the panel quads over the projection layer of the app. With a session of the
-mod on the PC no run had `ui_panel=1`, so the skip of the panel batches in
-eye pass 1 is not checked there.
+mod on the PC a scripted click with the menu only on the panel is not
+checked. The code for the hit test does not change, so it should. With no
+runtime no quad goes out, so the Creature panel on its quad needs a headset.
 
-Only a headset shows: the panel swapchain, `SetPanelTexture`, the quad layers,
-their place and size, the alpha over the world, the sRGB edges of 3.3, the
-recenter, and whether Virtual Desktop composes quad layers before the encode.
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ## 10. Ini keys and the test key
 
@@ -730,6 +758,10 @@ recenter, and whether Virtual Desktop composes quad layers before the encode.
 | `ui_help_px_per_deg` | 44 | help panel scale at a 2880 px tall render. It scales with the render height, as the help text does. |
 | `ui_help_rect` | 0 | the help rect in render pixels. 0 takes the default of 4.1. |
 | `creature_panel` | 2 | the Creature panel with `ui_panel=1`: 0 off, 1 fixed in the room, 2 near the Creature (section 13) |
+| `creature_panel_linger` | 1 | 1 the Creature panel shows while the Hand is at the player's Creature with no press, and for 3 s after the Hand left. 0 only while a press holds the Creature (section 13.2) |
+| `creature_panel_over` | 1 | 1 the Creature panel shows over the head of the Creature, turned to the eyes: with `ui_panel=0` on a card of its own. 0 on the subtitle card with `ui_panel=0`, and beside the Creature with `ui_panel=1` (section 13.3) |
+| `menu_room`, `menu_room_test` | 1, 0 | the menus in the room with `ui_panel=0` (section 20) |
+| `vr_keyboard` | 1 | the keyboard in the headset (section 21) |
 | `screen_distance_cm`, `screen_width_cm` | 200, 260 | the screen quad of 1.4, and of section 6 in the headset app |
 | `panel_pointer`, `panel_keys` | 1, 1 | with `xr_input=1` the ray and the trigger on a dialog box of a frame of the scene on the panel quads, and the keyboard of the app for a box that takes text (section 5, `controllers.md`, section 13). 0: the pointer from the eye view, and no keyboard in a frame of the scene |
 | `vk_stream_screens` | 1 | with `xr_input=1` a frame with no scene goes into the live stream for the screen quad of the headset app (section 6). 0: no frame with no scene in the stream |
@@ -784,9 +816,12 @@ card between the card and the eye pictures. Ctrl Shift F12 is the audio key.
 | `src/mod/stereo.cpp` | Latches the route before the eye passes. After eye pass 0 it saves the capture and copies the panel before the eye 0 capture. |
 | `src/mod/mod_main.cpp` | The ini keys. `FinishFrame` outside the eye passes, and the last release after it. |
 | `src/vr/xr_screen.cpp` | The panel swapchain, `SetPanelTexture`, `SetPanelQuads`, `StagePanelQuad`, the cards, and the quad layers after the projection layer |
+| `src/vr/card_send_math.h` | The clear edge and the mip levels of a card, and a model of the view of the headset (section 26) |
 | `src/mod/head_pose.cpp` | `HeadPoseOrigin`, the recenter pose in the LOCAL space |
 | `src/mod/controller_math.h` | `PanelPose`, `PanelWidth`, `WorldToRoom`, `RoomToLocal`, `FacePose`, `CreaturePanelPoint`, tested in `test/controller_math` |
 | `src/mod/subtitle_card_math.h` | The pure math of the subtitle card |
+| `src/mod/menu_room.cpp`, `menu_room_math.h` | The menus in the room: the place of the panel, the route of each frame, the pointer on the panel, the frames with no scene (section 20) |
+| `src/mod/vr_keyboard.cpp`, `vr_keyboard_math.h` | The keyboard in the headset (section 21) |
 | `src/mod/eye_capture.cpp` | A 32 bit BMP with a V4 header that keeps the alpha, and the panel over a checkerboard |
 
 ### 12.2 The route of a frame
@@ -862,9 +897,12 @@ The camera part is in `creature.md` (the Creature by touch).
   second one does not.
 - `Creature::Draw` (`0x00517910`) arms it with alpha 255 and layout 1 when the
   Creature has bit `0x10` of `Object+0x24` and is
-  `GInterface::GetInteractObject`, the object of the next pick record. So the
-  panel shows whenever the Hand is over the player's Creature, not only in the
-  Creature state. `CameraModeFollow::Update` arms it with layout 0.
+  `GInterface::GetInteractObject`, the object of the next pick record. The
+  locked select of a press sets bit `0x10` (`creature.md`, section 1.7). So
+  the plain game shows the panel while a press holds the Creature, from the
+  start of the locked select, and not only in the Creature state. A Hand over
+  the Creature with no press shows no panel. `CameraModeFollow::Update` arms
+  it with layout 0.
 - The four values, at `0x00CC62EC` down to `0x00CC62E0`: a = 1 - (vtable
   `+0x11C`), b = 1 - `[+0x160]+0x1C`, c = `[+0x160]+0x30`, and d = the lesson
   total `+0xD8` of the Creature state. The labels are the help texts
@@ -879,6 +917,24 @@ The camera part is in `creature.md` (the Creature by touch).
 
 ### 13.2 What the mod does
 
+- **The panel with no press** (`creature_panel_linger=1`). In the first call
+  of a frame the hook on `fn_005178D0` arms the panel itself when the game did
+  not arm it, while the controller places the Hand at the player's Creature:
+  the target at the Hand's point, or the Creature of the touch
+  (`HandDirectCreatureAtHand`). It writes the alpha 255, layout 1 and the
+  values a, b and c as `Creature::Draw` computes them. The value d (the lesson
+  total) keeps the value of the last Creature state, as the game's own panel
+  has it before a stroke. A Creature that does not live gets no panel. The
+  hook is in with each value of `ui_panel`. With `ui_panel=0` the panel then
+  draws where the game draws it: in the eye pictures, or with the help text
+  on the subtitle card (section 17).
+- **The panel stays.** After the Hand left the Creature, and after the end of
+  a press, the hook arms the panel for 3 s more (`creature_touch_math.h`,
+  `LingerStep`). So the panel does not go on and off at the edge of the body.
+  A different Creature, or no Creature of the player, ends the stay at once.
+  The mouse keeps the plain game: no panel with no press, and the 3 s after a
+  press. `creature_panel_linger=0` keeps the plain game for the controller
+  too. The debug page has the switch "Panel stays" (group Creature).
 - A hook on `fn_005178D0` latches, once a frame, that the panel drew, its
   layout and its four values. For layout 1 it also reads the Creature of the
   pick (`GInterface+0x400`) and puts its head in the LOCAL space: the base
@@ -895,22 +951,99 @@ The camera part is in `creature.md` (the Creature by touch).
 | --- | --- |
 | 0 | No quad. The panel does not show in the headset. |
 | 1 | Fixed in the room: 0.9 m out, 35 degrees to the left of the recenter yaw and 15 degrees down, facing the head. A recenter moves it. |
-| 2 (default) | Near the Creature. When the panel shows, it goes 30 cm over the Creature's head and 15 cm to its left as the eyes see it, then 0.5 to 1.5 m from the eyes, facing them (`CreaturePanelPoint`, `FacePose`). It stays there while it shows and until it was hidden for 1 s, so it does not follow a Creature that walks. With no head (layout 0, or no head pose) it goes to the place of 1. |
+| 2 (default) | Near the Creature. With `creature_panel_over=1` it goes over the Creature (13.3). With 0, when the panel shows, it goes 30 cm over the Creature's head and 15 cm to its left as the eyes see it, then 0.5 to 1.5 m from the eyes, facing them (`CreaturePanelPoint`, `FacePose`). It stays there while it shows and until it was hidden for 1 s, so it does not follow a Creature that walks. With no head (layout 0, or no head pose) it goes to the place of 1. |
 
-The log, once each time the panel shows:
+The log, once each time the panel shows, and for the panel with no press
+one line when the mod arms it, one when the Hand leaves and one when it goes:
 
 ```
 ui panel     : the Creature panel shows (layout 1, values 0.62 0.80 0.45 0.10), near the Creature at 0.31 1.18 -0.74 m, 0.84 m from the eyes, 0.35 by 0.45 m, rect 64 712 736 976
+ui panel     : the Hand is at your Creature 2925A6F0 with no press: the mod shows the Creature panel (creature_panel_linger=1), frame 931
+ui panel     : the Hand left your Creature: the Creature panel stays for 3.0 s, frame 1800
+ui panel     : the Creature panel goes, 3.00 s after the Hand left your Creature or the press ended, frame 1980
 ```
 
-The report window adds how many frames it drew and how many times it went to
-the room. `XrScreen` counts its quad layers.
+The report window adds how many frames it drew, on how many of them the mod
+armed it, and how many times it went to the room. `XrScreen` counts its quad layers.
 
-### 13.3 Tests
+### 13.3 The panel over the Creature (`creature_panel_over`)
+
+With `creature_panel_over=1` (the default) the panel shows over the head of
+the Creature, turned to the eyes, with each value of `ui_panel`:
+
+- **With `ui_panel=0`** the help text goes to the subtitle card (section 17),
+  and the Creature panel is in the same HelpText scope. The hook on
+  `fn_005178D0` marks the batches of its call (`UiPanelCreatureScope`), so
+  `draw_hooks.cpp` keeps their bounds apart from the bounds of the help text.
+  `SubtitleEndPasses` makes one copy at half the size that holds both rects.
+  The box of the Creature panel goes with no fade to a card of its own
+  (`kCardCreature`, `CreatureCardStage`), and the subtitle card shows only
+  the help text. With no head of the Creature in the frame (layout 0, or no
+  head pose), or in the cut scene window, the box stays on the subtitle card,
+  left of the middle.
+- **With `ui_panel=1` and `creature_panel=2`** the quad of the panel
+  (`kPanelCreature`) takes the same place.
+
+**The place** (`OverPose`, `controller_math::CreatureOverPoint`):
+
+- The panel is 11 degrees wide as the eyes see it, at each distance, so the
+  player reads it from where he stands.
+- As the eyes see it, it is right over the top of the body (1.1 S, the top
+  of the touch), with 2 degrees between the top and its lower edge.
+- It is 10 cm nearer than the top, and 0.6 to 1.5 m from the eyes. It goes up
+  to 25 degrees over eye level at most, and never lower than the top. A quad
+  layer is over the eye pictures, so a hill or the body does not hide it.
+- It takes its place when it shows. It stays there while the Creature
+  breathes, turns and takes a step. It takes a new place only when the place
+  that it would take now stays more than 12 degrees from it, or 1.4 times
+  nearer or farther, for 0.5 s (`creature_touch_math::OverMoves`). So a
+  Creature that walks away or a teleport of the player moves it, and a
+  Creature that moves a little does not. After 1 s with no panel, the next
+  show takes a new place.
+
+`creature_panel_over=0` keeps the old places: the subtitle card with
+`ui_panel=0`, and 30 cm over the head and 15 cm to the left with
+`ui_panel=1`. The debug page has the switch "Panel place" (group Creature).
+
+The log:
+
+```
+ui panel     : creature_panel_over=1. The Creature panel shows over the head of the Creature, turned to the eyes, and it stays there while you touch the Creature
+ui panel     : the Creature panel goes over the Creature at 0.21 0.95 -0.70 m, 0.98 m from the eyes. The top of the Creature is 1.08 m from the eyes. The panel is 11 degrees wide (creature_panel_over=1), frame 931
+ui panel     : the Creature panel was over the Creature on 450 frames, 450 of them on the Creature card, and it went to a new place 0 times. 0 frames had the box and no copy of it yet (the read ahead gives the copy of a frame before), so the box showed on no card (creature_panel_over=1)
+```
+
+With Direct3D 9 and `subtitle_read_ahead=1` the copy of a frame is the copy
+of one or two frames before. In the first frames of a show that copy does not
+hold the box yet. Then the box shows on no card: the subtitle card shows only
+the rect of the help text. So the panel comes one or two frames late, and it
+never shows first on the subtitle card. The Vulkan renderer has no read
+ahead.
+
+On a capture frame the Creature card saves `bwvr-creature-card-N.bmp` and
+`bwvr-creature-card-over-N.bmp`, with a line of its box and its place.
+
+### 13.4 Tests
 
 The math test checks the face of the quad (its front points at the eyes, with
 no roll), the place near the Creature (to the left, over the head, 0.5 to
-1.5 m from the eyes), and the room to LOCAL against `head_pose.cpp`.
+1.5 m from the eyes), the place over the Creature (the same yaw, 2 degrees
+of gap, 10 cm nearer, 0.6 and 1.5 m, a top over eye level), and the room to
+LOCAL against `head_pose.cpp`.
+
+The math test (`creature_touch_checks.h`) checks the panel that stays: it
+shows at the Hand, it stays 2.9 s and goes at 3 s after the Hand left, and
+not for a different Creature. It checks the stay of the panel over the
+Creature (`OverMoves`). `creature_recipe.ps1 -Kind touch` with
+`subtitle_card_test=1` is the run of the Creature card: the log line of its
+place, and the picture `bwvr-creature-card-N.bmp` at frame 1700.
+`creature_recipe.ps1 -Kind open` is the run of
+the panel with no press: a picture at frame 1840 must have the box, and a
+picture at frame 2060 must not. On the test laptop (2760 by 2208, Direct3D
+9) the run shows the panel at the first touch of the open hand, the stay of
+3.0 s after the hand left (the panel goes 2.99 s after it), the box in the
+picture at frame 1840 and none at frame 2060. With
+`creature_panel_linger=0` it shows no panel.
 
 No desktop run has drawn the box. A run needs a game where the player owns a
 Creature: the God view rig of `god-view.md` with `ui_panel=2`, the fake hand
@@ -918,8 +1051,8 @@ on the Creature (`touchc`) and a capture (`shot`). The capture must show the
 box at 2.5 to 27.5 percent across and 25 to 58 percent down, and the log must
 show the values.
 
-Needs the headset: the place and the size of the quad, its alpha over the
-world, and whether 15 cm to the left keeps it clear of the Hand.
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ## 14. Sources
 
@@ -940,7 +1073,7 @@ world, and whether 15 cm to the left keeps it clear of the Hand.
   subtitles in the world, and that read worse than subtitles on the view. A
   real layer needs a second render target and control of the render target
   switch, which section 2 gives.
-- `bwvr/src/mod/snapshot_guard.cpp`: the save picture is skipped in VR.
+- `bwvr/src/mod/snapshot_guard.cpp`: the save picture in VR.
 - `bwvr/src/mod/head_pose.cpp`: the recenter origin.
 - `bwvr/docs/backend.md`, `tabletop.md`, `controllers.md`, `hand.md`.
 - dxwrapper 1.8.8600.25, `ddraw/IDirect3DDeviceX.cpp`,
@@ -1003,10 +1136,22 @@ in `controller_math.h`):
 1. The size. The box of the call becomes `kHintHandCm` (2.5 cm) of the room
    high at the Hand's depth. The scale is 0.22 at 1 m and 0.40 at 0.55 m, and
    it stays between 0.1 and 3.
-2. The left eye scales the tooltip about the Hand's point, at the game's
-   layout, and moves it `kHintHandSideCm` (6 cm) to the right. It keeps that
-   place as an offset from the Hand's point.
-3. The right eye puts the tooltip at the same offset from its own Hand's
+2. The left eye scales the tooltip about the Hand's point. It keeps the
+   place of step 3 as an offset from the Hand's point.
+3. The place, with `hint_hand_tip=1`: beyond the fingertip. The Hand's
+   point is at the tip of the index finger, and the hand lies from there
+   back to the palm. So in the picture no part of the hand is on the far
+   side of a line through the tip, away from the palm. `hand_glow.cpp`
+   projects the middle of the palm of the mod's hand (`HandExactPalm`) in
+   each eye, and `HintBeyondTip` (`controller_math.h`) puts the tooltip on
+   the line from the palm through the tip, with its nearest edge
+   `kHintTipGapCm` (1.5 cm) of the room past the tip. When the palm is less
+   than 2 cm from the tip in the picture, the finger points along the view,
+   and the tooltip goes up from the tip. With the hand held low and
+   pointing forward, that is above and beyond the fingertip. When the mod
+   does not draw its hand, and with `hint_hand_tip=0`, the tooltip keeps
+   the game's layout and moves `kHintHandSideCm` (6 cm) to the right.
+4. The right eye puts the tooltip at the same offset from its own Hand's
    point. So both eyes give the tooltip the Hand's disparity, and it shows at
    the Hand's depth, beside the hand.
 
@@ -1016,8 +1161,9 @@ The game's mouse picture hint (the widget band) is not changed. With the control
 hints become key caps and take the tooltip path.
 
 The game draws its Hand after the help, so the mesh can hide a part of a
-label. The offset of 6 cm keeps a label clear of the arm and of the bundle in
-the Hand. That value is not yet checked in a desktop run.
+label. The place beyond the fingertip keeps a label clear of the finger, of
+the palm and of the bundle in the Hand. The move of 6 cm to the right does
+not: the finger can go to the right of the point in the picture.
 
 ### 15.4 The log
 
@@ -1025,17 +1171,27 @@ On a sample frame (every 150 frames, and when a tooltip with a new text
 shows) the tag `ui hint` gives each tooltip, hand hint picture and subtitle
 bar with the eye, its box as the game drew it, the pointer and the Hand's
 point in that eye. A second line gives the scale and the place at the Hand.
-The report of the `ui depth` tag counts the tooltips at the Hand.
+With `hint_hand_tip=1` a third line gives the palm and the tip in the left
+eye, the size of the box, and the gap: `the tooltip goes beyond the
+fingertip: the palm is at X Y and the tip at X Y`. With no palm it says that
+the tooltip goes 6 cm to the right. The report of the `ui depth` tag counts
+the tooltips at the Hand and those beyond the fingertip.
 
 ### 15.5 Tests
 
 The math test (`HintHandChecks`) covers the size at 1 m and at 0.55 m, the
-limits, the scale about the Hand's point in the left eye, and the Hand's
-disparity for a point of the tooltip in both eyes. The desktop rig is the bulk
-take rig of `hand.md` with `help_test=1`.
+limits, the scale about the Hand's point in the left eye, the Hand's
+disparity for a point of the tooltip in both eyes, and the place beyond the
+fingertip (`HintBeyondTip`) for a finger across the view and along it.
 
-**Needs the headset.** Whether 2.5 cm reads well at 40 to 80 cm, whether the
-label fuses at the hand's depth, and where the Hand's mesh hides it.
+`village_run.ps1 -Kind tooltip` (`hint_card=0`) has the tooltip "Amount: 128"
+of a pile at the Hand's point, 0.77 m from the eyes, at the scale 0.358. Each
+eye has the same eye difference for the tooltip as for the Hand's point (84
+px), and both eye pictures have the label at the same place against the
+hand.
+
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ### 15.6 A hint at the game's Hand
 
@@ -1085,6 +1241,7 @@ of the game takes the flat path then.
 | Key of `bwvr.ini` | Default | Meaning |
 | --- | --- | --- |
 | `hint_hand_depth` | 1 | 1: a tooltip or a hint of the game at the game's Hand has the depth of the Hand. 0: the same pixel in both eyes |
+| `hint_hand_tip` | 1 | 1: a tooltip at the Hand of the controller goes beyond the fingertip, on the side away from the palm (15.3). 0: it keeps the game's layout, 6 cm to the right |
 
 With `test_keys=1`, Ctrl, Shift and T change `hint_hand_depth` in
 play, with a long pulse for 1 and a short pulse for 0. Test keys for the
@@ -1118,7 +1275,9 @@ hint "Move" is at the Hand in that run.
 
 - No run had a real tooltip of a thing under the Hand while the game placed
   the Hand. The test key draws through the same call with the same flags.
-- Only a headset can show that the hint fuses with the Hand and the land.
+
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ## 16. The hint card
 
@@ -1151,6 +1310,12 @@ facts:
   the panel. It goes to the card.
 - With `ui_panel=0` the test key Ctrl Shift F11 switches the cards on and off:
   the hint cards and the subtitle card (`UiPanelToggle`).
+- With `hint_style=2` each lit button of a controller has a card of its own
+  (`controller-hints.md`, 9.14). The two hint cards and four cards of the
+  buttons (`kCardHintButton0` to `+3`) are six quads at most, each with its
+  own swapchain of 768 by 320 pixels. They go after the card of the other
+  hand, in the same way. When the runtime refuses a frame with one of them,
+  all hint cards are off. The view for videos shows them too.
 
 ## 17. The subtitle card
 
@@ -1235,8 +1400,9 @@ it as a FinishFrame callback.
 
 A picture of the camera help code inside the subtitle rows goes to the card
 with its line, when it draws in the HelpText scope. The Creature panel is
-drawn in the HelpText scope too, so it shows on the same screen, left of the
-middle and near eye level.
+drawn in the HelpText scope too. With `creature_panel_over=1` it goes to a
+card of its own over the Creature (13.3). With 0 it shows on the same screen
+as the subtitles, left of the middle and near eye level.
 
 ### 17.3 The place
 
@@ -1364,19 +1530,19 @@ The desktop route runs with `subtitle_card_test=1` and `subtitle_selftest=1`:
 the two test lines must be on the card and not in the eye pictures, and with
 the card off they must be in the eye pictures.
 
-**Not tested:** a real subtitle of the game in a desktop run. The place of the
-game's subtitle box in the render is not measured.
+A desktop run (`creature_recipe.ps1 -Kind open` with
+`fake_head_yaw=70;fake_head_sweep=1` and the word `look`) shows the anchor.
+Heads 30 and 40 degrees from the card for 450 frames each move no card. A
+head 70 degrees from the card moves it one time, 62 frames later. While the
+Hand is at the Creature the rect of the card has the Creature panel, and the
+capture has the panel, the test lines and a subtitle of the game. The place
+of the quad in the room needs a headset.
 
-**Needs the headset.**
+**Not tested:** the place of the game's subtitle box in the render is not
+measured.
 
-- The subtitle card as a quad layer: its swapchain of 1440 by 1440 pixels, the
-  alpha of the game's subtitle box over the world, and its colors.
-- Whether the letters read well at 1 degree, and whether 17 degrees below eye
-  level at 1.6 m is a good place while the hands work.
-- Whether the row at 93 percent is the middle of the game's subtitle box.
-- A move of the card after a turn of the head, with its fade.
-- The time of the copy at 2880 by 2880, from the report line.
-- The Creature panel on the card.
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ### 17.9 In the cut scene window
 
@@ -1798,4 +1964,1433 @@ eye, so the note is not at the depth of the Creature there either.
 - No run has shown a note that the game made by itself: a Creature that
   learns from a miracle of the player. The test key uses the same function
   of the game.
-- Only a headset can show that the note fuses with the Creature.
+
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
+
+## 20. The menus in the room
+
+The game draws each menu as a `SetupBox` dialog in screen space. In the eye
+pictures a menu is then fixed to the head: it turns with the head, and the
+player cannot look around it. With `menu_room=1` and a headset, the menus
+are on a panel that is fixed in the room. The code is in `menu_room.cpp`
+and `menu_room_math.h`. It works with `ui_panel=0`. With `ui_panel=1` the
+interface panel of that key has the menus.
+
+### 20.1 The paths that draw a menu [V]
+
+Each menu is a dialog of the Setup callback `0x006424E0` in
+`LH3DRender::FinishFrame` (1.2). `SetupBox::GetCurrentActiveBox`
+`0x00407ED0` returns the box that is up (`0x00C4CD20`). Two kinds of frame
+draw a menu:
+
+| Menu | The frame | Without the menus in the room |
+| --- | --- | --- |
+| The Main Menu over the loaded game at the start (`backend.md`, "A test save") | A frame with the scene: `GGame::Loop` runs `Process3dEngine`, so the eye passes run [R] | In the eye pictures, with the interface shift: fixed to the head |
+| The start dialog of a new game (`SkipBox`, `backend.md`, "The start of the game"): start normally, skip to the Creature select, skip the Creature tutorial, or keep your old Creature | A frame with the scene: the game shows the box in `GGame::OnNewGame`, and `GGame::Loop` runs with the game paused | The same |
+| The game menu of Esc (`MainMenu`), the options, the load and save boxes in play | A frame with the scene | The same |
+| The boxes of the front end: the profile, the name of a new god, the land, the options of the front end | A frame with no scene: `FrontEnd::JustDoABox` `0x00544F90` draws the plasma, runs `FinishFrame` with the callbacks on, and then `LHScreen::Flip` | The whole frame, flat: on the projection layer at the eye poses of the last stereo frame, or on the screen of 1.4 before the first stereo frame |
+| `DoCitadelDraw`, the loop at `0x0053CD1F` and the other loops of 1.4 that show a box | A frame with no scene | The same |
+
+The panel covers each of them. A loop with no eye passes that shows no menu
+(a loading screen, a video) keeps the route of 1.4.
+
+### 20.2 What the mod does
+
+**A frame with the scene.** `UiPanelBeginFrame` latches the route one time,
+before the eye passes (`MenuRoomBeginFrame`). When a box is up, the draws of
+the Setup callback go to the panel target in eye pass 0, and not to the eye
+pictures (`UiPanelRouteMenu` in `draw_hooks.cpp`). They draw at the pixels
+that the game gave them, and these are the pixels that the hit test of the
+box reads. The help text keeps the route of the subtitle card. After eye pass
+0 the menu rect of the target (4.1) goes out as one quad layer over the
+projection layer, as with `ui_panel=1` (`UiPanelQuads`, `MenuRoomQuad`). With
+`backend=vulkan` the quad takes the panel image of the Vulkan renderer
+(`vk_panel=1`).
+
+**A frame with no scene.** `h_FinishFrame` in `mod_main.cpp` calls
+`MenuRoomFlatFrame` before the frame goes to the headset. When a box is up
+and the Setup callback drew it, the frame goes out as a screen at the place
+of the panel: the menu rect of the flat picture, the same picture for both
+eyes (`XrScreen::StageWindow` with `WindowLayer::rect`). No eye pass runs in
+such a frame, so this function also runs the hands of the frame
+(`ControllersFrame`), the pointer (`PointerMapApply`) and the keyboard
+(section 21). `JustDoABox` makes one frame with no callbacks when a box
+opens. A frame with no draw of a menu less than 200 ms after one with a
+draw keeps the screen.
+
+The route goes back to the eye pictures, and the log says why, in these
+cases: the frame has no projection layer (the cut scene window, play mode
+1), the panel target is not shared with the headset, the session has no
+swapchain for the panel, or the runtime refused a frame with the panel
+(`XrScreen::PanelFailed`).
+
+### 20.3 The place
+
+The panel goes in front of the head in the first frame of a menu
+(`menu_room_math::PlaceMenu`):
+
+- The anchor is the head of that frame: the middle of the two eyes in the
+  LOCAL space, and the yaw of the head. The yaw comes from the right axis of
+  the head, so a head that looks down has a yaw. The panel has no roll.
+- The center of the panel is `ui_menu_distance_cm` (140) from the anchor,
+  `ui_menu_pitch_deg` (-10) below eye level. The panel turns about its own x
+  axis by the same angle, so it faces the head.
+- The panel shows the menu rect (4.1) at `ui_menu_px_per_deg` (16). The
+  default rect of 1280 by 960 pixels is then 2.35 by 1.76 m at 1.4 m. The
+  front end menu of 780 by 570 pixels is 49 degrees across.
+
+After that the panel stays at its place in the room. It never follows the
+head. A box that leads to the next box keeps the place: the menus must be
+closed for 1 s before the next menu gets a new place. A recenter (F11, or
+the headset menu) puts the panel in front of the head of that moment, as
+with the cut scene window (`cutscene-window.md`, 5.1).
+
+### 20.4 The pointer on the panel
+
+The aim ray of the pointing hand meets the panel in the LOCAL space
+(`menu_room_math::Hit`, the math of 5.3). The pixel under the ray is a
+pixel of the menu rect, so it is the pixel of the render that the game drew
+the dialog at (`Compute` in `controllers.cpp`, `MenuRoomRayPixel`). After
+that the pointer takes the path of a dialog box (`controllers.md`, 3.6): the
+trigger is the left button, and the grip is the right button. The game
+draws its own arrow at that pixel, on the panel.
+
+- A ray past the edge of the panel puts the pointer at the edge. The pointer
+  is then off the view, and a press does not reach the game.
+- A ray that does not meet the plane of the panel gives no pixel. The
+  pointer keeps its last pixel.
+- In a frame with the scene the thin ray of the hand ends on the panel, and
+  it shows over the panel (section 25). A frame with no scene draws no ray,
+  and the arrow of the game shows the pointer.
+- In a frame with no scene the controller can own the pointer
+  (`ChooseOwner` in `pointer_map.cpp`, `Usable` in `controllers.cpp`). The
+  front end calls no `LHMouse::UpdateDeltaPos`, so `MenuRoomFlatFrame` calls
+  `PointerMapApply` itself. The buttons go to the game through
+  `LHScreen::Flip`, which calls `AnyWindowMessages`, the hook of the pump.
+- The head does not turn the pixel of the mouse while the menus are on the
+  panel (`LockToRoom`), because a pixel of the panel is fixed in the room.
+
+### 20.5 Keys and the log
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `menu_room` | 1 | 1: in the headset the menus are on a panel that is fixed in the room. 0: the menus are in the eye pictures, fixed to the head |
+| `menu_room_test` | 0 | A test key: the route of a frame with the scene runs with no headset. The eye pictures lose the menus, the pointer of the scripted controller meets the panel, and a capture saves the panel (`bwvr-ui-NNNNN.bmp`, 12.4) |
+| `ui_menu_distance_cm`, `ui_menu_pitch_deg`, `ui_menu_px_per_deg`, `ui_menu_rect` | 140, -10, 16, 0 | The place, the size and the rect of the panel (section 10) |
+
+`menu_room` has no keyboard test key. With `menu_room=1` the session makes
+the panel swapchain, and the bridge makes a shared panel texture of the
+render size, also with `ui_panel=0`.
+
+The log has the tag `menu room`:
+
+```
+menu room    : menu_room=1, in the headset the menus show on a panel that is fixed in the room. vr_keyboard=1, ...
+menu room    : frame N, the menus go to the panel in the room, and not to the eye pictures
+menu room    : frame N, the menu panel goes in front of the head: 2.35 by 1.76 m, its center at x y z m, the head at x y z m with a yaw of Y degrees. It shows the rect x y w h of the W by H render
+menu room    : frame N, a frame with no scene shows a menu, so the part x y w h of its picture goes to the panel in the room, and the controller points on it
+menu room    : the ray meets the menu panel T m from the hand at U V of the panel, and the pixel is X Y
+menu room    : frame N, the menus stay in the eye pictures: <the reason>
+  openxr: a frame with no scene goes out as 2 quad layer(s) of the menus in the room, ...
+```
+
+### 20.6 Tests
+
+The math checks are in `test/controller_math/menu_room_checks.h`: the place
+for a head that looks ahead and for a head that is turned and looks down, a
+ray at the center, at a corner and past the edge, a ray from a hand that is
+not at the eye, and three rays that do not meet the panel.
+
+A desktop run in a test save with `menu_room_test=1` and
+`menu_skip_test_frame=0` keeps the Main Menu of the start up. The render is
+3600 by 2880. With `backend=vulkan` and with `backend=dxwrapper` the run
+shows the same numbers:
+
+- In frame 1 the panel goes in front of the head: 2.35 by 1.76 m, its
+  center at 0.00 -0.24 -1.38 m, the rect 1160 960 1280 960. The panel gets
+  one place.
+- 611 frames with the scene have the menu on the panel, and 610 of them
+  have the ray on the panel. The eye pictures have no Main Menu. The panel
+  capture (`bwvr-vk-panel-NNNNN.bmp` with Vulkan, `bwvr-ui-NNNNN.bmp` with
+  dxwrapper) has the menu, with the arrow of the game on "Continue Game".
+- The ray of the scripted hand meets the panel 1.12 m from the hand at
+  0.500 0.371 of the panel. That is the pixel 1800.0 1316.6, on "Continue
+  Game". The scripted trigger is down from frame 600 to frame 608. In frame
+  611 the game plays its menu click and closes the dialog. In frame 612 the
+  route goes back to the eye pictures, and the Hand comes back.
+
+With `menu_room=0` the eye pictures have the Main Menu, fixed to the head.
+The same hand then points at the pixel 1800.0 1454.4 of the view, and that
+is "Join Online Game".
+
+The box "Save Game Message" of the Save Game Room goes to the panel in the
+same way, and a click of the ray on its Cancel closes it (21.5). The desktop
+runs do not show a frame with no scene that shows a menu (the front end),
+the game menu of Esc, the options, or the load box. The invented head does
+not turn in them.
+
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
+
+## 21. The keyboard in the headset
+
+Some boxes of the game ask for text. While a text box has the focus, a
+keyboard shows below the menu panel, and the ray of the pointing hand
+presses its keys. The code is in `vr_keyboard.cpp` and
+`vr_keyboard_math.h`.
+
+### 21.1 The text boxes of the game [V]
+
+A text box is a `SetupEdit` control (the table of its virtual functions is
+at `0x008AB3A0`). The control that has the focus of a box is at box +
+`0x70` (`SetupBox::SetFocusControl` `0x00409140`). These boxes make a
+`SetupEdit` (the callers of its constructor `0x0040C220`):
+
+| Box | What it asks for |
+| --- | --- |
+| `NewProfileBox` | The name of the god of a new profile, in the first start |
+| `ProfileEditor` | The name of a profile |
+| `DialogBoxSaveMessage` | The name of a saved game |
+| `LoginBox`, `RegisterBox`, `MPFELogin` | A name and a password for the online game |
+| `LobbyBox`, `GSLobbyBox`, `GatheringBox`, `ChannelBox`, `MPFEChannelSelector`, `MPFECreateGame`, `MPFEChooseConnection`, `IPSpecialDialog`, `SetupMultiplayerMain` | The games for more players: a name, a message, an address |
+| `SetupLandscapeBox`, `SetupOnlineLandscapes`, `SpellSetupBox` | The setup of a land and of the miracles of a game for more players |
+| `EditingDebugBox` | A box of the debug code |
+
+No box asks for the name of the Creature.
+
+### 21.2 How the game reads a key [V]
+
+The window procedure `GameWindowProc` `0x007DBF30` puts the character of
+each `WM_CHAR` in a queue of 16 characters at `0x00E855A0` (at `0x007DC199`,
+after `TbIME_ConvertCHAR8toCHAR16`). The box gives one character of the
+queue to the control that has the focus in each pass (`0x00408EC8`, then
+`SetupEdit::Char` `0x0040B5F0`). `WM_KEYDOWN` and `WM_KEYUP` go to
+`LHKeyboard::ProcessKeyboard` `0x007DCAF0`, which sets the last key. The
+loops of the menus give the last key to the box: `FrontEnd::JustDoABox` at
+`0x00545125` and `GGame::ProcessKey` at `0x0063F222` call `fn_00408F80`,
+which calls `SetupEdit::KeyDown` `0x0040BAF0`. `ProcessWindowMessages` calls
+`TranslateMessage`, so a key of a computer gives `WM_KEYDOWN`, `WM_CHAR` and
+`WM_KEYUP`.
+
+### 21.3 What the mod does
+
+- **When.** `vr_keyboard=1`, the menus are on the panel in the room, and the
+  control that has the focus of the active box is a `SetupEdit`. The
+  keyboard goes away when the focus goes to a different control or the box
+  closes.
+- **The place.** The keyboard card hangs from the anchor of the panel
+  (20.3): 1 m from the head, 35 degrees below eye level, tilted to face the
+  head. It is 70 cm wide (38 degrees) and 26 cm high. It is nearer than the
+  panel and below the dialog. In a frame with the scene it is a card over
+  the projection layer. In a frame with no scene it is a card over the
+  screen of the menu.
+- **The look** follows `hint_card_style`, the key of the hint cards (the
+  launcher row "Card look", and the switch "Card look" of the debug page).
+  With 1 the card is a page of the parchment of the hint cards
+  (`controller-hints.md`, 9.11), with a torn and burnt edge. Past the torn
+  edge the card is clear. Each key is a frame of dark ink round a face that
+  is pressed into the paper: the wall at the top and the left of the face is
+  in shade, and the wall at the bottom and the right has the light. The
+  letter is in dark ink in Alegreya Bold, with a capital of 30 px, and the
+  words Space, Back, Enter and Shift are in Alegreya SC with a capital of 19
+  px. Alegreya has old style digits only, and its zero looks like a small o.
+  So the digits are in Palatino Linotype Bold (then Book Antiqua, then
+  Cambria, all fonts of Windows), as high as a capital letter, and the zero
+  is narrower than the O. The key under the ray has a gold face, a frame of
+  dark gold and a rim of bright gold 3 px wide. The key that the trigger
+  pressed has a face of bright yellow gold and a pale rim for 120 ms. While
+  Shift is on, the Shift key has a red wax seal with its word in light
+  letters. With 0 the card is dark and opaque, with grey keys in Segoe UI:
+  the key under the ray is gold, the pressed key is pale gold, and Shift on
+  is blue.
+- **The keys.** Five rows: the digits and Backspace, three rows of letters
+  with Enter and Shift, and the space bar. Shift makes the next letter a
+  capital. It is on when the keyboard opens, so the first letter of a name
+  is a capital.
+- **The ray.** The keyboard is nearer than the panel, so the ray of the
+  pointing hand meets it first, and the ray shows over the keyboard
+  (section 25). The key under the ray has a highlight, and
+  the hand gets a light pulse at each new key. With the ray on the keyboard
+  the pointer of the game is off the view, so the trigger makes no click in
+  the game.
+- **A press.** A pull of the trigger past 60 percent presses the key under
+  the ray, with a pulse of 20 ms at 0.3 and a short flash of the key. The
+  trigger must go below 40 percent before the next press. A pull that
+  starts off the keys presses nothing.
+- **The key to the game.** The mod sends `WM_KEYDOWN` with the scan code of
+  the key, and then `WM_CHAR` with the character, to the window of the game
+  with `SendMessageA` on the game thread. `WM_KEYUP` follows 60 ms later. So
+  the text box gets the key as from a keyboard of a computer. Backspace
+  sends `VK_BACK` and the character 8, and Enter sends `VK_RETURN` and 13.
+
+### 21.4 Keys and the log
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `vr_keyboard` | 1 | 1: the keyboard shows while a text box has the focus. 0: no keyboard |
+| `hint_card_style` | 1 | 1: the keyboard is a page of parchment with keys of ink. 0: the dark keyboard. The key also sets the look of the hint cards and of the spell book |
+| `vr_keyboard_test_save` | 0 | Test key. N saves the first N new pictures of the keyboard as `bwvr-keyboard-FFFFF.bmp` over a checkerboard (FFFFF is the frame), each with a log line that names the key under the ray, the key of the flash and the Shift |
+
+The log has the tag `keyboard`: one line when the keyboard shows, with its
+place, one line for each key that goes to the game, and one line when it
+goes away.
+
+```
+keyboard     : frame N, a text box of the game has the focus, so the keyboard shows below the menu panel, 0.70 by 0.26 m at x y z m
+keyboard     : frame N, the key A goes to the game (virtual key 0x41, character 0x41)
+keyboard     : the keyboard goes away: no text box has the focus
+```
+
+### 21.5 Tests and limits
+
+The math checks are in `test/controller_math/menu_room_checks.h`: each key
+is on the card, no two keys overlap, no two boxes of a key with its rim of
+3 px overlap, the center of each key finds that key,
+what each kind of key sends, the shift, and one key for each pull of the
+trigger.
+
+A desktop run shows the keyboard in the box "Save Game Message" of the Save
+Game Room, with `backend=vulkan`, the test save `temple` and
+`menu_room_test=1`:
+
+```
+temple_run.ps1 -Name kbd -Dll <dll> -Rooms "room_save@3400" -Points "0,-2,30"
+  -Set "menu_room_test=1;test_frame_rate=60;capture_every_seconds=4;aim_preset=0;temple_test_scan=10;temple_test_targets=e0 e0;fake_controller_turns=-2,-50,1 22,-40,1 -27,-36,1 -10,-18,1"
+  -Steps "point@5700+1 aimtemple@5800+1 trigger@5840+6 aimtemple@6000+1 trigger@6040+6
+          aimturn@6150+1 trigger@6190+6 aimturn@6240+1 trigger@6280+6 trigger@6320+6
+          aimturn@6370+1 trigger@6410+6 aimturn@6550+1 trigger@6600+6"
+```
+
+- Two clicks of the ray on the picture of an empty slot open the box. In
+  the same frame the panel goes in front of the head, and the keyboard shows
+  at 0.00 -0.57 -0.82 m, 0.70 by 0.26 m. The text line has the focus when
+  the box opens.
+- From the point `0,-2,30` the aims `-2,-50`, `22,-40` and `-27,-36` are
+  on B, W and Backspace. Four presses (B, W, W, Backspace) send `0x42`,
+  `0x77`, `0x77` and `0x08`. The panel capture shows "Bw" in the text line:
+  the first letter is a capital, and Backspace removes a letter.
+- Each press on the keyboard has the line `the left button press started
+  off view, so it is dropped`, so no press on a key reaches the game.
+- The aim `-10,-18` meets the panel at 0.579 0.572, the pixel 1901.5
+  1509.4, on Cancel. At the press the keyboard goes away (the text line
+  loses the focus), and the box closes 8 frames later. The run writes no
+  file in the folder of the slot.
+
+The run does not use Esc to close the box. A desktop capture does not save
+the keyboard card. The log and the text in the panel capture show the keys.
+With `vr_keyboard_test_save=24` in `-Set` the run saves each new picture of
+the card.
+
+- With `hint_card_style=1` the pictures show the page, the red seal of
+  Shift on, the gold key under the ray (B, W, Backspace), the bright yellow
+  flash of each press, and the small letters after the B.
+- The page takes 1.2 ms one time. The first picture draws the 40 keys in
+  17 ms, most of it the first draw of each letter by GDI. The first change
+  of Shift draws the 26 letters and Shift again in 7 ms. Each other new
+  picture draws 1 or 2 keys in 0.2 to 0.3 ms, or copies the boxes of the
+  keys in less than 0.01 ms.
+- With `hint_card_style=0` the pictures show the dark card. Each new
+  picture of the dark card draws all of it, in 0.9 to 1.2 ms (7.7 ms for
+  the first picture and 3 ms for the first small letters).
+
+- The hand does not press a key by touch. Only the ray and the trigger do.
+- The text box of a frame with no scene (the name of a new god) needs the
+  first start of a profile. The profile guard of the desktop scripts takes
+  a new profile away after a run, but no run has done it yet.
+
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
+
+### 21.6 The bake of the parchment
+
+The page is drawn one time, into a picture of its own. A key in a look
+(plain, under the ray, pressed) is drawn the first time that it shows, over
+the page, and the mod keeps a copy of its box: the key and its rim of 3 px
+(`card_scroll::kKeyRim`). The letters and Shift have a copy for Shift on and
+one for Shift off. A new picture of the card copies the box of each key
+whose look changed, and draws only a key that has no copy yet. The card
+needs two pictures of 1.5 MB (the page and the card) and at most 240 copies
+of about 26 KB.
+
+## 22. The panel of places
+
+With `places_sheet=0` the item `places` of the ring (`controllers.md`,
+section 10) opens a page of buttons for the places of the game and its 7
+bookmarks. With `places_sheet=1` (the default) the item goes to the sheet
+of the places on the ring (`controllers.md`, 10.11), and this panel does
+not open. The ray and the
+trigger of the pointing hand press its buttons, as on the keyboard in the
+headset (section 21). The code is in `places_panel.cpp` and
+`places_panel_math.h`.
+
+### 22.1 What the panel has
+
+| Row | Buttons | What a press does |
+| --- | --- | --- |
+| The places | Temple, Creature, Town, Land | The items `temple`, `creature`, `town` and `land` of the ring: the Temple key two times, one teleport to the Creature in the God view, Tab, and the key of the whole land |
+| Bookmarks 1 to 7 | A wax seal with the number, then Go, Set here, Follow, Remove | The key of the number with no modifier, with Ctrl, with Shift, and with Ctrl and Shift (`controls-audit.md`, section 3) |
+| The bottom row | Back, the note, Close | Back is the item `mark_back` of the ring (Backspace). Close closes the panel |
+
+- **The keys go the way of the ring.** Each key goes into the key buffer of
+  the game at the next pass of the pump (`controllers.md`, 10.3). So each
+  gate of the game holds: a dialog box, a cut scene, the tutorial.
+- **A button that cannot act now is dim.** Go, Follow and Remove of a
+  bookmark that is not set are dim. All the bookmark buttons are dim while
+  the game takes no bookmark key (`0x009CD384`, the two flags of the control
+  map). A place is dim for the reasons of its item on the ring, for example
+  "You have no Creature". The seal of a bookmark that is not set is pale.
+- **The note** between Back and Close says what the button under the ray
+  does ("Set bookmark 3 at the Hand"), or why it is dim ("Bookmark 3 is not
+  set"). After a press it says what the press did for 2 s.
+- **What closes the panel.** Go, Follow, the places and Back move the view,
+  so they close the panel. Set here and Remove keep it open, so the player
+  sees the seal change. Close, the ring, the spell book, a dialog box, a cut
+  scene and the Temple also close it. With `places_close_buttons=1` B of the
+  pointing hand and the menu button close it too, as they close the debug
+  window: B then draws no gesture, and the menu button sends no Esc.
+
+### 22.2 The place
+
+The panel opens in the frame of the choice on the ring, in front of the
+head of that frame (`places_math::PlaceAt`):
+
+- The anchor is the head of the frame and its yaw, as for the menu panel
+  (20.3). The middle of the panel is 1 m from the head, 12 degrees below eye
+  level, and the panel turns to face the head. It has no roll.
+- It is 56 by 56 cm, 31 degrees at 1 m: from about 3 degrees above eye
+  level to 27 degrees below it. A button is 11 by 4 cm, about the size of a
+  key of the keyboard.
+- After that the panel stays at its place in the room. The player moves
+  and the panel does not. A recenter puts it in front of the head again.
+
+Why there. The God view has no menu panel in the room, so the panel needs
+a place of its own. 1 m is out of the reach of the hand, so the ray, and not
+a touch, presses a button. The panel is a quad layer over the world, and a
+quad layer covers each thing of the eye pictures behind it, also the hand.
+A hand that points at the panel is lower than its bottom edge, so the panel
+does not cover that hand.
+
+### 22.3 The ray and the trigger
+
+- The aim ray of the pointing hand shows while the panel is open
+  (`ControllersMenuRay`). It ends at the panel, or 2 m from the hand when
+  it is not on the panel, and it shows over the panel (section 25). The
+  hand has the pose of a pointing finger.
+- The button under the ray is gold, and the hand gets a light pulse at each
+  new button (8 ms at 0.1), as on the keyboard.
+- A pull of the trigger past 60 percent presses the button under the ray,
+  with a pulse of 20 ms at 0.3 and a short flash of the button. The trigger
+  must go below 40 percent before the next press. A pull that starts off
+  the buttons presses nothing. A press of a dim button gives the pulse
+  `refused`.
+- While the panel is open, the trigger belongs to the panel, and no press
+  goes to the game (the pump of `controllers.cpp`). After a press that
+  closed the panel, the trigger stays with the panel until it goes up. So
+  the press that closed the panel is no click in the game.
+
+### 22.4 The look
+
+The look follows `hint_card_style`, as the keyboard does (21.3).
+
+- With 1 the panel is a page of the parchment of the cards (`card_scroll.h`)
+  with a torn edge. The title "Places" is in Alegreya Bold with a capital of
+  38 px, and the header "Bookmarks" in Alegreya SC. Each button is a key of
+  ink with its word in dark ink (a capital of 26 px). The button under the
+  ray has a gold face and a gold rim, and the pressed button is bright
+  yellow gold for 120 ms. A dim button and the pale seal go 65 percent of
+  the way back to the paper. Each bookmark has a red wax seal with its
+  number in the digits of the keyboard (Palatino Linotype).
+- With 0 the panel is dark and opaque, with grey buttons in Segoe UI: gold
+  under the ray, pale gold for a press, dark grey for a dim button.
+
+**The bake.** The page with the title and the header is drawn one time. A
+button in each look (plain, under the ray, pressed, dim) and a seal in each
+look (set, not set) are drawn the first time that they show, and the mod
+keeps a copy of the box. A new picture copies the box of each part whose
+look changed. The note is drawn again each time that it changes.
+
+**The warm.** With `panel_warm=1` (the default) the thread of the warm of
+the fonts also draws the page, each button plain and dim, and each seal in
+its two looks, at the start of the game (`controller-hints.md`, 9.11, "The
+first draw of a font"). That is 82 parts. So the first picture of the panel
+copies its parts and draws only the note. With `panel_warm=0` the first
+picture draws the page and each part on the frame thread.
+
+The panel uses the quad layer of the ring (`kCardRing`), 1024 by 1024
+pixels, as the ring does. The ring and the panel never show at one time.
+
+### 22.5 Keys and the log
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `places_panel` | 1 | 1: page 2 of the ring as made has the item `places`, and it opens the panel. 0: page 2 has `mark_set`, `mark_go` and `mark_back`, and the word `places` is an empty slot |
+| `places_close_buttons` | 1 | 1: B of the pointing hand and the menu button close the panel. 0: they do not, and B can start a gesture |
+| `panel_warm` | 1 | 1: the thread of the warm of the fonts draws the page and the parts of the first picture at the start (22.4, "The warm"). 0: the first picture draws them on the frame thread. The warm needs `font_warm=1` and `hint_card_style=1` |
+| `hint_card_style` | 1 | 1: the panel is a page of parchment. 0: the dark panel |
+| `places_panel_test_save` | 0 | Test key. N saves the first N new pictures of the panel as `bwvr-places-FFFFF.bmp` over a checkerboard (FFFFF is the frame) |
+| `places_test_buttons` | | Test key. The buttons for the word `aimplaces` of the scripted controller, in order: `temple`, `creature`, `town`, `land`, `back`, `close`, and `go`, `set`, `follow`, `remove` with the number, for example `set3,land,go3` |
+
+The log has the tag `places`:
+
+```
+places       : the panel opens, 0.56 by 0.56 m, its middle at x y z m, the head at x y z m with a yaw of Y degrees, frame N
+places       : the ray is on set 3, frame N
+places       : the trigger presses set 3, frame N
+ring         : the panel of places: the key Ctrl and 3, frame N
+places       : the trigger presses go 3, and it does not act: Bookmark 3 is not set, frame N
+places       : the panel closes: the player pressed land, frame N
+places       : the panel closes: the player pressed B, frame N
+places       : the panel closes: the player pressed the menu button, frame N
+```
+
+### 22.6 The parts for other panels
+
+The parts of the panel that are not places are in `panel_kit.h`,
+`panel_kit.cpp` and the pure `panel_kit_math.h`, so the next panels in the
+room can use them:
+
+- `panel_kit::Room`: `Open` places a panel in front of the head (a
+  distance, a pitch and a size), `FollowRecenter` places it again after a
+  recenter, and `Step` once a frame gives the part under the ray (a hit
+  function of the caller, a light pulse at each new part) and the part that
+  a pull of the trigger pressed. `Pressed` gives the stronger pulse and the
+  flash, and `StageLayer` sends the picture as the quad layer of the ring.
+- `panel_kit::Canvas`: the GDI picture, and the parchment. `StartParchment`
+  draws the page one time, with a function of the caller for the parts of
+  the page that never change. `InkWords`, `PageToCard` and `Fade` draw on
+  it.
+- `panel_kit::Tiles` and `ShowPart`: a copy of the box of each part in each
+  look, so a new picture copies the parts that changed.
+- `panel_kit::Button`: a button of the parchment in the looks plain, under
+  the ray, pressed and dim. `PlainButton` is the same button in the dark
+  look.
+- `panel_kit_math`: `PlaceAt`, `HitRects`, `RectBox`, and the trigger with
+  its band (`Press`, `PressStep`, `PressOpen`).
+- The widgets of a panel of settings (the debug window, section 23):
+  `Toggle` (a slot with a knob of wax), `ArrowKey` (a key with a triangle of
+  ink), `ScrollBar`, `InkWordsIn` (words at the left, in the middle or at
+  the right of a box), `InkLines` (words that wrap), and `Note` with `Over`
+  (a small card with rolled ends, laid over the card). They draw into a
+  picture of the caller, so a part can be drawn one time and copied to each
+  place. The look `kOn` is a button that is on now, for example a tab.
+- `panel_kit_math`, the list that scrolls: `MaxOffset`, `ClampOffset`,
+  `Thumb`, `OffsetOfThumb` (the drag of the thumb), and `StickScroll` (the
+  speed of a scroll by the stick).
+
+The caller keeps the trigger from the game while its panel is open
+(`PlacesPanelHoldsTrigger` and `DebugWindowHoldsTrigger` in the pump of
+`controllers.cpp`), and it decides what closes its panel.
+
+### 22.7 Tests and limits
+
+The math checks are in `test/controller_math/places_checks.h`: the buttons
+and their kinds, each button on the paper, no two boxes with the rim that
+overlap, the middle of each button finds it, the keys of a bookmark, the
+items of the places, what closes the panel and what is dim, one press for
+each pull of the trigger, the place 1 m out and 12 degrees down, a ray from
+the head to each button, and the test key.
+
+A desktop run (the test save `temple`, dxwrapper, `test_frame_rate=60`,
+`aim_preset=0`, `places_panel_test_save=60`,
+`places_test_buttons=set3,land,go3,follow3,remove3,go3,close`) opens the
+panel from page 2 of the ring five times: Y, the left hand to More, then to
+`places`. The word `aimplaces` aims the ray at each button, and the word
+`trigger` presses it.
+
+- The panel opens at 0.00 -0.21 -0.98 m from a head at 0 0 0.
+- Set here 3 sends Ctrl and 3, and bookmark 3 is set in the next frame.
+  The panel stays open, and its seal turns red.
+- Land sends F3, the panel closes, and the God view goes to the jump of
+  the game camera.
+- Go 3 sends 3, the panel closes, and the view goes back to the Temple,
+  where bookmark 3 is.
+- Follow 3 sends Shift and 3. Bookmark 3 is on the land, not on an object,
+  so the game camera stays where it is.
+- Remove 3 sends Ctrl, Shift and 3, and bookmark 3 is not set in the next
+  frame. Go 3 is then dim, and its press does not act, with the note
+  "Bookmark 3 is not set". Close closes the panel.
+- The log has no line of a press of the left button of the game.
+- With `backend=vulkan` and `hint_card_style=0` the dark panel shows, the
+  press of the dim Go 1 does not act, and Close closes the panel.
+- With `places_panel=0` and `snapshot_item=0` page 2 is `mark_set`,
+  `mark_go`, `mark_back`, `pause`, `more`, `debug`, `names`, `save` (the
+  owner's ini has `debug_menu=1`), and the three bookmark items send Ctrl
+  and 1, Ctrl and Tab, and Backspace, as before.
+- With `panel_warm=1` the thread of the warm draws the page and 82 parts in
+  28 ms at the start, and the first picture of the panel takes 0.66 ms: 1
+  part drawn (the note) and 41 copied. With `panel_warm=0` the first
+  picture takes 10.6 ms with 42 parts drawn, and the page 4.7 ms more. Each
+  other new picture takes 0.4 to 1.6 ms, or 0.01 ms when it only copies.
+
+Only a headset shows the panel, its place and its size, whether the ray
+finds a button with ease, whether a hand that points stays below the
+panel, and what Follow does with a bookmark on an object in the God view.
+
+## 23. The debug window
+
+The item `debug` of the ring opens a window with the switches of the debug
+page (`controllers.md`, 10.8), with `debug_menu=1` and `debug_window=1`.
+It is built on the parts of section 22.6. The code is in `debug_window.cpp`
+and `debug_window_math.h`, and the notes of the switches are in `kTips` of
+`debug_menu.cpp`.
+
+### 23.1 What the window has
+
+The picture is 1024 by 1024 pixels:
+
+| Part | Where | What it is |
+| --- | --- | --- |
+| The title | The top | "Debug switches", or "VR Settings" for the VR Settings window (section 24) |
+| The tabs | A column at the left, 196 by 62 px each | One for each group. The tab of the group that shows is bright gold (`kOn`) |
+| The list | 692 by 760 px, 10 rows of 76 px | The switches of the group, one row for each: the label at the left and the control at the right. An ink rule is at the foot of each row, and above and below the list |
+| The scroll bar | At the right of the list | Only for a group with more than 10 rows. The thumb is the share of the list in the view, at least 56 px |
+| The bottom row | Under the list | The words of the last press at the left, and Close at the right. A page (24.6) can have a button of its own at the left of Close |
+| The note | Over the list | After a rest of 0.35 s on a row: the name of the switch, its note in one to three sentences, and its ini key. It goes below the row, or above the row when it does not fit below. It does not catch the ray |
+
+The control of a row:
+
+- **A toggle** for a switch with two values: the word of the value, and a
+  slot (a key of ink) with a knob of wax. The knob is green at the right for
+  the value 1, and red at the left for 0. A press anywhere on the row changes
+  it.
+- **Two arrows** for a switch with more values or a number: a key with a
+  triangle at each side of the word of the value. The left arrow makes the
+  step back of the switch when the table has one, and else the step of the
+  right arrow (`controllers.md`, 10.8).
+- **A dim row** for a switch that cannot change now: the row goes 65 percent
+  of the way back to the paper, and the word is "not now".
+
+### 23.2 The place, the ray and the stick
+
+The place, the ray and the trigger are those of the panel of places (22.2,
+22.3): 1 m in front of the head, 12 degrees below eye level, 56 cm across,
+fixed in the room. A row is 4.2 cm high and an arrow 3.3 cm across.
+
+- The part under the ray is gold, with a light pulse at each new part. For a
+  toggle the part is the whole row.
+- A pull of the trigger presses the part under the ray. A press of a tab,
+  Close, the thumb or the track gives the stronger pulse of the kit. A step
+  of a switch gives the pulse of its test key only, and the control flashes.
+- The thumb: a pull on it takes it, the ray drags it while the trigger is
+  down, and the point of the thumb that the ray took stays under the ray.
+  A pull on the track goes one view less one row up or down.
+- The stick of the pointing hand: while the ray is on the window, a push
+  forward or back past 25 percent scrolls the list, up to 1400 px a second
+  at a full push (`StickScroll`). Forward goes up the list. The pump of
+  `controllers.cpp` then sends no zoom and no wheel (`DebugWindowTakesStick`),
+  and a push that the window took must come back before it zooms.
+- B of the pointing hand and the menu button close the window. B then draws
+  no gesture, and the menu button sends no Esc. Close, the ring, the spell
+  book, a dialog box and a cut scene close it too.
+
+### 23.3 The look and the bake
+
+The look follows `hint_card_style`, as the panel of places does. With 1 it
+is a page of parchment, with the words in Alegreya (a capital of 24 px for a
+label) and the values in Alegreya SC. With 0 it is dark, in Segoe UI, and
+the mod draws all of it each time that it changes.
+
+**The bake.** The page with the rules is drawn one time. The title is drawn
+on the card when the list changes, so each list has its own title. Each
+tab and Close in each look is drawn the first time that it shows, and the
+mod keeps a copy (`panel_kit::Tiles`), apart for each list. Each row of the group shows the paper
+of the first row of the list, so a copy of a row can go to each place of the
+list. A row is drawn into a picture of its own when its value or the look of
+its control changes, and a new picture copies the rows that show. So a
+scroll copies rows, and a change under the ray draws one or two rows. The
+note is drawn one time for each switch and laid over the rows again after a
+change. The scroll bar and the bottom row are drawn when they change.
+
+**The warm.** With `panel_warm=1` the thread of the warm of the fonts also
+draws the page, and the tabs and Close as a first picture shows them: the
+first group on, the other tabs plain. It does this for the settings
+(`settings_panel=1`) and for the debug switches (`debug_menu=1`). For the
+settings it also draws each row of the first group with its value in
+`bwvr.ini` and no ray on it (`SettingsPanelWarmRows`). The first open
+compares the look of each row, and it draws again only a row whose value
+changed. The title, the scroll bar and the bottom row are drawn at the open.
+The switches of the debug page hold states of the game, so their rows are
+drawn at the open. The drawing of the controllers of the page Controls has
+its own warm (24.6).
+
+Costs in a desktop run with the fonts warm: the first picture of the
+settings 4.8 ms with 15 parts drawn (`panel_warm=0`), and 4.3 ms with the
+page and 5 tabs from the warm (5.6 ms on its thread). The first show of the
+page Controls 17.9 ms, or 15.4 ms with the tabs from the warm, and its
+drawing of the controllers is about 11 ms of it. A change under the ray 0.4 to 0.9 ms, and 1.8 to 1.9 ms
+while a note shows (the note is laid over the rows again), a frame of a
+scroll by the stick 0.6 to 1.8 ms, a new group 5 ms, the first draw of a
+note 4 to 6 ms. The report of each window gives
+the average, the most, and the most for a change under the ray only.
+
+The window uses the quad layer of the ring (`kCardRing`), 1024 by 1024
+pixels, with the clear edge and the mip levels of section 26. The ring, the
+panel of places and the window never show at one time. Memory: the page and the card (4 MB each), a picture of 692 by 76 px
+for each row of the group (210 KB each, 24 rows in the group Render), and
+the note.
+
+### 23.4 Keys and the log
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `debug_window` | 1 | With `debug_menu=1`: 1 the item `debug` opens the window. 0 it goes to the debug pages of the ring |
+| `panel_warm` | 1 | 1: the thread of the warm of the fonts draws the page, the tabs and the rows of the first group of the settings at the start (23.3, "The warm"). 0: the first picture draws them on the frame thread |
+| `hint_card_style` | 1 | 1: the parchment. 0: the dark window |
+| `debug_window_test_save` | 0 | Test key. N saves the first N pictures of the window with a new group, a new value, a note or a scroll of 3 rows as `bwvr-debugwin-FFFFF.bmp` over a checkerboard |
+| `debug_test_parts` | | Test key. The parts for the word `aimdebug` of the scripted controller: `tab3`, `row5`, `left5`, `right5` (from 0), `thumb`, `trackend` and `close` |
+
+The log has the tag `debug window`:
+
+```
+debug window : the window opens, 0.56 by 0.56 m, its middle at 0.00 -0.21 -0.98 m, the group View with 14 switches, frame 371
+debug window : the note of "Zoom point" shows (row 4), frame 543
+debug window : the trigger presses the tab Render: 24 switches, frame 731
+debug window : the trigger takes the thumb of the scroll bar at offset 933, frame 841
+debug window : the trigger lets go of the thumb at offset 0 of 1064, frame 901
+debug window : frame 641, a new picture of the parchment window took 0.92 ms: 2 parts drawn and 9 parts copied (a change under the ray)
+debug window : 67 new pictures, 1.34 ms each on average and 5.69 ms at the most. 10 were a change under the ray only, 1.92 ms at the most
+```
+
+### 23.5 Tests and limits
+
+The math checks are in `test/controller_math/debug_window_checks.h`
+(`controllers.md`, 10.8). A desktop run opens the window from page 2 of the
+ring and presses a toggle, both arrows of a switch of three values, the
+arrows of "Throw speed", a tab, the stick, the thumb, the track and Close,
+and closes the window with B and with the menu button.
+
+The check in a headset is in `headset-checks.md`, check 23.
+
+## 24. The VR Settings window and the welcome page
+
+The VR Settings window is the debug window of section 23 with the settings
+of the player as its rows. The item `settings` of page 2 of the ring opens
+it, and so does the button VR Settings of the welcome page. The welcome page
+shows one time, at the first start of the mod. The code is in
+`settings_panel.cpp` and `settings_panel_math.h`. The window code in
+`debug_window.cpp` takes its rows from a table of functions (`WindowRows`
+in `debug_window.h`): one for the debug switches, one for the settings.
+
+### 24.1 The rows
+
+The place, the parts, the look, the bake, the stick and the closes are those
+of section 23. The title is "VR Settings". The words are the words of the
+launcher (`launcher.md`), so a player knows them. The note of a row has the
+launcher label and what the setting does. No player word of the window, of
+the welcome page or of the launcher names a key, a file or a part of the
+program.
+
+| Tab | Row | Key | Values |
+| --- | --- | --- | --- |
+| Moving | Turn | `snap_turn` | Smooth, 30, 45, 90 degrees. For 0 (no turn, a test value of bwvr.ini) the row shows the default |
+| Moving | Turn speed | `smooth_turn_speed` | Slow 45, Normal 90, Fast 135, Very fast 180 (degrees a second) |
+| Moving | Movement type | `move_type` | Walk, Fly |
+| Moving | Movement direction | `move_stick` | Head, Controller. For 0 (no walk, a test value of bwvr.ini) the row shows the default |
+| Moving | Walk speed | `move_stick_speed_cm` | Slow 75, Normal 150, Fast 250, Very fast 400 |
+| Moving | Smooth zoom | `god_zoom_smooth` | In steps, Smooth |
+| Moving | Comfort vignette | `comfort_vignette` | Off, Gentle, Strong |
+| Moving | Blink | `blink` | Off, Short, Long |
+| Hands | Grab the world | `grab_hand` | Off, Other grip, Either grip. At the next start |
+| Hands | Controller ahead | `grip_trim_ahead_mm` | -30 mm to 30 mm in steps of 5 mm, 0 mm by default |
+| Hands | Controller up | `grip_trim_up_mm` | The same |
+| Hands | Controller out | `grip_trim_out_mm` | The same |
+| Controls | The page of 24.6 | `button_map_hand`, `button_map_other` | A job for each button |
+
+The three rows of the controllers have no row in the launcher: a player
+sets them in the headset, where he sees the drawn controllers on his real
+ones. Ahead is where the controller points, up is to the top of the
+controller, and out is away from the other hand.
+
+A row of Off and On is a toggle, with Off first, so the knob is at the left
+for it. Each other row has two arrows, and a step goes round the list. So
+Smooth zoom (In steps, Smooth) has arrows: it is a choice of two ways, not
+a thing that is on or off, and a knob of wax would read as on and off
+(`settings_math::IsToggle`, `WindowRows::arrows`). A value in `bwvr.ini` that the list does not have shows
+as its number, and the right arrow goes to the first value of the list.
+
+**The settings with no row.** These keys still act, and the window does not
+show them:
+
+| Key | Why it has no row |
+| --- | --- |
+| `teleport` | Each player uses the teleport |
+| `recenter_hold` | The page Controls gives the recenter to a button |
+| `left_hand` | The left handed option of the game chooses the Hand (`hand_follow_game`, `controllers.md`, 5.6) |
+| `creature_stroke_open` | Each player has the stroke with the open hand |
+| `gesture_trail` | Each player has the trail of the gestures |
+| `hint_learn` | The ToolTips option of the game chooses it (`hints_follow_game`, `controller-hints.md`, 9.10) |
+| `hint_card_style` | Each player has the scroll look |
+| `subtitle_card` | Each player has the subtitle card |
+
+With `settings_lean=0` the window has these rows too, in the tabs Moving,
+Hands and Cards, as the table `settings_math::kTable` has them, and a row
+that acts at the next start has the small words "at the next start" under
+its label.
+
+**The restart.** A row that acts at the next start (`grab_hand`) has no
+words of its own. While its value is not the value of the start of the
+game, the bottom row of the window says "Restart the game to use the
+changes." at its left, after a round arrow of red ink, in place of "Point at
+a setting to read what it does." The icon tells a notice from a help line.
+The words of a change show there first for 2.5 s.
+
+### 24.2 A change
+
+A change writes the key into `bwvr.ini` at once, as the launcher writes it:
+`WritePrivateProfileString` in the section `[bwvr]`, with the value as a
+number. Then a row that acts at once calls the change function of its area,
+which writes its own log line:
+
+| Key | The change function |
+| --- | --- |
+| `snap_turn`, `smooth_turn_speed`, `blink` | `ComfortCameraSetSnap`, `ComfortCameraSetTurnSpeed`, `ComfortCameraSetBlink` |
+| `move_type`, `move_stick`, `move_stick_speed_cm`, `god_zoom_smooth` | `TabletopGodSetMoveType`, `TabletopGodSetMoveStick`, `TabletopGodSetMoveSpeed`, `TabletopGodSetZoomSmooth`. A walk, a fly or a hold of the zoom that runs stops |
+| `comfort_vignette` | `VignetteSet` |
+| `grip_trim_ahead_mm`, `grip_trim_up_mm`, `grip_trim_out_mm` | `GripFitSetTrim`. The controllers, the hands and the Hand move at the next frame (`controller-hints.md`, 9.15) |
+| With `settings_lean=0`: `teleport`, `recenter_hold`, `left_hand`, `gesture_trail`, `creature_stroke_open`, `hint_learn`, `hint_card_style` | `TeleportSetOn`, `ControllersSetRecenterHold`, `ControllersSetLeftHand`, `OverlaySetTrail`, `ControllersSetOpenStroke`, `HintCardSetLearn`, `HintCardSetStyle` |
+
+These functions do not need `test_keys=1`, and they give no pulse: the press
+of the row gives the pulse of the kit. The window never writes the registry
+or a file of the game. When Windows refuses the write, the change acts for
+this game only, and the log says so.
+
+### 24.3 The welcome page
+
+The page shows when `welcome_page=1` and `bwvr.ini` has no
+`welcome_done=1`. It waits until the controllers can act for 3 s, with no
+dialog box, no cut scene, no ring, no spell book and no other panel. It is
+a parchment page of 1024 by 640 pixels, 56 by 35 cm, at the place of the
+VR Settings window:
+
+- the title "Welcome to the Black & White VR Mod"
+- "You can change the settings at any time." and "The mod is a work in
+  progress, so expect some bugs."
+- three controls: the grip of the Hand, the grip of the other hand, and the
+  button of the ring with "VR Settings is in the ring". The button is Y, X,
+  B or A, as `button_layout`, the hand of the ring and the map of the
+  buttons (24.6) give it
+- the buttons VR Settings and Play
+
+VR Settings closes the page and opens the window. Play closes the page. A
+press of either button, B of the pointing hand and the menu button write
+`welcome_done=1`. The ring, the spell book, a dialog box and a cut scene
+close the page with no write, and it shows again when they are gone. The
+words are drawn one time into the page, and each button in each look is
+copied, so a change under the ray copies one button.
+
+### 24.4 Keys and the log
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `settings_panel` | 1 | 1: page 2 of the ring as made has the item `settings` in the slot of `names` (`controllers.md`, 10.2). 0: page 2 has `names`, and the word `settings` is an empty slot |
+| `settings_lean` | 1 | 1: the window has the rows of 24.1, and the restart line. 0: it also has the rows of the settings with no row, in the tabs Moving, Hands and Cards |
+| `welcome_page` | 1 | 0: the welcome page never shows |
+| `welcome_done` | 0 | The mod writes 1 after the welcome page. The desktop runs set 1 (`tools/desk/desk_test.ps1`) |
+| `welcome_test_save` | 0 | Test key. N saves the first N pictures of the welcome page as `bwvr-welcome-FFFFF.bmp`. The pictures of the window come from `debug_window_test_save` |
+| `welcome_test_parts` | | Test key. The buttons for the word `aimdebug` while the page is open: `settings`, `play` |
+
+The log has the tag `settings`, and the window lines of the VR Settings
+window have it too:
+
+```
+settings     : settings_panel=1: page 2 of the ring as made has the item "settings". settings_lean=1: the window has the rows that a player changes. welcome_page=1, welcome_done=0: the welcome page shows at this start
+settings     : the welcome page opens, 0.56 by 0.35 m, its middle at 0.00 -0.21 -0.98 m, frame 412
+settings     : the welcome page closes: the player pressed VR Settings. welcome_done=1 is in bwvr.ini, so the page does not show again, frame 530
+settings     : the window opens, 0.56 by 0.56 m, its middle at 0.00 -0.21 -0.98 m, the group Moving with 7 switches, frame 531
+settings     : snap_turn goes from 2 to 3 (90 degrees), written to bwvr.ini. It acts at once, frame 650
+comfort      : the VR Settings window: turn in steps of 90 degrees now
+settings     : grab_hand goes from 1 to 2 (Either grip), written to bwvr.ini. It acts at the next start of the game, frame 700
+settings     : the bottom row of the window asks for a restart of the game: a setting that acts at the next start has a new value, frame 700
+```
+
+### 24.5 Tests and limits
+
+The math checks are in `test/controller_math/settings_panel_checks.h`: the
+table (each line in its group, a key of its own, the default among its
+values, labels and value words that fit), the rows and the tabs of the lean
+window, the restart line, the words and numbers of the values, the step
+round a list, the text for `bwvr.ini`, the ring as made with
+`settings_panel` 1 and 0, and the layout of the welcome page.
+
+A setting that the area reads only at its start (`grab_hand`) acts at the
+next start. The other settings of the launcher stay in the launcher.
+
+**The pictures with no game.** An offline program (not in the repo) builds
+`debug_window.cpp`, `settings_panel.cpp`, `controls_page.cpp`,
+`panel_kit.cpp`, `card_scroll.cpp` and `hint_model.cpp` with stubs of the
+game and of the headset, and draws each page of the window to a picture
+with the fonts of the mod and the models of `bwvr/assets/controllers`.
+
+### 24.6 The page Controls
+
+The tab Controls of the VR Settings window shows the controllers of the
+player and gives a job of a controller to a different button of the same
+controller. The code is in `controls_page.cpp`, `controls_layout_math.h`
+(the layout of the page and the leaders), `button_map_math.h` (the kinds,
+the buttons, the map and the jobs), `panel_raster.h` (the drawing of a
+model on the CPU) and `hint_model.cpp` (the models). `controllers.md`, 5.7,
+has the map.
+
+**The page** is one picture in the box of the list and of the scroll bar,
+732 by 760 pixels, in place of rows (`WindowPage` in `debug_window.h`).
+Each controller has a half of the page:
+
+```
+| left model | left boxes | right boxes | right model |
+```
+
+- **The headers.** "Left hand" and "Right hand" over the two halves, and
+  the small word "Main" under the hand of the Hand.
+- **The models** are the models of the controllers of the hints
+  (`hint_model.cpp`, the WebXR Input Profiles), drawn on the CPU: a faint
+  wash of ink for the body, a darker wash for the controls, the light from
+  above, and an outline of ink at the edges, in the look of the parchment.
+  The eye is in front of each controller, above it and at its inner side,
+  as a player knows the controller, so the face buttons and the stick face
+  the eye and the trigger shows at the side toward the boxes. A soft light
+  comes from the upper left, and a face that turns away from the eye is
+  darker. Each button is a part of its own in a darker ink. Each model fits
+  a box of 196 by 644 pixels at the outer side of its half. A controller
+  with no model has the drawing of `controller_art_math.h` in its place.
+- **The boxes**, one for each control of the kind: the trigger, the grip,
+  the stick, the stick click, the face buttons and the menu button. A box
+  has the name of the control in small capitals ("Y button", "Stick
+  click") over its job ("Ring", or "Not used" for a control with no job).
+  The box of a button that can take a different job is a key with a mark
+  that points down. The box of a control that keeps its job (the trigger,
+  the grip, the stick, the pad click of a Vive wand) has a plain frame of
+  thin ink with no mark, and its words are a little lighter, so it reads as
+  a fact and not as a control that does not work.
+- **The rows.** The boxes of both sides are on one grid: as many rows as
+  the side with the most controls, at the same heights.
+- **The leaders.** A straight line of ink goes from the side of each box
+  that faces the model to its control, and ends in a small ring on the
+  control. The ring is at the middle of the pixels of that control in the
+  picture, so it is on a part of the control that the eye sees. The stick
+  and the stick click share the stick: the ring of the click is nearer to
+  the top of the stick. A control that the model does not have (the menu
+  button of a Touch Plus model) has a box with no leader. The controls take
+  the rows in their order from the top of the model, each as near to its
+  own height as the rows let it (`Route`), so the lines are short and run
+  side by side, and a line crosses the body only to reach a button on the
+  face. Two lines clash when they cross or when one runs within 9 pixels of
+  the ring of the other (`Clash`), as the line to Y over the ring of the
+  trigger at the side of a Touch model. Then the two controls swap their
+  rows, so the trigger has the row above Y and a short line. When lines
+  still clash, the side uses the order of the least length (`LeaderOrder`):
+  two straight lines of such an order never cross.
+- **Under the ray** a box is gold, and its leader, its ring and its
+  control on the model are gold too. The bottom row says the control and
+  its job ("Left Y: Ring"), with "(always)" for a control that keeps its
+  job.
+
+**A change.** A pull of the trigger on the box of a button opens a list
+under the box (above it at the foot of the page): a small scroll of paper
+with one item for each job of that controller. The item in use is bright
+gold, and the item under the ray is gold. A pull on an item gives the button
+that job, and the button that had the job takes the old job of the first
+one, so each job keeps one button. The bottom row says both, for example
+"Left Y: Recenter. Left stick click: Ring". A pull out of the list closes
+it and does no more. The page writes `button_map_hand` or
+`button_map_other` into `bwvr.ini` at once, and `controllers.cpp` uses the
+new map when each of the four buttons of both controllers is up. The hint
+cards, the help words and the welcome page take the new buttons in the next
+frame (`controller-hints.md`, 8.3).
+
+**Reset Defaults** is a button in the bottom row, at the left of Close,
+only on the page Controls. It gives each button its job as made. It is dim
+while each button has its job as made, and then a press does nothing.
+
+**The pictures of the models** are drawn one time for their models, with 3
+by 3 samples a pixel: 40 to 45 ms for each model on a PC of the owner. With
+`panel_warm=1` a thread of the mod draws them when the profiles of both
+controllers are known and both models are loaded
+(`ControlsPageWarmFrame`), so the first show of the page copies them. The
+page waits for the end of the thread before it uses them. A new picture of
+the page (a new box under the ray, a list, a change) lays the pictures, the
+leaders and the boxes again: about 5 ms.
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `controls_page` | 1 | 0: the VR Settings window has no tab Controls. The keys of the map still act |
+| `controls_page_models` | 1 | 1: the page of this section. 0: the page with the drawing of `controller_art_math.h`, a row with two arrows for each button, the row "Button defaults" and a dim row for each control that keeps its job |
+| `panel_warm` | 1 | 1: a thread of the mod draws the pictures of the models when they are loaded. 0: the first show of the page draws them on the frame thread |
+| `button_map_hand`, `button_map_other` | 1234 | The map of the buttons (`controllers.md`, 5.7). 1234 is the layout as made |
+| `hint_profile` | | Test key (`controller-hints.md`, 8). The page draws the kind and the model of this profile |
+| `debug_test_parts` | | Test key. The words `page4` (box 4 of the page: 0 to 7 the left controller, 8 to 15 the right controller, in the order of the log line of the parts), `item2` (item 2 of the list that shows) and `reset` |
+
+The log has the tag `controls`, and the map has lines of the tag
+`controllers`:
+
+```
+controllers  : the right controller is a Quest Touch controller (profile "/interaction_profiles/oculus/touch_controller"). Its buttons for the jobs: A, B, Stick click, frame 2
+controls     : panel_warm=1: the models of the controllers are loaded (meta-quest-touch-plus and meta-quest-touch-plus), so a thread of the mod draws their pictures for the page Controls, frame N
+controls     : the page with the models (meta-quest-touch-plus and meta-quest-touch-plus, parchment): part 0 left Stick click: Recenter (a list), part 1 left Stick: Walk, part 2 left Trigger: Not used, part 3 left Y button: Ring (a list), ...
+controls     : a picture of the page took 3.65 ms, frame 731
+settings     : the trigger presses the part 3 of the page: its list of 4 items opens, frame 740
+controls     : the list of Left Y: it goes from Ring to Recenter, and Left stick click takes Ring. button_map_other=1324 is in bwvr.ini. It acts when each button is up, frame 760
+controllers  : the new map of the buttons acts now: button_map_hand=1234, button_map_other=1324, frame 761
+controls     : Reset Defaults: each button has its job as made. button_map_hand=1234 and button_map_other=1234 are in bwvr.ini, frame 902
+```
+
+The math checks are in `test/controller_math/controls_layout_checks.h` (the
+columns, the boxes, the grid, 300 sets of leaders with no two that cross
+for each of `LeaderOrder` and `Route`, the parts, the view and the fit of a
+model), `panel_raster_checks.h` (the drawing on the
+CPU), `debug_window_checks.h` (the parts of a page, the list and the button)
+and `button_map_checks.h` (the kinds, the maps and the jobs). The desktop run
+is `village_run.ps1 -Kind controls` (`tools/desk/README.md`). A desktop run
+has the fake controller, which is a Touch controller: `hint_profile` draws
+the other kinds, but only a headset gives the profile of a real Index, wand
+or Mixed Reality controller.
+
+## 25. The ray over the panels
+
+A panel in the room is a quad layer, and the runtime draws each quad layer
+over the eye pictures (4.3). The ray of the pointing hand is in the eye
+pictures (`hand-model.md`, "Overlay renderer"). So a panel hides the part
+of the ray in front of it, and the player cannot see where the ray points
+on the panel. With `ray_over_panels=1` (the default) the ray goes out as a
+quad layer of its own while a panel in the room is open. The code is in
+`ray_card.cpp` and `ray_card_math.h`.
+
+### 25.1 When
+
+The ray goes over the panels while the menu ray shows
+(`ControllersMenuRay`) and one of these is open (`ControllersPanelRay`):
+
+- a panel of `panel_kit.cpp`: the panel of places (22), the VR Settings window
+  and the debug window (23, 24) and the welcome page (24.3)
+- the menus in the room in a frame with the scene: the menu panel and the
+  keyboard (20, 21)
+
+The ray of a dialog box in the eye pictures (`menu_room=0`) and the ray of
+a room of the Temple stay in the eye pictures, because no quad hides them.
+A frame with no scene draws no ray (20.4).
+
+### 25.2 The strip
+
+- The quad is a flat strip along the ray in the LOCAL space. It goes from
+  the aim point of the hand to the end of the ray: the point on the panel or
+  on the keyboard, or 2 m from the hand when the ray is off the panel. It
+  turns about the ray to face the middle of the head, so both eyes see a
+  line at its true place in the room.
+- It is a quad layer after the panels and the other cards (`kCardRay`), so
+  no panel hides it. Only the glow at its end comes after it.
+- The eye pictures then have no menu ray, so the player sees one ray. When
+  the runtime refuses the layer, the ray goes back to the eye pictures, and
+  the log says so one time.
+- The look is the look of the ray in the eye pictures (`hand-model.md`, "The
+  glow ribbons"): the glow alone (`ray_glow=1`, `ray_glow_only=1`), a tube
+  under a glow (`ray_glow_only=0`) or a plain tube (`ray_glow=0`). The light
+  runs along the strip as it runs along the ribbon. The strip is 1.92 cm
+  across for the glow alone, 2.4 cm for a tube under a glow and 1.2 cm for a
+  plain tube.
+- With `ray_tip=1` (the default) the strip stops at the end of the ray. The
+  end is the round soft glow of `hand-model.md` ("The glow at the end of the
+  menu ray") on a second quad layer (`kCardRayTip`), after the strip. Its
+  middle is at the end of the ray, and its front faces the middle of the
+  head. The strip holds the ray, and the head sees it at a small angle, so a
+  round mark in the strip looks narrow along the ray. The quad of the glow
+  faces the head, so each eye sees a circle at the depth of the end. The
+  quad is as wide as the glow: 1.3 percent of its distance from the head
+  from the middle to the edge, 2.6 cm across at 1 m. Its picture is 64 by 64
+  pixels. It does not change, so it goes into the swapchain of the card only
+  once.
+- With `ray_tip=0`, or when the runtime refuses the quad layer of the glow,
+  a round mark is at the end of the strip: a disc 6 mm across in the color
+  of the ray, in a ring of dark ink 1.6 cm across.
+- The picture of the strip is 32 by 1024 pixels. The mod draws it on the CPU in each
+  frame, because the light moves, and it goes to the swapchain of the card
+  in each frame (128 KB).
+- The view for videos draws the strip as it draws the other cards
+  (`backend.md`, "The view for videos").
+
+### 25.3 Keys and the log
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `ray_over_panels` | 1 | 0: the ray stays in the eye pictures, and a panel hides the part of it in front of the panel. The switch "Ray on panels" of the debug page (the group Picture) |
+| `ray_tip` | 1 | 1: the end of the ray is a round glow on a quad layer that faces the head. 0: the strip has a disc in a ring of dark ink at its end. The switch "Ray tip" of the debug page (the group Picture). See `hand-model.md`, "The glow at the end of the menu ray" |
+| `ray_card_test_save` | 0 | Test key. N saves the first N pictures of the strip as `bwvr-raycard-FFFFF.bmp` over a checkerboard, and the picture of the glow at the end once as `bwvr-raytip-FFFFF.bmp` |
+
+The log has the tag `ray card`. One line at the start, one line at the
+first frame of each run of frames with the strip, at each frame in which the
+end of the ray goes onto a panel or off it or `ray_tip` changes, and at the
+end of the run (40 at the most), and the count in each report:
+
+```
+ray card     : ray_over_panels=1: while a panel in the room is open, the ray of the pointing hand goes out as a quad layer over the panels
+ray card     : the ray goes over the panels as a quad layer, frame N: from X Y Z to X Y Z m (L m). It meets no panel, so it is 2 m long. A strip 1.9 cm across and L m long at X Y Z m. Its front is 0.0 degrees from the best turn to the head, and the head sees it at A degrees from its plane (90 is face on, a ray that points away from the head has less). The look: the glow alone, and a round glow D cm across at the end, R m from the head, on a quad layer of its own that faces the head. The eye pictures have no ray
+ray card     : the end of the ray over the panels moves, frame N: from X Y Z to X Y Z m (L m). It ends on the panel, and the glow is there. ...
+ray card     : the ray is no longer over the panels, frame N, after M frames
+ray card     : N frames had the ray over the panels
+```
+
+With `ray_tip=0` the look ends "and a mark of 1.6 cm at the end", and the
+line of a move says "and the mark is there". When the runtime refuses the
+quad layer of the glow, one line says so, and the strip has the mark.
+
+### 25.4 Tests and limits
+
+The math checks are in `test/controller_math/ray_card_checks.h`: the three
+looks, the place of the strip (along the ray, the front square to the ray
+and toward the head, a right hand set of axes, a ray that points at the
+head, a ray of 5 mm), how the head sees the strip (a ray of a desktop run
+5 degrees from the line of sight, where no turn about the ray faces the head
+more, and a ray up and out from the hand), and the picture (the middle line,
+the rim, the edge, the hand, the mark and its ink, the tube, the bytes of
+the picture). The checks of the glow at the end and of its quad layer are in
+`ray_tip_checks.h`.
+
+The desktop run is `village_run.ps1 -Kind rayover`. It puts the fake hand
+where a player holds it, 15 cm right, 25 cm down and 35 cm in front of the
+head, and rests the ray on the button VR Settings of the welcome page and on a
+row of the VR Settings window. Before the word `point`, the fake hand is at the
+point of the Main Menu, 1 m in front of the head and at the depth of the
+panel. Its ray then meets no panel, is 2 m long and points about 5 degrees
+from the line of sight, so the head sees the strip at 5 degrees from its
+plane, and it is thin. The glow ribbon of the eye pictures has the same
+plane.
+
+- The strip holds the ray, so it can only turn about the ray. A ray that
+  points away from the head is seen at a small angle and looks thin, as a
+  real line does. In a headset the hand is below the eyes, so the ray to a
+  panel goes up and out at an angle.
+- The strip is over the hand where the ray starts, because a quad layer
+  has no depth. The glow alone has no light at the hand and full light from
+  6 cm. A tube starts at the hand.
+- The glow at the end is also over the hand and over anything in front of
+  the end, for the same reason.
+- Only a headset shows how the strip and the glow at its end look over a
+  panel and over the land.
+
+## 26. The edge and the mip levels of a card
+
+Each card (the hint cards, the cards of the buttons, the subtitle card, the
+ring with the panels of `panel_kit.cpp` on it, the keyboard, the bubble, the
+ray over the panels and the glow at its end) is a picture of the CPU on a quad layer. The
+compositor of the runtime samples the quad. The code is in `SendCard` of
+`xr_screen.cpp` and in the pure `card_send_math.h`.
+
+### 26.1 Why
+
+- **The edge.** The sampler of the compositor reads the texels around the
+  edge of the rect of the quad. Past the rect each swapchain image holds an
+  older picture of the card, or no write at all, and each of the 3 images
+  holds a different one. So a quad that shows only the rect of its picture
+  can have a faint line at its edge that changes from frame to frame.
+- **The text.** A Quest 3 through Virtual Desktop renders about 21 pixels a
+  degree at the middle of the view (2688 pixels for the tangents from -54
+  to 40 degrees). A hint card has 40 texels a cm: 1.3 texels a pixel at
+  35 cm and 2.3 at 60 cm. The settings window and the debug window have
+  1024 texels across 56 cm: 1.5 texels a pixel at 1 m. With one mip level
+  the sampler skips texels, so thin lines of ink come and go when the head
+  moves. The menus of the game on the menu panel have 16 texels a degree,
+  fewer than the pixels, so their letters do not do this.
+
+### 26.2 What the mod does
+
+- **The clear edge** (`card_edge_clear=1`). The swapchain of a card is 40
+  texels larger than its picture, and more to a multiple of 8. The picture
+  goes in with 8 clear texels around it inside the rect of the quad (the
+  frame), and 8 clear texels more outside the rect (the apron). Each upload
+  writes the picture, the frame and the apron, so the sampler reads only
+  clear texels at the edge of the quad. The quad grows by the share of the
+  frame, and the frame is the same at each side. So the picture keeps its
+  size and its place in the room.
+- **The mip levels** (`card_mips=1`). The swapchain of a card has up to 4
+  mip levels, and no level is less than 8 texels at a side. After each new
+  picture the CPU makes each level from the one above it: each texel is the
+  mean of 2 by 2 texels. The mean is of the bytes, in the gamma of the
+  picture, as the mod blends its cards. So a thin line of ink keeps a
+  little more of its dark at a distance. A card holds the color multiplied
+  by the alpha, so the mean needs no other step, and a clear texel stays
+  clear. The part that an upload writes starts and ends on a multiple of 8,
+  so each level is exactly half of the level above it.
+- **A new picture only.** Each card gives a new number with each new picture
+  (`CardLayer::serial`). The mod keeps the levels of the last picture of
+  each card, and makes them again only for a new number. Then it compares
+  each row of the picture with the last one, and makes the levels again
+  only for the bands of 8 rows that changed. A card with the number 0 gets
+  its levels again in each frame. Each frame still writes the levels into
+  the next swapchain image, because each image holds an older picture.
+- **The flags.** The quad has `XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT`
+  and not `XR_COMPOSITION_LAYER_UNPREMULTIPLIED_ALPHA_BIT`, so the runtime
+  reads the color as multiplied by the alpha, which is what each card holds.
+  The first picture of each card counts the texels with more color than
+  alpha, and the log says whether the picture is correct.
+- **Where the levels can go.** With Vulkan (`xr_vulkan_upload=1`, or a
+  session with no Direct3D 11) one copy of the buffer writes each level. A
+  session with Direct3D 11 writes each level with `UpdateSubresource`. The
+  relay of Direct3D 11 in a session with Vulkan (`xr_vulkan_upload=0`)
+  copies level 0 only, so there each card has one level and the clear
+  edge. A runtime that refuses a swapchain with mip levels gets one level
+  for each card from then on, and the log says so.
+- **The view for videos** shows the picture of each card as before, with no
+  frame and from level 0 (`backend.md`, "The view for videos").
+
+### 26.3 Cost
+
+On this PC a new picture of a panel of 1024 by 1024 texels takes about
+0.9 ms for a new layout and 0.3 to 0.7 ms for a change of one row (the
+compare of the rows is most of it). A hint card is about a tenth of that.
+The buffer of all levels has 4/3 of the texels of the picture with its
+frame and apron. So the copy into the swapchain in each frame is about 1.4
+times as large as without them: 5.9 MB in place of 4 MB for a panel, and
+about 1 MB for a hint card. The memory is one buffer of the levels for
+each card.
+
+### 26.4 Keys and the log
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `card_edge_clear` | 1 | 1: the clear edge (26.2). 0: the swapchain is the size of the picture, and the quad shows the rect of the picture only |
+| `card_mips` | 1 | 1: up to 4 mip levels, made on the CPU after each new picture. 0: one level |
+| `card_send_test_save` | 0 | Test key. For the first N new pictures of the cards that stay for two frames (not a step of a fade, and not the ray), also with no headset: `bwvr-cardsend-NN-levels-FFFFF.bmp` (the levels side by side over a checkerboard) and `bwvr-cardsend-NN-views-FFFFF.bmp` (the model of the view, 26.5), and one line `card send` for each picture |
+
+A change of `card_edge_clear` or `card_mips` takes effect at the next start
+of the game.
+
+```
+  openxr: the hint card of the pointing hand has its own swapchain, 808 by 360, 4 mip level(s), a clear edge of 8 texels around the picture, 3 images
+  openxr: the first picture of the hint card of the pointing hand has 0 texels with more color than alpha, so its color is multiplied by its alpha
+  openxr: the runtime refused a swapchain of the ring with 4 mip levels (-N), so each card has one level
+  cards        : N new pictures of the cards made ready for their swapchains (card_edge_clear=1, card_mips=1), X ms each on average and Y ms at the most. N of their N rows changed, and N copies of the levels went to the GPU
+card send    : picture N, the ring, 1024 by 1024 px, 4 level(s), a clear edge: made ready in X ms, 0 straight texels. At 0.60 m (0.90 texels a pixel) the shimmer is A the old way and B now (C for the ideal sampler), the edge E and F. At 1.00 m ...
+```
+
+### 26.5 The model of the view, and the tests
+
+`card_send_math.h` also has a model of a compositor, for the checks and the
+test pictures. It views the quad straight on at a scale in texels a pixel.
+It takes a bilinear sample of level 0 (one level), a trilinear sample (the
+levels), or the ideal sample (the mean of the texels under each pixel). For
+the old way the model reads past the rect what the picture of the card
+holds there.
+
+- **The shimmer** is how much the light of a block of 8 by 8 pixels changes
+  over 8 views, each shifted by 1/8 of a pixel across and down, in steps of
+  1/255. A sampler that skips texels hits a thin line at one shift and
+  misses it at the next. Part of the number comes from the move of the ink
+  across the edges of the blocks. The ideal sampler gives that part alone.
+- **The edge** is the largest alpha of the outer ring of pixels of the
+  quad, over 4 shifts.
+- **The views** of the test pictures: a row for each distance (0.35 and
+  0.60 m for a card of the hints, 0.60 and 1.00 m for a panel) and each
+  shift (0 and half a pixel), the old way at the left and the new way at
+  the right, over grey. A panel shows its top left part only.
+
+The math checks are in `test/controller_math/card_send_checks.h`: the
+layout of the old way, each box in its swapchain, the frame of 8 texels,
+the boxes on multiples of 8, the place and size of the picture, the levels
+for each size, the mean of each level, clear texels in the frame and the
+apron of each level, the color multiplied by the alpha, a change of one
+row, and red first. With a test card of thin lines of ink and an older
+card past its rect:
+
+| Texels a pixel | Shimmer, one level | Shimmer, the levels | Shimmer, ideal |
+| --- | --- | --- | --- |
+| 1.15 | 6.49 | 5.74 | 5.21 |
+| 2.00 | 11.67 | 6.15 | 6.86 |
+| 3.30 | 37.36 | 5.88 | 5.79 |
+
+The edge has an alpha of 0.50 the old way and 0 with the clear edge.
+
+A desktop run has no headset session, so `SendCard` does not run in it.
+`card_send_test_save` runs the same code on the pictures of the cards in a
+desktop run, and saves the levels and the model views.
+
+Only a headset shows whether the runtime samples the mip levels of a quad
+(the OpenXR specification lets the runtime choose), and how the text and
+the edge of the cards look.
+
+## 27. Words that fit
+
+Each card and panel of the mod draws its words with `text_fit::Draw`
+(`src/mod/text_fit.cpp`, the pure math in `text_fit_math.h`). No text of
+the mod ends in an ellipsis.
+
+**The rule.** A text that is too wide for its box first gets a smaller
+font, one step at a time: 90, 80 and 70 percent of its size. 70 percent is
+the floor: a capital letter of a card is then still more than 0.5 degrees
+high at the place of the card. A text that is still too wide at the floor
+goes on more lines, if its box has room for them: the fewest lines, and for
+them the largest step that fits. A line breaks at a space. Only a text that
+does not fit on the most lines at the floor is cut. The log then has one
+line for each such text and place:
+
+```
+text fit     : spell book note: the text "..." does not fit in 480 by 90 px, even at 70 percent of its size on 2 lines, so it is cut
+```
+
+The smaller steps are copies of the font of the box (`GetObjectW`, then
+`CreateFontIndirectW` with a smaller height), made one time and kept. A
+smaller font on one line keeps the baseline of the font of the design, so
+the words stay on the line of the card.
+
+**Where.** The boxes that can take two lines are the title and the note of
+a spell book with no item, and a line of a hint card (a second row of the
+card, at most 4 rows in a card). The other boxes take one line: a name in a
+cell of the spell book, a badge, a seal and the card of the ring, a tab, a
+label and a value of the debug window and of the VR Settings window, a line
+of the controls of the welcome page, a key of the keyboard, a button, a
+note and a seal of the panel of places, and the words of the page
+Controls. A paragraph (the note of the debug window) wraps as before.
+
+**The check** (`text_fit_test=1`, a test key). At the first frame, each card
+and panel measures the texts that it can show, in its own boxes and with its
+own fonts: the spell book (each title, note and name, at each size of a
+cell), the hint card (the lines of the spell book and the longest lines of
+the mod, in both looks), the ring (each word and name of an item, each
+group, and each label, name and value of a switch, in both looks), the debug
+window and the VR Settings window (each tab, label and value word), the
+keyboard (each key, with and with no shift) and the panel of places (each
+button and note). The log has one line for each text that needs a smaller
+font or more lines, one line for each cut, and the counts:
+
+```
+text fit     : check: spell book title: "No miracle to ask for now" fits in 480 by 98 px at 70 percent of its size on 1 line
+text fit     : check: text_fit_test=1: 1234 texts of the cards and panels measured in their boxes: 40 at a smaller font, 3 on more lines, 0 cut
+```
+
+Each report window has the counts of the draws that needed a smaller font
+or more lines, and of the cuts:
+
+```
+text fit     : this window 3 texts had a smaller font, 1 went on more lines, and 0 were cut
+```
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `text_fit_test` | 0 | Test key. 1: the check of the words of each card and panel at the first frame |
+
+The math checks are in `test/controller_math/text_fit_checks.h`: a text
+that fits keeps its font, each step of the ladder, the floor, two lines
+before a cut, the break at a space, the fewest lines first, a word that is
+wider than the box, and for many widths, each fit keeps each word in order
+inside the box.
+
+A game text on a hint card (a tooltip of the game) is measured when it
+shows: a cut of a game text has its log line in a normal play.
+
+## 28. A hand in front of a card
+
+The spell book and the ring are the quad layer `kCardRing`, and the runtime
+draws a quad layer over the eye pictures. The hands of the mod are in the
+eye pictures. With no more than that, the page of the book hides the hand
+that picks an item, also when the hand is in front of the page, and the
+ring hides the hand that moves over it. The code is in
+`src/mod/hand_cut.cpp`, with the pure math in `hand_cut_math.h`.
+
+**The real order** (`card_hand_front=1`). Once a frame, after the hands are
+built and before the eye passes, for each eye:
+
+1. Each triangle of the mesh of each hand (`HandModelWorldMesh`, skinned on
+   the CPU in the world) goes into the LOCAL space of OpenXR, and is cut to
+   its part in front of the plane of the page (`ClipFront`). Each triangle
+   counts, on both of its sides (`card_hand_both_sides=1`), because the
+   hand draws with no culling, and a test of one side for the whole hand
+   can take the wrong side while the hand turns. With
+   `card_hand_both_sides=0` only the triangles on the side of the triangle
+   nearest to the eye count, one side for the whole hand. A triangle with a vertex below 50
+   percent of opacity makes no hole. The opacity is what the draw has: the
+   alpha of the texture of the game at the vertex, times the opacity of the
+   hand. The texture fades the wrist and the forearm, so there the page
+   stays, behind the clear part of the hand.
+2. That part goes onto the page along the lines from the eye
+   (`OntoPage`). The eye is the view that the projection layer of that eye
+   declares (`StereoDeclaredView`), so the hole is where that eye picture
+   has the hand.
+3. The parts fill a mask of the page with half of its pixels each way,
+   with 2 by 2 samples in each pixel (`FillConvex`). Each row of samples
+   takes the span of the part on its line. The mask grows by 1 of its
+   pixels (2 pixels of the card), for the time between the draw and the
+   display. The cut scales it up to the pixels of the card with a soft
+   edge: each pixel takes 3 quarters of its own pixel of the mask and 1
+   quarter of the next, each way.
+
+**The bubble of a pull** (`card_ball_cut=1`). While the game draws the
+bubble that the hand pulls out of the spell book (`miracles.md`, "The
+pull"), the mask of each eye also gets the disc of the ball as that eye
+sees it (`BallOnPage`: the middle of the ball on the page along the line
+from the eye, and its radius times the same scale). The ball covers its
+own hole in each eye picture, so no hole shows beside the ball, and the
+hole does not grow when the ball comes to the head. The ball alone also
+splits the card into one quad for each eye.
+
+**A solid hand** (`card_hand_solid=1`). A hand goes faint while the
+controller of a hint shows in it (`hint_hand_opacity_pct`). While a hand is
+in front of the page, it has its full opacity, so the player sees a solid
+hand and fingertip over the page. The texture still fades the wrist and the
+forearm. The rule takes the hands of the cut of the frame before.
+
+**The cost.** Only the box of the holes of the last frame is cleared. The
+picture of the owner (the book or the ring) keeps its pixels: the cut keeps
+a copy of the box that it cut and puts it back in the next frame, while the
+owner gives the same pixels with the same serial. The picture of the right
+eye is copied whole only for a new picture of the owner, and else only in
+the box of its last holes. When the eyes, the page, 12 points spread over
+each hand and the bubble of a pull moved 0.3 mm or less, the cut of the
+frame before stays, with no work. The spell book
+draws its picture again for the mark of the pick only when the mark moves a
+pixel. The holes scale each pixel with two 32 bit products. The report line
+has the mean and the longest time of the cut, with no save of a test
+picture in it, and the mean of each part.
+
+The page gets a hole where the mask is, and the eye sees its eye picture,
+with the hand, through it. A part of the hand behind the page makes no
+hole, so the page stays over it. The two eyes see the hand at two places of
+the page, so while a hand is in front of the page, the card goes out as two
+quads in one place: `kCardRing` for the left eye and `kCardRingRight` for
+the right eye (`XrCompositionLayerQuad::eyeVisibility`), each with its own
+holes. When no hand is in front, the card is one quad for both eyes, as
+before. The text stays sharp, because the page is still a quad layer. The
+view for videos shows the quad of the left eye.
+
+**The ways that the mod does not use.** A hole for both eyes in one picture
+must be the union of the two places of the hand, so each eye sees the land
+in a band beside the hand. A second draw of the hand on a layer of its own
+needs the pixels of the hand of each eye from the GPU. The book in the eye
+pictures with the depth test loses the sharp text of a layer. A depth
+layer (`XR_KHR_composition_layer_depth`) is not certain with each runtime,
+and the order of a quad layer over a projection layer does not change with
+it.
+
+**The other cards.** The keyboard, the panel of places, the debug window
+and the VR Settings window take the ray, and the ray goes over them
+(section 25), so no hand touches them. The ring and its sheets (the places
+and the leashes) are the quad of the ring, so they get the same cut. The
+hints and the subtitles take no touch.
+
+**Limits.** The low poly hands (`hand_model=0`) have no mesh here, so they
+make no hole. A head that moves fast between
+the draw and the display can show the page 1 or 2 pixels into the edge of
+the hand.
+
+**The log.** One line when a hand comes in front of a page and when it goes:
+
+```
+hand cut     : frame N, a hand is in front of the page of the spell book: 4210 px of holes for the left eye and 3986 px for the right eye. The card goes out as one quad for each eye
+hand cut     : frame N, no hand is in front of the page of the spell book now. The card goes out as one quad for both eyes
+hand cut     : this window the cut ran in 450 frames, 0.120 ms on average and 0.400 ms at the most (with no save of a test picture). On average: the hands into the room 0.010 ms, the masks 0.040 ms, the copies 0.030 ms, the holes 0.040 ms. In 300 frames nothing moved and the cut of the frame before stayed. A hand was in front of a page in 120 frames: the card went out as one quad for each eye. The largest hole of an eye had 5120 px
+```
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `card_hand_front` | 1 | 0: the page of the spell book and of the ring is over the hands, also where a hand is in front of it. The switch "Hand in front" of the debug page (group Interface) |
+| `card_hand_solid` | 1 | 0: a hand in front of the page keeps the faint opacity of a hint. The switch "Hand solid" of the debug page (group Interface) |
+| `card_hand_both_sides` | 1 | 0: only the triangles on the side that faces the eye make a hole, with one side for the whole hand. The switch "Hand cut sides" of the debug page (group Interface) |
+| `card_ball_cut` | 1 | 0: the book makes one round hole for both eyes where the bubble of a pull is in front of the page. The switch "Orb cut" of the debug page (group Interface) |
+| `hand_cut_test_save` | 0 | Test key. N: saves the pictures of both eyes of the first N frames with a cut, at most one each 30 frames, as `bwvr-handcut-left-<frame>.bmp` and `bwvr-handcut-right-<frame>.bmp` |
+
+The math checks are in `test/controller_math/hand_cut_checks.h`: the cut of
+a triangle at the plane, the place on the page from each eye (4 mm apart
+for a point 5 cm in front of a page 45 cm away), no hole for a point behind
+the page or for an eye behind it, the fill of a polygon and its box, and
+the cover of a half pixel. The recipe `village_run.ps1 -Kind bookhand`
+puts the hand on the page, 5 cm in front of it and 8 cm behind it. Its
+picture `bwvr-book-N` is the page before the cut and the mark of the pick,
+and `bwvr-handcut-left-N` and `bwvr-handcut-right-N` are the page that each
+eye gets.

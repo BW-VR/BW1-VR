@@ -2,10 +2,15 @@
 
 This file records how the game draws its mouse and key hints, what the mod
 does with them while a controller is in use, how the hint cards work, and
-what is still open (pictures of the controllers and models).
+what is still open (pictures in the hints of the game).
 
-While a controller owns the pointer, the hints show on one card beside the
-wrist of each hand, with prompts for the controller (section 9). The words of
+While a controller owns the pointer, the hints show on cards with prompts for
+the controller (section 9). The launcher row "Show 3D controller for hints"
+(`hint_controller`, on by default) chooses the look. On (`hint_style=2`): a
+hand with a hint shows the model of its controller, with each button of the
+hint lit and a small card for each lit button (9.14). Off (`hint_style=1`,
+`hint_card_pictures=0`): the cards are at the wrists, with the button words
+only. The words of
 the controller replace the mouse words in the game's help text (section 8).
 
 Marks: **[V]** verified (disassembly, symbols, the game files or the SDK
@@ -44,8 +49,15 @@ All addresses are for `runblack.exe` v1.42, image base `0x00400000`.
 - A line of a prompt that teaches an action goes away after the player did
   the action 3 times, and comes back after 10 minutes of play with no use of
   it. In a lesson of the tutorial each line shows (`hint_learn`, 9.10).
-- Not built: glyph pictures of the buttons, a picture of the controller with
-  the button lit, and the runtime's 3D model (section 5).
+- Each line of a button on a card has a small picture of the controller
+  with that button lit, from the drawing of the page Controls
+  (`hint_card_pictures`, 9.13).
+- While a hand has a hint, the model of its controller (WebXR Input
+  Profiles, MIT) shows in the hand with each button of the hint lit, and each
+  lit button has its own scroll card with a line of ink to it
+  (`hint_style=2`, 9.14).
+- Not built: glyph pictures of the buttons in the hints of the game
+  (section 5).
 
 ## 1. How the hint icons work
 
@@ -274,7 +286,11 @@ card with no game call.
 
 ## 3. Controller art
 
-The mod must not ship art it may not ship. Three levels. None is built.
+The mod must not ship art it may not ship. Three levels. The page Controls
+of the settings window has a drawing of each kind of controller in code
+(`ui-layer.md`, 24.6). Level (b) comes from it, on the hint cards (9.13).
+Level (c) is the model of each controller in the hand (9.14). No level is in
+the hints that the game draws.
 
 ### (a) Flat icons per profile
 
@@ -308,41 +324,27 @@ This is the "modern VR" look at a small size.
 
 ### (c) A 3D model of the controller in the player's hand
 
-The real controller model, drawn at the real controller pose, with the button
-lit and a label. The runtime can supply the model.
+The real controller model, drawn at the real controller pose, with the
+button lit and a label. Built with `hint_style=2` (9.14).
 
-**What the SDK offers** [V, `third_party/OpenXR-SDK`, version 1.1.43]:
+**The models.** The mod ships the models of the WebXR Input Profiles
+(`bwvr/assets/controllers`, MIT, Copyright 2019 Amazon). The installer puts
+them in `bwvr-controllers` of the game folder. The README of the folder has
+the source, the version and the trademark note of the project: some models
+show the trademarks of the makers, and the license gives no right to use
+them. So a model shows only for the controller that it shows. The mod reads
+the meshes and the nodes, and draws them in its own colors. It does not read
+the textures, so no logo of a texture shows.
 
-- `XR_MSFT_controller_model` (`xrGetControllerModelKeyMSFT`,
-  `xrLoadControllerModelMSFT`, `xrGetControllerModelStateMSFT`). The runtime
-  gives a binary glTF and per node poses that move the button and stick nodes.
-- `XR_FB_render_model` (`xrGetRenderModelPropertiesFB`,
-  `xrLoadRenderModelFB`). The runtime gives a glTF for a path such as a
-  controller.
-
-**What a runtime supports.** `XR_MSFT_controller_model` is a Windows Mixed
-Reality feature. `XR_FB_render_model` is a Meta feature [I]. Virtual Desktop's
-32 bit OpenXR runtime lists neither [M]. `xr_screen.cpp` asks for only
-`XR_KHR_D3D11_ENABLE_EXTENSION_NAME` and logs the extensions that the runtime
-lists. The models may use compressed textures (KTX2 with Basis) [I]. A viewer
-needs a glTF reader (tinygltf or cgltf, both MIT) and a Basis transcoder
-(Apache 2.0) [I].
-
-**Legal.** The runtime hands the model to the app at run time. The mod does not
-ship it and must not save it into the mod folder or the repository. If a
-runtime offers nothing, do not ship a copy of a maker's model. Options that
-stay legal: a generic controller mesh the author makes, or the silhouette art
-from (b).
-
-**Other cost.** The mod needs a small glTF renderer on the Direct3D 11 side
-(`xr_screen`), a place in the frame for it, and a link from the hint code
-("hint active: this button"). It needs a model per hand and node names for each
-button, which differ by maker. The model stays still with the controller. Only
-the lit part changes. A model in the hand can hide the Hand of the game, so
-draw it beside the Hand, or only when the Hand is idle.
+**What a runtime offers** [V, `third_party/OpenXR-SDK`, version 1.1.43].
+`XR_MSFT_controller_model` (Windows Mixed Reality) and `XR_FB_render_model`
+(Meta) give a model at run time. Virtual Desktop's 32 bit OpenXR runtime
+lists neither [M]. The mod does not use them: the shipped models work with
+each runtime.
 
 **Controller families.** The mod uses the profile string from
-`XrScreen::HandProfile` (`FamilyOf` in `controller_hints.cpp`):
+`XrScreen::HandProfile` (`FamilyOf` in `controller_hints.cpp`, which is
+`button_map::KindOfProfile`, `controllers.md`, 5.7):
 
 | Family | Profiles | Layout |
 | --- | --- | --- |
@@ -394,7 +396,8 @@ disk.
 
 ## 5. Plans for pictures
 
-The words and the card are built. These parts are open, in the order of effort:
+The words, the cards and the model in the hand (9.14) are built. This part
+is open:
 
 1. **Flat glyph atlas.** Replace the mouse picture in every hint by a
    controller glyph, including the screen edge hint and the controls page.
@@ -410,23 +413,6 @@ The words and the card are built. These parts are open, in the order of effort:
    release of the old material [?]. A 64 by 64 cell at the 20 percent hint size
    is about 13 pixels, which may be too small. The atlas also shows on the
    options controls page, so switch it by input state.
-2. **A picture of the controller with the button lit.** One silhouette per
-   family, one lit control per variant (section 3, level b), with a bright
-   accent on the used control. Show it through the atlas if 64 by 64 is clear.
-   If not, show it through `DrawBox` with an own material (way D) or on the
-   hint card. The Touch controller shape on a Quest 3 differs from the Touch
-   Plus shape, so use one generic shape for the family.
-3. **The runtime's 3D model.** Ask for the extension at `xrCreateInstance`
-   only if the runtime lists it. Load the glTF at session start, read the node
-   names, and render on the Direct3D 11 side at the hand's grip pose in the
-   LOCAL space, only while a hint is active. The model has no motion that the
-   player did not make. Fall back to the picture of item 2 when the runtime has
-   no model. This is the largest item. The main risk is that the runtime offers
-   no model (it offers none now, section 3).
-
-The card of section 9 is the place for items 2 and 3: they draw on the XR side
-at the grip pose, only while a hint is active, with no motion that the player
-did not make.
 
 ## 6. Risks that cut across
 
@@ -539,9 +525,13 @@ The labels come from one function, `BuildWords`. It follows `xr_screen.cpp`
 | world (the grip of the other hand, with `grab_world`) | Grip | Grip | Grip (not Simple) |
 | ring (the control of the other hand that opens the ring menu), `button_layout=1` | Y, or B when the left hand points | B | the stick, when only the stick opens the ring |
 | ring, `button_layout=0` | X, or A when the left hand points | A | the stick, when only the stick opens the ring |
+| book (the spell book, `spell_book=1`), `button_layout=1` | X, or A when the left hand points | none: that button sends Esc | none |
 
 The words follow the layout of the buttons in use (`button_layout`,
-`controllers.md`, 5.1). The test key of the layout builds the words again, so
+`controllers.md`, 5.1), and the map of the buttons (`button_map_hand`,
+`button_map_other`, `controllers.md`, 5.7): the word of a job is the word of
+the button that the map gives its slot. With the map as made, the table
+above holds. The test key of the layout builds the words again, so
 the next card shows the new buttons. The word of the menu button of the left
 controller is on the card of the left hand: the other hand, or the pointing
 hand of a left handed player (`ControllerHintMenuOnPointing`). The cards have
@@ -625,10 +615,9 @@ bulk take shows "Amount: 57" and on, as text only. The words of the help text
 
 ### 8.6 What needs the headset
 
-- Whether the word in the cap reads at the real size.
-- The switch of the help text when the player puts the controller down and uses
-  the mouse (it works in the desktop runs, at the start).
-- A census of a play session (section 7).
+The switch of the help text to the words of the mouse works in the desktop
+runs, at the start. The checks in a headset are in `headset-checks.md`, and
+the checks that a desktop run can prove are in `roadmap.md`, R12.
 
 ## 9. The hint card
 
@@ -666,14 +655,17 @@ is 1, no hint of the game draws in an eye picture:
    mouse picture) and the caption. Then it returns. The game draws nothing, and
    its callers run their fades as before.
 3. After both eye passes (`UiDepthSetEye(-1)`), `HintCardEndFrame` draws the
-   words of each card into a picture of 768 by 320 pixels with GDI (Segoe UI):
-   a dark card, white letters, and the button word on a badge. The trigger
-   badge is green and the grip badge is gold, as the glow at the Hand's point.
-   Other buttons have a light badge.
+   words of each card into a picture of 768 by 320 pixels with GDI. With
+   `hint_card_style=1` the card is a parchment scroll with dark brown letters,
+   and the button word is on a wax seal (9.11). With `hint_card_style=0` it is
+   a dark card with white Segoe UI letters, and the button word is on a badge.
+   In both looks the trigger is green and the grip is gold or amber, as the
+   glow at the Hand's point. Other buttons have a red seal or a light badge.
 4. `XrScreen::StageCard` gives the picture and its pose to
    `XrScreen::EndFrame`. That makes a small swapchain at the first layer of a
-   card, writes the part that shows, and adds one quad layer for the card in
-   the LOCAL space, after the projection layer and the panels.
+   card, writes the part that shows with a frame of clear texels and its mip
+   levels (`ui-layer.md`, section 26), and adds one quad layer for the card
+   in the LOCAL space, after the projection layer and the panels.
 
 The runtime puts the quad again for each displayed frame from the head pose, so
 a slow frame of the game does not double it when the head moves.
@@ -717,7 +709,9 @@ no game transform, so it is at the real wrist at each scale of the world.
   letter is about 8 mm high and a card with one line is 2.2 cm high. That
   letter is 0.8 degrees at 55 cm, the length of an arm. Most cards are 7 to
   14 cm wide. A wider card stops at 19 cm. `hint_card_size_pct` scales all of
-  it. The card has an alpha of 0.86 and round corners.
+  it. The scroll is opaque, and its rolls and its drop shadow add 1.1 cm to
+  the width and 0.8 cm to the height. The plain card has an alpha of 0.86 and
+  round corners.
 
 A card on the forearm side of the wrist in the room (away from the fingers and
 up) would be between the eyes and the hand when the fingers point along the
@@ -734,6 +728,7 @@ once a frame, and the first match counts, in this order:
 | Context | Source | Prompt |
 | --- | --- | --- |
 | A dialog box | `ControllersMenuRay` | Trigger: "Select" |
+| The spell book is open, or the game refused a miracle of the book less than 4 s ago | `SpellBookHint` (`spell_book.cpp`) | Grip: "Hold and pull out Fireball" for the miracle under the pointing hand ("Take Fireball" with `spell_book_pull_cm=0`). "Pull farther to take it" and grip: "Open to put it back" while the hand pulls a miracle out. "Fireball: No prayer power. Villagers must worship" for a miracle that the game refuses now. "Put your hand on a miracle" with no miracle under the hand. "No miracle to ask for now" and the reason for an empty book. The reason of a refusal for 4 s. The lines stay while the book is open, and the card of the other hand does not show then (`miracles.md`, "The spell book") |
 | A room of the Temple, with the ray | `TempleCardRoom` (`temple.cpp`) | "Select" (the trigger with `temple_click=1`, else the grip), the ring word: "Rooms", the menu word: "Leave the Temple" in the hall, "Back to the hall" in other rooms |
 | The teleport aim | `TeleportAiming` | A: "Release to go" |
 | A miracle, or a one-off seed, in the Hand | `MiracleHint` (`miracle.cpp`) | The lines of `miracle.cpp`: what the grip does with this kind of miracle, why the game refused the last cast, and how to cancel (the gesture word and the shake) |
@@ -747,9 +742,9 @@ once a frame, and the first match counts, in this order:
 | The Hand holds an object | `HandDirectGlowFacts`, holding | Grip: "Open to drop". In a forest, or with the bundle of a take from a forest: the line of `forest_take.cpp`. |
 | An object to take | hand mode 9 | Grip: "Take" |
 | A pile, a field or a fish farm | hand mode `0xD` | Grip: "Hold to collect" |
-| The Hand touches the Creature | hand mode `0x13` | Grip: "Stroke or slap" |
+| The Hand touches the Creature | hand mode `0x13` | Grip: "Stroke or slap". While the mod holds the press for the open hand (`creature_stroke_open`, `creature.md`, 2.10): "Move slowly to stroke" and "Hit fast to slap", with no button. With `creature_open_slap=0`: "Move the hand to stroke", and Grip: "Close and swing to slap" |
 | The land, with the leash on | hand mode 3 with the leash | Trigger: "Send the Creature", A: "Teleport" while a press of A can move the player |
-| The land | hand mode 3 | On the card of the other hand: the world word "Move the land" (the grip of the other hand, in the God view and on the table), the walk word "Move" (the stick of the other hand) while a push of the stick moves the player, the ring word "Ring menu", and the first time the menu word "Game menu". On the card of the pointing hand: A "Teleport" (or "Jump" with `teleport=0`) while a press of A can move the player. In the old immersive view the trigger moves the land, so Trigger: "Move the land" shows on the card of the pointing hand. |
+| The land | hand mode 3 | On the card of the other hand: the world word "Move the land" (the grip of the other hand, in the God view and on the table), the walk word "Move" (the stick of the other hand) while a push of the stick moves the player, the ring word "Ring menu", the book word "Spells" while a press can open the spell book (`SpellBookCanOpen`), and the first time the menu word "Game menu". On the card of the pointing hand: A "Teleport" (or "Jump" with `teleport=0`) while a press of A can move the player, and the gesture word "Tap for spells" while a tap of B can open the spell book (`SpellBookTapCanOpen`, `spell_book_b=1`). In the old immersive view the trigger moves the land, so Trigger: "Move the land" shows on the card of the pointing hand. |
 
 **The lines of the moves** (`prompt_moves`, 1). A line says what a control
 does now, so the lines of the walk and of A show only while the control can
@@ -849,8 +844,9 @@ of the object in the Hand ("Drop").
 
 With `hint_words=3` the context of the fetch stays for those frames
 (`FetchKeepStep` in `hint_card_math.h`). So the card says "Grip Pull to fetch"
-from the frame in which the far target comes until the hint of the object in
-the Hand comes. The rule:
+from the frame in which the far target comes until the Hand holds the object
+(`hint_held_latch=1`), or until the hint of the object in the Hand comes
+(`hint_held_latch=0`). The rule:
 
 1. It starts when the far target goes while the card has the prompt "Pull to
    fetch", or less than 0.15 s after that prompt showed. The grip must be
@@ -858,16 +854,48 @@ the Hand comes. The rule:
    (`FarGrabGlideOrigin`: the game took the press of the fetch). A far target
    that goes for a different reason starts nothing. A far target with a
    different prompt (a scroll, a bulk source, the Creature) starts nothing.
-2. It holds while the Hand is empty and on no target. It also holds while the
-   Hand has the object and the game still gives the hint that the prompt
-   owned. It holds too while the Hand has the object, the object is still on
-   its way, and the game gives no hint for the grip (`FetchWaits`).
-3. It ends when the Hand has the object and the game gives a new hint for
-   the grip. It also ends as the take in work ends: a different context comes,
-   the grip opens, or 1.0 s passed since the far target went.
+2. It holds while the Hand is empty and on no target.
+3. With `hint_held_latch=1` it ends in the frame in which the Hand holds the
+   object (see "One text for one object in the Hand"). With
+   `hint_held_latch=0` it also holds while the Hand has the object and the
+   game still gives the hint that the prompt owned, and while the object is
+   still on its way and the game gives no hint for the grip (`FetchWaits`).
+   It then ends when the game gives a new hint for the grip.
+4. It also ends as the take in work ends: a different context comes, the
+   grip opens, or 1.0 s passed since the far target went.
 
 With `hint_words` 2 or less the hint of the game for the grip shows from the
 end of the far target until the hint of the object in the Hand comes.
+
+**One text for one object in the Hand** (`hint_held_latch=1`). The context of
+a frame comes from the facts of that frame. The game gives its hint for the
+object in the Hand 0 to 6 frames after the Hand has it. Later it can give no
+hint for the grip for a frame or two, for example while the aim turns, or
+while its hint for the object changes from one text to another ("Combine
+Scaffolds", then "Build"). So:
+
+1. The fetch in work ends in the frame in which the Hand holds the object,
+   and it does not start while the Hand holds an object. From that frame
+   until the game gives a new hint for the grip (1.0 s at most), the line of
+   the grip has the words of the mod for the object in the Hand
+   (`HoldWords`): the words of a tree that the opening does not plant
+   ("Lower to plant. Open to drop", the same words that the card gives to
+   the hint of the game), the line of a take from a forest, "Open to plant"
+   for a tree that the opening plants, or "Open to drop". The hint of the
+   take that the prompt owned does not show then (`OwnedStale`). So the card
+   says what the grip does with the object from the first frame with the
+   object in the Hand. With `hint_held_latch=0` the card says "Pull to
+   fetch" until the hint of the game comes, and the fetch in work can start
+   again while the object is still on its way.
+2. A far target that is not locked is no context while the Hand holds an
+   object. The far grab is not ready then, and such a target is the state of
+   the frame before.
+3. A frame with no words on the pointing card, while the Hand holds the same
+   object as in the last frame with words, keeps those words for 0.10 s at
+   most (`kHeldGapSeconds`). A card with no words for one or two frames
+   between two hints of the game for the same object is a blink.
+
+`hint_held_latch=0` gives each frame the words of its own context.
 
 **After the prompt went.** The card has the hint of the game for the button of
 a target for some frames after the target went: 1 to 11 frames in desktop
@@ -930,16 +958,26 @@ the help options of the game, so a player with "No ToolTips" sees them too.
 
 | Key of `bwvr.ini` | Default | Meaning |
 | --- | --- | --- |
+| `hint_style` | 2 | 2 the model of the controller in the hand, with a card for each lit button (9.14). 1 the card at each wrist |
 | `hint_card` | 1 | 1 shows the hints on the card while a controller points. 0 draws them in the eye pictures (`ui-layer.md`, section 15). |
 | `prompts` | 1 | 0 no prompts, 1 the first times, 2 always |
 | `hint_card_size_pct` | 100 | The size of the card, 50 to 200 |
 | `prompt_timing` | 1 | 1 the prompt of a target shows at once, stays while the target is there and shows each time. 0 the dwell, hold and count for all prompts (9.4) |
 | `hint_words` | 3 | 1 the prompt of a target owns its button and a hint of the game with no words does not show. 2 is 1, and the prompt of a take also keeps the grip from the close of the grip until the Hand holds the object. 3 is 2, and the prompt of a fetch keeps the grip from the end of the far target until the Hand holds the object, and a hint of the game that a prompt owned does not show for 0.25 s after the prompt went. 0 the hint of the game takes the place of the prompt, as it comes (9.4) |
+| `hint_held_latch` | 1 | 1 the card keeps one text for one object in the Hand: a fetch in work ends in the frame in which the Hand holds the object, and the card has the words of the mod for the object until the game gives its hint for it. A far target with no lock is no context while the Hand holds an object, and a frame with no words keeps the words for the same object for 0.10 s at most. 0 each frame has the words of its own context, and the fetch in work waits for the hint of the game (9.4, "One text for one object in the Hand") |
 | `hint_palm_check` | 1 | 1 a grip hint of the game over the land does not show while the search at the palm is off, because a press there acts on no object. 0 it shows (9.9) |
 | `text_click` | 1 | 1 shows the prompt of a text that waits for a click in each view, and makes the trigger that click. 0 gives that prompt the rule of each other hint of the left button (section 10) |
 | `prompt_moves` | 1 | 1 the prompt of the land has the line of the walk with the stick while a push moves the player, and the line of A shows only while a press of A can move the player. 0 no line for the walk, and the line of A shows in each case (9.4) |
-| `hint_learn` | 1 | 1 a line of a prompt that teaches an action goes away after the player did the action 3 times, and comes back after 10 minutes of play with no use of it. Each line shows in a lesson of the tutorial. 0 each line shows always, and the mod counts nothing (9.10). The launcher row "Hints": "Until learned" is 1, "Always" is 0 |
+| `hints_follow_game` | 1 | 1 the ToolTips option of the game chooses the rule of `hint_learn`: All ToolTips is 0, the other options are 1 (9.10). 0 `hint_learn` chooses. Not in the launcher |
+| `hint_learn` | 1 | With `hints_follow_game=0`: 1 a line of a prompt that teaches an action goes away after the player did the action 3 times, and comes back after 10 minutes of play with no use of it. Each line shows in a lesson of the tutorial. 0 each line shows always, and the mod counts nothing (9.10). Not in the launcher |
 | `hint_counts_test_file` | empty | Test key. The full path of the file of the counts. Empty is `bwvr-hint-counts.ini` beside `bwvr.ini` (9.10) |
+| `hint_card_style` | 1 | 1 each card is a parchment scroll with dark ink and a wax seal for each button word (9.11). 0 the plain dark card with white Segoe UI letters. The launcher row "Card look": "Scroll" is 1, "Plain" is 0. The same key sets the look of the spell book (`miracles.md`), of the ring (`controllers.md`, 10.4) and of the keyboard in the headset (`ui-layer.md`, section 21) |
+| `hint_card_pictures` | from `hint_controller` | 1 each line of a button has a small picture of the controller with that button lit, before the badge or the seal (9.13). 0 the button word only. The default is 1 with `hint_controller=1` and 0 with `hint_controller=0` (9.14). Not in the launcher: a save of the launcher removes it, and a test can write it |
+| `hint_card_saving` | 1 | 1 while the game saves, the card of the pointing hand says "Saving..." (9.12). 0 the cards say nothing in a save |
+| `hint_card_save_test` | 0 | Test key. 1 saves each new picture of a card as `bwvr-hintcard-draw-NNN-FFFFF.bmp` over a checkerboard (NNN counts the pictures, FFFFF is the frame, 40 pictures at most) |
+| `font_warm` | 1 | 1 a thread of the mod draws each letter of each font of the cards one time at the start of the game (9.11, "The first draw of a font"). 0 the first draw of each font of a card makes its letters on the frame thread |
+| `panel_warm` | 1 | With `font_warm=1`: 1 the same thread then draws the page and the parts of the first picture of the panel of places and of the settings window, and a thread draws the drawing of the page Controls (9.11, "The warm of the panels"). 0 the first picture of each panel draws them on the frame thread |
+| `hint_card_fonts_test_dir` | empty | Test key. The folder of the font files of the scroll. Empty is `bwvr-fonts` beside `runblack.exe`. A desktop run sets the staged folder `bwvr\out\stage\bwvr-fonts` of its worktree |
 
 `hint_card.cpp` reads the keys itself, at the first frame. With `test_keys=1`
 and `ui_panel=0`, Ctrl Shift F11 switches between the card and the hints in the
@@ -951,12 +989,33 @@ three pulses for 3, two for 2 and one for 1. It gives one long pulse for 0.
 Ctrl and Shift with the period key switch `prompt_moves` between 1 (a long
 pulse) and 0 (a short pulse). The word `promptkey` of the scripted controller
 does the same in a desktop run. `hint_learn` has no test key: the launcher
-row "Hints" sets it.
+row "Hints" sets it. `hint_card_style` has no key of the keyboard. With
+`debug_menu=1` the switch "Card look" (group Interface) of the debug page
+changes it, and each card draws its picture again in the next frame. The
+ring (`controllers.md`, 10.4) and the keyboard in the headset follow it too.
+The switch "Card pictures" of the same group changes `hint_card_pictures`
+in the same way.
 
 ### 9.6 The log
 
 - `hint card : hint_card=1, ... prompts=1, ...` once, with the settings, and
-  one line each for `prompt_timing`, `hint_words` and `prompt_moves`.
+  one line each for `prompt_timing`, `hint_words`, `prompt_moves` and
+  `hint_card_style`.
+- `card scroll : the words use Alegreya and the seals use Alegreya SC, from
+  the folder bwvr-fonts. The noise tile and the fonts took 8.5 ms on the warm
+  thread`: once, on the thread of the warm, or on the frame thread at the
+  first picture of a scroll with `font_warm=0`. When a font file does not
+  load, the line names the font in its place (Georgia, then Segoe UI) and
+  the first file that did not load.
+- `card scroll : font_warm=1: a thread of the mod drew each letter of 20
+  fonts of the cards one time in N ms`: once, at the start of the game.
+- `card scroll : a card asks for the font of the words with a capital of N
+  px, and the warm did not draw it`: once for each such font. The table
+  `kWarm...Caps` of `card_scroll.cpp` must then get the new size.
+- `hint card : frame N, a new picture of the card of the pointing hand in
+  the scroll look, 501 by 119 px, took 1.80 ms`: one line for each new
+  picture (24 lines at most). The report window has a line with the count of
+  the new pictures, their mean time and the longest time.
 - `hint card : frame N, the card of the right hand: [Grip] Take. 6.0 by 2.2 cm,
   241 by 86 px, at x y z m, 7.4 cm to the right of the wrist in the view and
   55 cm from the head. The prompt is for an object to take`: each time the words
@@ -978,6 +1037,17 @@ row "Hints" sets it.
   (or `the grip opened`, or `the time limit passed`): one line for the start
   and one for the end of each fetch in work, with `hint_words=3`. These lines
   count in the same 60 lines.
+- `hint card : frame N, the Hand holds P, the object of the fetch, and the
+  game gives no new hint for the grip yet. The prompt of the fetch goes now,
+  and the card has the words of the mod for the object`, `hint card : frame
+  N, the words of the mod for P end after K frames: the game gives its hint
+  for the grip` (or `the Hand does not hold it now`, or `the time limit
+  passed`), `hint card : frame N, the pointing card keeps "[Grip] Combine Scaffolds": the Hand holds the
+  same object P, and this frame has no words for it. The context is ..., the
+  prompt is ..., and the game gives K lines, J of them on the card`, and
+  `hint card : frame N, the far target T is no context: the Hand holds P`:
+  with `hint_held_latch=1` (60 lines at most). The report window has the
+  count of each, with `hint_held_latch=N`.
 - `hint card : frame N, the hint "[Grip] Pick Up" of the game did not show on
   K frames after its prompt went at frame M: the game gives it no more` (or
   `the time limit passed, so it shows now`, or `a prompt owns it again`): one
@@ -1025,11 +1095,9 @@ row "Hints" sets it.
 
 ### 9.7 What is not built
 
-- Glyph pictures of the buttons, a picture of the controller with the button
-  lit, and the runtime's model (section 5). The badge with the button word is
-  the mod's own art and needs no picture of a real controller.
-- Virtual Desktop's runtime lists no controller model extension [M], so a
-  model is not possible there.
+- Glyph pictures of the buttons in the hints of the game (section 5). The
+  badge, the seal and the picture of the button (9.13) are the mod's own
+  art.
 
 ### 9.8 Tests
 
@@ -1067,26 +1135,11 @@ sharp at 40 pixels a cm.
 The lines that the player knows (9.10) have their own math test
 (`learn_checks.h`) and desktop runs of their own (9.10, "Tests").
 
-**Needs the headset.**
-
-- The quad layers themselves: the swapchain of each card, its alpha over the
-  world, and two cards in one frame. The desktop has no runtime.
-- Whether a letter of 8 mm reads at 40 to 60 cm (`hint_card_size_pct`).
-- Whether the side of the wrist is the right place while the hand works, and
-  how often the card changes side.
-- Whether the card steps against the hand at a low frame rate. The hand pose is
-  from the game frame, and the runtime moves the quad only for the head.
-- The prompts in play: the dwell, the time of the show and the counts.
-- The words of the card at the end of a take and of a fetch, and when the
-  Hand leaves a target, at the frame rate of the headset (`hint_words=3`, the
-  0.25 s of `kOwnedSeconds`). The desktop runs have 60 to 90 frames a second.
-- Whether the left card is easy to see while the right hand works, and whether
-  the land prompt at the left wrist teaches the grip.
-- The lines of the moves (`prompt_moves`): whether the left card with four
-  lines is easy to read, and whether "Stick Move" and "A Teleport" teach the
-  two ways to move at the start of the tutorial.
-- Whether 3 uses and 10 minutes of play are right for a new player, and
-  whether a player misses a line that went away (`hint_learn`, 9.10).
+The desktop has no runtime, so no desktop run shows the quad layers of the
+cards. The hand pose is from the game frame, and the runtime moves the quad
+only for the head. The desktop runs have 60 to 90 frames a second. The checks
+in a headset are in `headset-checks.md`, and the checks that a desktop run can
+prove are in `roadmap.md`, R12.
 
 ### 9.9 Two cards and true hints
 
@@ -1102,7 +1155,7 @@ prompt "Continue" is known by its node in the HelpSystem, not by its words
 | "Focus Creature" over the land with the leash on | Right, code 2 | False. It is the tooltip of the leash (`0xEA2`): a press sends the Creature to that place. `creature_command.cpp` leaves that packet out for the grip, and the trigger sends the Creature. | Does not show over the land (hand mode 3) while the leash is on. The prompt shows "Trigger Send the Creature". |
 | A grip hint over the land (hand mode 3), for example "Pick Up" near a fish farm in the sea | Right, code 2 | False while the search at the palm is off (one target, `palm_search=0`). The game names an object near the land behind the palm, and a right press with an empty pick record takes it (`fn_005D39E0`). The mod gives such a press no object. An object at the Hand's point is in the record, and then the hand mode is not the land | Does not show (`hint_palm_check=1`). At a fish farm the prompt shows "Grip Hold to collect" ([grab.md](grab.md), "The fish in the sea"). `hint_palm_check=0` shows it |
 | "Continue", while a text waits for a click | Left, code 1 | True in each view: the trigger is the left button, and the game takes that click at each place of the pointer (section 10) | Shows as the first line, "Trigger Continue". No prompt of the mod for the trigger takes its place. With `text_click=0` it has the rule of "Move" |
-| "Pick Up", "Plant", "Catch", "Throw", "Activate", "Reminder" | Right, code 2 | True: the grip does the work of the right button | Shows |
+| "Pick Up", "Plant", "Catch", "Throw", "Drop", "Activate", "Reminder" | Right, code 2 | True: the grip does the work of the right button | Shows. With an object in the Hand the card says "Grip Drop", and "Grip Throw" while the game gives that word (`creature_recipe.ps1 -Kind open`, with `help_test=1`) |
 | "Plant" with a tree in the Hand | Right, code 2 | The text is the same for each release, so it is not always true: a hand higher than `release_fall_cm`, a tree that leans more than 0.2 rad, no dry land, a tree on fire or a body in the way lets the tree fall | The card keeps "Plant" when the opening plants the tree. Else it says "Lower to plant. Open to drop" or a line for the other cause, for example "Object in the way. Open to drop" (`tree_plant_hint`, `tree_plant_bodies`, `grab.md`, "A tree in the Hand") |
 | "Interact" on the Creature | Right, code 2 | True. The grip is the control that touches the Creature. | Shows. The prompt of the mod says "Grip Stroke or slap". |
 | "Zoom Out" | The wheel, code `0x10` | True: the stick zooms | Shows |
@@ -1155,9 +1208,17 @@ Code: `src/mod/hint_learn_math.h` (the count, the time to come back, the
 lesson, the take and the drop), `LearnFrame` and `LearnFilter` in
 `src/mod/hint_card.cpp`, and the calls of `HintCardLearnDone`.
 
-With `hint_learn=1` (the default, the launcher row "Hints", "Until learned"),
-a line of a prompt that teaches an action goes away when the player knows the
-action:
+The ToolTips option of the game (Options, Help Options) chooses the rule,
+with `hints_follow_game=1` (the default): All ToolTips shows each line
+always, and Intelligent ToolTips (the default of the game), Minimum ToolTips
+and No ToolTips take a line away when the player knows it. The mod reads the
+option once a frame (`HintCardFollowTooltips`), and a change in the options
+of the game acts at once. With `hints_follow_game=0` the key `hint_learn`
+chooses, as below. The launcher and the VR Settings window have no row for
+it.
+
+With `hint_learn=1` a line of a prompt that teaches an action goes away when
+the player knows the action:
 
 1. The mod counts each use of the action that worked (the table below).
 2. After 3 uses the line does not show.
@@ -1238,7 +1299,7 @@ take), the drop, a start of the ring, the grab, the walk, and the values of
 the file. The desktop runs:
 
 - Six takes at the store of Land 1, in the test save `pen`:
-  `hand_run.ps1 -Kind one -Set "seek_plan=hold,hold,hold,hold,hold,hold;near_test_flips=4610;hint_learn=1"`.
+  `hand_run.ps1 -Kind one -Set "seek_plan=hold,hold,hold,hold,hold,hold;near_test_flips=4610;hint_learn=1;hints_follow_game=0"`.
   Each seek goes to the nearest object that the Hand can hold, and the flip
   at 4610 gives `near_rule=2` before the first seek. The card has "Grip Take"
   for the first three takes, and no line for the grip at the next three. The
@@ -1260,6 +1321,768 @@ show three fetches there.
 Not shown by a run: the collect, the grab of the land, the walk, the ring,
 the commands of the Creature, and a line that comes back after 10 minutes of
 play. The math test has the rules for them.
+
+### 9.11 The look of the card
+
+Code: `src/mod/card_scroll.cpp` and `.h` (the art), `RasterScroll` in
+`src/mod/hint_card.cpp` (the layout). The fonts are in
+`third_party/fonts`.
+
+With `hint_card_style=1` (the default) each card is a small parchment scroll,
+to match the old world look of the game. The same key and the same art give
+the page of the spell book (`miracles.md`, "The spell book") and the seals
+and the card of the ring (`controllers.md`, 10.4). The parts, from the back:
+
+1. A soft drop shadow 3 px to the right and 5 px down. It comes from the
+   outline of the shape with a distance test, so it needs no blur.
+2. The paper: a warm color with light and dark areas and a grain of fibers,
+   a torn top and bottom edge, and a burnt brown rim along the edge.
+3. A rolled end at each side: a cylinder with a shade, a line where the paper
+   wraps, and a hollow at each end.
+4. A wax seal for each button word, with an uneven edge, a raised rim, a
+   shine and its own small shadow. The trigger is green, the grip is amber,
+   and other buttons are red. The word is in capitals: light letters on green
+   and red, dark letters on amber.
+5. The words in dark brown ink. The ink bleeds 1 px into the paper.
+
+The grid of the plain card stays: 40 px a cm, a row of 66 px, a seal of
+50 px, and a pad of 18 px. The capital letter of the words is 31 px, as the
+capital letter of Segoe UI at 44 px, and that of a seal word is 23 px. The
+mod measures the capital H of each font, so a font in place of Alegreya has
+the same letter height. The rolls and the shadow add a margin around the
+paper (`card_scroll.h`). The paper is opaque.
+
+**The fonts.** The words use Alegreya Bold and the seals use Alegreya SC Bold,
+both under the SIL Open Font License 1.1. Alegreya is a variable font: GDI
+gives its Bold instance for the weight 700. The installer and `dev.ps1 install`
+put the files in `bwvr-fonts` of the game folder, with `OFL.txt`. The mod
+loads them with `AddFontResourceEx` and `FR_PRIVATE`, so they are for the game
+process only. When a file does not load, the words use Georgia, then Segoe
+UI, and the log says so. No font of the game is used.
+
+**The grain and the cost.** The headset shows a card smaller than its picture
+(about 26 pixels of the view for each cm at 55 cm), so a detail of 1 px would
+shimmer. The smallest cell of the noise is 4 px. The swapchain of each card
+also has mip levels and a clear edge (`ui-layer.md`, section 26), so the
+thin lines of the words do not shimmer and the edge of the quad is clear. `card_scroll::Start` makes
+one noise tile of 256 by 256 pixels and the tables of the burnt edge, one
+time. It also bakes the paper into the tile: the color of each pixel with
+its light and dark areas and its grain, and the opaque pixel 64 px or more
+from each edge, where the burn of the edge is at its last step. A pixel of
+paper is then one read and the burn of its edge, and a pixel deep in the
+paper is one read only. A baked pixel is the same, bit for bit, as the
+pixel of the full mix. A new picture makes no blur. The picture is drawn
+again only when the words of the card change. The text of GDI costs most,
+not the paper.
+
+**The first draw of a font.** The first DrawTextW of a font at one size
+costs 6 to 11 ms: GDI makes each letter, and the text layout of Windows,
+which DrawTextW goes through, makes its own data for that font and size.
+Each card draws its words with DrawTextW. Both costs are for the whole
+process, for each thread and each DC. Without a warm they come on the frame
+thread at the first card, the first picture of the book, the ring, the
+keyboard, the panel of places and the debug window. With `font_warm=1`
+(the default) `card_scroll::WarmStart` starts a thread of the mod at the
+install of the hooks, with a priority below normal. The thread loads the
+fonts and makes the noise tile (`card_scroll::Start`, which the frame
+thread then finds done), then draws the printable ASCII, the letters of
+Latin-1, the quotes, the dashes and the dots one time in each font of the
+cards, with DrawTextW: the words in 16 sizes, the seals in 5 and the digits
+in 1. Each size
+comes from a constant of the card that uses it (the table in
+`card_scroll.cpp`). A font that a card asks for and the table does not have
+gets a line in the log. A draw with TextOutW is not enough: it makes the
+letters, but not the data of the text layout. A test program with
+`card_scroll.cpp` outside the game measured the first DrawTextW of a line of
+words: 6.6 to 10.9 ms with no warm, 7.2 to 10.5 ms after a warm with
+TextOutW, and 0.10 to 0.26 ms after a warm with DrawTextW. The warm takes
+about 0.3 s on its thread. The warm does nothing with `hint_card_style=0`,
+which uses Segoe UI.
+
+The other parts of a first picture are the parchment itself. In the same
+test a page of 1024 by 1024 px (`card_scroll::Page`) took 1.8 to 3.4 ms and
+a key 0.1 ms. The panel of places draws 42 parts in its first picture, so
+its keys are about 4 ms of it. Later pictures copy the parts
+(`panel_kit::Tiles`).
+
+**The warm of the panels.** With `panel_warm=1` (the default) the thread of
+the warm runs jobs after the fonts (`card_scroll::WarmAdd`). The job of the
+panel of places draws its page and the parts of a first picture. The job of
+the window of the settings and of the debug switches draws its page, its
+tabs and the rows of the first group of the settings (`ui-layer.md`, 22.4
+and 23.3). So the first open of a panel copies these parts. The drawing of
+the controllers of the page Controls gets a thread of its own when the
+profiles of the controllers are known (`ui-layer.md`, 24.6). A panel that a job draws waits for the end of the thread
+before it uses its picture (`card_scroll::WarmWait`). The thread ends long
+before a player can open a panel. When a panel waits, the log says so.
+
+**Tests.** A desktop run saves each new picture of a card with
+`hint_card_save_test=1`, and loads the fonts from the staged folder of its
+worktree (`package.ps1 -StageOnly`, then `hint_card_fonts_test_dir`). The
+run is the six takes at the store of Land 1 (9.10), with the keys
+`hint_learn=0;hints_follow_game=0;prompts=2;hint_card_save_test=1;hint_card_fonts_test_dir=<folder>`
+added to `-Set`. With `hint_card_style=1` the pictures show the scroll, the
+seals and the ink, and the log line `card scroll` names Alegreya and
+Alegreya SC. With `hint_card_style=0` the pictures are the plain cards. In
+these runs a new picture of the scroll takes 0.55 to 1.1 ms, and a plain one
+0.3 to 0.9 ms. The first picture of the scroll takes about 14 ms: it makes
+the noise tile and loads the fonts (about 8.5 ms), and GDI draws each letter
+of the new fonts for the first time. A line that is too long for 19 cm gets
+a smaller font, down to 70 percent, and then a second row of the card, in
+both looks (`ui-layer.md`, "Words that fit"). A card has at most 4 rows.
+
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
+
+### 9.12 The card of a save
+
+The game writes a save on the game thread. `GameOSFile::SaveAllGame`
+(`0x00558160`) draws the save box in one frame with no scene
+(`GameSavingBox`, `0x00557FC0`), writes the files, and only then returns. The
+mod sends no frame of that box: the frame comes less than 150 ms after the
+last stereo frame, so it is no screen with no scene (`ui-layer.md`, 1.4). The
+game gives no frame until the save is over, so no card can change in that
+time. The headset shows the layers of the last frame, which the hold sends
+again (`backend.md`, "The hold of the last frame").
+
+So a hook on `SaveAllGame` makes the card before the save starts
+(`HintCardSavingLayer`). The card of the pointing hand has one line,
+"Saving...", at the place of the card of the last frame.
+`XrScreen::HoldCard` puts it into the layers of the hold. The card shows
+until the game gives a frame again, and then it fades out in 0.35 s, as each
+card does. The card needs the route of the last frame: a controller points,
+and the cards showed.
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `hint_card_saving` | 1 | 1 the card "Saving..." in a save. 0 the cards say nothing in a save |
+
+The log: `hint card : frame N, the game saves: the card of the right hand
+says "Saving..."` at the start, and `save card : the game saved in N ms` at
+the end, with the reason when the card did not go to the hold. With
+`hint_card_save_test=1` the picture of the card is in the folder of the run.
+
+A new game of the desktop saves near frame 830, so
+`creature_recipe.ps1 -Kind open -NewGame` shows the card. A desktop run has
+no headset session, so it shows the picture and the log, not the hold. Only
+a headset can show that the card stays in the view for the whole save, and
+with `xr_hold_ms=0` there is no hold and no card.
+
+### 9.13 The pictures of the buttons
+
+Code: `src/mod/hint_picture_math.h` (the picture) and `PutPictures` in
+`src/mod/hint_card.cpp` (the layout). The checks are in
+`test/controller_math/hint_picture_checks.h`.
+
+With `hint_card_pictures=1` (the default with `hint_controller=1`) each line of a button has a small
+picture before its badge or its seal: a drawing of the controller with the
+button of the line lit. The words stay. A line with no button, or with a
+button that the drawing does not show, has no picture.
+
+**Two views.** The face buttons, the stick, the pad and the menu button are
+on the top of a controller. Their picture is a part of the drawing of the
+page Controls (`controller_art_math.h`, `ui-layer.md`, 24.6), seen from
+above. The trigger and the grip are under the controller and on its handle.
+Their picture is the side of the controller (`SideOf`): the head, the
+handle, the stick on the top, the trigger under the front of the head and
+the grip on the handle. Each kind has its own side: the flat head of a
+Touch controller, the long bar of an Index controller, and the ring and the
+long handle of a wand and of a Mixed Reality controller. The select button
+of a simple controller is on its top. All of it is our own art in code.
+
+**The button of a line.** The mod finds the control from the button word
+and from the controller of the card (`ControlOfWord`). The words are those
+of `controller_hints.cpp`, so a change of the map of the buttons changes the
+picture too. "A x2" and "Grip hold" name the same control as "A" and "Grip".
+The kind of the controller comes from its interaction profile, or from the
+test key `hint_profile`, as on the page Controls. The left controller is the
+mirror of the right one, and the menu button of a Touch controller is only
+on the left one.
+
+**The window.** A full controller from above in the height of a row would
+be too small: a face button would be about 4 px of the view at 55 cm. So
+the picture of a top view is a square window of 140 units of the drawing
+around the lit control, in 60 by 60 px of the card (1.5 cm). Each window of
+a top view has the same scale, so a face button of a Touch controller is
+about 10 px of the card and 7 px of the view. When the part of the body
+that has the control fits in the window, the window holds all of it: the
+whole ring of the face buttons of a Touch controller. Else the control is
+in the middle of the window, and the window goes at most 16 units past the
+drawing. A side view holds the whole controller, with a margin of 7 units.
+The edge of the picture fades out over 5 px, with round corners, so a cut
+outline does not end in a hard line.
+
+**The look** (`LookOf`). On the scroll the outline is a dark brown ink,
+darker than the words, 3.4 px wide, and the body has a pale fill, so the
+shape reads on the paper. On the plain card the outline is light gray, 3 px
+wide, on a slate fill. The other controls are at 85 percent on the scroll
+and 75 percent on the plain card. The lit control has the color of its
+badge or its seal: green for the trigger, amber or gold for the grip, red on
+the scroll and white on the plain card for the other buttons. It has a soft
+halo of the same color and a thin edge in ink.
+
+**The layout.** The picture is in the middle of its row, before the badge
+or the seal, with 10 px to it. While one line of a card has a picture, each
+line of a button has the place of a picture, so the badges and the seals
+stay in one column. A line with no button starts at the left edge. A picture makes its line 70 px wider. A line that is too
+long for 19 cm gets a smaller font, and then a second row, as with no
+picture.
+
+**The cost.** The mod makes each picture one time for each look and tone
+(`Bake`), and keeps 24 of them. A new picture of a card copies the pictures
+of its lines. Each bake writes a line in the log, 24 at most:
+`hint card : frame N, the picture of the right Touch first face button for
+"A" in the scroll look, 60 by 60 px, took N ms`. The line of each new
+picture of a card gives the count of its pictures of buttons.
+
+**Tests.** A desktop run with `hint_card_save_test=1` saves each new
+picture of a card (9.11). The run is the six takes at the store of Land 1
+(9.10) with `hint_learn=0;hints_follow_game=0;prompts=2`, one time for each kind with
+`hint_profile`, and one time with `hint_card_pictures=0`. A desktop run has
+the fake controller only, which is a Touch controller, so the other kinds
+come from `hint_profile`.
+
+Only a headset can show whether a picture is clear at 55 cm, and whether
+the player finds the button from it (`headset-checks.md`).
+
+### 9.14 The controller in the hand
+
+Code: `src/mod/hint_model.cpp` and `.h` (the load, the place, the draw),
+`src/mod/hint_model_math.h` (the model of each profile, the nodes, the press,
+the place of the cards), `ModelCards` in `src/mod/hint_card.cpp` (the
+cards), and the cards of the buttons in `src/vr/xr_screen.h`
+(`kCardHintButton0`). The checks are in
+`test/controller_math/hint_model_checks.h`.
+
+With `hint_style=2` (the default) the mod does what Half-Life: Alyx does
+(`research-hla.md`, section 7), in the look of the scroll cards:
+
+1. While a hand has a hint, the model of its controller fades in at the
+   real grip pose of that hand, in 0.2 s. It fades out in 0.35 s when the
+   hint ends.
+2. The body of the controller is faint: a warm parchment tone at 30
+   percent alpha, with a dark brown ink outline at its silhouette, so it
+   reads on bright land.
+3. Each button of a hint is solid and lit in a warm gold that pulses: one
+   slow beat a second, from 35 percent of the light to full light and back
+   (`PulseLevel`). A new set of lit buttons starts at full light. A pressed
+   button moves as the model says (the press, below).
+4. Each lit button has its own small scroll card beside the controller, with
+   a line of ink, 2 mm across, from the button to the middle of the inner
+   edge of its card. A dot of ink marks the place where the line leaves the
+   box of its button.
+5. The hand of the player stays, at 68 percent of its opacity
+   (`HandOpacity`, `hint_hand_opacity_pct`). So the player still sees where
+   the Hand touches, and the controller shows through the hand.
+
+The logic of when a line shows does not change: the prompts (9.4), the
+hints of the game (9.9) and the lines that the player knows (9.10) are the
+same. Only the look and the place change.
+
+**The model of each controller** (`ModelOfProfile`). The models are in
+`bwvr-controllers` beside the mod (section 3 (c)). The interaction profile
+gives the model. Virtual Desktop gives `oculus/touch_controller` for each
+Quest, so the name of the headset (`XrSystemProperties`, the log line
+`openxr: headset`) tells the Touch controllers apart:
+
+| Profile | Name of the headset | Model |
+| --- | --- | --- |
+| `oculus/touch_controller`, and `fake` | "Quest 3", "Quest 3S", an other name | `meta-quest-touch-plus` |
+| `oculus/touch_controller` | "Pro" | `meta-quest-touch-pro` |
+| `oculus/touch_controller` | "Quest 2", "Quest2" | `oculus-touch-v3` |
+| `oculus/touch_controller` | "Quest" (the first one), "Rift S" | `oculus-touch-v2` |
+| any | "Pico" | `pico-4` |
+| `valve/index_controller` | | `valve-index` |
+| `htc/vive_controller` | | `htc-vive` (one file for both hands) |
+| `htc/vive_cosmos_controller`, `htc/vive_focus3_controller` | | `htc-vive-cosmos`, `htc-vive-focus-3` |
+| `microsoft/motion_controller` | "HP", "Reverb" | `hp-mixed-reality` |
+| `microsoft/motion_controller` | an other name | no model (the first Mixed Reality controllers have a touchpad) |
+| `khr/simple_controller` | | `generic-trigger` |
+
+No profile yet, or an other profile, gives no model. Then that hand has the
+card at the wrist of `hint_style=1`, with the drawn pictures of the buttons
+(9.13, `hint_card_pictures=1` with `hint_controller=1`). The same is true while a model loads, and when a model does not
+load. The bridge to the Steam Frame host does not send the name of the
+headset, so there a Touch profile gives the Touch Plus.
+
+**The load.** At the first frame in which the hints go to the cards, the mod
+starts a thread for the model of each hand. cgltf reads the meshes, the
+normals and the nodes, and no texture. A test program outside the game measured
+0.4 to 2.7 ms for each file. The model in use changes when the profile or the test key
+changes.
+
+**The nodes** (`NodeBases`). Each control of the drawing of the page
+Controls (`controller_art.h`) has a node of the model: `a_button` (`x_button`
+on a left Touch), `b_button` (`y_button`), `xr_standard_trigger`,
+`xr_standard_squeeze` (the grip), `xr_standard_thumbstick` (the stick and
+its click, or `xr_standard_touchpad` on a wand), and `menu`. The node is the
+base and `_pressed_value`. The meshes under that node are the lit part. The
+control of a line comes from its button word (`ControlOfWord`), so a change
+of the map of the buttons changes the lit button too. Two controls have no
+mesh of their own: the grip of an Index (its value node has no mesh, so a
+small gold diamond marks it), and the menu button of a Touch controller (no
+node at all, so its line goes to the card with no button).
+
+**The press.** A value node goes between its `_min` and `_max` nodes with
+the value of the control, as the WebXR profiles say: the trigger and the
+grip with their travel, a face button and the stick click with the press,
+and the stick with its two axes. The touch dot of a pad does not show.
+
+**The cards of the buttons** (`ModelCards`). The lines of a hand go to its
+cards:
+
+- One card for each lit button, with the lines of that button.
+- The lit button shows which button it is. So a line has no seal when its
+  button word is only the name of the button ("Grip", "A"). A word with
+  " x2" or " hold" keeps its seal, so the player sees the double press or
+  the hold.
+- The lines with no button (a hint of the game such as "Temple Health:
+  100%"), and the lines of a button with no node, are one card with no line
+  of ink, with their seals. It is the top card.
+- A hand has 4 cards at most. The hand that points takes its own card and
+  then the cards of the buttons (`kCardHintButton0` to `+3`). The other hand
+  takes its own card and the cards that are left. So both hands have 6 cards
+  at most.
+- The cards have the scroll look (or the plain look with
+  `hint_card_style=0`), the size of the hint card (9.3), and no drawn
+  pictures of the buttons.
+
+**The place of the cards** (`Stack`). The cards of a hand are a column on the
+outer side of the hand, as the head sees it: right of the right hand and
+left of the left hand. The column is laid out in the view of the head (the
+mean turn of the two eyes): the inner edges of the cards are on a line that
+is vertical in the view, 2 cm (at the distance of the controller) past the
+outline of the palm and of the box of the controller as the head sees it, so
+no card is on the hand or on the controller. Each card faces the head from
+its own middle, and its width is level in the view, so a head that looks
+down sees no card turned. In the view the cards are 6 mm apart: the
+place of each card comes from the corners of the card above it as the head
+sees them, because a tilted card is taller in the view than in the plane of
+the controller. The middle of the column is at the height of the middle of
+the controller (within 1.2 cm), so the column stays beside the controller.
+The cards with no button are at the top of the column.
+
+The cards do not change side. A hand that holds a controller is closed, so
+the tips of the open fingers are not in the outline (only the corners of the
+palm), and the side of the card at the wrist (9.3) does not apply.
+
+The order of the cards is the one with no crossing of the lines in the view.
+In a frame with the same cards as the frame before, Stack tries the order of
+that frame first and keeps it when its lines do not cross. Else it tries each
+order (24 for 4 cards) and takes the one with the fewest
+crossings, then the one with the least vertical distance from each button to
+its card. A line goes from its button to the inner edge of its card, and
+the column is outside the outline, so a line does not go over a card. A card
+of a hand that would hide the other hand does not show. A card of the other
+hand that would overlap a card of the hand that points does not show.
+
+**The depth.** The controller, the diamond and the lines draw in the eye
+pictures, after the opaque meshes of the overlay and before the mesh of the
+hands, with the depth of the scene (`overlay.cpp`). So the land can hide
+them. Each eye has three draws: the lit parts and the lines, then the front
+faces of the body (faint, with the depth write), then the outline: the back
+faces again, each corner pushed out 1.2 mm along its normal, in ink. Inside
+the silhouette the front faces are nearer and hide the outline, so only a
+thin edge round the body shows. The back faces of the body do not draw.
+
+So the body writes the depth of its front faces, and the faint hand, which
+draws after the controller, does not show behind the body. The cards are
+quad layers, as each hint card is (9.2), so the Hand cannot
+hide them. A real hand in the land is drawn on the land (`hand-model.md`,
+"The Hand stops at the land"), and its controller goes with the drawn hand.
+The line still ends at the edge of its card.
+
+**The view for videos** (`video_view=1`) shows the cards of the buttons as it
+shows each card. The controller and the lines are in the eye pictures.
+
+**The keys.**
+
+| Key of `bwvr.ini` | Default | Meaning |
+| --- | --- | --- |
+| `hint_controller` | 1 | The launcher row "Show 3D controller for hints". 1 gives `hint_style=2` and `hint_card_pictures=1`: the controller in the hand, and a hand with no model has the cards at the wrists with the pictures of the buttons. 0 gives `hint_style=1` and `hint_card_pictures=0`: the cards at the wrists with the button words only (`hint_model_math.h`, `StyleOfSwitch` and `PicturesOfSwitch`) |
+| `hint_style` | from `hint_controller` | 2 the controller in the hand, with a card for each lit button. 1 the cards at the wrists (9.3). The default is 2 with `hint_controller=1` and 1 with `hint_controller=0`. Not in the launcher: a save of the launcher removes it, and a test can write it |
+| `hint_hand_opacity_pct` | 68 | The opacity of the hand while its controller shows, in percent. 35 is the fainter hand |
+| `hint_pulse` | 1 | 1 the lit buttons pulse, one beat a second from 35 percent of the light to full light. 0 a steady light |
+| `view_check` | 1 | 1 the check of the view (9.15) and the scale check (9.16) run in the God view and write their log lines. 0 no check |
+| `hint_body_fine` | 1 | 1 the simpler body of a heavy model has cells of 3.4 mm at most and a cell for each side of the normal, so the ink outline of a thin part (a ring, a strap) does not break. 0 the cells grow until the body has 2500 triangles, with one cell for all the normals |
+| `hint_model_test` | empty | Test key. The folder of a model for both hands, for example `valve-index`, in place of the model of the profile |
+| `hint_model_test_dir` | empty | Test key. The folder of the models. Empty is `bwvr-controllers` beside `runblack.exe`. `desk_test.ps1` sets `bwvr\assets\controllers` of its worktree |
+
+With `test_keys=1`, Ctrl Shift H switches `hint_style` between 2 and 1, for a
+live comparison.
+
+**The log.**
+
+- `hint model   : hint_controller=1, hint_style=2, ...` once, with the folder of the models,
+  and `hint model   : hint_hand_opacity_pct=68, ... hint_pulse=1, ...` with
+  the opacity of the hand and the light of the lit buttons.
+- `hint model   : the right hand reports the profile "oculus/touch_controller"
+  and the headset "Meta Quest 3", so the model is meta-quest-touch-plus`:
+  once for each hand, and again when the model changes.
+- `hint model   : the model meta-quest-touch-plus of the right hand loaded in
+  0.4 ms on a thread: 31 nodes, 6 meshes, 3340 vertices, 4470 triangles, a
+  box of 6.8 by 6.0 by 12.3 cm. The controls with a node: first face button,
+  ...`: once for each load, or the reason when the load failed.
+- `hint model   : the controller meta-quest-touch-plus shows in the right
+  hand, with 2 cards`: the first time for each hand.
+- `hint card    : frame N, the controller of the right hand has 2 cards: Take
+  (grip, 4.1 by 2.2 cm, at x y z m); [A] Teleport (first face button, ...)`:
+  each time the cards of a hand change, in the 160 lines of 9.6.
+- `hint model   : the controllers cost N ms a frame on the CPU over 120
+  frames (the build and 2.0 eye passes a frame), N ms at most, N triangles
+  a frame`:
+  once, and in each report window with the frames in which each controller
+  showed. The report of the hint card has the frames of the cards of the
+  buttons, and the cards that did not show.
+
+**The cost.** The load welds the vertices with the same place and normal in
+a part (Touch v3: 12111 vertices in the file, 4048 after the weld; Touch v2:
+10005 and 2270; Vive Cosmos: 14838 and 10001; Vive wand: 17551 and 15190),
+and keeps each vertex, its normal and its corner of the outline in the grip
+space. A body with more than 2500 triangles gets a simpler mesh at the load:
+its vertices go into cells of a grid (2 mm, then 30 percent larger each step,
+until it has 2500 triangles or less), one vertex for each cell at the mean
+place and normal. With `hint_body_fine=1` the cell stops at 3.4 mm, and each
+cell is also for one side of the normal (the largest axis of the normal and
+its sign, `NormalSide`). Two opposite normals are never in one cell, so the
+two faces of a thin part (the ring of a Touch v3 or a Cosmos, the strap of
+an Index) stay apart. With one cell for both faces, or a cell larger than
+the part is thick, the part becomes one sheet with a mean normal of almost
+zero, and its outline breaks. The lit parts and the parts that move keep
+all their detail. The body in the file and after the load:
+
+| Model | In the file | `hint_body_fine=1` | `hint_body_fine=0` |
+| --- | --- | --- | --- |
+| Vive wand | 14288 | 6853 (cells of 3.4 mm) | 1930 (7.4 mm) |
+| Vive Cosmos | 15740 | 6934 (3.4 mm) | 1702 (7.4 mm) |
+| Index | 7213 | 4333 (3.4 mm) | 2130 (5.7 mm) |
+| Touch v3 | 4341 | 3104 (3.4 mm) | 2411 (4.4 mm) |
+| Touch Plus | 3163 | 2345 (2 mm) | 2221 (2 mm) |
+
+The load line gives both counts and the cell. A frame computes again
+only the vertices of the parts that a press
+moves, and the color of each vertex from a table of the light. Each eye puts
+each corner on the screen once, with one matrix from the grip space to the
+camera, and the triangles go to compact lists, so each draw sends only the
+vertices that it uses. The cost of a frame is the build and all its eye
+passes, and the next build closes it. The log line gives the vertices that
+the draws sent. The triangles
+of a hand after the load, with `hint_body_fine=1`: Touch Plus 3652, Touch
+Pro 3201, Touch v3 4594, Touch v2 3335, Index 6053, Vive wand 9909, Vive
+Cosmos 9670, Vive Focus 3 3444, HP 4826, Pico 4 3835, the controller with
+only a trigger 2682. The goal is under 0.3 ms a frame for two controllers and four cards.
+The Vive wand and the Vive Cosmos have almost three times the triangles of
+the Touch Plus, so they cost more. Desktop runs (Direct3D 9, the hints
+recipe, the last window of 450 frames), `hint_body_fine` at 1 and 0: Touch
+Plus 0.205 and 0.183 ms, Touch v3 0.239 and 0.206, Index 0.305 and 0.196,
+Cosmos 0.414 and 0.206, Vive wand 0.587 and 0.360. The fine body loads in 7
+to 14 ms on the thread.
+
+The outline also draws short ink dashes inside the body where the surface
+folds (along the handle of the Index). The full model of the file has
+them too. They do not hide the shape.
+
+**Tests.** The math test (`hint_model_checks.h`): the model of each profile
+and headset name, the nodes of each control, the control of each word, the
+press, the crossing of two lines, and 3000 poses of play with 1 to 4 cards:
+no two lines cross in the view, no two cards of a hand overlap, no card
+covers a point of the hand or of the controller, each line ends at the
+inner edge of its card as it is turned, and each card is less than 1 degree
+off its own line of sight. A test program outside
+the game loaded each model with `hint_model.cpp`, placed four cards and drew
+the controllers on the CPU: each model loads, and its lit parts are the
+trigger, the grip and A. It also drew each model with `hint_body_fine` at 1
+and 0 and with no simpler body: at 1 the outlines of the rings and the
+strap are continuous, as with no simpler body.
+
+The desktop runs: `hand_run.ps1 -Kind hints` holds both fake controllers
+as a player holds them (the grips turned 60 degrees up), 40 cm ahead and
+25 cm down, so both controllers are
+in the view, with the cards of the land prompt on both hands
+(`prompts=2`). A run with each model (`hint_model_test`), the cost, and
+`hint_style` at 1 and 2. With Direct3D 9 they save the eye pictures, and
+with Vulkan and `video_view=1` the pictures of the view for videos
+(`bwvr-vk-video-N.bmp`), which have the cards over the eye picture.
+
+**The fit in the hand.** The models and the drawn hand move together. The
+model is on the controller axes of `OverlayHand` (`controller`), and the
+drawn hand is on its own axes (`rotation`): the grip with the angle of the
+real hand, 37.9 degrees from the frame of the model about the palm normal
+(`hand_angle=1`, hand.md, "The angle of the hand"). So the real hand wins
+over the fit of the drawn hand to the model. On a runtime of the table of
+9.15 the controller axes are the frame of the model on the grip pose
+(`grip_fit=1`). With `hand_angle=0` the hand is on the controller axes, as
+the rest of this paragraph has it. The test program drew the low
+poly hand of the overlay at the grip of each model, and gave the box of
+each model in the grip space. The frames agree: the fingers of the hand
+open along -y, the back of the right hand is at +x (the strap of the Index
+goes to +8.9 cm, over the back of the hand), and the handle of each
+controller goes along z through the closed fingers, under the line of the
+knuckles. The trigger is about 3 cm under the origin and 2.5 cm ahead, at
+the index finger. The grip button of a Touch is at x -0.6 cm, on the side
+of the finger tips. The -z axis of the grip goes through the closed
+fingers from the little finger to the thumb, so in a natural hold it points
+up and ahead. A fake controller at a pitch of 0 has the forearm straight up,
+and its controller and hand look turned on their side.
+
+The check of the view (9.15) shows whether the mod draws the controller and
+the hand at the frame that it gives them. Only a headset can show whether
+the faint body and the pulse of the gold buttons read at 55 cm over the
+land, and whether the cards and their lines are easy to follow
+(`headset-checks.md`).
+
+### 9.15 The place of the controller
+
+The drawn controller, the drawn hand and the Hand of the game are on one
+frame of each controller. This section gives the frame (the fit and the
+trim), each step from that frame to the pixels of the eye pictures, and the
+check of the whole chain.
+
+Code: `src/mod/grip_fit_math.h` (the table and the math of the fit and the
+trim), `src/mod/grip_fit.cpp` (the keys, the log and the change of the hands
+of each frame), `src/mod/view_check_math.h` and `src/mod/view_check.cpp`
+(the check), `XrScreen::DeclaredView` in `src/vr/xr_screen.cpp` (the views
+that the projection layer declares), and `StereoDeclaredView` in
+`stereo.cpp`. The checks are in `test/controller_math/grip_fit_checks.h` and
+`view_check_checks.h`. The tool `tools/grip_fit.py` makes the numbers of the
+table.
+
+**The frame of the model.** The origin of a WebXR model is the grip space
+of the browser of the Quest. The grip pose of Virtual Desktop, of the Oculus
+runtime and of SteamVR is a different frame:
+
+- Virtual Desktop copies the grip pose and the aim pose of the Oculus
+  runtime (`controllers.md`, 8.1, the constants of
+  `rebindControllerActions`).
+- SteamVR gives the component `openxr_grip` of its own model of each Quest
+  controller (`resources/rendermodels/oculus_quest*_controller_*`). Its aim
+  pose is 60 degrees down from that grip pose and 9.96 cm from it, as in
+  Virtual Desktop.
+- The SteamVR model of a controller and the WebXR model of the same
+  controller have the same shape. `tools/grip_fit.py` puts the SteamVR
+  model in its `openxr_grip` frame and fits it on the WebXR model. The
+  points of the surfaces are 1.2 to 1.8 mm apart after the fit.
+
+| WebXR model | Turn | Origin of the model in the grip frame (x right, y up, z back) | Move of the middle |
+| --- | --- | --- | --- |
+| `meta-quest-touch-plus` (Quest 3, 3S) | 18.0 degrees, down about x | 0.32, -1.09, -2.62 cm | 2.7 cm |
+| `meta-quest-touch-pro` | 16.1 degrees | 0.35, -0.94, -2.65 cm | 2.7 cm |
+| `oculus-touch-v3` (Quest 2) | 16.5 degrees | -0.04, -1.03, -2.31 cm | 2.8 cm |
+| `oculus-touch-v2` (Quest, Rift S) | 17.9 degrees | -0.02, -1.22, -2.11 cm | 2.9 cm |
+
+The values are for the right hand. The left hand has the mirror image, as
+Virtual Desktop mirrors its poses. With the WebXR model on the grip pose of
+the runtime, the middle of a Touch Plus shows 2.7 cm from the real middle:
+2.5 cm toward the bottom of the handle and 1.0 cm away from the trigger. With
+a level aim that is 2.1 cm back toward the player and 1.6 cm down
+(`grip_fit_checks.h`). The drawn hand is fitted to the models (9.14, "The
+fit in the hand"), so it shows at the same wrong place.
+
+**The fit.** With `grip_fit=1`, `GripFitFrame` changes the grip pose of each
+hand of a frame to the frame of its model: the position moves by the
+offset of the table in the frame of the grip, and the orientation turns by
+the turn of the table. It does this for a runtime whose name starts with
+`VirtualDesktopXR`, `Oculus` or `SteamVR`, and for a model of the table (the
+model of `ModelOfProfile`, from the profile and the name of the headset).
+Each other runtime and model keeps the grip pose of the runtime. The aim
+pose does not change: it is the aim pose of the runtime, and the presets of
+`controllers.md`, 8, are on it.
+
+The change is in `ControllersFrame`, before any code reads the hands. So
+the model, the hand, the cards at the wrist, the Hand of the game and its
+point of the pick, the throw and the check of the view all use the grip
+point of the frame of the model. The model and its cards use its axes. The
+hand turns from them by the angle of the real hand (`hand_angle`, hand.md,
+"The angle of the hand"). The log line of the grip to aim (`controllers.md`, 8.4) reads
+the poses of the runtime. The bridge (`xr_bridge=1`) does not send the name
+of the runtime, so it has no fit.
+
+**The trim.** For a player whose controller still does not fit, the VR
+Settings window (`ui-layer.md`, 24.1, the tab Hands) moves the controllers
+ahead, up or out in steps of 5 mm, from -30 to 30 mm: `grip_trim_ahead_mm`,
+`grip_trim_up_mm` and `grip_trim_out_mm`. The axes are the axes of the aim
+pose of the runtime: ahead is where the controller points, up is to its top
+face, and out is away from the other hand. The trim moves the grip pose and
+the aim pose of both hands by the same move, so the drawn controller, the
+hand, the Hand and the ray move together. A change acts at the next frame,
+and the window writes the key into `bwvr.ini`.
+
+**What a player can compare in the headset.** The Quest menu shows its own
+controllers only while it is open, and then the game has no input focus and
+the mod draws no controller. Two still checks need no menu: the tips of the
+two real controllers touch, and the drawn tips must touch too. And a real
+finger on the real trigger must be on the drawn trigger.
+
+**The chain.** Each step must keep a point of the room at its place:
+
+| Step | What the mod does | Why it keeps the place |
+| --- | --- | --- |
+| The head | The middle of the two eye positions of `xrLocateViews` (LOCAL), in the room of `head_pose.cpp` | The same function puts the grip in the room |
+| The God view | `world = P0 + Lt * (s / 7.5) * room`, for the head (the lean of `head_camera.cpp`) and for the grip (`ControllersOverlayHands`) | One map, one gain and one basis for both |
+| The turn | `R = L * H`. The engine builds a camera with no roll, and each eye pass adds the roll | `eye_camera.cpp` puts the eye offset after the roll, on the rolled right axis |
+| The eyes | Each eye pass moves the camera by half the separation: the IPD of the runtime times `s` | The log gives 6.3 world units at 100 units a meter for 63.3 mm |
+| One walk | The right eye is the left eye with each vertex moved by `per_rhw * rhw` | `one_walk_math.h`: exact for each depth |
+| The frustum | `LH3DTech::ChangeFov` gives `1 / tan(half)` across and `aspect / tan(half)` up, with the aspect of the render (square pixels) | The layer declares the same half angle, and the vertical angle of the same aspect |
+| The picture | The Vulkan target goes to the swapchain with a copy of the same size (`vkCmdCopyImage`) | No crop and no scale |
+| The pose of the layer | The eye poses that the render used (the frame before), with the frustum of the render (`DeclaredView`) | The engine built its camera from those poses |
+| The controller | The model of the WebXR profile at the frame of the model (the grip pose with the fit): `world = position + rotation * (x, y, -z) * units` | The origin of a WebXR model is the frame of the model |
+
+**The check in the game.** In each eye pass of the God view,
+`ViewCheckEye` puts the grip point of each hand on the screen with the
+matrix of the eye pass (`OverlayEyeMatrix`, the matrix that draws the
+controller and the hand). With one walk the right eye gets the move of one
+walk. The same grip point, as the runtime gives it in LOCAL, goes through
+the view that `DeclaredView` gives for each eye. Two numbers come out:
+
+- the distance between the two pixels of each eye, and
+- the place where the two eyes see the grip: the ray of each pixel of the
+  game through its declared view, and the point where the two rays meet. Its
+  error along the line from the middle of the head to the grip is the error
+  of depth.
+
+The invented head of a desktop run has no layer. Then the check takes the
+views that a layer would declare: the pose of each invented eye
+(`HeadPoseFakeEye`, with `fake_eye_cant_deg`) and the frustum of the render.
+
+**The math test** runs the chain with the real `head_pose.cpp` and
+`controller_math.h`, and with the steps of `head_camera.cpp`,
+`eye_camera.cpp`, `LH3DTech::UpdateWorldToCamera`, `ChangeFov` and one walk
+as those files do them. In 1080 cases (the scales 7.5 to 4000, three
+headings, six turns of the head with roll, three leans and four hands), the
+worst pixel is 0.8 pixels from its declared pixel (0.03 degrees), and the
+worst error of depth is 0.3 mm. That is the float precision of the game at
+the life size scale, where the world is 1500 units from its origin and a
+hand is 3 units from the eye. A planted error shows with the size that the
+geometry gives: a separation 6 percent too large shows the grip 2.67 cm
+nearer at 47 cm, and both eyes 2.5 cm forward show it 2.1 cm nearer along
+the line to the grip.
+
+**What the check shows.** The chain of the mod has no step that moves a
+still grip point. In a session with Virtual Desktop on a Quest 3 the check
+gave 0.00 cm between the place where the game draws the grip point and the
+place that the declared views give it, at 50 cm from the head. So the eyes
+see the controller at the frame that the mod gives it. The check cannot see
+an error of that frame against the real controller: the fit corrects that.
+
+**The log.**
+
+- `view check   : view_check=1. ...` once.
+- `view check   : frame N, the right hand. The grip point is 50.5 cm from the
+  middle of the head. The game draws it at pixel ... and the declared views
+  put it at ... (0.02 and 0.03 pixels apart). The two eyes see it 0.01 cm
+  nearer to the head, and 0.00 cm to the side. The declared eyes are 63.3 mm
+  apart, the pictures are 3600 by 2880 with the tangents ...`: once, with the
+  first point.
+- `view check   : N points of the grip. On average the two eyes see the grip
+  N cm nearer to the head ..., the worst N cm ... The worst gap of a pixel of
+  the game and a pixel of the declared view is N pixels`: in each report
+  window with points.
+
+- `grip fit     : grip_fit=1. On Virtual Desktop, the Oculus runtime and
+  SteamVR, the grip pose of a Meta Touch controller is the frame of its
+  model: the model, the hand and the Hand of the game go on that frame. The
+  trim of the player is N mm ahead, N mm up and N mm out`
+  once.
+- `grip fit     : the right hand, runtime "VirtualDesktopXR", model
+  meta-quest-touch-plus: the frame of the model is turned 18.0 degrees from
+  the grip pose of the runtime, at 0.3 -1.1 -2.6 cm in the frame of the grip
+  (x right, y up, z back). The middle of the controller moves 2.7 cm, frame
+  N` for each hand, and again when the runtime, the model or the switch
+  changes (16 lines at most). With no fit: `... the table has no fit for
+  them. The model and the hand are on the grip pose of the runtime`.
+- `grip fit     : the VR Settings window: the trim is N mm ahead, N mm up
+  and N mm out now ...` at each change of a trim row.
+- `grip fit     : the debug page: grip_fit is N now ...` at each change of
+  the switch.
+
+**The keys.**
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `grip_fit` | 1 | 1 the grip pose is the frame of the model of the controller, for the runtimes and the models of the table. 0 the grip pose of the runtime. The switch "Controller fit" of the debug page (group Hand) changes it live |
+| `grip_trim_ahead_mm` | 0 | The trim of the player, -30 to 30 mm: ahead along the aim of the controller. A row of the VR Settings window |
+| `grip_trim_up_mm` | 0 | The trim up, to the top face of the controller |
+| `grip_trim_out_mm` | 0 | The trim out, away from the other hand |
+| `grip_fit_test` | 0 | Test key. 1 gives the hands of the scripted controller the fit of Virtual Desktop and the Touch Plus. A desktop run has no runtime, so with 0 the scripted hands have no fit |
+
+Open: only a headset shows that the drawn controllers and hands are on the
+real ones with the fit (`headset-checks.md`). The table is made from the
+models of SteamVR and of the WebXR profiles, not from a measure of a real
+controller in Virtual Desktop.
+
+### 9.16 The scale that the eyes see
+
+The walk, the grab and the zoom use the scale of the God view (units per
+meter). The scale check measures the scale that the player sees from the
+matrices of the eye passes and the poses of the runtime, with no number of
+the God view in it, and puts the two side by side. It runs with
+`view_check=1`, in the same passes as the check of 9.15.
+
+| Measure | From | Gives |
+| --- | --- | --- |
+| The eyes | The camera of each eye pass, from the inverse of its matrix (`CameraPosition`), or with one walk the separation that the move of the right eye uses (`OneWalkSeparation`), over the declared eyes apart | The units per meter of the stereo picture |
+| The head | A move of 5 cm or more of the declared left eye while the version of the God view stays: the move of the camera of the left eye pass, over the move. Once with the declared eye of the same frame, and once with the declared eye of the frame before | The units per meter of a move of the head |
+| The drawn grip | The same for the grip point that draws the controller, over the grip of the runtime | The units per meter of a move of the hand |
+| The Hand of the game | The same for the Hand's world position in the game (`0x00C5E680`), over the grip of the pointing hand | The same for the Hand that the game draws. A turn of the controller and the stop at the land change it a little |
+| The walk | The camera that the game gets (`0x00EA1DB8`) in the frames of a walk, in units for each second, over the units per meter of the eyes | The speed in the room that the player sees, in all, across the land, and up and down. On a slope the follow of the land adds the move up and down, so the speed in all is more than the speed of the stick |
+| The grab | The same camera in the frames of a grab of the world, over the units per meter of the eyes, beside the way of the grips | The move of the land in the room for the move of the hand |
+
+**The frame of the head pose.** The main camera call of the game builds the
+camera of a frame before `xrWaitFrame` of that frame. With
+`head_pose_frame=1` (the default) that call locates the head for the display
+time of its frame. With `head_pose_frame=0` it takes the pose that the frame
+before located. In each case the projection layer declares the pose of the
+camera, so the picture and the declared pose agree (`backend.md`, "The head
+pose of the frame"). The head measure with the declared eye of the same
+frame is the one for a session.
+
+On the desktop the word `lean` of the scripted controller acts in the frame
+function of the controllers, after the head of that frame. The declared view
+of the invented head (`HeadPoseFakeEye`) has the lean in that frame. The
+main camera call of the next frame has it with `head_pose_frame=1`, so the
+picture comes 1 frame after the declared eye. With `head_pose_frame=0` the
+camera has it one frame later, 2 frames after the declared eye. The first of
+these frames is in the invented head only.
+
+**The step watch.** A move of the declared left eye of 5 cm or more from one
+frame to the next is a step: a lean of the invented head or a recenter. For
+the frame of the step and the 5 frames after it, the watch takes how far the
+camera of the left eye pass is from its place in the frame before the step.
+The first frame with 90 percent of the move at the scale of the eyes is the
+lag, and the move in that frame over the step is the scale of the head. A
+real head in a headset does not step 5 cm in one frame, so the watch acts
+only on the desktop and at a recenter. The line below has
+`head_pose_frame=0`.
+
+```
+scale check  : a step of the head of 14.14 cm at frame 171. The camera of the left eye pass from its place in the frame before: 0.0000 0.0000 0.1414 0.1414 0.1414 0.1414 units in that frame and the 5 after (the full move is 0.1414 units at 1.000 units per meter of the eyes). So the camera has the full move 2 frames after the declared eye, and with the declared eye of 2 frames before the head gives 1.000 units per meter
+```
+
+The math test runs the chain at 1, 7.5 and 100 units per meter: the cameras
+of the eye passes, the shift of one walk, a move of the head of 14 cm and a
+move of the grip of 14 cm each give the scale within 0.2 percent, and a
+render separation 6 percent too large shows as 6 percent more in the eyes.
+
+The log has one line in each report window, and one when the scale of the
+God view changes and the scale before had 30 frames or more (at most 400
+lines in a game):
+
+```
+scale check  : a report window. The God view is at 1.000 units per meter. The eye cameras of the game give 1.000 units per meter (1.000 to 1.000, 450 frames), a move of the head 1.000 with the declared eye of the frame before (2 moves of 5 cm) and 0.500 with the declared eye of the same frame (2), a move of the drawn grip 1.000 (3), and a move of the Hand of the game 0.000 (0). In 119 frames of a walk the camera of the game went 2.98 units in 1.98 s: 150.0 cm of the room each second at the units per meter of the eyes, 150.0 across the land and 0.0 up and down. The scale makes the speed of the stick 1.00 times move_stick_speed_cm (move_stick_scale), and the speed across over that factor is 150.0 cm each second.
+scale check  : a move of the head of 14.14 cm from frame 160 to frame 171, with the declared eye of the frame before: the camera of the left eye pass went 0.1414 units, 1.000 units per meter
+```
+
+The first line is from a desktop run with `move_stick_scale=0`. With the
+speed by the scale (`god-view.md`, 5.7) the speed of the walk is the speed
+of the key times the factor, for example 600 cm each second at 1 unit per
+meter, and the speed across over the factor gives the key again. The line of a move comes for each of
+the first 40 moves of the head in a game.
+
+A walk at the same room speed looks slower when the land is farther below
+the head: the land moves under the eyes at the speed over its distance. At
+2.3 m each second the land 1 m below moves at about 130 degrees each
+second, and the land 9 m below at about 15 (`god-view.md`, section 5.7, "The
+land under the head").
 
 ## 10. A text that waits for a click
 
@@ -1441,6 +2264,6 @@ goes to the Creature select, and it has no scroll there too.
   `backend.md`), and the cut scene window does not open. The same must
   happen for the time of a spoken line, when a quest starts while a
   different challenge script has the dialogue [I].
-- The card is at the wrist of the pointing hand. Only a headset shows
-  whether a player sees the prompt there while a text stays on the subtitle
-  card.
+
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.

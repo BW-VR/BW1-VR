@@ -260,11 +260,8 @@ click of the game, and `-Fps 90` a run at 90 frames a second. The recipe
 reach its state (`bwvr/tools/desk/README.md`, "Known limits of the
 recipes").
 
-**Needs the headset.** Whether 3 to 4 frames from the opening to the release
-feel at once. Whether the window of 80 ms before the opening gives the throw
-the player meant. Whether a still hand sets the object down where it is.
-Whether a catch with a real hand takes the object each time: a real grip
-closes over some frames, and a real hand moves with the object.
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ### A catch at once
 
@@ -423,11 +420,8 @@ to the sum of the turn (`0x00645FEE` adds the force of a step with a contact
 after the call of `fn_007FE260`, and the hook takes that force off before).
 
 
-**Needs the headset.** Whether the object is in the hand at the press with a
-real hand, which closes over some frames and moves with the object. Whether
-the way of 0.12 s to the place in the Hand looks right when the object was
-15 to 23 cm from the finger tip at the press. Whether the throw after a
-catch is the throw that the player meant.
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ## One point for each interaction
 
@@ -947,6 +941,7 @@ return address in `fn_005D5E40`.
 | `palm_search` | 0 | 1 leaves the game's search at the palm on |
 | `target_check` | 1 | 1 drops a target that the game deleted, at the start of each frame and before the mod puts the target in the pick record (see "A target that the game deletes"). 0 puts the target of the last draw in the record with no check |
 | `fish_take` | 1 | 1 makes each fish farm in reach a candidate of the choice and a far target, so the grip takes fish ("The fish in the sea"). 0 leaves the farms out: the game does not draw them |
+| `fish_school` | 1 | 1 puts the target of a fish farm on its fish: the middle of the drawn fish, with a body 2 units past the fish, and a farm in reach is a candidate also when the draw filled the list ("The fish in the sea"). 0 puts the target at the point of the farm with a body of 5 units, and a farm is a candidate only while the list has room |
 | `hand_glow_idle` | 0 | 1 draws the glow also with no target and while the Hand holds an object |
 | `leash_at_palm` | 1 | 1 ends the rope of the leash at the palm of the mod's hand |
 
@@ -1041,24 +1036,18 @@ when the item names no other script:
 - The Hand's point is 11 cm from the Creature (`seek_plan=creature` and the
   word `slap`). With `hand_wide_creature=0` there is no target, and a grip
   does nothing. With the default the Creature is the target in the wide
-  reach, and a grip of 6 frames puts the leash on.
+  reach, and a grip of 6 frames puts the leash on. A grip that stays closed
+  at 9.7 and at 11.1 cm starts the Creature state, and a grip of 30 frames
+  takes the leash off (`creature_recipe.ps1 -Kind wide`).
 
 **Not proven on the desktop:** a miracle in the wide reach beside a signpost
-(the test miracle floats at the height of the Hand, so the point is in it), a
-grip that stays closed on the Creature in the wide reach, the body of a tree and the game's height in the
+(the test miracle floats at the height of the Hand, so the point is in it), the body of a tree and the game's height in the
 game, the red halo, the Creature as a choice, a scroll that wins over a tree that the point is in, and the hook of
 the leash past its install. A place at 66 to 100 units a meter, the scale of
 the headset, is not run.
 
-**Needs the headset.** Whether 4 cm is the right reach: an object must be easy
-to take, and an object at the palm must not be taken. Whether a scroll starts
-with the glow on it. Whether the body of a scroll is where the scroll shows
-(the line of the tag `hand pick` gives the gap). Whether 10 and 15 cm keep the
-far grab out of the way near an object and do not turn it off too often in a
-village. Whether 1 cm is the right touch distance. Whether the halo is easy to
-see and not too strong, and whether the Hand with no glow is still easy to
-aim. Whether the rope of the leash now comes out of the hand. Whether the paler
-gold of the activate look is easy to tell from the gold of the take look.
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ## The bulk take
 
@@ -1246,6 +1235,14 @@ take has no sound. See [audio.md](audio.md), 6.4, for the God view.
    take the Pot is in the Hand with the grip open (OpenHeld). The next close
    carries it, and the next opening lets go. A pile that runs out while the grip
    is closed gives a carry.
+
+   **Only an open grip ends a take** (`near_take_keeps=1`). While a take runs,
+   at the Hand or at a distance, the grip opens only below 35%. A fast fall of
+   the squeeze (`grip_fast_open`) does not open it then, so a real hand that
+   moves away from the pile and relaxes its squeeze for a moment keeps the
+   take. The log has each fall that the rule kept closed, with the values of
+   the last 12 frames. With `near_take_keeps=0` a fast fall ends the take, as
+   it ends a carry. The debug page has the switch "Take keeps".
 2. **The source is a choice.** `Choose` counts a bulk source (`TakeValid`, the
    tests of `FUN_005D1330`), and a holdable object wins a tie. So the pile goes
    in the next record, and the game gives `0xD`. The glow is gold over a source.
@@ -1291,71 +1288,120 @@ The mouse is as before: no change runs while no controller button is held.
 take gives a Pot of fish, with the stream `SF_MultiPickUpFoodFish.txt`
 (`FishFarm::NetworkFriendlyStartLockedSelect` `0x0052D770`). The game does not
 draw the farm (`FishFarm::Draw` `0x0052C830` is a plain `ret`), so the draw
-never offers it to the pick, and no hover gives hand mode `0xD` for it. With
-the mouse a right press over the sea finds it with the search at the palm: the
-record has no object, so `FUN_005D1330` calls `fn_005D39E0` (`0x005D13A1`),
-which takes the nearest object within 5 units of the land under the Hand. The
-press then tests slot `0x6CC` first and starts the take. The farm also says
-yes to `ValidForPlaceInHand` while it has fish, but the press never gets to
-that test. The game's hint for the right button over the land there is "Pick
-Up". An empty farm stays: `FishFarm::Process` `0x0052D130` gives it its fish
-back over time.
+never offers it to the pick, and no hover gives hand mode `0xD` for it. An
+empty farm stays: `FishFarm::Process` `0x0052D130` gives it its fish back
+over time.
 
-Each `FishFarm` is in a list of its town. The constructor (`0x0052C360`)
-takes the nearest town and puts the farm in the list at `Town+0x788` (nodes
-of 8 bytes: the next node, then the farm). The towns of a player are a list
-from `GPlayer+0xA50`, with the next town at `Town+0x75C`
-(`Town::GetNearestTownToPos` `0x0073B170`).
+The fish that the player sees are not at the point of the farm. The creation
+of the farm (`FishFarm::CallVirtualFunctionsForCreation` `0x0052CC10`) makes a
+school of 15 fish (`FishFarm+0x88`, 0x68 bytes). It looks on rings of 2, 4, 6
+... units around the point of the farm, in 32 directions, for the first
+direction where two rings one after the other are sea. The home of the school
+is there (`+0x48`): 4 units east for a farm in the open sea, farther for a
+farm near the coast. Each fish is a sprite. It swims to a point within 7
+units (`+0x58`) of the home in x and in z, and it then gets a new point
+(`fn_00824DA0`). The game draws `ftol(fill * 15)` fish, with the fill
+(`+0x64`) the food of the farm over its most food (`FishFarm::Process`). The
+landscape draws and moves the schools (`GLandscape::Draw` calls `fn_00824B90`)
+while the camera is within 300 units of the home. A tap on the water makes
+the fish within 8 units of the tap swim away.
 
-**What the mod does (`fish_take=1`).** The rule of one target turns the search
-at the palm off, so the grip on the fish did nothing. Now the mod reads the
-lists of the towns once a frame and makes each farm in reach a candidate of
-the choice, with no mesh (`OfferFishFarms` in `hand_direct.cpp`):
+With the mouse a right press over the sea goes to the search at the palm
+(`fn_005D39E0`, called at `0x005D13A1`). When the land point under the Hand is
+sea, the search asks `fn_00824B10` (at `0x005D3A79`) for a drawn fish within 2
+units of that point in x and z. With such a fish it walks the list of all
+farms (`GGame+0x205C0C`, the next farm at `FishFarm+0x7C`) for the farm of
+that school, and the press starts the take of fish (`FUN_005D1330` tests slot
+`0x6CC` first). With no such fish the search takes the nearest object within
+5 units of the land point. The farm also says yes to `ValidForPlaceInHand`
+while it has fish, but the press never gets to that test. The game's hint for
+the right button over the land there is "Pick Up".
 
-- The point of a farm is its x and z, at the height of the land there. The
-  sea gives 0.
+**What the mod does (`fish_take=1`, `fish_school=1`).** The rule of one
+target turns the search at the palm off. So once a frame the mod reads the
+game's list of farms and makes each farm in reach a candidate of the choice,
+with no mesh (`OfferFishFarms` in `hand_direct.cpp`):
+
+- The point of a farm is the middle of its drawn fish (`fish_math.h`). The
+  fish move, so the point moves with them.
+- The body is a cylinder. Its radius goes 2 units past the drawn fish that is
+  farthest from the point, so each land point where the game's own test finds
+  a fish is in the body. It goes from 5 units under the point to 10 units
+  over it. A farm with no drawn fish has the point of the farm and a body of
+  5 units (the game's 2D radius).
 - In reach is the range of the far grab from the Hand's point, plus 1 m of
   the room for the head. With `far_grab_max_m=0` each farm is a candidate.
-- The body is a cylinder of the game's 2D radius (5 units). It goes from 5
-  units under the sea to 10 units over it: the fish are in the water, and the
-  game holds the Hand 5 units over the farm in a take.
+- The draw offers the objects in the view near to far, and in the God view
+  the list of candidates holds 256. At a coast with a town in the view the
+  draw can fill the list before the farms come. A farm in reach then takes a
+  place after that limit (the list has room for 4096).
 - A grip on a farm takes fish, also when the farm says yes to
   `ValidForPlaceInHand` (`PressKind` tests the take first, as the press of the
   game does).
 
-So the Hand at the fish has the halo, the game gives hand mode `0xD`, the card
-says "Hold to collect", and the closed grip collects fish as from a pile. At a
-distance a farm is a target of the aim with no pull ("A bulk source at a
-distance"). The farm has no mesh, so it gets the halo and no glow on a mesh.
+So the Hand in the fish has the halo, the game gives hand mode `0xD`, the
+card says "Hold to collect", and the closed grip collects fish as from a pile.
+At a distance the aim at the fish has the farm as a target with no pull ("A
+bulk source at a distance"). The farm has no mesh, so it gets the halo and no
+glow on a mesh. The game's take holds the Hand over the point of the farm, and
+the stream of fish starts there.
+
+`fish_school=0` puts the target at the point of the farm, with the height of
+the land there and a body of 5 units, and a farm is a candidate only while the
+list has room. Then the fish of a farm swim mostly outside its body, and at a
+coast with a town in the view no farm is a candidate.
 
 **The hint over the land (`hint_palm_check=1`).** With the search at the palm
 off, a press over the land acts on no object. So the card does not show a
 grip hint of the game while the hand mode is the land (`GameHintTrue`,
 [controller-hints.md](controller-hints.md), 9.9). The "Pick Up" of a farm
 behind the palm does not show, and the line "Hold to collect" shows when the
-Hand's point is at the farm. `hint_palm_check=0` shows the grip hints of the
+Hand's point is in the fish. `hint_palm_check=0` shows the grip hints of the
 game over the land.
 
-Tag `hand fish`: the key at the start, and each change of the count of the
-farms, with the place of each farm and its distance from the Hand's point.
+Tag `hand fish`: the keys at the start. At each change of the count of the
+farms, one line with the count, the farms in reach and the farms in reach with
+no room, then one line for each farm (16 at most): its point, its distance
+from the Hand's point, the count of drawn fish, the middle of the fish, its
+distance from the point of the farm, and the radius of the body. After that,
+one line for each change of the farms in reach or of the farms with no room
+(60 at most), with the count of the objects that the draw offered.
 
 **Tests.** Land 1 has 13 farms in 6 towns. Five of them are in the sea west
 of the Temple of the test save `temple` (1755 to 1845, 2425 to 2505). A desktop
-run teleports the God view there (`seek_plan=go,pile`,
-`fish_test_only=1`): the Hand at a farm has it as the target, the card says
-"Hold to collect", and the closed grip takes fish for 51 game turns. A run
-that aims from 1.2 m (`aimfar`, `seek_bulk=1`) takes fish at a distance, with
-the stream from the farm. With `fish_test_off_frame` the same grip presses
-with no target, the search at the palm finds the farm, and the mod gives the
-press no object.
+run teleports the God view there. The seek word `fish` puts the Hand's point on
+the drawn fish nearest to it, from the sprites of the game and not from the
+candidates. The seek word `pile` with `fish_test_only=1` puts the Hand's point
+on the point of the candidate. A run that aims from 1.2 m (`aimfar`,
+`seek_bulk=1`) takes fish at a distance. With `fish_test_off_frame` the same
+grip presses with no target, the search at the palm finds the farm, and the
+mod gives the press no object.
 
-**Not shown on the desktop.** The game did not give its grip hint over the
-land near a farm in the desktop runs, also with `hint_palm_check=0`. Only the
-math checks (`hint_checks.h`) show the rule of `hint_palm_check`.
+In the test save `temple`, four of the five farms west of the Temple have 15
+drawn fish. Their schools are 36 to 48 units from the points of their farms,
+and three of the schools are within 6 units of each other. The bodies have a
+radius of 7.6 to 9.9 units. The fifth farm (1815, 2505) has no drawn fish.
+With `fish_school=1` the Hand's point on a fish of a school 34 units from the
+point of its farm has that farm as the target in the next frame. The game
+gives hand mode `0xD`, the card says "Hold to collect" in the same frame, the
+target pulse comes, and the farm keeps its halo. The target stays for 700
+frames while the fish swim and the Hand does not move. With `fish_school=0`
+the same point has no target: the hand mode stays the land, and the card
+says "Teleport".
 
-**Needs the headset.** Whether the body of a farm (5 units around its point,
-11 cm of the room at 44 units a meter) is easy to find with the hand. The
-farm has no mesh, so only the halo shows where it is.
+With the fake head 50 degrees down, so that the fish are in the view, the grip
+on the farm with the halo starts the bulk take of the game, and the Hand holds
+a PileFood of 33 five frames after the press.
+
+**Not shown on the desktop.** No run has shown the far take with
+`fish_school=1` or the log of a full list at a coast. The math checks
+(`fish_checks.h`) show the body: each land point where the game's test finds
+a fish is in it. The game did not give its grip hint over the land near a
+farm in the desktop runs, also with `hint_palm_check=0`. Only the math checks
+(`hint_checks.h`) show the rule of `hint_palm_check`.
+
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ### The log, tests and keys of the take
 
@@ -1368,8 +1414,13 @@ the mod puts the source back. "The take still runs with the grip open, so the
 mod ends it", with the method. Each report window counts the takes, the frames
 of a take, the pumps where the grip was the game's button, the steps where the
 record held the source, the steps where the mod put it back, and the takes that
-the mod ended. Tag `grip`: "the grip opens during a bulk take" and "the bulk
-take still runs after the grip opened". Tag `hand pick` says when the choice is
+the mod ended. The end of a take has the facts of that moment: the right
+button of the game, the grip, the interface action, the distance of the
+Hand's point from the source across the land, and whether the land under it
+is inside the influence. A take also has one line with the same facts at 15,
+30, 60 and 120 cm of the room from the source. Tag `grip`: "the grip opens
+during a bulk take", "the bulk take still runs after the grip opened", and
+"the grip falls fast during a bulk take and stays closed". Tag `hand pick` says when the choice is
 a bulk source, and whether it is inside the player's influence.
 
 The math tests are `BulkTakeChecks` and `TakeRuleChecks`
@@ -1398,15 +1449,20 @@ Test keys of `bwvr.ini`, for the desktop runs only:
   `fish_take=0`. A run puts the Hand on the fish first, and then shows a grip
   there with the old behavior.
 
-**Not tested:** a field, a store inside the real influence, and a take with
-the hand pulled away from the store. A desktop run has the loop of a take of
+`village_run.ps1 -Kind neartake` closes the grip on a pile and moves the hand
+away from the pile while the grip stays closed. The take goes on with the
+hand 15, 36 and 48 cm of the room from the pile, until the grip opens. Then
+the squeeze dips to 0.59 for 2 frames (the script word `gripdip`), a fast
+fall. With `near_take_keeps=1` the grip stays closed and the take goes on.
+With 0 the dip opens the grip and ends the take.
+
+**Not tested:** a field, a store inside the real influence, and a real grip
+that falls fast during a take (only a headset log shows it). A desktop run has the loop of a take of
 wood ([audio.md](audio.md), section 11). Desktop runs have the take of fish
 (see "The fish in the sea").
 
-**Needs the headset.** Whether the count reads at the hand. Whether the loop
-of the take sounds, and how loud it is beside the other sounds. Whether the
-stream of pieces reads well. Whether the Hand stays at the controller during a
-take. A short squeeze on a pile must stop when the grip opens.
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ## The grab from a distance
 
@@ -1685,7 +1741,15 @@ not count, and a player who leans toward an object brings it into range. The
 head is the eye point of the aim ray (`ControllersFarRay`). The target of the
 last frame stays to 15 cm more (`FarInRange`, `kFarRangeKeepM`), so a small move
 of the head does not turn the target off and on. `far_grab_max_m=0` gives no
-limit. An object past the range gets no halo and no lock.
+limit. An object past the range gets no halo and no lock. With the leash on,
+the target of a Creature command can be past this range (to 10 m,
+`creature_command_max_m`). It then has the green ring of a command and no
+glow, and the card says "Grip Too far to take" (`creature.md`, "The look of
+a target").
+
+**The object that holds a tied leash** is no far target and no target at the
+Hand (`grip_skips_tied=1`, `creature.md`, section 5.2): the game takes
+nothing from it.
 
 **The range in a view that the game holds still.** While the game's switch for
 the drag of the land is off (bit 8 of `CameraHelp::EnabledFeatures`,
@@ -1823,9 +1887,19 @@ not over the source. So the mod puts the pieces on a curve from the top of
 the source to the Hand (`take_stream=1`). A piece goes straight up out of the
 source, then over to the Hand, and it comes down into the Hand at the end of
 its life. The game makes and deletes the pieces as before: 8 pieces a second,
-and each one lives 1 s. A take with the Hand at the source has the line of
-the game. With `take_stream=0` each take has the line of the game, from the
-land under the Hand.
+and each one lives 1 s. With `take_stream=0` each take has the line of the
+game, from the land under the Hand.
+
+**A take with the Hand at the source.** The direct grab starts a take with
+the real hand at the pile. Then the hand moves away from the pile, or the
+player moves the view, and the game does not hold the Hand over the pile as
+it does with the mouse. On the line of the game each new piece then starts at
+the land under the real hand. With `take_stream_hand=1` (the default) such a
+take has the curve too, from the top of the source of the game's take
+(`GInterfaceStatus+0x3C`, `HandDirectTakeSource`). So the pieces come out of
+the pile wherever the hand goes. With the hand at the pile the way is short:
+the pieces go up out of the pile into the Hand. With `take_stream_hand=0` a
+take with the Hand at the source has the line of the game.
 
 **The hook** (`take_stream.cpp`) is on the rule
 `ER_MultiPickup::ModifyAtomCollection`. After the rule of the game it writes
@@ -1833,7 +1907,9 @@ the place (`AtomCore+0x80`) and the velocity (`+0x34`) of each piece again,
 from the age of the piece (`AtomCore::GetAtomAge`) over `RaiseTime`.
 `FarGrabTakeSource` says that the far grab has the source of a take: from the
 press on a bulk target to the end of the take. The game starts the stream in
-the game turn of the press, before the far grab reads the take.
+the game turn of the press, before the far grab reads the take. With no take
+of the far grab, the source is the one of the game's take
+(`take_stream_hand=1`).
 
 **The curve** (`take_stream_math.h`) is a cubic Bezier curve in world units:
 
@@ -1888,13 +1964,17 @@ about 8 pieces are on the way at one time, and they go faster on a long way:
 a way of 0.6 m of the room has a mean speed of 0.6 m/s, and a way of 2.5 m
 has 2.5 m/s. The mod does not change the two values.
 
-**The log.** Tag `take stream`: one line when the stream of a take at a
-distance starts, with the source, its point and its top, the Hand, the length
-of the way in units and in meters of the room, and the life of a piece. One
-line at its end, with the count of the pieces that the mod placed, the calls
-of the rule, how many of them were a second call in a frame, and the top of
-the source at the start and at the end. With `take_stream=0` the two lines
-say that the pieces are on the line of the game.
+**The log.** Tag `take stream`: one line when the stream of a take starts
+("a take at a distance" or "a take with the Hand at the source"), with the
+source, its point and its top, the Hand, the length of the way in units and
+in meters of the room, and the life of a piece. One line at its end, with the
+count of the pieces that the mod placed, the calls of the rule, how many of
+them were a second call in a frame, and the top of the source at the start
+and at the end. With `take_stream=0`, or `take_stream_hand=0` for a take with
+the Hand at the source, the two lines say that the pieces are on the line of
+the game. The test key `take_stream_test_trace=1` gives one line for each
+frame of a stream (400 at the most): the top of the source, the Hand, and
+the place of the newest piece.
 
 ### A forest gives a tree
 
@@ -2107,8 +2187,8 @@ In the test save `pen` these recipes take a small rock beside the tree and
 not the tree, so they need `-NewGame` (`tools/desk/README.md`, "Known limits
 of the recipes").
 
-**Open.** Whether the pile at the roots is what the player means by the "pit"
-needs the headset.
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ### The far touch
 
@@ -2314,8 +2394,10 @@ held 15 steps back, and the game put the rock in the Hand in that turn. With
 the Hand kept the rock until the grip opened.
 
 **Open.** Not run: a villager that comes to rest in a take, and
-the mouse. Only a headset shows whether a tree that the player takes at the
-moment of its rest comes to the hand each time.
+the mouse.
+
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ### Show
 
@@ -2328,9 +2410,13 @@ moment of its rest comes to the hand each time.
   land under the target. By default the mesh of the target glows in the color
   of the halo, and the disc shows only for a target whose mesh does not glow
   (`target_glow=1`, `hand-model.md`, "The glow on the mesh of a target").
-- **The tether** (`overlay.cpp`, `BuildFar`). After the lock, a gold tube of 3 mm
-  goes from the Hand's point to the object. It also shows while the game takes
-  from a far bulk source.
+- **The tether** (`overlay.cpp`, `BuildFar`). After the lock, a gold line
+  goes from the Hand's point to the object. It also shows while the game
+  takes from a far bulk source. With `ray_glow=1` and `ray_glow_only=1` (the
+  defaults) it is a glow of 0.8 cm of the room from the middle to the edge,
+  with a light that runs along the tether from the Hand (`hand-model.md`,
+  "The glow ribbons"). With `ray_glow_only=0` it is a tube of 3 mm under a
+  glow of 1 cm, and with `ray_glow=0` the tube alone.
 - **The tick:** 0.15 for 10 ms at a new target, 0.3 for 30 ms at the lock, and
   0.2 up to 0.6 every 60 ms during the glide. The game's effect 4 starts at the
   pick up.
@@ -2386,8 +2472,11 @@ not jump.
 | `far_grab_near_cm`, `far_grab_near_out_cm`, `far_grab_beside_loose` | 10, 15, 1 | See "Near objects win" |
 | `far_touch` | 1 | 1 makes a scroll in the aim a far target that the grip activates |
 | `far_leash` | 1 | The leash click on the player's own Creature at a distance (see [creature.md](creature.md)) |
+| `grip_skips_tied` | 1 | The object that holds a tied leash is no target of the grip, at the Hand and from a distance. 0: it is a target as each other object (see [creature.md](creature.md), section 5.2) |
 | `far_take_carry` | 1 | 1: when the source of a take at a distance goes away while the grip is closed, the grip machine keeps the grip and the grip carries the bundle. 0: the far grab holds the grip back until it opens, and the machine lets the bundle go at once (see "A bulk source at a distance"). Test key: Shift and Backspace |
 | `take_stream` | 1 | 1: the pieces of the stream of a take at a distance go on a curve from the top of the source to the Hand. 0: the line of the game, from the land under the Hand (see "The stream of a take at a distance"). Test key: Ctrl, Shift and the minus key |
+| `take_stream_hand` | 1 | 1: a take with the Hand at the source (the direct grab) has the curve too, from the top of the source of the game's take, so the pieces come out of the pile when the hand or the view moves. 0: the line of the game (see "The stream of a take at a distance") |
+| `take_stream_test_trace` | 0 | A test key: one line for each frame of a stream, with the top of the source, the Hand and the newest piece |
 | `creature_hold_stay`, `creature_hold_stay_ms`, `creature_stay_look` | 1, 350, 1 | A grip that stays closed on the far Creature makes it stay (see [creature.md](creature.md), section 5.3). Test key: Shift and End |
 | `far_roots_at_tree` | 1 | 1 puts the roots pile of a tree that comes from a distance at the roots, on the land where the tree stood. 0 leaves it where the game puts it, on the way of the glide. Test key: Ctrl, Shift and Page Down |
 | `tree_plant_hint` | 1 | 1 makes the card say what the opening of the grip does with a tree in the Hand. 0 shows the text of the game ("Plant") each time. Test key: Ctrl and Page Down |
@@ -2675,7 +2764,7 @@ from the Hand, and the lock, the pull and the fetch put it in the Hand. With
 fetched.
 
 **Not shown in a run:** the fireball challenge of Land 2 itself (no test save
-is there), the test key Shift A, a villager beside a tree (the start of Land 1 has no villager in view, so the runs use a rock and a tree), a tree or a signpost beside the Creature (the test save `temple` has no tree 20 units or less from the Creature), a large Creature that the draw does not offer, a miracle of a quest beside its signpost, a locked target that drifts out of the
+is there), the test key Shift A, a tree or a signpost beside the Creature (the test save `temple` has no tree 20 units or less from the Creature), a large Creature that the draw does not offer, a miracle of a quest beside its signpost, a locked target that drifts out of the
 influence, a villager in the sea, the tether and the halo during a take at a
 distance, a take at a distance from a pile that the game deletes (the runs
 make that case with the test key and a pile of the store), a `Field` as a
@@ -2686,16 +2775,8 @@ land outside the influence, a multiplayer game, a fetch of a villager, a
 Creature or a building, the haptics on a real controller, and the look of the
 halo against open land (the pen is a slope).
 
-**Needs the headset.** Whether 2 m is the right range. Whether a seed of the
-fireball challenge of Land 2, 16.7 m away at 12.9 units for each meter, is easy
-to aim at with no range limit. Whether the body, the size term and the bias of 3 degrees pick the villager that the hand points at in a crowd, in the quest to save the children. Whether the Creature, a miracle and a signpost are easy to choose with the real aim, and whether a signpost in the last rank is still easy to choose with the aim on it. Whether the cone of 8
-degrees feels right with the real aim pose. Whether the pull at 0.8 m/s or 12 cm
-is easy to do and does not fire by accident. Whether the glide time reads well.
-Whether a take at a distance reads well: the halo, the tether and the count at
-the Hand. Whether the curve of the stream of that take reads well in depth, how
-it looks with a hand that moves, and whether a life of 1 s and 8 pieces a
-second read well on a way of 2 m. Whether the halo alone shows the target well against the land. Whether
-a ball on the sea gets the halo, the lock and the fetch.
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ## Many trees from a forest
 
@@ -2862,10 +2943,8 @@ that one. A `BigForest` gives the wood of one tree at each step with no tree tha
 leaves the picture, until the game deletes the forest. The take changes the tree
 in the Hand into wood.
 
-**Needs the headset.** Whether 600 ms and 400 ms feel right, and whether 10 cm is
-the right reach at the scales of the headset. Whether one whole tree is still easy
-to take from a forest. Whether the take at a distance starts when the player does
-not want it, after a fetch of one tree.
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ## An object in the Hand that goes onto a thing
 
@@ -3070,11 +3149,8 @@ code with a different class), the altar and a sacrifice, a teleport, a thing out
 the influence (the red halo and its line), a villager at a field, at a building site
 and at the Workshop, and a scaffold that the Workshop makes.
 
-**Needs the headset.** Whether 6 cm is the right reach for a store and a scaffold.
-Whether the halo of a large thing (the Village Store has a body of 15 units, 35 cm of
-the room) reads as "the wood goes here". Whether a player gives an object to the
-Creature with no effort: the Creature becomes the target in its body, and it stays
-the target to 6 cm.
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 **Limits.** The draw offers a thing only when the point of its mesh is near the Hand.
 A very large building with its point far from the Hand's point can be no target, and

@@ -35,16 +35,20 @@ inline void DebugMenuChecks() {
     Check(unique, "no two entries share a slot", unique, 1);
   }
 
-  // THE SLOT OF THE ITEM "debug". The page 2 as made is full: "debug" takes
-  // slot 5 (the help of the game). The ring of the Temple has an empty slot.
+  // THE SLOT OF THE ITEM "debug". Page 2 as made and page 2 of
+  // places_panel=0 are full: "debug" takes slot 5 (the help of the game).
+  // The ring of the Temple has an empty slot.
   {
-    int page[kSlots], temple[kSlots];
+    int page[kSlots], full[kSlots], temple[kSlots];
     char unknown[16];
     ParseItems(kDefaultPage2, page, unknown, sizeof(unknown));
+    ParseItems(kDefaultPage2Marks, full, unknown, sizeof(unknown));
     ParseItems(kDefaultTemple, temple, unknown, sizeof(unknown));
     Check(DebugSlot(page) == 5 && page[5] == kItemHelp,
-          "on the full page 2 the item debug takes slot 5, the help",
-          DebugSlot(page), 5);
+          "on the full page 2 the item debug takes slot 5", DebugSlot(page), 5);
+    Check(DebugSlot(full) == 5 && full[5] == kItemHelp,
+          "on the full page 2 of places_panel=0 the item debug takes slot 5, "
+          "the help", DebugSlot(full), 5);
     Check(DebugSlot(temple) == 7, "in the Temple it takes the empty slot 7",
           DebugSlot(temple), 7);
     int more[kSlots];

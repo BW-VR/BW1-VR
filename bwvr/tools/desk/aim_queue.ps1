@@ -3,6 +3,10 @@
 #
 #   aim_queue.ps1 -Dll <dll> -Runs aim2,move1b,cmd1b -Tag b
 #   aim_queue.ps1 -Dll <dll> -Runs aim2 -NewGame
+#   aim_queue.ps1 -Dll <dll> -Runs cmd1b -Set "test_frame_rate=60"
+#
+# -Set gives more ini keys to each run, after the keys of the recipe, so a key
+# of -Set replaces a key of the recipe with the same name.
 #
 # THE START. Each run starts in the test save "pen" (README.md, "A fast
 # start"): the Creature pens of Land 1 after the first story, which is the
@@ -18,6 +22,7 @@ param(
     [switch]$Now,
     [int]$WaitMinutes = 60,
     [string]$Save = 'pen',
+    [string]$Set = '',
     [switch]$NewGame
 )
 $sp = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -91,6 +96,31 @@ $defs = @{
         Points = ''
         Seconds = 103
     }
+    # ringin1: the steps of ring1 to 44.4 units a meter, then two more zoom
+    # steps in (about 19.8 units a meter) and one more A. There the ring of
+    # rule 1 (11 units) is more than 40 cm, so the upper limit acts.
+    ringin1 = @{
+        Set = "god_zoom_about=0;fake_controller_front=1;fake_controller_play_frame=2750;aim_test_touch=$from;teleport_ring_mode=1;fake_controller_turns=0,-60,1"
+        Steps = 'point@2990+1 aimfar@3000+1 grip@3060+90 pull@3100+3 pull@3170+3 point@3200+1 aimturn@3205+1 a@3215+30 shot@3230+1 stick_up@3260+10 stick_up@3290+10 point@3320+1 a@3340+30 shot@3355+1 stick_up@3390+10 stick_up@3420+10 point@3460+1 a@3480+30 shot@3495+1'
+        Points = ''
+        Seconds = 100
+    }
+    # ring4k1 and ring4k0: the steps of ring1 and ring0, then six more zoom
+    # steps out (about 3840 units a meter) and one more A. The aim logs the
+    # radius of the ring at that scale, where the limit of 40 cm of the ring
+    # acts.
+    ring4k1 = @{
+        Set = "god_zoom_about=0;fake_controller_front=1;fake_controller_play_frame=2750;aim_test_touch=$from;teleport_ring_mode=1;fake_controller_turns=0,-60,1"
+        Steps = 'point@2990+1 aimfar@3000+1 grip@3060+90 pull@3100+3 pull@3170+3 point@3200+1 aimturn@3205+1 a@3215+30 shot@3230+1 stick_up@3260+10 stick_up@3290+10 point@3320+1 a@3340+30 shot@3355+1 stick_down@3390+10 stick_down@3420+10 stick_down@3450+10 stick_down@3480+10 stick_down@3510+10 point@3550+1 a@3570+30 shot@3585+1 stick_down@3620+10 stick_down@3650+10 stick_down@3680+10 stick_down@3710+10 stick_down@3740+10 stick_down@3770+10 point@3810+1 a@3830+30 shot@3845+1'
+        Points = ''
+        Seconds = 110
+    }
+    ring4k0 = @{
+        Set = "god_zoom_about=0;fake_controller_front=1;fake_controller_play_frame=2750;aim_test_touch=$from;teleport_ring_mode=0;fake_controller_turns=0,-60,1"
+        Steps = 'point@2990+1 aimfar@3000+1 grip@3060+90 pull@3100+3 pull@3170+3 point@3200+1 aimturn@3205+1 a@3215+30 shot@3230+1 stick_up@3260+10 stick_up@3290+10 point@3320+1 a@3340+30 shot@3355+1 stick_down@3390+10 stick_down@3420+10 stick_down@3450+10 stick_down@3480+10 stick_down@3510+10 point@3550+1 a@3570+30 shot@3585+1 stick_down@3620+10 stick_down@3650+10 stick_down@3680+10 stick_down@3710+10 stick_down@3740+10 stick_down@3770+10 point@3810+1 a@3830+30 shot@3845+1'
+        Points = ''
+        Seconds = 110
+    }
     # other: the aim at a Creature that is not the Creature of the player
     # (far_test_aim_class=6). In the test save "pen" the Creatures of the pens
     # have no player. A grip that stays closed for 1 s and a short grip come
@@ -121,6 +151,8 @@ foreach ($run in $Runs) {
     # The start of a run in a test save is 49 s shorter than the start of a
     # new game with the first story.
     $seconds = $d.Seconds
+    $keys = $d.Set
+    if ($Set -ne '') { $keys = "$keys;$Set" }
     $more = @{}
     if ($start) {
         $seconds = $d.Seconds - 49
@@ -128,9 +160,9 @@ foreach ($run in $Runs) {
     }
     "=== $name $(Get-Date -Format s), $(if ($start) { "the test save '$start'" } else { 'a new game' }), $seconds s"
     if ($Now) {
-        $o = & (Join-Path $sp 'aim_run.ps1') -Name $name -Dll $Dll -Set $d.Set -Steps $d.Steps -Points $d.Points -Seconds $seconds -Now -WaitMinutes $WaitMinutes @more
+        $o = & (Join-Path $sp 'aim_run.ps1') -Name $name -Dll $Dll -Set $keys -Steps $d.Steps -Points $d.Points -Seconds $seconds -Now -WaitMinutes $WaitMinutes @more
     } else {
-        $o = & (Join-Path $sp 'aim_run.ps1') -Name $name -Dll $Dll -Set $d.Set -Steps $d.Steps -Points $d.Points -Seconds $seconds -Minutes $Minutes @more
+        $o = & (Join-Path $sp 'aim_run.ps1') -Name $name -Dll $Dll -Set $keys -Steps $d.Steps -Points $d.Points -Seconds $seconds -Minutes $Minutes @more
     }
     $o
     if (-not (Test-BwvrVerdict $o 'RUN DONE')) { "QUEUE STOPPED at $name"; exit 2 }

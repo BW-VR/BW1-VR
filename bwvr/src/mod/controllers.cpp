@@ -56,9 +56,15 @@
 #include "MinHook.h"
 #include "aim_math.h"
 #include "aim_smooth.h"
+#include "button_map_math.h"
+#include "comfort_math.h"
 #include "controller_math.h"
 #include "controllers.h"
 #include "creature_command.h"
+#include "creature_stay.h"
+#include "creature_touch_math.h"
+#include "cutscene_hands_math.h"
+#include "cutscene_window.h"
 #include "debug_menu.h"
 #include "far_grab.h"
 #include "left_hold.h"
@@ -66,14 +72,28 @@
 #include "haptics.h"
 #include "hand_exact_math.h"
 #include "hand_fit_math.h"
+#include "menu_room.h"
+#include "menu_room_math.h"
 #include "miracle.h"
 #include "note_depth.h"
 #include "quad_layer_math.h"
+#include "debug_window.h"
+#include "settings_panel.h"
+#include "controls_page.h"
+#include "places_panel.h"
+#include "bookmark_aim.h"
 #include "radial_menu.h"
 #include "screen_quad_math.h"
+#include "spell_book.h"
+#include "text_fit.h"
+#include "hand_cut.h"
+#include "gesture_panel.h"
+#include "gesture_sheet.h"
+#include "grip_fit.h"
 #include "script_frame_math.h"
 #include "temple.h"
 #include "temple_math.h"
+#include "teleport.h"
 #include "text_click.h"
 #include "text_click_math.h"
 #include "walk_math.h"
@@ -83,17 +103,30 @@
 
 extern void ModLog(const char* format, ...);
 
+// Below: the motion of the pointing hand in the room, in game units.
+bool ControllerDirectMotion(float reach_room_out[3], float grip_room_out[3],
+                            float room_out[9]);
+
 // head_pose.cpp
 float HeadPoseScale();
 bool HeadPoseCurrent(float matrix_out[9], float translation_out[3]);
 bool HeadPoseToRoom(const float position[3], const float orientation[4],
                     float rotation_out[9], float translation_out[3]);
 bool HeadPoseHeadInRoom(float translation_out[3]);
+// overlay.cpp: the tip of the index finger in the hand frame of the right hand,
+// in hand lengths, at the rest curl.
+void OverlayIndexTipLocal(float out[3]);
 // head_camera.cpp
 bool HeadCameraStageBasis(float basis_out[9]);
 bool HeadCameraGameCamera(float position[3], float focus[3]);
 // comfort_camera.cpp
 bool ComfortCameraRequestTurn(int direction);
+// The smooth turn of the God view (snap_turn=4): on, and the request of a
+// push of the stick, -1 full left to 1 full right.
+bool ComfortCameraSmoothTurn();
+bool ComfortCameraRequestSmoothTurn(float share);
+// head_pose.cpp: the recenter of F11 and of the headset's own menu.
+void HeadPoseRecenter();
 const void* ComfortCameraLastMode();
 // stereo.cpp
 bool StereoIdle();
@@ -137,6 +170,11 @@ bool HandDirectModTake();
 // hand_direct.cpp: the release at once is on now (release_at_once, and the
 // A/B key of test_keys=1). The fast opening of the grip follows it.
 bool HandDirectReleaseAtOnce();
+// hand_direct.cpp: the player's own Creature at the Hand, and the gap from
+// the Hand's point to its body in cm of the room. See docs/creature.md, "The
+// stroke with the open hand".
+void* HandDirectCreatureAtHand(bool empty);
+bool HandDirectOwnCreatureGap(void* creature, float* gap_cm);
 // hand_direct.cpp: on the table, offer the objects in a wider ball around the
 // Hand to the pick for a few frames, for the word "seek".
 void HandDirectWidenPick(int frames);
@@ -188,19 +226,19 @@ bool TabletopGodZoomForwardIn();
 // rule, its request for the next frame, and its test key. And the game's
 // switch for the drag of the land, which the walk keeps to.
 int TabletopGodMoveStick();
-bool TabletopGodWalk(const float push[2], const float* aim, float boost,
-                     float climb, bool path);
+bool TabletopGodWalk(const float push[2], const float* aim, const float* aim3,
+                     float boost, float climb, bool path);
 void TabletopGodMoveStickCycle();
 bool TabletopMoveAllowed();
 // teleport.cpp and hint_card.cpp: the test keys of teleport_switch and of
 // prompt_moves, for the words "teleportkey" and "promptkey" of the script.
 void TeleportSwitchToggle(const char* by);
 void HintCardMovesToggle(const char* by);
+// hand_model.cpp: the switch of hand_two_sided (the word sideskey).
+void HandModelTwoSidedChange(const char* by);
 
 void ControllersPump();
 bool ControllersFarAllowed(const char** why);
-// cutscene_window.cpp: this frame draws on the screen of the cut scene window.
-bool CutsceneWindowFlat();
 // intro_vr.cpp: true while the Lionhead intro draws in stereo.
 bool IntroBlocksButtons();
 // hand_direct.cpp: the CHand of this frame.
@@ -315,6 +353,31 @@ enum FakeInput {
   kLMatch,
   // The test key of left_hold acts on the first frame of the word.
   kHoldKey,
+  // The spell book: the right hand steps to the middle of the next item of
+  // the open book (spell_book.cpp).
+  kBook,
+  // The left hand turns to the next yaw, pitch and roll of
+  // fake_controller_left_rots: the palm that turns up (spell_book_palm,
+  // gesture_panel).
+  kLRot,
+  // The panel of places: the aim of the right hand turns to the middle of
+  // the next button of places_test_buttons (places_panel.cpp).
+  kAimPlaces,
+  // The stick click of the left hand: the recenter hold (recenter_hold=1).
+  kLStickClick,
+  // The debug window: the aim of the right hand turns to the middle of the
+  // next part of debug_test_parts (debug_window.cpp).
+  kAimDebug,
+  // The aim of a new bookmark: the aim of the right hand turns to the target
+  // of the test key bookmark_test_aim (bookmark_aim.cpp).
+  kAimMark,
+  // The stick of the left hand forward at half of a full push: a push under
+  // the threshold of the speed ramp (move_stick_ramp).
+  kLStickHalf,
+  // The switches of hand_angle (grip_fit.cpp) and of hand_two_sided
+  // (hand_model.cpp) act on the first frame of the word.
+  kAngleKey,
+  kSidesKey,
   kInputCount
 };
 
@@ -329,16 +392,19 @@ const char* const kInputName[kInputCount] = {
     "lstick_left", "lstick_right", "lstick_up", "lstick_down", "ltrigger",
     "aimtemple",  "gripdip",    "exit",       "bench",
     "lmenu",      "layoutkey",  "movekey",    "teleportkey", "promptkey",
-    "controlskey", "lmatch", "holdkey"};
+    "controlskey", "lmatch", "holdkey",
+    "book",       "lrot",       "aimplaces",  "lstick_click",
+    "aimdebug",   "aimmark",    "lstick_half", "anglekey",  "sideskey"};
 
 // The fake hand positions for the word "point", in cm from the head center.
+// A value can have decimals.
 const int kMaxPoints = 16;
-int g_points[kMaxPoints][3];
+float g_points[kMaxPoints][3];
 int g_point_count = 0;
 int g_point_index = -1;  // -1 is the base pose
 int g_points_used = 0;
 // The same for the left hand and the word "lpoint".
-int g_lpoints[kMaxPoints][3];
+float g_lpoints[kMaxPoints][3];
 int g_lpoint_count = 0;
 int g_lpoint_index = -1;
 // The word "lmatch": the left hand takes the place of the right hand at that
@@ -352,6 +418,12 @@ int g_rots[kMaxPoints][3];
 int g_rot_count = 0;
 int g_rot_index = -1;
 int g_rots_used = 0;
+// The same for the left hand and the word "lrot", from the test key
+// fake_controller_left_rots. Not mirrored.
+int g_lrots[kMaxPoints][3];
+int g_lrot_count = 0;
+int g_lrot_index = -1;
+int g_lrots_used = 0;
 // The word "aimfar" turns the right hand to a yaw and a pitch that point the
 // aim ray at an object. The word "pull" steps the right hand 15 cm toward the
 // head center (the origin of the cm of the points) over a few frames, and the
@@ -372,6 +444,13 @@ uint64_t g_pull_start = 0;
 uint64_t g_pull_frames = 0;
 // The exact Hand: the offset from the grip to the real index tip in the
 // world, on the last frame, so the word "seek" puts the tip on the object.
+// The camera of the render pixel of the last frame, for the pixel of other
+// points (ControllersPointPixel).
+float g_pixel_eye[3] = {0.0f, 0.0f, 0.0f};
+float g_pixel_room[9];
+float g_pixel_head[9];
+controller_math::Screen g_pixel_screen = {0.0f, 0.0f, 0.0f, 0.0f};
+bool g_have_pixel_camera = false;
 bool g_have_tip_offset = false;
 float g_last_tip_offset[3] = {0.0f, 0.0f, 0.0f};
 // The words "lean" and "look" step the invented head. Without a "lean" word,
@@ -426,6 +505,7 @@ const int kSeekLine = 1;      // "seekc": a point on the line to the Creature
 const int kSeekBody = 2;      // "touchc": the Creature's body bone
 const int kSeekFar = 3;       // "aimfar": a far target, to aim at
 const int kSeekCommand = 4;   // "aimcmd": a target of a Creature command
+const int kSeekMark = 5;      // "aimmark": a target of a new bookmark
 int g_seek_due_kind = kSeekObject;
 
 struct ScriptStep {
@@ -485,19 +565,29 @@ void ParseScript(const char* text) {
   }
 }
 
+// One number of a list: a whole number for the turns, and a number with
+// decimals for the points of the hands.
+void ReadNumber(const char* p, char** end, int* out) {
+  *out = static_cast<int>(strtol(p, end, 10));
+}
+void ReadNumber(const char* p, char** end, float* out) {
+  *out = static_cast<float>(strtod(p, end));
+}
+
 // right,up,forward in cm, separated by spaces.
-void ParsePoints(const char* text, int (*points)[3], int* count) {
+template <typename T>
+void ParsePoints(const char* text, T (*points)[3], int* count) {
   int& point_count = *count;
   point_count = 0;
   const char* p = text;
   while (*p != 0 && point_count < kMaxPoints) {
     while (*p == ' ' || *p == '\t') ++p;
     if (*p == 0) break;
-    int value[3] = {0, 0, 0};
+    T value[3] = {0, 0, 0};
     char* end = nullptr;
     bool ok = true;
     for (int i = 0; i < 3 && ok; ++i) {
-      value[i] = static_cast<int>(strtol(p, &end, 10));
+      ReadNumber(p, &end, &value[i]);
       if (end == p) ok = false;
       p = end;
       if (i < 2) {
@@ -613,6 +703,106 @@ void LoadTraces(const char* list) {
 // the step of the word "pull". The base pose is on the side of the
 // controller: on the left of the head for the left controller. The point of a
 // word is a place in the room, so it is not mirrored.
+// THE TRACE ON THE LAND, for the circle of the ray (docs/miracles.md, "The
+// circle of the pointer ray"). With the test key fake_controller_trace_aim_cm
+// above 0, the word "trace" holds the hand at the middle of the trace and
+// turns its aim, so that the ray goes through the template on a level plane
+// that many cm ahead of the middle and fake_controller_trace_aim_down_cm (60)
+// under it, at fake_controller_trace_aim_pct (300) percent of the size of
+// the trace. The ray then draws the template on the land in front.
+int IniInt(const char* key, int fallback);
+void AimTurnOfPointingHand(float* yaw_left_deg, float* pitch_up_deg);
+struct TraceAim {
+  bool read;
+  int forward_cm, down_cm, pct;
+};
+TraceAim g_trace_aim = {false, 0, 60, 300};
+
+bool TraceAimNow() {
+  if (!g_trace_aim.read) {
+    g_trace_aim.read = true;
+    g_trace_aim.forward_cm = IniInt("fake_controller_trace_aim_cm", 0);
+    g_trace_aim.down_cm = IniInt("fake_controller_trace_aim_down_cm", 60);
+    g_trace_aim.pct = IniInt("fake_controller_trace_aim_pct", 300);
+    if (g_trace_aim.forward_cm > 0) {
+      ModLog("controllers  : test key fake_controller_trace_aim_cm=%d: the "
+             "word \"trace\" turns the aim of the hand, so its ray draws the "
+             "template on a level plane %d cm ahead and %d cm down, at %d%% "
+             "of its size", g_trace_aim.forward_cm, g_trace_aim.forward_cm,
+             g_trace_aim.down_cm, g_trace_aim.pct);
+    }
+  }
+  return g_trace_aim.forward_cm > 0 && g_point_index == kTraceIndex &&
+         g_trace_now < g_trace_count && g_trace_points[g_trace_now] > 0;
+}
+
+// The orientation of the hand at the middle of the trace whose ray goes
+// through the pose of the trace now. In the God view and on the table the
+// template lies on the land itself: the middle is the land under the middle
+// of the plane, and each pose is at its offset across the land, at the
+// height of the land there. So the ray draws the template with its own shape
+// on the land. Else the pose is on the plane of TraceAimNow.
+int g_trace_aim_for = -1;         // the trace of the middle on the land
+float g_trace_aim_middle[3];       // in the world
+bool TraceAimOrientation(float roll, float q[4]) {
+  const float* p = g_trace_cm[g_trace_now][g_trace_step];
+  const float s = 0.01f * static_cast<float>(g_trace_aim.pct);
+  const float dx = (p[0] - kTraceCenterCm[0]) * s;
+  const float dy = (p[1] - kTraceCenterCm[1]) * s;
+  float target[3] = {
+      kTraceCenterCm[0] + dx,
+      kTraceCenterCm[1] - static_cast<float>(g_trace_aim.down_cm),
+      kTraceCenterCm[2] + static_cast<float>(g_trace_aim.forward_cm) + dy};
+  const float scale = HeadPoseScale();
+  if (g_last_table && scale > 0.0f) {
+    // cm of the room to the world: P0 + Lt * (gain * t), t in room units.
+    const auto to_world = [&](const float cm[3], float out[3]) {
+      float t[3];
+      for (int i = 0; i < 3; ++i) t[i] = cm[i] * scale * 0.01f * g_last_table_gain;
+      float moved[3];
+      controller_math::Apply(g_last_room, false, t, moved);
+      for (int i = 0; i < 3; ++i) out[i] = g_last_table_origin[i] + moved[i];
+    };
+    const int id = g_traces_used;
+    if (g_trace_aim_for != id) {
+      const float middle_cm[3] = {
+          kTraceCenterCm[0],
+          kTraceCenterCm[1] - static_cast<float>(g_trace_aim.down_cm),
+          kTraceCenterCm[2] + static_cast<float>(g_trace_aim.forward_cm)};
+      to_world(middle_cm, g_trace_aim_middle);
+      g_trace_aim_middle[1] =
+          TeleportGround(g_trace_aim_middle[0], g_trace_aim_middle[2]);
+      g_trace_aim_for = id;
+    }
+    // The right and the forward of the room across the land.
+    const float right_cm[3] = {100.0f, 0.0f, 0.0f};
+    const float ahead_cm[3] = {0.0f, 0.0f, 100.0f};
+    const float zero_cm[3] = {0.0f, 0.0f, 0.0f};
+    float r[3], f[3], o[3];
+    to_world(right_cm, r);
+    to_world(ahead_cm, f);
+    to_world(zero_cm, o);
+    float world[3];
+    for (int i = 0; i < 3; ++i) {
+      world[i] = g_trace_aim_middle[i] + (r[i] - o[i]) * dx * 0.01f +
+                 (f[i] - o[i]) * dy * 0.01f;
+    }
+    world[1] = TeleportGround(world[0], world[2]);
+    float in_room[3];
+    controller_math::TableRoomPoint(g_last_table_origin, g_last_room,
+                                    g_last_table_gain, world, in_room);
+    for (int i = 0; i < 3; ++i) target[i] = in_room[i] / scale * 100.0f;
+  }
+  float d[3];
+  for (int i = 0; i < 3; ++i) d[i] = target[i] - kTraceCenterCm[i];
+  float yaw = 0.0f, pitch = 0.0f;
+  if (!controller_math::FakeAimAngles(d, &yaw, &pitch)) return false;
+  float turn_yaw = 0.0f, turn_pitch = 0.0f;
+  AimTurnOfPointingHand(&turn_yaw, &turn_pitch);
+  controller_math::FakeOrientation(yaw - turn_yaw, pitch - turn_pitch, roll, q);
+  return true;
+}
+
 void RightHandCm(float cm[3]) {
   cm[0] = static_cast<float>(g_fake.right_cm) *
           (g_left_handed_base ? -1.0f : 1.0f);
@@ -624,6 +814,8 @@ void RightHandCm(float cm[3]) {
     }
   } else if (g_point_index == kSeekIndex) {
     for (int i = 0; i < 3; ++i) cm[i] = g_seek_cm[i];
+  } else if (TraceAimNow()) {
+    for (int i = 0; i < 3; ++i) cm[i] = kTraceCenterCm[i];
   } else if (g_point_index == kTraceIndex && g_trace_now < g_trace_count &&
              g_trace_points[g_trace_now] > 0) {
     for (int i = 0; i < 3; ++i) cm[i] = g_trace_cm[g_trace_now][g_trace_step][i];
@@ -636,6 +828,8 @@ void RightHandCm(float cm[3]) {
 // aim ray points as the ray of the right hand with the same pose (the aim
 // block below).
 float FakeLeftAimFix();
+
+float FakeStickScale();
 
 void FakeHand(int index, bwvr::HandInput* out) {
   const bool both = g_fake.mode >= 2;
@@ -670,7 +864,14 @@ void FakeHand(int index, bwvr::HandInput* out) {
                                                 : g_fake.pitch);
   const float roll = g_fake.roll * turn;
   float q[4];
-  if (role == 1 && g_aim_set) {
+  if (role == 0 && g_lrot_index >= 0 && g_lrot_index < g_lrot_count) {
+    controller_math::FakeOrientation(
+        static_cast<float>(g_lrots[g_lrot_index][0]),
+        static_cast<float>(g_lrots[g_lrot_index][1]),
+        static_cast<float>(g_lrots[g_lrot_index][2]), q);
+  } else if (role == 1 && TraceAimNow() && TraceAimOrientation(roll, q)) {
+    // The trace on the land turns the aim (fake_controller_trace_aim_cm).
+  } else if (role == 1 && g_aim_set) {
     controller_math::FakeOrientation(g_aim_yaw, g_aim_pitch, roll, q);
   } else if (role == 1 && g_rot_index >= 0 && g_rot_index < g_rot_count) {
     controller_math::FakeOrientation(
@@ -723,6 +924,8 @@ void FakeHand(int index, bwvr::HandInput* out) {
                     (g_held[kStickLeft] ? 1.0f : 0.0f);
     out->stick[1] = (g_held[kStickUp] ? 1.0f : 0.0f) -
                     (g_held[kStickDown] ? 1.0f : 0.0f);
+    out->stick[0] *= FakeStickScale();
+    out->stick[1] *= FakeStickScale();
     out->stick_click = g_held[kStickClick];
     out->primary = g_held[kA];
     out->secondary = g_held[kB];
@@ -739,6 +942,8 @@ void FakeHand(int index, bwvr::HandInput* out) {
                     (g_held[kLStickLeft] ? 1.0f : 0.0f);
     out->stick[1] = (g_held[kLStickUp] ? 1.0f : 0.0f) -
                     (g_held[kLStickDown] ? 1.0f : 0.0f);
+    if (g_held[kLStickHalf]) out->stick[1] += 0.5f;
+    out->stick_click = g_held[kLStickClick];
   }
 }
 
@@ -765,6 +970,9 @@ struct Pointing {
   bool grip_frozen;      // not tracked, so the last tracked point is used
   float grip[3];         // the grip point, one to one
   float grip_room[3];    // the same in the room, for the motion test
+  float draw_room[3];    // the point of the draw of a gesture in the room: the
+                         // tip of the index finger, or the grip point
+  bool draw_tip;
   float anchor[3];       // the reach anchor in the world
   float reach[3];        // the grip point moved out by the reach curve
   float reach_room[3];   // the same in the room, for the velocity
@@ -788,9 +996,27 @@ struct Pointing {
   bool have_rotation;
   float grip_rotation[9];
   float tip_offset[3];
+  // The menus in the room (menu_room.cpp): the pixel is where the aim ray
+  // meets the menu panel in the room, not a pixel of the eye view.
+  bool on_panel;
+  // The length of the ray to the menu panel or the keyboard in the LOCAL
+  // space, in meters, 0 when it meets neither (ControllersPanelRay).
+  float panel_meters;
+  bool on_window;       // the aim is the ray of the cut scene window
 };
 
+// The hands of this frame. The grip pose is the frame of the model of the
+// controller, with the trim of the player (GripFitFrame), and each user of a
+// grip pose reads it here.
 bwvr::HandInput g_hands[2];
+// The hands of this frame as the runtime gives them, for the log line of the
+// aim pose seen from the grip pose (LogGripToAim).
+bwvr::HandInput g_runtime_hands[2];
+// The orientation of the drawn hand of each hand in this frame, in the space
+// of g_hands (GripFitFrame, hand_angle_math.h). The drawn hand, the Hand of
+// the game, its point and the cards beside the hand use it. The model of the
+// controller uses the grip pose.
+float g_hand_q[2][4] = {{0.0f, 0.0f, 0.0f, 1.0f}, {0.0f, 0.0f, 0.0f, 1.0f}};
 // The aim orientation of each hand in this frame, with the turn of UpdateAim.
 // Every user of the aim reads this one and the point below: the pointer, the
 // menu ray, the teleport, the grab from a distance and the Creature commands.
@@ -799,6 +1025,9 @@ float g_aim_q[2][4] = {{0.0f, 0.0f, 0.0f, 1.0f}, {0.0f, 0.0f, 0.0f, 1.0f}};
 // aim point of the runtime, moved by the preset.
 float g_aim_p[2][3] = {{0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 0.0f}};
 Pointing g_point;
+// The settings of the draw of a gesture (gesture_button, gesture_size_cm and
+// gesture_point). Compute reads the point of the draw.
+GestureSettings g_gesture;
 uint64_t g_frame = 0;
 uint64_t g_frames_in_window = 0;
 bool g_said_no_head = false;
@@ -852,7 +1081,7 @@ void AimTurnOfPointingHand(float* yaw_left_deg, float* pitch_up_deg);
 // the reach curve backward from the anchor, then the room.
 void Seek(int kind) {
   if (g_last_table && g_seek_due == 0) {
-    if (kind == kSeekFar || kind == kSeekCommand) {
+    if (kind == kSeekFar || kind == kSeekCommand || kind == kSeekMark) {
       HandDirectWidenFar(3, 6.5f);
     } else {
       HandDirectWidenPick(3);
@@ -864,13 +1093,15 @@ void Seek(int kind) {
   g_seek_due = 0;
   float world[3];
   const float scale = HeadPoseScale();
-  if (kind == kSeekFar || kind == kSeekCommand) {
+  if (kind == kSeekFar || kind == kSeekCommand || kind == kSeekMark) {
     // "aimfar": the hand stays where it is, and its aim turns to the object.
     // Only on the table and in the God view, where the room is the table's.
-    // "aimcmd" is the same with a target of a Creature command.
+    // "aimcmd" is the same with a target of a Creature command, and
+    // "aimmark" with a target of a new bookmark.
     if (!g_have_last_room || scale <= 0.0f || !g_last_table ||
-        !(kind == kSeekFar ? HandDirectSeekFarPoint(world)
-                           : CreatureCommandTestPoint(world))) {
+        !(kind == kSeekFar       ? HandDirectSeekFarPoint(world)
+          : kind == kSeekCommand ? CreatureCommandTestPoint(world)
+                                 : BookmarkAimTestPoint(world))) {
       ModLog("controllers  : the fake hand has nothing far to aim at, frame "
              "%llu", g_frame);
       return;
@@ -962,13 +1193,28 @@ int g_script_play = -1;
 int g_script_play_after = 1000;
 bool g_script_shift_known = false;
 int64_t g_script_shift = 0;
+// THE SCRIPT AFTER THE GUIDE OF THE HALL (the test key
+// fake_controller_temple_frame, script_frame_math.h, CountedTwice). With the
+// key at N, the steps from frame N on count from the frame at which the ray
+// of the Temple was on for 30 frames in a row: that frame is N.
+int g_script_temple = -1;
+bool g_temple_shift_known = false;
+int64_t g_temple_shift = 0;
+int g_temple_ray_frames = 0;
+
+// The number that a step or a test key with the frame `own` compares with
+// `own` on the frame `frame`, with the two anchors.
+uint64_t CountedFrame(uint64_t frame, uint64_t own) {
+  return script_frame_math::CountedTwice(
+      frame, own, g_script_play, g_script_shift_known, g_script_shift,
+      g_script_temple, g_temple_shift_known, g_temple_shift);
+}
 // The word "deactivate" came. The pump acts on it.
 bool g_fake_deactivate = false;
 
 // The frame that a step of the script compares with its own frames.
 uint64_t StepFrame(const ScriptStep& step) {
-  return script_frame_math::Counted(g_frame, step.start, g_script_play,
-                                    g_script_shift_known, g_script_shift);
+  return CountedFrame(g_frame, step.start);
 }
 
 // The word "aimtemple": the hand stays where it is, and its aim turns to the
@@ -995,6 +1241,55 @@ void AimTemple() {
          g_aim_yaw, g_aim_pitch, g_frame);
 }
 
+// The word "aimplaces": the hand stays where it is, and its aim turns to the
+// middle of the next button of places_test_buttons on the open panel of
+// places. The panel and the aim point are in the LOCAL space: right is +X,
+// up is +Y, forward is -Z.
+void AimPlaces() {
+  float local[3];
+  if (!PlacesPanelTestTarget(local)) {
+    ModLog("controllers  : the word aimplaces: the panel of places is not "
+           "open, or places_test_buttons has no button, frame %llu", g_frame);
+    return;
+  }
+  const float* from = g_aim_p[g_left_handed ? 0 : 1];
+  const float d[3] = {local[0] - from[0], local[1] - from[1],
+                      -(local[2] - from[2])};
+  if (!controller_math::FakeAimAngles(d, &g_aim_yaw, &g_aim_pitch)) return;
+  float turn_yaw = 0.0f, turn_pitch = 0.0f;
+  AimTurnOfPointingHand(&turn_yaw, &turn_pitch);
+  g_aim_yaw -= turn_yaw;
+  g_aim_pitch -= turn_pitch;
+  g_aim_set = true;
+  ModLog("controllers  : the fake hand aims its ray at a button of the panel "
+         "of places: the pose has yaw %.2f, pitch %.2f degrees, at frame %llu",
+         g_aim_yaw, g_aim_pitch, g_frame);
+}
+
+// The word "aimdebug": the same as "aimplaces", for the next part of
+// debug_test_parts on the open debug window.
+void AimDebug() {
+  float local[3];
+  if (!DebugWindowTestTarget(local) && !WelcomePageTestTarget(local)) {
+    ModLog("controllers  : the word aimdebug: the debug window is not open, "
+           "or debug_test_parts has no part in the view, frame %llu",
+           g_frame);
+    return;
+  }
+  const float* from = g_aim_p[g_left_handed ? 0 : 1];
+  const float d[3] = {local[0] - from[0], local[1] - from[1],
+                      -(local[2] - from[2])};
+  if (!controller_math::FakeAimAngles(d, &g_aim_yaw, &g_aim_pitch)) return;
+  float turn_yaw = 0.0f, turn_pitch = 0.0f;
+  AimTurnOfPointingHand(&turn_yaw, &turn_pitch);
+  g_aim_yaw -= turn_yaw;
+  g_aim_pitch -= turn_pitch;
+  g_aim_set = true;
+  ModLog("controllers  : the fake hand aims its ray at a part of the debug "
+         "window: the pose has yaw %.2f, pitch %.2f degrees, at frame %llu",
+         g_aim_yaw, g_aim_pitch, g_frame);
+}
+
 void UpdateScript() {
   if (g_script_play < 0) {
     g_script_play = IniInt("fake_controller_play_frame", 0);
@@ -1017,6 +1312,25 @@ void UpdateScript() {
            g_script_shift < 0 ? "sooner" : "later",
            SecondsSinceProcessStart());
   }
+  if (g_script_temple < 0) {
+    g_script_temple = IniInt("fake_controller_temple_frame", 0);
+  }
+  if (g_script_temple > 0 && !g_temple_shift_known) {
+    g_temple_ray_frames = TempleRayOn() ? g_temple_ray_frames + 1 : 0;
+    const uint64_t first = script_frame_math::Counted(
+        g_frame, static_cast<uint64_t>(g_script_temple), g_script_play,
+        g_script_shift_known, g_script_shift);
+    if (g_temple_ray_frames >= script_frame_math::kTempleSteadyFrames &&
+        first > 0) {
+      g_temple_shift_known = true;
+      g_temple_shift = static_cast<int64_t>(first) - g_script_temple;
+      ModLog("controllers  : the ray of the Temple is on for %d frames in a "
+             "row at frame %llu. The steps of the script from frame %d on "
+             "count from this frame (fake_controller_temple_frame)",
+             script_frame_math::kTempleSteadyFrames, g_frame,
+             g_script_temple);
+    }
+  }
   bool now[kInputCount] = {false};
   for (int i = 0; i < g_script_count; ++i) {
     const ScriptStep& step = g_script[i];
@@ -1029,7 +1343,7 @@ void UpdateScript() {
     // After the last point the list starts again.
     if (step.input == kPoint && t == step.start && g_point_count > 0) {
       g_point_index = g_points_used++ % g_point_count;
-      ModLog("controllers  : the fake hand steps to point %d (%d %d %d cm) "
+      ModLog("controllers  : the fake hand steps to point %d (%g %g %g cm) "
              "at frame %llu", g_point_index, g_points[g_point_index][0],
              g_points[g_point_index][1], g_points[g_point_index][2], g_frame);
     }
@@ -1043,7 +1357,7 @@ void UpdateScript() {
     if (step.input == kLPoint && t == step.start && g_lpoint_count > 0) {
       g_lmatch = false;
       g_lpoint_index = g_lpoints_used++ % g_lpoint_count;
-      ModLog("controllers  : the fake left hand steps to point %d (%d %d %d "
+      ModLog("controllers  : the fake left hand steps to point %d (%g %g %g "
              "cm) at frame %llu", g_lpoint_index,
              g_lpoints[g_lpoint_index][0], g_lpoints[g_lpoint_index][1],
              g_lpoints[g_lpoint_index][2], g_frame);
@@ -1097,8 +1411,18 @@ void UpdateScript() {
              "%llu", turn[0], turn[1], g_aim_yaw, g_aim_pitch, g_frame);
     }
     if (step.input == kAimTemple && t == step.start) AimTemple();
+    if (step.input == kAimPlaces && t == step.start) AimPlaces();
+    if (step.input == kAimDebug && t == step.start) AimDebug();
+    if (step.input == kAimMark && t == step.start) Seek(kSeekMark);
     if (step.input == kPull && t == step.start) {
-      // 15 cm toward the head center, or back to where the hand was.
+      // fake_controller_pull_cm (15) toward the head center, or back to
+      // where the hand was.
+      static int pull_cm = -1;
+      if (pull_cm < 0) {
+        pull_cm = IniInt("fake_controller_pull_cm", 15);
+        if (pull_cm < 1) pull_cm = 1;
+        if (pull_cm > 60) pull_cm = 60;
+      }
       float here[3];
       RightHandCm(here);
       for (int k = 0; k < 3; ++k) here[k] -= g_pull_cm[k];
@@ -1106,14 +1430,19 @@ void UpdateScript() {
       const bool back = controller_math::Length(g_pull_cm) > 0.5f;
       for (int k = 0; k < 3; ++k) {
         g_pull_from[k] = g_pull_cm[k];
-        g_pull_to[k] = back || !(length > 1.0f) ? 0.0f
-                                                : -here[k] / length * 15.0f;
+        g_pull_to[k] = back || !(length > 1.0f)
+                           ? 0.0f
+                           : -here[k] / length * static_cast<float>(pull_cm);
       }
       g_pull_start = g_frame;
       g_pull_frames = step.frames > 0 ? step.frames : 1;
-      ModLog("controllers  : the fake hand steps %s over %llu frames at frame "
-             "%llu", back ? "back to where it was" : "15 cm toward the head",
-             g_pull_frames, g_frame);
+      if (back) {
+        ModLog("controllers  : the fake hand steps back to where it was over "
+               "%llu frames at frame %llu", g_pull_frames, g_frame);
+      } else {
+        ModLog("controllers  : the fake hand steps %d cm toward the head over "
+               "%llu frames at frame %llu", pull_cm, g_pull_frames, g_frame);
+      }
     }
     if (step.input == kSeek && t == step.start) Seek(kSeekObject);
     if (step.input == kSeekCreature && t == step.start) Seek(kSeekLine);
@@ -1123,6 +1452,12 @@ void UpdateScript() {
       ModLog("controllers  : the fake hand turns to yaw %d, pitch %d, roll %d "
              "at frame %llu", g_rots[g_rot_index][0], g_rots[g_rot_index][1],
              g_rots[g_rot_index][2], g_frame);
+    }
+    if (step.input == kLRot && t == step.start && g_lrot_count > 0) {
+      g_lrot_index = g_lrots_used++ % g_lrot_count;
+      ModLog("controllers  : the fake left hand turns to yaw %d, pitch %d, "
+             "roll %d at frame %llu", g_lrots[g_lrot_index][0],
+             g_lrots[g_lrot_index][1], g_lrots[g_lrot_index][2], g_frame);
     }
     if (step.input == kShot && t == step.start) {
       EyeCaptureArmNow(g_frame + 3);
@@ -1151,6 +1486,26 @@ void UpdateScript() {
     if (step.input == kControlsKey && t == step.start) {
       ControllersControlsToggle("The word controlskey");
     }
+    if (step.input == kAngleKey && t == step.start) {
+      GripFitHandAngleChange("The word anglekey");
+    }
+    if (step.input == kSidesKey && t == step.start) {
+      HandModelTwoSidedChange("The word sideskey");
+    }
+    if (step.input == kBook && t == step.start) {
+      float local[3];
+      if (SpellBookTestItem(local)) {
+        // LOCAL space: right is +X, up is +Y, forward is -Z.
+        g_seek_cm[0] = local[0] * 100.0f;
+        g_seek_cm[1] = local[1] * 100.0f;
+        g_seek_cm[2] = -local[2] * 100.0f;
+        g_side_cm = 0.0f;
+        g_point_index = kSeekIndex;
+      } else {
+        ModLog("controllers  : the word book: the spell book is not open, "
+               "frame %llu", g_frame);
+      }
+    }
     if ((step.input == kNudge || step.input == kSlap) &&
         t == step.start) {
       const float side = step.input == kNudge ? 2.0f : 12.0f;
@@ -1177,7 +1532,9 @@ void UpdateScript() {
         i == kTouchCreature || i == kRot || i == kAimFar || i == kPull ||
         i == kAimCommand || i == kAimTurn || i == kDeactivate ||
         i == kAimTemple || i == kExit || i == kBench || i == kLayoutKey ||
-        i == kMoveKey || i == kLMatch || i == kHoldKey) {
+        i == kMoveKey || i == kLMatch || i == kHoldKey || i == kBook ||
+        i == kAimPlaces || i == kAimDebug || i == kAimMark || i == kAngleKey ||
+        i == kSidesKey) {
       continue;
     }
     if (i == kPose2) {
@@ -1200,6 +1557,119 @@ void UpdateScript() {
 }
 
 bool MenuUp();
+
+// The pixel of the menus in the room for the aim ray of the pointing hand
+// (menu_room.cpp). A ray that does not meet the panel gives no pixel, and
+// the pointer keeps its last one. A ray past the edge or on the keyboard is
+// off the view, so a press there does not reach the game. Returns the
+// length of the ray to the panel or the keyboard in meters, or 0.
+float PanelPixel(const bwvr::HandInput& hand, int index, Pointing* p) {
+  p->on_panel = true;
+  float x = 0.0f, y = 0.0f, meters = 0.0f;
+  bool off = false;
+  const bool hit = MenuRoomRayPixel(hand.trigger, g_aim_p[index],
+                                    g_aim_q[index], &x, &y, &off, &meters);
+  const bw::tech::InfoTransform* info =
+      reinterpret_cast<const bw::tech::InfoTransform*>(bw::tech::kInfoTransform);
+  if (!IsBadReadPtr(info, sizeof(*info))) {
+    p->render_w = static_cast<float>(info->res_x);
+    p->render_h = static_cast<float>(info->res_y);
+  }
+  if (hit) {
+    p->x = x;
+    p->y = y;
+    p->have_pixel = true;
+    p->off_view = off;
+  } else {
+    p->have_pixel = false;
+    p->off_view = true;
+  }
+  return meters;
+}
+
+// THE CUT SCENE WINDOW (cutscene_hands=1, docs/cutscene-window.md, "The
+// hands in the window"). In a flat frame the aim ray of the pointing hand
+// meets the screen of the window in the room. The pixel of the game camera at
+// that point is the pixel of the pointer, so a press of the trigger clicks
+// there. A ray that misses the opening gives no pixel, and the pointer stays
+// where it is.
+// The pointer of the game in render pixels (pointer_map.cpp writes it).
+const uintptr_t kGamePointerX = 0x00E852C0;
+uint64_t g_window_pixels = 0;
+uint64_t g_window_misses = 0;
+bool g_window_was_hit = false;
+// The pixel and the frame of the last line of the ray: a new line when the
+// pixel moves 8 px or more, at most one each 30 frames.
+float g_window_logged[2] = {0.0f, 0.0f};
+uint64_t g_window_logged_frame = 0;
+int g_window_logs = 0;
+const int kMaxWindowLogs = 80;
+
+void WindowPixel(const bwvr::HandInput& hand, int index, Pointing* p) {
+  (void)hand;
+  // The ray of the window points as a ray of the menus in the room does, so
+  // the controller keeps the pointer (pointer_map.cpp, ChooseOwner).
+  p->on_window = true;
+  menu_room_math::AimForward(g_aim_q[index], p->room_direction);
+  const bw::tech::InfoTransform* info =
+      reinterpret_cast<const bw::tech::InfoTransform*>(bw::tech::kInfoTransform);
+  if (!IsBadReadPtr(info, sizeof(*info))) {
+    p->render_w = static_cast<float>(info->res_x);
+    p->render_h = static_cast<float>(info->res_y);
+  }
+  cutscene_hands_math::View view;
+  float m[9], origin[3], direction[3];
+  float u = 0.0f, v = 0.0f, t = 0.0f;
+  bool inside = false;
+  bool hit = false;
+  if (CutsceneWindowRoomView(&view) &&
+      HeadPoseToRoom(g_aim_p[index], g_aim_q[index], m, origin)) {
+    controller_math::AimDirection(m, direction);
+    hit = cutscene_hands_math::HitPlane(view, origin, direction, &u, &v, &t,
+                                        &inside) &&
+          inside;
+  }
+  if (hit) {
+    cutscene_hands_math::GamePixel(view, u, v, &p->x, &p->y);
+    p->have_pixel = true;
+    p->off_view = false;
+    p->hand_x = p->x;
+    p->hand_y = p->y;
+    p->have_hand_pixel = true;
+    p->hand_off_view = false;
+    ++g_window_pixels;
+  } else {
+    ++g_window_misses;
+  }
+  const bool moved =
+      hit && g_window_was_hit &&
+      (fabsf(p->x - g_window_logged[0]) >= 8.0f ||
+       fabsf(p->y - g_window_logged[1]) >= 8.0f) &&
+      g_frame >= g_window_logged_frame + 30;
+  if ((hit != g_window_was_hit || moved) && g_window_logs < kMaxWindowLogs) {
+    ++g_window_logs;
+    g_window_logged_frame = g_frame;
+    if (hit) {
+      g_window_logged[0] = p->x;
+      g_window_logged[1] = p->y;
+      float lx = 0.0f, ly = 0.0f, rx = 0.0f, ry = 0.0f;
+      cutscene_hands_math::EyePixel(view, 0, u, v, &lx, &ly);
+      cutscene_hands_math::EyePixel(view, 1, u, v, &rx, &ry);
+      ModLog("controllers  : the ray of the pointing hand meets the screen "
+             "of the cut scene window %.2f m right and %.2f m up of its "
+             "middle, %.2f m from the hand. The pointer goes to the pixel "
+             "%.1f %.1f of the game camera (the left eye picture %.1f %.1f, "
+             "the right eye picture %.1f %.1f), frame %llu",
+             u / HeadPoseScale(), v / HeadPoseScale(), t / HeadPoseScale(),
+             p->x, p->y, lx, ly, rx, ry, g_frame);
+    } else {
+      ModLog("controllers  : the ray of the pointing hand does not meet the "
+             "screen of the cut scene window, so the pointer stays where it "
+             "is, frame %llu", g_frame);
+    }
+  }
+  g_window_was_hit = hit;
+}
 
 void Compute() {
   Pointing& p = g_point;
@@ -1226,6 +1696,19 @@ void Compute() {
              &g_logged_aim_tracked);
   LogTracked("grip", "the direct Hand stays at its last tracked point",
              p.grip_tracked, &g_logged_grip_tracked);
+
+  // THE MENUS IN THE ROOM, in a frame with no scene. No world is drawn, so
+  // the ray meets only the menu panel, in the LOCAL space of the runtime.
+  if (MenuRoomFlatNow()) {
+    // The turn of the aim, for the owner rule (ControllerMoved).
+    menu_room_math::AimForward(g_aim_q[index], p.room_direction);
+    PanelPixel(hand, index, &p);
+    return;
+  }
+  if (CutsceneWindowFlat() && CutsceneWindowHands()) {
+    WindowPixel(hand, index, &p);
+    return;
+  }
 
   // ONE HEAD SAMPLE. The head matrix, the lean and the head center all come
   // from the last HeadPoseUpdate. The eye is the game camera moved by that
@@ -1274,13 +1757,12 @@ void Compute() {
   p.eye_distance = controller_math::Distance(p.origin, eye);
 
   // The direct hand: the grip pose in the room, then the reach from the
-  // anchor, then the world.
+  // anchor, then the world. The axes are the axes of the drawn hand
+  // (g_hand_q), so the index tip and the exact Hand turn with the hand.
   {
     float m_grip[9], t_grip[3];
     if (HeadPoseToRoom(grip_pose ? hand.grip_position : hand.aim_position,
-                       grip_pose ? hand.grip_orientation
-                                 : hand.aim_orientation,
-                       m_grip, t_grip)) {
+                       g_hand_q[index], m_grip, t_grip)) {
       if (p.grip_tracked) {
         for (int i = 0; i < 3; ++i) g_tracked_grip[i] = t_grip[i];
         g_have_tracked_grip = true;
@@ -1293,6 +1775,22 @@ void Compute() {
       controller_math::ReachAnchor(
           scale, g_direct.reach_anchor_down_cm * 0.01f, anchor_room);
       for (int i = 0; i < 3; ++i) p.grip_room[i] = t_grip[i];
+      // THE POINT OF THE DRAW of a gesture (gesture_air.cpp): the tip of the
+      // index finger at its rest curl, as the exact Hand has it, or the grip
+      // point. The trigger does not move the tip. The tip is in the room, at
+      // the real hand's length at the life size scale.
+      for (int i = 0; i < 3; ++i) p.draw_room[i] = t_grip[i];
+      if (g_gesture.point != 0) {
+        float local[3];
+        OverlayIndexTipLocal(local);
+        const float length =
+            g_direct.hand_cm * 0.01f * g_direct.scale_pct * 0.01f * scale;
+        const float zero[3] = {0.0f, 0.0f, 0.0f};
+        float off[3];
+        overlay_math::PlacePoint(zero, m_grip, length, index == 0, local, off);
+        for (int i = 0; i < 3; ++i) p.draw_room[i] += off[i];
+        p.draw_tip = true;
+      }
       if (p.table) {
         // No reach curve on the table: the whole land is within arm's
         // reach, and the Hand is where the hand is.
@@ -1372,6 +1870,15 @@ void Compute() {
   }
   p.render_w = 2.0f * screen.hx;
   p.render_h = 2.0f * screen.hy;
+  // The camera of the pixel of this frame, for the pixel of other points
+  // (ControllersPointPixel).
+  for (int i = 0; i < 3; ++i) g_pixel_eye[i] = eye[i];
+  for (int i = 0; i < 9; ++i) {
+    g_pixel_room[i] = room[i];
+    g_pixel_head[i] = head[i];
+  }
+  g_pixel_screen = screen;
+  g_have_pixel_camera = true;
   if (p.have_grip) {
     p.have_hand_pixel = controller_math::PointPixel(
         eye, room, head, p.reach, screen, &p.hand_x, &p.hand_y,
@@ -1420,6 +1927,18 @@ void Compute() {
       p.menu_depth = true;
       room_depth = true;
     }
+  }
+
+  // THE MENUS IN THE ROOM. The pixel is where the aim ray meets the menu
+  // panel, and the drawn ray ends there.
+  if (MenuRoomSurface()) {
+    const float scale = HeadPoseScale() * (p.table ? gain : 1.0f);
+    const float meters = PanelPixel(hand, index, &p);
+    p.panel_meters = meters;
+    // With no panel under the ray, the drawn ray has its own length.
+    p.menu_depth = meters > 0.0f && scale > 0.0f;
+    if (p.menu_depth) p.target_distance = meters * scale;
+    return;
   }
 
   p.have_pixel = controller_math::RenderPixel(
@@ -1507,6 +2026,14 @@ uint64_t g_grip_down_ms = 0;
 bool g_grip_button_was = false;
 ULONGLONG g_right_close_ms = 0;  // the right control closed at this time
 uint64_t g_fast_opens = 0;      // openings by a fast fall, this window
+// near_take_keeps, read at the first pump: 1 keeps a fast fall of the grip
+// from opening it while a bulk take runs, so only a grip below 35% ends the
+// take. g_take_running is the fact of the last step of the grip machine.
+int g_near_take_keeps = -1;
+bool g_take_running = false;
+uint64_t g_take_falls_kept = 0;  // fast falls in a take that did not open
+int g_take_fall_logs = 0;
+const int kMaxTakeFallLogs = 40;
 uint64_t g_slow_opens = 0;      // openings below kGripOpenBelow
 int g_level_logs = 0;
 const int kMaxLevelLogs = 80;
@@ -1571,6 +2098,14 @@ uint64_t g_god_zooms = 0;
 const float kStickFull = 0.95f;
 bool g_god_zoom_holding = false;
 uint64_t g_god_holds = 0;
+// The smooth turn of the God view (snap_turn=4): the stick to the side past
+// kStickBack turns the view while it is held, at a rate that follows the
+// push along a curve (comfort_math::SmoothTurnShare) and is full from
+// kStickFull. A hold starts with a fresh push only, and it holds only in a
+// pump that asks the God view again.
+bool g_god_turn_holding = false;
+uint64_t g_god_turn_holds = 0;
+uint64_t g_god_turn_refused = 0;
 bool g_other_before[3] = {false};  // B or Y, the menu button, the stick click
 
 // Which owner the test key Ctrl+F12 asks for: automatic, controller only or
@@ -1806,6 +2341,26 @@ bool FakeFront() {
   return on == 1;
 }
 
+// A TEST KEY for desktop runs, fake_controller_stick_pct (100): how far the
+// words of the stick of the right hand push it, in percent of a full push. So
+// a run can push the stick by half (the smooth turn). Read only with the fake
+// controller on.
+float FakeStickScale() {
+  if (g_fake.mode == 0) return 1.0f;
+  static int pct = -1;
+  if (pct < 0) {
+    pct = IniInt("fake_controller_stick_pct", 100);
+    if (pct < 0) pct = 0;
+    if (pct > 100) pct = 100;
+    if (pct != 100) {
+      ModLog("controllers  : fake_controller_stick_pct=%d (a test). The words "
+             "of the stick of the right hand push it %d%% of a full push",
+             pct, pct);
+    }
+  }
+  return static_cast<float>(pct) * 0.01f;
+}
+
 // THE GAME WINDOW BEHIND (docs/controllers.md, "9. The game window behind"). A
 // player in the headset cannot see the desktop. When a different program is
 // in front there, the hands would do nothing, and the player would not know
@@ -1866,8 +2421,9 @@ bool Usable() {
   if (IntroBlocksButtons()) return false;
   g_not_usable[0] = !GameInFront() && !ActsBehind();
   // A frame with no scene blocks the hands, except the pointer on the
-  // screen quad (screen_pointer=1).
-  g_not_usable[1] = StereoIdle() && !ScreenPointerActs();
+  // screen quad (screen_pointer=1), and it leaves the hand to the mouse, but
+  // not when it shows the menus in the room.
+  g_not_usable[1] = StereoIdle() && !ScreenPointerActs() && !MenuRoomFlatNow();
   g_not_usable[2] = GetTickCount64() - g_frame_tick > 250;
   g_not_usable[3] = !g_hands[PointingIndex()].active;
   if (!g_on || !g_installed || g_owner_mode == 2) return false;
@@ -2283,6 +2839,23 @@ void ReconcileController(int button, ULONGLONG now, bool quiet = false) {
                                          : "",
              g_frame);
     }
+    // In the cut scene window the press goes to the place of the pointer of
+    // the game. With cutscene_hands=1 that is the pixel of the ray.
+    if (CutsceneWindowFlat() && g_window_logs < kMaxWindowLogs) {
+      ++g_window_logs;
+      const int32_t* px = reinterpret_cast<const int32_t*>(kGamePointerX);
+      const bool readable = !IsBadReadPtr(px, sizeof(int32_t) * 2);
+      ModLog("controllers  : the %s button presses in the cut scene window "
+             "at the pointer of the game %d %d. %s, frame %llu",
+             kButtonName[button], readable ? px[0] : -1,
+             readable ? px[1] : -1,
+             !CutsceneWindowHands()
+                 ? "cutscene_hands=0: the pointer is where it was"
+             : g_window_was_hit ? "The ray of the pointing hand meets the screen"
+                                : "The ray misses the screen, so the pointer "
+                                  "is where it was",
+             g_frame);
+    }
   } else {
     SendToGame(button, kReleaseFlag[button]);
     ++g_releases_sent;
@@ -2630,9 +3203,9 @@ void GrabSamples() {
 // for the owner rule. A draw that stops while the button stays down needs a
 // new press, as the game's buttons do. The button is no mouse button, so it
 // takes nothing from pick up, the land drag or the grab.
-GestureSettings g_gesture;
 bool g_gesture_down = false;    // the button on this frame
 bool g_gesture_before = false;  // and on the last frame
+bool g_window_b_before = false;  // B, for the debug window
 bool g_gesture_need_up = false;
 bool g_gesture_held = false;    // the draw may run on this frame
 const char* g_gesture_why = "the button is up";
@@ -2643,6 +3216,41 @@ bool GestureButtonDown(const bwvr::HandInput& hand) {
   return false;
 }
 
+// THE TAP OF B FOR THE SPELL BOOK (spell_book_b=1, spell_book.cpp). A short
+// press of B is a tap: the spell book gets its length and the motion of the
+// hand at its release, and decides if it is a tap that opens or closes the
+// book. A press that closed a window or stopped a teleport is no tap.
+bool g_b_tap_down = false;
+bool g_b_tap_claimed = false;
+double g_b_tap_since = 0.0;
+float g_b_tap_from[3] = {0.0f, 0.0f, 0.0f};
+float g_b_tap_moved = 0.0f;
+
+void LatchBookTap(const bwvr::HandInput& hand, bool b, bool closed_window) {
+  float reach[3], grip[3], room[9];
+  const float life = HeadPoseScale();
+  const bool motion =
+      life > 0.1f && ControllerDirectMotion(reach, grip, room);
+  if (b && !g_b_tap_down) {
+    g_b_tap_since = NowSeconds();
+    g_b_tap_moved = 0.0f;
+    g_b_tap_claimed = closed_window;
+    for (int i = 0; i < 3; ++i) g_b_tap_from[i] = motion ? grip[i] : 0.0f;
+  } else if (b && motion) {
+    const float dx = grip[0] - g_b_tap_from[0],
+                dy = grip[1] - g_b_tap_from[1],
+                dz = grip[2] - g_b_tap_from[2];
+    const float moved = sqrtf(dx * dx + dy * dy + dz * dz) / life;
+    if (moved > g_b_tap_moved) g_b_tap_moved = moved;
+  }
+  if (b && hand.primary && TeleportOwnsA()) g_b_tap_claimed = true;
+  if (!b && g_b_tap_down && !g_b_tap_claimed) {
+    SpellBookTapB(static_cast<float>(NowSeconds() - g_b_tap_since),
+                  g_b_tap_moved);
+  }
+  g_b_tap_down = b;
+}
+
 // Once a frame, from ControllersFrame, after the latches of the pump.
 void LatchGesture(bool back) {
   const bwvr::HandInput& hand = g_hands[ButtonIndex()];
@@ -2651,6 +3259,21 @@ void LatchGesture(bool back) {
   g_gesture_before = down;
   g_gesture_down = down;
   if (!down) g_gesture_need_up = false;
+  // THE DEBUG WINDOW (debug_window.cpp) AND THE PANEL OF PLACES
+  // (places_panel.cpp). A press of B closes them, and the draw button must
+  // go up before it draws.
+  const bool b = hand.active && hand.secondary;
+  bool closed_window = false;
+  if (b && !g_window_b_before &&
+      (DebugWindowCloseBy("the player pressed B") |
+       PlacesPanelCloseBy("the player pressed B") |
+       BookmarkAimStopBy("the player pressed B") |
+       WelcomePageCloseBy("the player pressed B"))) {
+    g_gesture_need_up = down;
+    closed_window = true;
+  }
+  g_window_b_before = b;
+  LatchBookTap(hand, b, closed_window);
   // While A holds a teleport, B cancels it and starts no gesture.
   if (down && !g_gesture_held && hand.primary && TeleportOwnsA()) {
     g_gesture_need_up = true;
@@ -2723,6 +3346,59 @@ int ButtonLayout() {
   return g_layout;
 }
 
+// THE COMFORT OF THE STICK (docs/god-view.md, "The comfort of a move", and
+// docs/controllers.md, 5.1). The keys of bwvr.ini:
+//
+//   menu_stops_turn=1     while a dialog box of the game is up, the stick
+//                         does not turn and does not zoom the God view. 0:
+//                         it does, as the walk does not
+//   recenter_hold=1       a hold of 1 s of the stick click recenters the view
+//                         (PumpRecenter): 1 the stick click of the hand that
+//                         does not point, 2 that of the pointing hand, 0 no
+//                         hold
+//
+// The switches of the debug page change each one while the game runs.
+struct ComfortSettings {
+  bool read = false;
+  int menu_stops_turn = 1;
+  int recenter_hold = comfort_math::kRecenterOther;
+} g_comfort;
+
+void LogMenuStopsTurn(const char* by) {
+  ModLog("controllers  : %s%smenu_stops_turn=%d. %s", by,
+         by[0] != 0 ? ": " : "", g_comfort.menu_stops_turn,
+         g_comfort.menu_stops_turn != 0
+             ? "While a dialog box is up, the stick does not turn and does "
+               "not zoom the God view"
+             : "The stick turns and zooms the God view also while a dialog "
+               "box is up");
+}
+
+void LogRecenterHold(const char* by) {
+  const int rule = g_comfort.recenter_hold;
+  ModLog("controllers  : %s%srecenter_hold=%d. %s", by,
+         by[0] != 0 ? ": " : "", rule,
+         rule == comfort_math::kRecenterOther
+             ? "Hold the stick click of the hand that does not point for 1 s, "
+               "with the stick at rest, to recenter the view"
+         : rule == comfort_math::kRecenterPointing
+             ? "Hold the stick click of the pointing hand for 1 s, with the "
+               "stick at rest, to recenter the view"
+             : "No hold of a stick click recenters the view");
+}
+
+const ComfortSettings& Comfort() {
+  if (!g_comfort.read) {
+    g_comfort.read = true;
+    g_comfort.menu_stops_turn = IniInt("menu_stops_turn", 1) != 0 ? 1 : 0;
+    g_comfort.recenter_hold = comfort_math::RecenterRule(
+        IniInt("recenter_hold", comfort_math::kRecenterOther));
+    LogMenuStopsTurn("");
+    LogRecenterHold("");
+  }
+  return g_comfort;
+}
+
 // The profile of a hand: "fake" for the scripted controller, and empty until
 // the runtime tells it.
 const char* HandProfileOf(int index) {
@@ -2789,7 +3465,13 @@ void LatchEsc() {
     face = free_hand.primary;
   }
   const bool down = (left.active && left.menu) || (free_hand.active && face);
-  if (down && !g_esc_before && g_esc_prev_active && active) {
+  // A press closes the debug window (debug_window.cpp) and the panel of
+  // places (places_panel.cpp), and then it sends no Esc.
+  if (down && !g_esc_before && g_esc_prev_active && active &&
+      !(DebugWindowCloseBy("the player pressed the menu button") |
+        PlacesPanelCloseBy("the player pressed the menu button") |
+        BookmarkAimStopBy("the player pressed the menu button") |
+        WelcomePageCloseBy("the player pressed the menu button"))) {
     g_esc_event = true;
   }
   g_esc_before = down;
@@ -2797,7 +3479,8 @@ void LatchEsc() {
   // The first face button has no job with button_layout=1. The log says so
   // for a press, so a log from a headset session shows why nothing happened.
   const bool idle = ButtonLayout() != 0 && !index && free_hand.active &&
-                    free_hand.primary && !ControllersLeftLeash();
+                    free_hand.primary && !ControllersLeftLeash() &&
+                    !SpellBookButtonOn();
   if (idle && !g_idle_before && g_idle_logs < kMaxIdleLogs) {
     ++g_idle_logs;
     ModLog("controllers  : the first face button of the %s hand is down. It "
@@ -2928,6 +3611,10 @@ bool ControllersGripCarries() {
 // as the pump last saw it, and the hand can act.
 bool ControllersGripClosed() { return g_on && RawDown(kRight) && Usable(); }
 
+// For the log of a bulk take (hand_direct.cpp): the right button of the game
+// is down now, from either source.
+bool ControllersGameRightDown() { return (g_game_mask & 2) != 0; }
+
 namespace {
 
 // Real button events, one at a time, from the window procedure.
@@ -3047,6 +3734,7 @@ controller_math::GripStepOut StepGrip(bool usable, bool far_claim) {
     g_grip_ms = static_cast<uint64_t>(NowSeconds() * 1000.0);
   }
   const GripStepOut out = GripStep(&g_hold, grip, facts, g_frame, g_grip_ms);
+  g_take_running = facts.direct && (facts.take || facts.mod_take);
   if (out.opened) HandDirectGripOpened();
   // How long the button was down for the game, for the log.
   if (out.button && !g_grip_button_was) g_grip_down_ms = g_grip_ms;
@@ -3178,6 +3866,21 @@ void ControllersPressHoldChange(const char* by) {
 }
 int ControllersPressHoldValue() {
   return g_installed && g_press_hold >= 0 ? g_press_hold : kDebugCannot;
+}
+
+void ControllersNearTakeKeepsChange(const char* by) {
+  if (g_near_take_keeps < 0) return;
+  g_near_take_keeps = g_near_take_keeps != 0 ? 0 : 1;
+  ControllersGesturePulse(0.5f, g_near_take_keeps != 0 ? 0.30f : 0.08f);
+  ModLog("grip         : %s: near_take_keeps is %d now, frame %llu. %s", by,
+         g_near_take_keeps, g_frame,
+         g_near_take_keeps != 0
+             ? "Only a grip below 35% ends a bulk take"
+             : "A fast fall of the squeeze ends a bulk take too");
+}
+int ControllersNearTakeKeepsValue() {
+  return g_installed && g_near_take_keeps >= 0 ? g_near_take_keeps
+                                               : kDebugCannot;
 }
 
 namespace {
@@ -3387,6 +4090,168 @@ bool g_ltrigger_down = false;
 bool g_left_command = false;  // the press of now commands the Creature
 bool StickWalks();
 bool OtherStickPushed();
+// THE STROKE WITH THE OPEN HAND (creature_stroke_open, docs/creature.md,
+// "The stroke with the open hand"). The game strokes the Creature only in the
+// Creature state of the Hand, and only a press of its Action button on the
+// Creature starts that state. So while the open hand stays in the body of the
+// player's Creature, the mod holds that button down for the player
+// (creature_touch_math.h). The grip and the trigger must be open. A grip that
+// closes in the press takes the press, and then a slap counts as before.
+// hand_direct.cpp sends no leash click for such a press. 0 keeps the old way:
+// only the grip presses.
+//
+// creature_open_slap=1: the open hand slaps too. The real speed of the hand
+// decides, as the speed of the mouse decides in the plain game: a slow motion
+// on the body strokes, and a fast hit slaps (creature_slap_mps). 0: the open
+// hand never slaps, because hand_direct.cpp keeps it under the speed of a
+// slap.
+//
+// creature_touch_easy=1: the press starts with the Hand's point 8 cm from the
+// body for 0.1 s, and it ends 15 cm from the body after 0.3 s
+// (creature_touch_math::EasyRule). 0: in the body for 0.2 s, and out past
+// creature_touch_cm at once.
+int g_open_stroke = -1;           // creature_stroke_open
+int g_open_slap = -1;             // creature_open_slap
+int g_touch_easy = -1;            // creature_touch_easy
+creature_touch_math::Press g_open_press;
+
+bool OpenSlapOn() {
+  if (g_open_slap < 0) {
+    g_open_slap = IniInt("creature_open_slap", 1) != 0 ? 1 : 0;
+  }
+  return g_open_slap != 0;
+}
+void* g_open_creature = nullptr;  // the Creature of the press
+uint64_t g_open_starts = 0;
+uint64_t g_open_frames = 0;
+int g_open_logs = 0;
+const int kMaxOpenLogs = 60;
+
+// One step, once a frame. True while the mod holds the Action button.
+bool OpenStrokeStep(ULONGLONG now_ms, bool usable, bool far_claim) {
+  using namespace creature_touch_math;
+  if (g_open_stroke < 0) {
+    g_open_stroke = IniInt("creature_stroke_open", 1) != 0 ? 1 : 0;
+    OpenSlapOn();
+    ModLog("controllers  : creature_stroke_open=%d. %s", g_open_stroke,
+           g_open_stroke != 0
+               ? "An open hand at the body of your Creature strokes it: the "
+                 "mod holds the Action button of the game until the hand "
+                 "is away from the body"
+               : "Only the grip strokes the Creature");
+    ModLog("controllers  : creature_open_slap=%d. %s", g_open_slap,
+           g_open_slap != 0
+               ? "The open hand slaps too: a slow motion on the body strokes "
+                 "the Creature, and a fast hit slaps it"
+               : "The open hand never slaps. A slap needs the grip");
+  }
+  if (g_touch_easy < 0) {
+    g_touch_easy = IniInt("creature_touch_easy", 1) != 0 ? 1 : 0;
+    const creature_touch_math::Rule rule =
+        g_touch_easy != 0
+            ? creature_touch_math::EasyRule(
+                  static_cast<float>(g_direct.creature_touch_cm))
+            : creature_touch_math::OldRule(
+                  static_cast<float>(g_direct.creature_touch_cm));
+    ModLog("controllers  : creature_touch_easy=%d. The press of the open hand "
+           "starts with the Hand's point %.0f cm or less from the body for "
+           "%.0f ms, and it ends when the point is more than %.0f cm from "
+           "the body for %.0f ms", g_touch_easy, rule.near_cm,
+           rule.dwell * 1000.0, rule.out_cm, rule.out_seconds * 1000.0);
+  }
+  const creature_touch_math::Rule rule =
+      g_touch_easy != 0
+          ? creature_touch_math::EasyRule(
+                static_cast<float>(g_direct.creature_touch_cm))
+          : creature_touch_math::OldRule(
+                static_cast<float>(g_direct.creature_touch_cm));
+  const double now = static_cast<double>(now_ms) / 1000.0;
+  // The controls of the game's two buttons.
+  const bool right_control = g_swap_buttons ? g_trigger_down : g_grip_down;
+  const bool left_control = g_swap_buttons ? g_grip_down : g_trigger_down;
+  const bool hand_ok = g_open_stroke != 0 && usable && DirectHandNow() &&
+                       g_pointer_owned && !left_control;
+  void* creature =
+      g_open_press.on ? g_open_creature : HandDirectCreatureAtHand(true);
+  float gap_cm = 0.0f;
+  const bool have_gap =
+      creature != nullptr && HandDirectOwnCreatureGap(creature, &gap_cm);
+  const bool can_start = hand_ok && creature != nullptr && !far_claim &&
+                         !GrabHeld() && !g_jump_control && !g_gesture_held &&
+                         !TeleportAiming() && !MenuUp() && !TempleRayOn() &&
+                         !CreatureStayHolds() && !g_button[kRight].need_up &&
+                         InView();
+  const double age = now - g_open_press.started;
+  const int event = Step(&g_open_press, now, can_start, hand_ok, have_gap,
+                         gap_cm, rule, right_control);
+  if (event == kStart) {
+    g_open_creature = creature;
+    ++g_open_starts;
+  }
+  if (g_open_press.on) ++g_open_frames;
+  if (event != kNothing && g_open_logs < kMaxOpenLogs) {
+    ++g_open_logs;
+    if (event == kStart) {
+      ModLog("controllers  : the open hand is at the body of your Creature "
+             "%p for %.0f ms: the mod holds the Action button of the game "
+             "for a stroke or a slap. The Hand's point is %.1f cm %s the "
+             "body (creature_stroke_open=1, creature_touch_easy=%d), frame "
+             "%llu",
+             creature, rule.dwell * 1000.0, fabsf(gap_cm),
+             gap_cm <= 0.0f ? "in" : "from", g_touch_easy, g_frame);
+    } else if (event == kEndOut && have_gap) {
+      ModLog("controllers  : the press of the open hand ends after %.0f ms: "
+             "the Hand's point is %.1f cm out of the body, past %.0f cm for "
+             "%.0f ms (creature_touch_easy=%d), frame %llu", age * 1000.0,
+             gap_cm, rule.out_cm, rule.out_seconds * 1000.0, g_touch_easy,
+             g_frame);
+    } else {
+      ModLog("controllers  : the press of the open hand ends after %.0f ms: "
+             "%s, frame %llu", age * 1000.0,
+             event == kEndGrip
+                 ? "the grip closed, and the press goes on as a press of the "
+                   "grip"
+                 : event == kEndOut
+                       ? "the mod does not know the body of the Creature now"
+                       : "the hand cannot stroke now (the trigger, a menu, "
+                         "or the controller does not place the Hand)",
+             g_frame);
+    }
+  }
+  if (!g_open_press.on) g_open_creature = nullptr;
+  return g_open_press.on;
+}
+
+// One value of a control, as GripLevelStep. With keep, a closed control does
+// not open on a fast fall (near_take_keeps, during a bulk take). The step
+// with the fast fall runs on a copy, so the log names each fall that the
+// rule kept closed, with the values of the last frames.
+bool TakeLevelStep(controller_math::GripLevel* level, float value, bool fast,
+                   bool keep, const char* name) {
+  if (!keep || !level->down) {
+    return controller_math::GripLevelStep(level, value, fast);
+  }
+  controller_math::GripLevel copy = *level;
+  const bool would = controller_math::GripLevelStep(&copy, value, true);
+  const bool stays = controller_math::GripLevelStep(level, value, false);
+  if (!would && stays) {
+    ++g_take_falls_kept;
+    if (g_take_fall_logs < kMaxTakeFallLogs) {
+      ++g_take_fall_logs;
+      char trace[160] = "";
+      size_t used = 0;
+      for (int i = 0; i < level->count && used + 8 < sizeof(trace); ++i) {
+        used += static_cast<size_t>(sprintf_s(
+            trace + used, sizeof(trace) - used, " %.2f", level->trace[i]));
+      }
+      ModLog("grip         : the %s falls fast during a bulk take and stays "
+             "closed (near_take_keeps=1), frame %llu. Its values over the "
+             "last %d frames:%s",
+             name, g_frame, level->count, trace);
+    }
+  }
+  return stays;
+}
 
 void PumpButtons(ULONGLONG now) {
   const bwvr::HandInput& hand = g_hands[PointingIndex()];
@@ -3427,6 +4292,16 @@ void PumpButtons(ULONGLONG now) {
                  "167 ms after the object came into the Hand of the picture. "
                  "That is less than the 225 ms that the game needs for an "
                  "object that moves");
+  }
+  if (g_near_take_keeps < 0) {
+    g_near_take_keeps = IniInt("near_take_keeps", 1) != 0 ? 1 : 0;
+    ModLog("grip         : near_take_keeps=%d. %s", g_near_take_keeps,
+           g_near_take_keeps != 0
+               ? "While a bulk take runs, at the Hand or at a distance, only "
+                 "a grip below 35% ends it. A fast fall of the squeeze does "
+                 "not open the grip then"
+               : "A fast fall of the squeeze opens the grip also during a "
+                 "bulk take, and ends the take");
   }
   PollPressGuardKey();
   PollPressHoldKey();
@@ -3512,8 +4387,12 @@ void PumpButtons(ULONGLONG now) {
   const bool fast =
       g_fast_open != 0 && HandDirectReleaseAtOnce() && DirectHandNow() &&
       !guarded;
-  g_trigger_down = controller_math::GripLevelStep(
-      &g_trigger_level, hand.trigger, fast && RightIsTrigger());
+  // A BULK TAKE KEEPS ON (near_take_keeps): while a take runs, the control
+  // of the right button opens only below 35%.
+  const bool take_keeps = fast && g_near_take_keeps != 0 && g_take_running;
+  g_trigger_down =
+      TakeLevelStep(&g_trigger_level, hand.trigger, fast && RightIsTrigger(),
+                    take_keeps && RightIsTrigger(), "trigger");
   // In the probe, and on the frame on which the Hand goes back after a probe
   // with no target, the trigger of the Hand is the trigger of the other hand.
   // It is no press of the game then.
@@ -3521,8 +4400,9 @@ void PumpButtons(ULONGLONG now) {
       (g_left_handed != g_left_handed_base && !left_out.borrow)) {
     g_trigger_down = false;
   }
-  g_grip_down = controller_math::GripLevelStep(&g_grip_level, hand.squeeze,
-                                               fast && !RightIsTrigger());
+  g_grip_down =
+      TakeLevelStep(&g_grip_level, hand.squeeze, fast && !RightIsTrigger(),
+                    take_keeps && !RightIsTrigger(), "grip");
   if (RightIsTrigger() ? (!trigger_was && g_trigger_down)
                      : (!grip_was && g_grip_down)) {
     g_right_close_ms = now;
@@ -3589,7 +4469,17 @@ void PumpButtons(ULONGLONG now) {
     // it (far_grab.cpp, PumpHold).
     const bool can_hold = usable && DirectHandNow();
     const bool ok = can_hold && ControllersFarAllowed(&why);
-    far_claim = FarGrabPumpGrip(RawDown(kRight), ok, can_hold);
+    // THE SPELL BOOK: a grip on a miracle of the open book takes it, and
+    // the game and the grab of the world do not get that press
+    // (spell_book.cpp).
+    const bool book_claim = SpellBookPumpGrip(RawDown(kRight));
+    // THE AIM OF A NEW BOOKMARK: the grip sets the bookmark at the target of
+    // the ray, and the game and the grab of the world do not get that press
+    // (bookmark_aim.cpp).
+    const bool mark_claim = BookmarkAimPumpGrip(RawDown(kRight));
+    far_claim = FarGrabPumpGrip(RawDown(kRight) && !book_claim && !mark_claim,
+                                ok, can_hold);
+    far_claim = far_claim || book_claim || mark_claim;
   }
   UpdateGrab(usable, back, far_claim);
   // THE CREATURE COMMAND. While the leash is on the Hand, a press of the
@@ -3603,20 +4493,29 @@ void PumpButtons(ULONGLONG now) {
   // the trigger is no command and makes no seed active: it goes to the game.
   const bool click_waits = TextClickFlag();
   const bool click_on = TextClickOn();
-  bool command_claim = false;
+  // THE PANEL OF PLACES (places_panel.cpp) and THE DEBUG WINDOW
+  // (debug_window.cpp). While one is open, the trigger presses its parts
+  // and does not reach the game.
+  const bool panel_claim =
+      PlacesPanelHoldsTrigger() || DebugWindowHoldsTrigger() ||
+      WelcomePageHoldsTrigger();
+  bool command_claim = panel_claim;
   // With left_leash=1 the trigger of the other hand commands (FlyPress gives
   // the pointing trigger no command then). Its press is a command when the
   // stick of that hand does not walk at the press.
   const bool left_command = ControllersLeftLeash();
   {
     const bool ok = usable && DirectHandNow() && g_pointer_owned &&
+                    !panel_claim &&
                     (!g_swap_buttons || FlyScheme()) && !GrabHeld() &&
                     (left_command || !far_claim) &&
                     !g_jump_control && !g_gesture_held && !TeleportAiming() &&
                     text_click_math::TriggerMayCommand(click_on, click_waits);
     const bool trigger =
         left_command ? g_ltrigger_down && g_left_command : RawDown(kLeft);
-    command_claim = CreatureCommandPumpTrigger(trigger, ok) && !left_command;
+    command_claim =
+        (CreatureCommandPumpTrigger(trigger, ok) && !left_command) ||
+        panel_claim;
     // A SEED IN THE HAND. While the Hand carries a one-off seed, a press of
     // the trigger makes the seed active and does not reach the game
     // (miracle.cpp).
@@ -3624,6 +4523,10 @@ void PumpButtons(ULONGLONG now) {
       command_claim = true;
     }
   }
+
+  // THE STROKE WITH THE OPEN HAND: the mod holds the Action button while the
+  // open hand stays in the body of the player's Creature.
+  const bool open_press = OpenStrokeStep(now, usable, far_claim);
 
   // The A button starts a jump when no source holds the left button, and no
   // grab holds the world.
@@ -3707,7 +4610,8 @@ void PumpButtons(ULONGLONG now) {
       g_button[b].need_up = true;
     }
     const bool held_by_hold = hold_on && b == kRight;
-    const bool asks = held_by_hold ? hold.button : ButtonDown(b);
+    const bool asks = (held_by_hold ? hold.button : ButtonDown(b)) ||
+                      (open_press && b == kRight);
     // The click of an open grip lets go and picks nothing. It needs no fresh
     // press and no pixel in view, and a grab of the world does not hold it
     // back: a throw often ends with the hand out of view.
@@ -3783,9 +4687,30 @@ void PumpButtons(ULONGLONG now) {
 // starts with a fresh push only. A push that the view or a grab refused, and
 // a hold that stopped because the stick went to the side, must come back
 // below kStickBack before the stick zooms again.
+//
+// A DIALOG BOX (menu_stops_turn=1). While a box of the game is up, a push of
+// the stick does not turn and does not zoom the God view, as the walk, the
+// teleport and the grab of the world do not move it then. Each push is
+// refused once and counted, and it must come back before it acts. Outside
+// the God view the push forward and back is a wheel click, which a box can
+// use, so only the turn stops there. With the turn off (snap_turn=0) the
+// stick does not turn, and the game's own smooth turn of the turn keys and
+// the middle mouse goes to the game camera only (comfort_camera.cpp).
+//
+// THE SMOOTH TURN (snap_turn=4). In the God view the stick to the side past
+// kStickBack turns the view while it is held, and the pump asks again on
+// each pass (ComfortCameraRequestSmoothTurn). The larger axis of the stick
+// wins, as for the smooth zoom. A push that the God view, MayTurn, a grab or
+// a dialog box refused, and a hold that stopped because the stick went
+// forward or back, must come back below kStickBack before the stick turns
+// again. Outside the God view the stick turns in steps of 45 degrees.
+uint64_t g_menu_stick_refused = 0;
+
 void PumpStick(ULONGLONG now) {
   const bool was_holding = g_god_zoom_holding;
   g_god_zoom_holding = false;
+  const bool was_turning = g_god_turn_holding;
+  g_god_turn_holding = false;
   if (!Usable()) {
     g_wheel_tick = 0;
     return;
@@ -3798,6 +4723,11 @@ void PumpStick(ULONGLONG now) {
   if (ay < kStickBack || !live) g_god_zoom_armed = true;
   const bool god = TabletopGodOwnsView();
   const bool smooth = god && TabletopGodZoomSmooth();
+  const bool smooth_turn = god && ComfortCameraSmoothTurn();
+  // A push for a snap turn is past kStickPast, and a push for the smooth
+  // turn is past kStickBack.
+  const float turn_past = smooth_turn ? kStickBack : kStickPast;
+  const bool menu = Comfort().menu_stops_turn != 0 && MenuUp();
   // No snap turn and no zoom step while a grab holds the world. The two hands
   // turn and zoom then. Each push is refused once and counted. A push for a
   // step is past kStickPast, and a push for the smooth zoom is past
@@ -3812,13 +4742,17 @@ void PumpStick(ULONGLONG now) {
   if (TempleTurnOn()) {
     if (live && g_turn_armed && ax > kStickPast && ax > ay) {
       g_turn_armed = false;
-      if (TempleTurn(hand.stick[0] > 0.0f ? 1 : -1)) Pulse(ButtonIndex());
+      if (menu) {
+        ++g_menu_stick_refused;
+      } else if (TempleTurn(hand.stick[0] > 0.0f ? 1 : -1)) {
+        Pulse(ButtonIndex());
+      }
     }
     g_wheel_tick = 0;
     return;
   }
   if (GrabHeld()) {
-    const bool turn = live && g_turn_armed && ax > kStickPast && ax > ay;
+    const bool turn = live && g_turn_armed && ax > turn_past && ax > ay;
     const bool zoom = pushed && !g_zoom_blocked;
     if (turn) g_turn_armed = false;
     // A push that the grab refused must come back before it zooms.
@@ -3834,10 +4768,70 @@ void PumpStick(ULONGLONG now) {
     }
     return;
   }
-  if (live && g_turn_armed && ax > kStickPast && ax > ay) {
+  bool skip_turn = false;
+  if (menu) {
+    const bool turn = live && g_turn_armed && ax > turn_past && ax > ay;
+    const bool zoom = god && pushed && g_god_zoom_armed;
+    if (turn) g_turn_armed = false;
+    if (god && pushed) g_god_zoom_armed = false;
+    if (turn || zoom) {
+      ++g_menu_stick_refused;
+      if (g_event_logs < kMaxEventLogs) {
+        ++g_event_logs;
+        ModLog("controllers  : the stick %s is refused while a dialog box is "
+               "up (menu_stops_turn=1), frame %llu", turn ? "turn" : "zoom",
+               g_frame);
+      }
+    }
+    if (god) {
+      g_wheel_tick = 0;
+      return;
+    }
+    skip_turn = true;
+  }
+  if (smooth_turn) {
+    // The rate follows the push.
+    const bool side = live && ax > kStickBack && ax > ay;
+    if (!skip_turn && side && (was_turning || g_turn_armed)) {
+      g_turn_armed = false;
+      const float share = comfort_math::SmoothTurnShare(
+          hand.stick[0], kStickBack, kStickFull);
+      g_god_turn_holding = ComfortCameraRequestSmoothTurn(share);
+      if (g_god_turn_holding && !was_turning) {
+        ++g_god_turn_holds;
+        ++g_turns_asked;
+        Pulse(PointingIndex());
+        if (g_event_logs < kMaxEventLogs) {
+          ++g_event_logs;
+          ModLog("controllers  : the stick starts a smooth turn %s of the God "
+                 "view, %.0f%% of the full speed, frame %llu",
+                 share > 0.0f ? "right" : "left", fabsf(share) * 100.0f,
+                 g_frame);
+        }
+      } else if (!g_god_turn_holding && !was_turning) {
+        ++g_god_turn_refused;
+        if (g_event_logs < kMaxEventLogs) {
+          ++g_event_logs;
+          ModLog("controllers  : the smooth turn of the stick is refused (the "
+                 "turn switch of the game, a fight or a drag of the Hand), "
+                 "frame %llu", g_frame);
+        }
+      }
+    }
+  } else if (!skip_turn && live && g_turn_armed && ax > kStickPast &&
+             ax > ay) {
     g_turn_armed = false;
     ++g_turns_asked;
     ComfortCameraRequestTurn(hand.stick[0] > 0.0f ? 1 : -1);
+  }
+  // THE DEBUG WINDOW (debug_window.cpp). While the ray is on the window, the
+  // stick forward and back scrolls its list, so it does not zoom and sends
+  // no wheel. A push that the window took must come back below kStickBack
+  // before it zooms.
+  if (DebugWindowTakesStick()) {
+    if (live && ay > kStickBack) g_god_zoom_armed = false;
+    g_wheel_tick = 0;
+    return;
   }
   // THE DIRECTION OF THE ZOOM (god_zoom_forward_in). With 0 the stick forward
   // zooms out, so the world gets smaller, and the stick back zooms in. With
@@ -3899,6 +4893,78 @@ void PumpStick(ULONGLONG now) {
     }
   } else {
     g_wheel_tick = 0;
+  }
+}
+
+// THE RECENTER HOLD (recenter_hold, docs/controllers.md, 5.1). A hold of the
+// stick click of one hand for 1 s, with the stick at rest, recenters the
+// view as F11 and the headset's own recenter do (HeadPoseRecenter), with a
+// pulse on that hand. A push of the stick in the hold starts the time again,
+// so a click that comes with a walk or a turn does not recenter
+// (comfort_math.h, RecenterStep). The click must go up before the next hold.
+// The hold does not act when the stick click of that hand has a different
+// job: the ring with radial_menu_button=2 on the hand that does not point,
+// and the draw with gesture_button=2 on the pointing hand.
+comfort_math::RecenterHold g_recenter_hold;
+uint64_t g_recenters = 0;
+const double kRecenterHoldSeconds = 1.0;
+
+// The stick click of the hand of the rule has a different job.
+const char* RecenterClash(int rule) {
+  if (rule == comfort_math::kRecenterOther &&
+      IniInt("radial_menu", 1) != 0 && IniInt("radial_menu_button", 1) == 2) {
+    return "the stick click of that hand opens the ring "
+           "(radial_menu_button=2)";
+  }
+  if (rule == comfort_math::kRecenterPointing && g_gesture.button == 2) {
+    return "the stick click of that hand draws a gesture (gesture_button=2)";
+  }
+  return nullptr;
+}
+
+// The map of the buttons that acts on a controller (below).
+void MapOfController(int c, int out[button_map::kButtons]);
+
+void PumpRecenter() {
+  const int rule = Comfort().recenter_hold;
+  if (rule == comfort_math::kRecenterOff) {
+    g_recenter_hold = comfort_math::RecenterHold();
+    return;
+  }
+  static int clash_said = -1;
+  const char* clash = RecenterClash(rule);
+  if (clash != nullptr) {
+    if (clash_said != rule) {
+      clash_said = rule;
+      ModLog("controllers  : recenter_hold=%d does not act: %s", rule, clash);
+    }
+    g_recenter_hold = comfort_math::RecenterHold();
+    return;
+  }
+  const int index =
+      rule == comfort_math::kRecenterOther ? OtherIndex() : PointingIndex();
+  const bwvr::HandInput& hand = g_hands[index];
+  const bool click = hand.active && hand.stick_click;
+  const bool still = fabsf(hand.stick[0]) < kStickBack &&
+                     fabsf(hand.stick[1]) < kStickBack;
+  if (comfort_math::RecenterStep(&g_recenter_hold, click, still,
+                                 GetTickCount64() / 1000.0,
+                                 kRecenterHoldSeconds)) {
+    // The words name the button that gives the slot of the stick click
+    // (the map of the buttons, MapButtons).
+    int map[button_map::kButtons];
+    MapOfController(index, map);
+    const int button =
+        button_map::ButtonOfSlot(map, button_map::kStickClick);
+    const wchar_t* word = button_map::ButtonWord(
+        button_map::KindOfProfile(HandProfileOf(index)), index == 0, button);
+    char by[96];
+    sprintf_s(by, "a hold of %ls of the %s",
+              word != nullptr && button != button_map::kStickClick
+                  ? word
+                  : L"the stick click",
+              index == PointingIndex() ? "pointing hand" : "other hand");
+    ControllersRecenter(by);
   }
 }
 
@@ -3972,13 +5038,14 @@ void PumpWalk() {
   const char* why = WalkRefusal();
   if (why == nullptr) {
     // The direction in which the controller of the stick points, flat on the
-    // land, in the room.
+    // land, in the room, and in 3D for the fly.
     float rotation[9], translation[3], direction[3], aim[2];
-    bool have_aim = false;
+    bool have_aim = false, have_direction = false;
     float climb = 0.0f;
     if (hand.aim_valid &&
         HeadPoseToRoom(g_aim_p[other], g_aim_q[other], rotation, translation)) {
       controller_math::AimDirection(rotation, direction);
+      have_direction = true;
       have_aim = walk_math::AimForward(direction, walk_math::kAimLeast, aim);
       // THE CLIMB (controls=1): the up part of the direction of that
       // controller (walk_math.h, ClimbShare).
@@ -3999,7 +5066,8 @@ void PumpWalk() {
         boost = walk_math::Boost(hand.trigger, g_boost_pct * 0.01f);
       }
     }
-    if (!TabletopGodWalk(push, have_aim ? aim : nullptr, boost, climb,
+    if (!TabletopGodWalk(push, have_aim ? aim : nullptr,
+                         have_direction ? direction : nullptr, boost, climb,
                          FlyScheme() && PathOn())) {
       why = "the game does not allow a drag of the land now";
     }
@@ -4294,7 +5362,7 @@ void PollAimKeys() {
 // One line at the first tracked frame, and one when it changes by more than 1
 // degree or 5 mm. The next log of a headset then says what its runtime does.
 void LogGripToAim(int index) {
-  const bwvr::HandInput& hand = g_hands[index];
+  const bwvr::HandInput& hand = g_runtime_hands[index];
   if (!hand.active || !hand.aim_valid || !hand.grip_valid ||
       !hand.aim_tracked || !hand.grip_tracked) {
     return;
@@ -4425,6 +5493,9 @@ void ControllersSetFake(const FakeControllerSettings& fake) {
   g_rot_count = 0;
   g_rot_index = -1;
   g_rots_used = 0;
+  g_lrot_count = 0;
+  g_lrot_index = -1;
+  g_lrots_used = 0;
   if (fake.mode != 0) {
     char path[MAX_PATH];
     const DWORD length = GetModuleFileNameA(nullptr, path, MAX_PATH);
@@ -4437,6 +5508,10 @@ void ControllersSetFake(const FakeControllerSettings& fake) {
       GetPrivateProfileStringA("bwvr", "fake_controller_rots", "", rots,
                                sizeof(rots), path);
       ParsePoints(rots, g_rots, &g_rot_count);
+      char lrots[512];
+      GetPrivateProfileStringA("bwvr", "fake_controller_left_rots", "", lrots,
+                               sizeof(lrots), path);
+      ParsePoints(lrots, g_lrots, &g_lrot_count);
       char turns[512];
       GetPrivateProfileStringA("bwvr", "fake_controller_turns", "", turns,
                                sizeof(turns), path);
@@ -4681,14 +5756,160 @@ void MouseOwnerTestFrame() {
   if (at < 0) at = IniInt("mouse_owner_test_frame", 0);
   if (at <= 0 || g_owner_mode == 2) return;
   // As ControllersTestFrame counts it (fake_controller_play_frame).
-  if (script_frame_math::Counted(g_frame, static_cast<uint64_t>(at),
-                                g_script_play, g_script_shift_known,
-                                g_script_shift) != static_cast<uint64_t>(at)) {
+  if (CountedFrame(g_frame, static_cast<uint64_t>(at)) !=
+      static_cast<uint64_t>(at)) {
     return;
   }
   g_owner_mode = 2;
   ModLog("controllers  : test key mouse_owner_test_frame: the pointer owner "
          "is now %s, frame %llu", kOwnerModeName[g_owner_mode], g_frame);
+}
+
+// --- the map of the buttons --------------------------------------------------
+//
+// THE MAP OF THE BUTTONS (docs/controllers.md, "The map of the buttons"). The
+// page Controls of the settings window lets the player give a job of a
+// controller to a different button of the same controller. The jobs read the
+// four buttons of g_hands (primary, secondary, stick_click, menu). After the
+// read of the hands, MapButtons puts each button into the slot that the map
+// gives it, so each reader after it sees the map with no change of its own.
+//
+//   button_map_hand=1234    the map of the controller of the Hand
+//   button_map_other=1234   the map of the controller of the other hand
+//
+// Each digit is the slot that a button gives: first face button, second face
+// button, stick click, menu button (button_map_math.h). 1234 is the layout as
+// made. A new map waits until each of the four buttons of both controllers
+// is up, so no press goes to the wrong job. A map that moves a button that
+// the controller does not have acts as 1234, and the log says so.
+//
+// THE KIND of each controller comes from its interaction profile. The log
+// names it at each change.
+struct ButtonMapState {
+  bool read = false;
+  int want[2][button_map::kButtons];  // 0 the Hand, 1 the other hand
+  int now[2][button_map::kButtons];
+  bool waits = false;
+  int kind[2] = {-1, -1};             // of each controller: 0 left, 1 right
+  char profile[2][64] = {};
+  bool refused[2] = {false, false};   // the map does not fit the controller
+} g_map;
+
+const char* const kMapKey[2] = {"button_map_hand", "button_map_other"};
+
+void LogButtonMap(int role, const char* by) {
+  ModLog("controllers  : %s%s%s=%d: %s, frame %llu", by,
+         by[0] != 0 ? ": " : "", kMapKey[role],
+         button_map::MapValue(g_map.want[role]),
+         button_map::IsAsMade(g_map.want[role])
+             ? "each button has its job as made"
+             : "the page Controls moved jobs to other buttons",
+         g_frame);
+}
+
+void ReadButtonMap() {
+  if (g_map.read) return;
+  g_map.read = true;
+  for (int role = 0; role < 2; ++role) {
+    const int value = IniInt(kMapKey[role], button_map::kAsMade);
+    if (!button_map::ParseMap(value, g_map.want[role])) {
+      ModLog("controllers  : %s=%d is not a map of the four buttons (each "
+             "digit 1 to 4 one time), so the buttons are as made",
+             kMapKey[role], value);
+    }
+    memcpy(g_map.now[role], g_map.want[role], sizeof(g_map.now[role]));
+    if (!button_map::IsAsMade(g_map.want[role])) LogButtonMap(role, "");
+  }
+}
+
+bool FourButtonsUp(const bwvr::HandInput& h) {
+  return !h.primary && !h.secondary && !h.stick_click && !h.menu;
+}
+
+// The kind of each controller, and a line of the log at each change of its
+// profile.
+void UpdateKinds() {
+  for (int c = 0; c < 2; ++c) {
+    const char* profile = HandProfileOf(c);
+    if (g_map.kind[c] >= 0 && strcmp(profile, g_map.profile[c]) == 0) {
+      continue;
+    }
+    strcpy_s(g_map.profile[c], profile);
+    g_map.kind[c] = button_map::KindOfProfile(profile);
+    g_map.refused[c] = false;
+    const bool left = c == 0;
+    wchar_t words[96] = L"";
+    for (int b = 0; b < button_map::kButtons; ++b) {
+      const wchar_t* w = button_map::ButtonWord(g_map.kind[c], left, b);
+      if (w == nullptr) continue;
+      if (words[0] != 0) wcscat_s(words, L", ");
+      wcscat_s(words, w);
+    }
+    if (profile[0] == 0) {
+      ModLog("controllers  : the %s controller has no interaction profile "
+             "yet, so the mod takes it as a %s controller, frame %llu",
+             left ? "left" : "right",
+             button_map::kKindLog[g_map.kind[c]], g_frame);
+    } else {
+      ModLog("controllers  : the %s controller is a %s controller (profile "
+             "\"%s\"). Its buttons for the jobs: %ls, frame %llu",
+             left ? "left" : "right", button_map::kKindLog[g_map.kind[c]],
+             profile, words[0] != 0 ? words : L"none", g_frame);
+    }
+  }
+}
+
+// Once a frame, after the read of the hands: each button into its slot.
+void MapButtons() {
+  ReadButtonMap();
+  UpdateKinds();
+  if (g_map.waits && FourButtonsUp(g_hands[0]) && FourButtonsUp(g_hands[1])) {
+    g_map.waits = false;
+    memcpy(g_map.now, g_map.want, sizeof(g_map.now));
+    ModLog("controllers  : the new map of the buttons acts now: %s=%d, "
+           "%s=%d, frame %llu", kMapKey[0],
+           button_map::MapValue(g_map.now[0]), kMapKey[1],
+           button_map::MapValue(g_map.now[1]), g_frame);
+  }
+  for (int c = 0; c < 2; ++c) {
+    const int role = c == PointingIndex() ? 0 : 1;
+    const int* map = g_map.now[role];
+    if (button_map::IsAsMade(map)) continue;
+    if (!button_map::FitsController(map, g_map.kind[c], c == 0)) {
+      if (!g_map.refused[c]) {
+        g_map.refused[c] = true;
+        ModLog("controllers  : %s=%d moves a button that the %s %s "
+               "controller does not have, so its buttons are as made, "
+               "frame %llu", kMapKey[role], button_map::MapValue(map),
+               c == 0 ? "left" : "right",
+               button_map::kKindLog[g_map.kind[c]], g_frame);
+      }
+      continue;
+    }
+    bwvr::HandInput& h = g_hands[c];
+    const bool button[button_map::kButtons] = {h.primary, h.secondary,
+                                               h.stick_click, h.menu};
+    bool slot[button_map::kButtons];
+    button_map::Apply(map, button, slot);
+    h.primary = slot[button_map::kFirst];
+    h.secondary = slot[button_map::kSecond];
+    h.stick_click = slot[button_map::kStickClick];
+    h.menu = slot[button_map::kMenu];
+  }
+}
+
+// The map that acts on a controller now: as made when it does not fit.
+void MapOfController(int c, int out[button_map::kButtons]) {
+  ReadButtonMap();
+  const int role = c == PointingIndex() ? 0 : 1;
+  const int kind = g_map.kind[c] >= 0 ? g_map.kind[c]
+                                      : button_map::KindOfProfile(
+                                            HandProfileOf(c));
+  if (button_map::FitsController(g_map.want[role], kind, c == 0)) {
+    memcpy(out, g_map.want[role], sizeof(int) * button_map::kButtons);
+  } else {
+    button_map::AsMade(out);
+  }
 }
 
 }  // namespace
@@ -4968,7 +6189,11 @@ void ControllersFrame() {
   } else {
     return;
   }
+  g_runtime_hands[0] = g_hands[0];
+  g_runtime_hands[1] = g_hands[1];
+  GripFitFrame(g_hands, g_fake.mode != 0, g_frame, g_hand_q);
   FitHands();
+  MapButtons();
   LatchFront();
   // The pointer on the panel quads, before the aim of the hand that points.
   if (g_fake.mode == 0 && XrInputOn()) PanelFrame();
@@ -5047,6 +6272,15 @@ void ControllersFrame() {
   RadialMenuFrame();
   RemoteControlFrame();
   DetailScaleFrame();
+  BookmarkAimFrame();
+  PlacesPanelFrame();
+  WelcomePageFrame();
+  DebugWindowFrame();
+  ControlsPageWarmFrame();
+  SpellBookFrame();
+  GesturePanelFrame();
+  GestureSheetFrame();
+  TextFitTestFrame();
 }
 
 // The hand of a slot of the grab: 0 the other hand and 1 the pointing hand. Gives 0 left, 1 right.
@@ -5094,6 +6328,24 @@ bool ControllerRenderPixel(float* x, float* y, bool* off_view) {
 // active box is not 0 while the Lionhead logo plays, so ControllerRenderPixel
 // gives the pixel of the aim ray there. False with controller_hand=0. With
 // no pixel of the Hand, off_view is true.
+// For a test word (hand_direct.cpp, seek_plan "open"): the render pixel of a
+// point of the world with the camera of the pixel of the Hand of this frame,
+// and the size of the render. False with no camera, and for a point off the
+// render.
+bool ControllersPointPixel(const float point[3], float* x, float* y,
+                           float* width, float* height) {
+  if (!g_have_pixel_camera) return false;
+  bool off = true;
+  if (!controller_math::PointPixel(g_pixel_eye, g_pixel_room, g_pixel_head,
+                                   point, g_pixel_screen, x, y, &off) ||
+      off) {
+    return false;
+  }
+  *width = 2.0f * g_pixel_screen.hx;
+  *height = 2.0f * g_pixel_screen.hy;
+  return true;
+}
+
 bool ControllerHandPixel(float* x, float* y, bool* off_view) {
   if (!DirectMode()) return false;
   if (!g_point.have_hand_pixel) {
@@ -5123,8 +6375,18 @@ bool ControllersGestureInput(GestureInput* out) {
       g_point.have_grip && g_point.have_world && Usable()) {
     out->held = true;
     out->why = "the grip is closed with a miracle that needs a circle";
+    // With the ray, the land point of the ray draws the circle on the land
+    // (miracle_circle_aim=1).
+    if (MiracleAimShows()) {
+      out->aim = true;
+      out->aim_have_land =
+          MiracleAimLand(out->aim_land, out->aim_direction,
+                         &out->aim_distance, &out->aim_units);
+    }
   }
   for (int i = 0; i < 3; ++i) out->grip_room[i] = g_point.grip_room[i];
+  for (int i = 0; i < 3; ++i) out->draw_room[i] = g_point.draw_room[i];
+  out->draw_tip = g_point.draw_tip;
   for (int i = 0; i < 9; ++i) out->head[i] = g_point.head[i];
   out->scale = HeadPoseScale();
   float x = 0.0f, y = 0.0f;
@@ -5155,6 +6417,9 @@ void ControllersHintState(ControllerHintState* out) {
   out->ring = RadialMenuHintMode();
   out->layout = ButtonLayout();
   out->walk = StickWalks();
+  out->book = SpellBookButtonOn();
+  MapOfController(PointingIndex(), out->map_hand);
+  MapOfController(OtherIndex(), out->map_other);
   if (g_fake.mode != 0) {
     strcpy_s(out->profile, "fake");
   } else if (XrInputOn()) {
@@ -5208,6 +6473,19 @@ bool ControllersCardPose(int which, float grip_position[3],
   return true;
 }
 
+// For hint_card.cpp: the orientation of the drawn hand of one hand (`which`
+// as in ControllersCardPose), in the LOCAL space, from the last controllers
+// frame. The grip pose of ControllersCardPose is the frame of the model of
+// the controller. False when that hand has no pose.
+bool ControllersHandOrientation(int which, float out[4]) {
+  if (!g_on || g_frame == 0) return false;
+  const int index = which == 0 ? PointingIndex() : 1 - PointingIndex();
+  const bwvr::HandInput& hand = g_hands[index];
+  if (!hand.active || (!hand.grip_valid && !hand.aim_valid)) return false;
+  for (int i = 0; i < 4; ++i) out[i] = g_hand_q[index][i];
+  return true;
+}
+
 // For radial_menu.cpp: the hand that does not point, with its grip point and
 // the head center in the LOCAL space. False before the first frame. The ring
 // may open while the pointing hand is not active, so this does not ask
@@ -5231,15 +6509,42 @@ bool ControllersRingHand(RingHand* out) {
   out->face_buttons = strstr(profile, "vive") == nullptr &&
                       strstr(profile, "microsoft") == nullptr &&
                       strstr(profile, "simple") == nullptr;
+  // The first face button opens the spell book with button_layout=1. On an
+  // Index controller it sends Esc (LatchEsc).
+  out->book_face = ButtonLayout() != 0 && out->face_buttons &&
+                   strstr(profile, "index") == nullptr;
   if (!hand.active) return true;
   // The face button of the ring: the second one with button_layout=1, and
   // the first one with 0.
   out->button = ButtonLayout() != 0 ? hand.secondary : hand.primary;
+  out->book_button = out->book_face && hand.primary;
   out->stick_click = hand.stick_click;
   out->stick_live = StickLive(hand);
   out->trigger = hand.trigger;
+  out->squeeze = hand.squeeze;
   out->stick[0] = hand.stick[0];
   out->stick[1] = hand.stick[1];
+  return true;
+}
+
+bool ControllersPointingAim(float position[3], float orientation[4],
+                            float* trigger) {
+  if (!g_on || !g_installed || g_frame == 0) return false;
+  const int index = PointingIndex();
+  const bwvr::HandInput& hand = g_hands[index];
+  if (!hand.active || !hand.aim_valid) return false;
+  for (int i = 0; i < 3; ++i) position[i] = g_aim_p[index][i];
+  for (int i = 0; i < 4; ++i) orientation[i] = g_aim_q[index][i];
+  *trigger = hand.trigger;
+  return true;
+}
+
+bool ControllersPointingStick(float* forward) {
+  *forward = 0.0f;
+  if (!g_on || !g_installed || g_frame == 0) return false;
+  const bwvr::HandInput& hand = g_hands[PointingIndex()];
+  if (!hand.active || !StickLive(hand)) return false;
+  *forward = hand.stick[1];
   return true;
 }
 
@@ -5250,10 +6555,12 @@ void ControllersGesturePulse(float amplitude, float seconds) {
 
 int ControllersGestureSizeCm() { return g_gesture.size_cm; }
 
-// Whether a hand points and its ray is known in the world. The ray can still
-// be behind the head, and then there is no pixel.
+// Whether a hand points and its ray is known in the world, or on the menus
+// in the room. The ray can still be behind the head, and then there is no
+// pixel.
 bool ControllerPointing() {
-  return g_on && g_point.have_hand && g_point.have_world;
+  return g_on && g_point.have_hand &&
+         (g_point.have_world || g_point.on_panel || g_point.on_window);
 }
 
 // Whether the aim turned more than 1 degree from where it was when the mouse
@@ -5374,7 +6681,8 @@ bool g_overlay_seen_tracked[2] = {false, false};
 // each hand in the world, one to one, and its trigger and squeeze. It takes the
 // head sample of this frame and the steps of Compute, on the table and off
 // it, so the pointing grip lands on the point the direct hand uses when the
-// reach gain is 0. The rotation is L * M_grip, as HandToWorld gives it. A
+// reach gain is 0. The controller axes are L * M_grip, as HandToWorld gives
+// them, and the rotation is L * M_hand, the axes of the drawn hand. A
 // hand that is not active, or whose pose is not tracked, is not valid. False
 // with the controllers off, before the first frame, or with no head sample.
 // overlay.cpp calls it once a frame, after ControllersFrame.
@@ -5404,6 +6712,12 @@ bool ControllersOverlayHands(OverlayHands* out) {
   out->pointing = PointingIndex();
   out->free_hand = FreeIndex();
   out->frame = g_frame;
+  for (int i = 0; i < 3; ++i) {
+    out->map_eye[i] = eye[i];
+    out->map_head[i] = t_head_w[i];
+  }
+  for (int i = 0; i < 9; ++i) out->map_basis[i] = room[i];
+  out->map_gain = gain;
   for (int index = 0; index < 2; ++index) {
     const bwvr::HandInput& hand = g_hands[index];
     OverlayHand& o = out->hand[index];
@@ -5414,22 +6728,94 @@ bool ControllersOverlayHands(OverlayHands* out) {
                  &g_overlay_seen_tracked[index])) {
       continue;
     }
-    float m_grip[9], t_grip[3], t_grip_w[3];
+    float m_grip[9], m_hand[9], t_grip[3], t_grip_w[3], t_same[3];
     if (!HeadPoseToRoom(grip_pose ? hand.grip_position : hand.aim_position,
                         grip_pose ? hand.grip_orientation
                                   : hand.aim_orientation,
-                        m_grip, t_grip)) {
+                        m_grip, t_grip) ||
+        !HeadPoseToRoom(grip_pose ? hand.grip_position : hand.aim_position,
+                        g_hand_q[index], m_hand, t_same)) {
       continue;
     }
     controller_math::ScaleRoom(t_grip, gain, t_grip_w);
     controller_math::HandToWorld(eye, room, t_head_w, t_grip_w, m_grip,
-                                 o.position, o.rotation);
+                                 o.position, o.controller);
+    controller_math::Multiply(room, m_hand, o.rotation);
+    o.trigger = hand.trigger;
+    o.squeeze = hand.squeeze;
+    o.valid = true;
+  }
+  return true;
+}
+
+// The grip point of a hand in the LOCAL space of the runtime, from the same
+// sample as ControllersOverlayHands, with the same tests: the check of the
+// view (view_check.cpp) compares the place where the overlay draws the grip
+// with this point. It is the grip point of the frame of the model
+// (GripFitFrame), as the overlay draws it. False for a hand that the overlay does not draw.
+bool ControllersGripLocal(int index, float out[3]) {
+  if (!g_on || g_frame == 0 || index < 0 || index > 1) return false;
+  const bwvr::HandInput& hand = g_hands[index];
+  const bool grip_pose = hand.grip_valid;
+  if (!hand.active || !(grip_pose || hand.aim_valid)) return false;
+  if (!Tracked(grip_pose ? hand.grip_tracked : hand.aim_tracked,
+               &g_overlay_seen_tracked[index])) {
+    return false;
+  }
+  const float* p = grip_pose ? hand.grip_position : hand.aim_position;
+  for (int i = 0; i < 3; ++i) out[i] = p[i];
+  return true;
+}
+
+// For overlay.cpp in a frame of the cut scene window (cutscene_hands=1): the
+// hands as ControllersOverlayHands gives them, but in the room of the hands
+// (HeadPoseToRoom) and not in the world. The room is the world of the
+// overlay then: no table, no game camera and a gain of 1.
+bool ControllersOverlayHandsRoom(OverlayHands* out) {
+  memset(out, 0, sizeof(*out));
+  if (!g_on || g_frame == 0) return false;
+  out->units_per_meter = HeadPoseScale();
+  out->pointing = PointingIndex();
+  out->frame = g_frame;
+  for (int i = 0; i < 9; ++i) out->map_basis[i] = (i % 4) == 0 ? 1.0f : 0.0f;
+  out->map_gain = 1.0f;
+  for (int index = 0; index < 2; ++index) {
+    const bwvr::HandInput& hand = g_hands[index];
+    OverlayHand& o = out->hand[index];
+    const bool grip_pose = hand.grip_valid;
+    if (!hand.active || !(grip_pose || hand.aim_valid)) continue;
+    if (!Tracked(grip_pose ? hand.grip_tracked : hand.aim_tracked,
+                 &g_overlay_seen_tracked[index])) {
+      continue;
+    }
+    float same[3];
+    if (!HeadPoseToRoom(grip_pose ? hand.grip_position : hand.aim_position,
+                        grip_pose ? hand.grip_orientation
+                                  : hand.aim_orientation,
+                        o.controller, o.position) ||
+        !HeadPoseToRoom(grip_pose ? hand.grip_position : hand.aim_position,
+                        g_hand_q[index], o.rotation, same)) {
+      continue;
+    }
     o.trigger = hand.trigger;
     o.squeeze = hand.squeeze;
     o.fingers = hand.fingers_valid;
     for (int f = 0; f < 5; ++f) o.finger_curl[f] = hand.finger_curl[f];
     o.valid = true;
   }
+  return true;
+}
+
+// For overlay.cpp in the same frames: the aim ray of the pointing hand in the
+// room of the hands. False when the hand has no aim pose.
+bool ControllersRoomAim(float origin[3], float direction[3]) {
+  if (!g_on || g_frame == 0) return false;
+  const int index = PointingIndex();
+  const bwvr::HandInput& hand = g_hands[index];
+  if (!hand.active || !hand.aim_valid) return false;
+  float m[9];
+  if (!HeadPoseToRoom(g_aim_p[index], g_aim_q[index], m, origin)) return false;
+  controller_math::AimDirection(m, direction);
   return true;
 }
 
@@ -5563,6 +6949,26 @@ bool RayOf(const TeleportInput& in, float origin[3], float direction[3],
 }
 }  // namespace
 
+// A point of the LOCAL space of OpenXR, in meters, in the world, with the map
+// of the aim of this frame (see THE AIM FOR THE TELEPORT). units is the world
+// units in a meter of the room. False when the aim is not known.
+bool ControllersLocalToWorld(const float local[3], float world[3],
+                             float* units) {
+  const TeleportInput& in = g_frame_aim;
+  if (!g_on || g_frame == 0 || !in.have_aim) return false;
+  const float life = HeadPoseScale();
+  const float none[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+  float m[9], t[3];
+  if (!(life > 0.0f) || !HeadPoseToRoom(local, none, m, t)) return false;
+  const float r[3] = {t[0] / life, t[1] / life, t[2] / life};
+  for (int i = 0; i < 3; ++i) {
+    world[i] = in.base[i] + in.map[i * 3 + 0] * r[0] +
+               in.map[i * 3 + 1] * r[1] + in.map[i * 3 + 2] * r[2];
+  }
+  *units = in.units_per_meter;
+  return true;
+}
+
 // THE RAY OF A FAR GRAB (docs/grab.md, "The grab from a distance"): the aim
 // pose of the pointing hand in the world, as the teleport takes it. The origin
 // is the aim point, the direction is a unit vector, and units is the world
@@ -5622,6 +7028,10 @@ bool ControllersFarAllowed(const char** why) {
     *why = "a jump, a gesture or a teleport runs";
     return false;
   }
+  if (BookmarkAimActive()) {
+    *why = "the aim of a new bookmark runs";
+    return false;
+  }
   if (RawDown(kLeft) || ((g_game_mask | g_mouse_mask | g_ctrl_mask) & 1) != 0) {
     *why = "the trigger is down";
     return false;
@@ -5663,7 +7073,20 @@ bool ControllersCommandAllowed(const char** why) {
 // and a point kMenuRayMeters of the room along the aim. units is the world
 // units in a meter of the room. False when there is no ray to draw.
 bool ControllersMenuRay(float from[3], float to[3], float* units) {
-  if (!g_on || !g_pointer_owned || !(MenuUp() || TempleRayOn())) return false;
+  // The panel of places and the debug window have the ray too: to the
+  // panel, or 2 m long when the ray is off the panel.
+  float panel_meters = 0.0f;
+  bool panel = PlacesPanelRay(&panel_meters);
+  if (!panel) panel = DebugWindowRay(&panel_meters);
+  if (!panel) panel = WelcomePageRay(&panel_meters);
+  // The aim of a new bookmark: to its target, or 2 m long with none.
+  if (!panel) panel = BookmarkAimRay(&panel_meters);
+  // A Storm or a shield in the Hand: to the land point that draws its
+  // circle (miracle_circle_aim=1), or 2 m long when it meets no land.
+  if (!panel) panel = MiracleAimRay(&panel_meters);
+  if (!g_on || !g_pointer_owned || !(MenuUp() || TempleRayOn() || panel)) {
+    return false;
+  }
   TeleportInput in;
   if (!ControllersTeleportInput(&in) || !in.have_aim) return false;
   // The ray ends where the cursor is in both eyes: at the depth of the menu,
@@ -5676,7 +7099,8 @@ bool ControllersMenuRay(float from[3], float to[3], float* units) {
     *units = in.units_per_meter;
     return true;
   }
-  const float kMenuRayMeters = 2.0f;
+  const float kMenuRayMeters =
+      panel && panel_meters > 0.0f ? panel_meters : 2.0f;
   float a[3], b[3];
   for (int i = 0; i < 3; ++i) {
     a[i] = in.origin_m[i];
@@ -5689,6 +7113,49 @@ bool ControllersMenuRay(float from[3], float to[3], float* units) {
             in.map[i * 3 + 1] * b[1] + in.map[i * 3 + 2] * b[2];
   }
   *units = in.units_per_meter;
+  return true;
+}
+
+// For hint_card.cpp: the ray of ControllersMenuRay shows only for the circle
+// of a Storm or a shield (miracle_circle_aim=1), so the card keeps the lines
+// of the miracle and not the lines of a dialog box.
+bool ControllersRayIsMiracleAim() {
+  float meters = 0.0f;
+  if (PlacesPanelRay(&meters) || DebugWindowRay(&meters) ||
+      WelcomePageRay(&meters) || BookmarkAimRay(&meters)) {
+    return false;
+  }
+  return !MenuUp() && !TempleRayOn() && MiracleAimShows();
+}
+
+// THE RAY OVER THE PANELS (ray_card.cpp, docs/ui-layer.md, "The ray over
+// the panels"). The ray of ControllersMenuRay in the LOCAL space of the
+// runtime, in meters, when the panels in the room can hide it: a panel of
+// panel_kit (the places, the settings and debug window, the welcome page) is
+// open, or the menus are on the panel in the room in a frame with the scene.
+// It has the length of the drawn ray: to the panel or the keyboard, or 2 m.
+// *on_panel is true when it ends on the panel or the keyboard.
+// False for the ray of a dialog box in the eye pictures and of the Temple.
+bool ControllersPanelRay(float from[3], float to[3], bool* on_panel) {
+  float meters = 0.0f;
+  bool panel = PlacesPanelRay(&meters);
+  if (!panel) panel = DebugWindowRay(&meters);
+  if (!panel) panel = WelcomePageRay(&meters);
+  const bool room =
+      !panel && MenuUp() && MenuRoomSurface() && !MenuRoomFlatNow();
+  if (!g_on || !g_pointer_owned || !(panel || room)) return false;
+  if (room) meters = g_point.panel_meters;
+  const int index = PointingIndex();
+  const bwvr::HandInput& hand = g_hands[index];
+  if (!hand.active || !hand.aim_valid) return false;
+  *on_panel = meters > 0.0f;
+  if (!*on_panel) meters = 2.0f;
+  float d[3];
+  menu_room_math::AimForward(g_aim_q[index], d);
+  for (int i = 0; i < 3; ++i) {
+    from[i] = g_aim_p[index][i];
+    to[i] = from[i] + d[i] * meters;
+  }
   return true;
 }
 
@@ -5746,12 +7213,30 @@ void ControllersSetGesture(const GestureSettings& gesture) {
   if (g_gesture.button < 0 || g_gesture.button > 2) g_gesture.button = 1;
   if (g_gesture.size_cm < 5) g_gesture.size_cm = 5;
   if (g_gesture.size_cm > 200) g_gesture.size_cm = 200;
+  g_gesture.point = g_gesture.point != 0 ? 1 : 0;
   static const char* const kButton[3] = {
       "off", "the second face button (B, or Y on the left hand)",
       "the stick click"};
   ModLog("gesture      : the draw button is %s. %d cm of hand motion is a "
-         "third of the view height to the game.", kButton[g_gesture.button],
-         g_gesture.size_cm);
+         "third of the view height to the game. The point of the draw is the "
+         "%s (gesture_point=%d).", kButton[g_gesture.button],
+         g_gesture.size_cm,
+         g_gesture.point != 0 ? "tip of the index finger" : "grip point",
+         g_gesture.point);
+}
+
+// The switch "Gesture point" of the debug page: the tip of the index finger
+// or the grip point draws the gesture. Choose it between two draws.
+void ControllersGrabPulse(int hands, float amplitude, float seconds);
+int ControllersGesturePointValue() { return g_gesture.point; }
+
+void ControllersGesturePointChange(const char* by) {
+  g_gesture.point = g_gesture.point != 0 ? 0 : 1;
+  ControllersGrabPulse(1, 0.5f, g_gesture.point != 0 ? 0.40f : 0.08f);
+  ModLog("gesture      : %s: gesture_point=%d. The point of the draw is the "
+         "%s, frame %llu", by, g_gesture.point,
+         g_gesture.point != 0 ? "tip of the index finger" : "grip point",
+         static_cast<unsigned long long>(g_frame));
 }
 
 // The player keys of the grab. world_grab.cpp gets the same.
@@ -5821,8 +7306,7 @@ uint64_t ControllersFrameCount() { return g_frame; }
 // keep their distance when the run starts in a test save. Without the key of
 // the script, the number is `frame`.
 uint64_t ControllersTestFrame(uint64_t key_frame, uint64_t frame) {
-  return script_frame_math::Counted(frame, key_frame, g_script_play,
-                                    g_script_shift_known, g_script_shift);
+  return CountedFrame(frame, key_frame);
 }
 
 // For the land drag probe: the pointing grip and the head in the
@@ -5844,6 +7328,44 @@ int ControllersThrowGainPct() { return g_direct.throw_gain_pct; }
 float ControllersCreatureSlapMps() { return g_direct.creature_slap_mps; }
 int ControllersCreatureTouchCm() { return g_direct.creature_touch_cm; }
 bool ControllersCreatureSlapWait() { return g_direct.creature_slap_wait; }
+// The press of the open hand on the Creature is on (creature_stroke_open).
+bool ControllersOpenStrokeOn() { return g_open_press.on; }
+// The switch of the debug page for creature_stroke_open. A press that runs
+// ends at the next pump.
+int ControllersOpenStrokeValue() {
+  return g_on && g_open_stroke >= 0 ? g_open_stroke : kDebugCannot;
+}
+void ControllersOpenStrokeChange(const char* by) {
+  if (g_open_stroke < 0) return;
+  g_open_stroke = g_open_stroke != 0 ? 0 : 1;
+  ControllersGesturePulse(0.5f, g_open_stroke != 0 ? 0.30f : 0.08f);
+  ModLog("controllers  : %s: creature_stroke_open is %d now, frame %llu", by,
+         g_open_stroke, g_frame);
+}
+// The open hand slaps too (creature_open_slap), and its switch on the debug
+// page. The next frame of a press reads the new value.
+bool ControllersOpenSlap() { return OpenSlapOn(); }
+int ControllersOpenSlapValue() {
+  return g_on ? (OpenSlapOn() ? 1 : 0) : kDebugCannot;
+}
+void ControllersOpenSlapChange(const char* by) {
+  g_open_slap = OpenSlapOn() ? 0 : 1;
+  ControllersGesturePulse(0.5f, g_open_slap != 0 ? 0.30f : 0.08f);
+  ModLog("controllers  : %s: creature_open_slap is %d now, frame %llu", by,
+         g_open_slap, g_frame);
+}
+// The switch of the debug page for creature_touch_easy. A press that runs
+// takes the new zone at the next pump.
+int ControllersTouchEasyValue() {
+  return g_on && g_touch_easy >= 0 ? g_touch_easy : kDebugCannot;
+}
+void ControllersTouchEasyChange(const char* by) {
+  if (g_touch_easy < 0) return;
+  g_touch_easy = g_touch_easy != 0 ? 0 : 1;
+  ControllersGesturePulse(0.5f, g_touch_easy != 0 ? 0.30f : 0.08f);
+  ModLog("controllers  : %s: creature_touch_easy is %d now, frame %llu", by,
+         g_touch_easy, g_frame);
+}
 
 // A controller button changed since the owner rule last asked.
 bool ControllersButtonEvent() {
@@ -5875,6 +7397,117 @@ int ControllersOwnerModeValue() {
 }
 
 int ControllersButtonLayout() { return ButtonLayout(); }
+
+// For the page Controls (controls_page.cpp) and the hints: the kind of a
+// controller (0 left, 1 right), the map that acts on it, and the settings
+// that give the slots their jobs.
+bool ControllersProfileKnown(int c) {
+  const char* profile = HandProfileOf(c < 0 || c > 1 ? 1 : c);
+  return profile != nullptr && profile[0] != 0;
+}
+
+int ControllersKindOf(int c) {
+  if (c < 0 || c > 1) return button_map::kTouch;
+  return g_map.kind[c] >= 0 ? g_map.kind[c]
+                            : button_map::KindOfProfile(HandProfileOf(c));
+}
+
+int ControllersPointingSide() { return PointingIndex(); }
+
+// For hint_model.cpp: the input of one controller (0 the left, 1 the right)
+// in this frame, as ControllersFrame took it, and the name of the headset.
+bool ControllersHandInput(int side, bwvr::HandInput* out) {
+  if (!g_on || g_frame == 0 || side < 0 || side > 1) return false;
+  *out = g_hands[side];
+  return true;
+}
+
+// The interaction profile of one controller (0 the left, 1 the right):
+// "fake" for the fake controller, "" before the runtime gives one.
+const char* ControllersProfileOf(int side) {
+  return HandProfileOf(side < 0 || side > 1 ? 0 : side);
+}
+
+// For hint_model.cpp: the turn of the head in the LOCAL space, the mean of
+// the turns of the two eyes. False when the eyes are not known.
+void HeadPoseFakeEye(int eye, float position[3], float orientation[4]);
+bool ControllersHeadTurn(float out[4]) {
+  float q[2][4];
+  if (g_fake.mode != 0) {
+    float position[3];
+    HeadPoseFakeEye(0, position, q[0]);
+    HeadPoseFakeEye(1, position, q[1]);
+  } else if (g_screen != nullptr && g_screen->eye(0).valid &&
+             g_screen->eye(1).valid) {
+    for (int e = 0; e < 2; ++e) {
+      for (int i = 0; i < 4; ++i) q[e][i] = g_screen->eye(e).orientation[i];
+    }
+  } else {
+    return false;
+  }
+  const float dot = q[0][0] * q[1][0] + q[0][1] * q[1][1] +
+                    q[0][2] * q[1][2] + q[0][3] * q[1][3];
+  const float sign = dot < 0.0f ? -1.0f : 1.0f;
+  float length = 0.0f;
+  for (int i = 0; i < 4; ++i) {
+    out[i] = q[0][i] + sign * q[1][i];
+    length += out[i] * out[i];
+  }
+  length = sqrtf(length);
+  if (!(length > 1e-6f)) return false;
+  for (int i = 0; i < 4; ++i) out[i] /= length;
+  return true;
+}
+
+const char* ControllersSystemName() {
+  if (g_fake.mode != 0 || g_screen == nullptr) return "";
+  return g_screen->SystemName();
+}
+
+// For grip_fit.cpp: the name of the OpenXR runtime, or an empty string.
+const char* ControllersRuntimeName() {
+  if (g_fake.mode != 0 || g_screen == nullptr) return "";
+  return g_screen->RuntimeName();
+}
+
+void ControllersButtonMapOf(int c, int map[button_map::kButtons]) {
+  MapOfController(c < 0 || c > 1 ? 1 : c, map);
+}
+
+void ControllersButtonJobs(button_map::Jobs* out) {
+  memset(out, 0, sizeof(*out));
+  out->layout = ButtonLayout();
+  out->teleport = TeleportOwnsA();
+  out->gesture_button = g_gesture.button;
+  out->recenter_hold = Comfort().recenter_hold;
+  out->book = SpellBookButtonOn();
+  // The keys of the ring do not change while the game runs.
+  static int ring_button = -1, ring_stick = 0;
+  if (ring_button < 0) {
+    const bool ring = IniInt("radial_menu", 1) != 0;
+    ring_button = ring ? IniInt("radial_menu_button", 1) : 0;
+    ring_stick = ring && ring_button != 3 &&
+                 IniInt("radial_menu_stick", 1) != 0;
+  }
+  out->ring_button = ring_button;
+  out->swap_buttons = g_swap_buttons;
+  out->world_grab = g_grab.on && g_grab.hand >= 1;
+  out->walk = TabletopGodMoveStick() != walk_math::kRuleOff;
+  out->stick_ring = ring_stick != 0;
+}
+
+// The page Controls: a new map for the controller of the Hand (role 0) or of
+// the other hand (role 1). It acts when each button of both controllers is
+// up (MapButtons).
+void ControllersSetButtonMap(int role, const int map[button_map::kButtons],
+                             const char* by) {
+  if (role < 0 || role > 1) return;
+  ReadButtonMap();
+  memcpy(g_map.want[role], map, sizeof(g_map.want[role]));
+  g_map.waits = true;
+  g_map.refused[0] = g_map.refused[1] = false;
+  LogButtonMap(role, by);
+}
 
 // The value of the switch of button_layout on the debug page.
 int ControllersButtonLayoutValue() {
@@ -6021,6 +7654,7 @@ void ControllersPump() {
   PumpButtons(now);
   PumpStick(now);
   PumpWalk();
+  PumpRecenter();
   PumpEsc(now);
   RadialMenuPump(now);
 }
@@ -6340,6 +7974,88 @@ uint32_t ControllersScreenFlags() {
              : 0u;
 }
 
+// A recenter of the view from the controllers: the recenter hold, and the
+// item "recenter" of the ring. It acts as F11 does (HeadPoseRecenter), and
+// both hands get a pulse.
+void ControllersRecenter(const char* by) {
+  HeadPoseRecenter();
+  ++g_recenters;
+  if (g_on) {
+    PulseWith(0, 0.6f, 0.12f);
+    PulseWith(1, 0.6f, 0.12f);
+  }
+  ModLog("controllers  : %s recenters the view, frame %llu", by, g_frame);
+}
+
+// THE SWITCHES of the debug page: menu_stops_turn and recenter_hold. The
+// pointing hand gives a long pulse for a rule that acts and a short pulse
+// for the old rule.
+
+int ControllersMenuStopsTurnValue() {
+  if (!g_on || !TestSwitchesOn()) return kDebugCannot;
+  return Comfort().menu_stops_turn;
+}
+
+void ControllersMenuStopsTurnChange(const char* by) {
+  if (!g_on || !TestSwitchesOn()) return;
+  Comfort();
+  g_comfort.menu_stops_turn = g_comfort.menu_stops_turn != 0 ? 0 : 1;
+  PulseWith(PointingIndex(), 0.5f,
+            g_comfort.menu_stops_turn != 0 ? 0.30f : 0.08f);
+  LogMenuStopsTurn(by);
+}
+
+int ControllersRecenterHoldValue() {
+  if (!g_on || !TestSwitchesOn()) return kDebugCannot;
+  return Comfort().recenter_hold;
+}
+
+void ControllersRecenterHoldChange(const char* by) {
+  if (!g_on || !TestSwitchesOn()) return;
+  Comfort();
+  g_comfort.recenter_hold =
+      comfort_math::NextRecenterRule(g_comfort.recenter_hold);
+  g_recenter_hold = comfort_math::RecenterHold();
+  const int rule = g_comfort.recenter_hold;
+  PulseWith(PointingIndex(), 0.5f,
+            rule == comfort_math::kRecenterPointing ? 0.40f
+            : rule == comfort_math::kRecenterOther  ? 0.24f
+                                                    : 0.08f);
+  LogRecenterHold(by);
+}
+
+// The settings window (settings_panel.cpp): recenter_hold, left_hand and
+// creature_stroke_open at once. UpdateHandSide moves the Hand to the other
+// controller when each button is up.
+void ControllersSetRecenterHold(int rule, const char* by) {
+  Comfort();
+  if (rule < comfort_math::kRecenterOff ||
+      rule > comfort_math::kRecenterPointing) {
+    rule = comfort_math::kRecenterOther;
+  }
+  g_comfort.recenter_hold = rule;
+  g_recenter_hold = comfort_math::RecenterHold();
+  LogRecenterHold(by);
+}
+
+void ControllersSetLeftHand(int key, const char* by) {
+  g_left_hand_key = key < -1 || key > 1 ? -1 : key;
+  ModLog("controllers  : %s: left_hand=%d now (%s), frame %llu", by,
+         g_left_hand_key,
+         g_left_hand_key < 0    ? "the left hand option of the game chooses "
+                                  "the Hand"
+         : g_left_hand_key == 0 ? "the right controller is the Hand"
+                                : "the left controller is the Hand",
+         g_frame);
+}
+
+void ControllersSetOpenStroke(int on, const char* by) {
+  if (g_open_stroke < 0) return;
+  g_open_stroke = on != 0 ? 1 : 0;
+  ModLog("controllers  : %s: creature_stroke_open is %d now, frame %llu", by,
+         g_open_stroke, g_frame);
+}
+
 // A snap turn that the stick asked for has happened.
 void ControllersSnapTurned() {
   ++g_turns_done;
@@ -6371,12 +8087,34 @@ void ControllersReport() {
     g_dropped = g_forced_releases = 0;
   }
   RadialMenuReport();
+  PlacesPanelReport();
+  BookmarkAimReport();
+  DebugWindowReport();
+  SettingsPanelReport();
+  ControlsPageReport();
+  SpellBookReport();
+  text_fit::Report();
+  HandCutReport();
+  GesturePanelReport();
+  GestureSheetReport();
   TempleReport();
   TextClickReport();
   if (g_god_zooms != 0 || g_god_holds != 0) {
     ModLog("controllers  : the stick asked the God view for %llu zoom steps "
            "and %llu smooth zooms", g_god_zooms, g_god_holds);
     g_god_zooms = g_god_holds = 0;
+  }
+  if (g_god_turn_holds != 0 || g_god_turn_refused != 0) {
+    ModLog("controllers  : the stick started %llu smooth turns of the God "
+           "view, and %llu pushes were refused", g_god_turn_holds,
+           g_god_turn_refused);
+    g_god_turn_holds = g_god_turn_refused = 0;
+  }
+  if (g_menu_stick_refused != 0 || g_recenters != 0) {
+    ModLog("controllers  : %llu pushes of the stick were refused while a "
+           "dialog box was up. The controllers recentered the view %llu "
+           "times", g_menu_stick_refused, g_recenters);
+    g_menu_stick_refused = g_recenters = 0;
   }
   if (g_grab_starts != 0 || g_grab_claims != 0 || g_grab_refused != 0 ||
       g_grab_picks != 0 || g_grab_trigger_held != 0 ||
@@ -6403,13 +8141,22 @@ void ControllersReport() {
     g_hold_held_on = g_hold_short = 0;
   }
   if (g_hold_take_opens != 0 || g_hold_take_ends != 0 || g_fast_opens != 0 ||
-      g_slow_opens != 0) {
+      g_slow_opens != 0 || g_take_falls_kept != 0) {
     ModLog("grip         : %llu openings on a fast fall and %llu below 35%%. "
            "%llu openings ended a bulk take, and the mod had to end %llu "
-           "takes, this window", g_fast_opens, g_slow_opens, g_hold_take_opens,
-           g_hold_take_ends);
+           "takes. %llu fast falls in a take stayed closed "
+           "(near_take_keeps=%d), this window", g_fast_opens, g_slow_opens,
+           g_hold_take_opens, g_hold_take_ends, g_take_falls_kept,
+           g_near_take_keeps);
     g_hold_take_opens = g_hold_take_ends = 0;
+    g_take_falls_kept = 0;
     g_fast_opens = g_slow_opens = 0;
+  }
+  if (g_open_starts != 0 || g_open_frames != 0) {
+    ModLog("controllers  : %llu presses of the open hand on your Creature, "
+           "and %llu frames with the Action button held for one, this window",
+           g_open_starts, g_open_frames);
+    g_open_starts = g_open_frames = 0;
   }
   // The focus test of the camera, in a window in which the mod changed its
   // answer.

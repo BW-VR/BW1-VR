@@ -93,6 +93,7 @@
 #include "one_walk_math.h"
 #include "../common/bw_addresses.h"
 #include "controller_math.h"
+#include "bookmark_aim.h"
 #include "creature_command.h"
 #include "far_grab.h"
 #include "miracle.h"
@@ -126,6 +127,8 @@ bool HandDirectNearTarget(float center[3], float* radius, float* half_height,
 // or of the frame before, or null.
 void* HandDirectNearTargetObject(bool* acts);
 bool HandDirectGlowIdle();
+// spell_book.cpp: the book is open, and its page shows the point of the pick.
+bool SpellBookHidesGlow();
 // overlay.cpp: the world to camera matrix of this eye pass, with the camera
 // matrices put back as they were.
 void OverlayEyeMatrix(float m[12]);
@@ -134,6 +137,8 @@ void OverlayEyeMatrix(float m[12]);
 float TabletopViewScale();
 // head_pose.cpp: units per meter at the life size scale.
 float HeadPoseScale();
+// hand_exact.cpp: the middle of the palm of the mod's hand in the world.
+bool HandExactPalm(float out[3], uint64_t* frame, int32_t* state);
 
 namespace {
 
@@ -188,7 +193,7 @@ const Style kHaloInvalid = {"a far target outside the influence", 0.0f, 255,
 // THE HALO of a Creature command (creature_command.cpp): green, the color of
 // the trigger. It shows around the object that the leashed Creature goes to
 // when the trigger is pressed. A far target has the gold halo, also when the
-// trigger can send the Creature to it.
+// trigger can send the Creature to it. Only with command_look=0.
 const Style kHaloCommand = {"a target of the Creature", 0.0f, 70, 255, 150,
                             0.50f, 0.65f};
 // THE HALO of the target of a miracle (miracle.cpp): gold, the color of the
@@ -307,8 +312,13 @@ struct EyePoint {
   bool valid;
   uint64_t frame;
   float x, y, meters;
+  // The middle of the palm of the mod's hand in this eye (HandExactPalm), for
+  // the tooltip beyond the fingertip (draw_hooks.cpp, hint_hand_tip).
+  bool palm;
+  float palm_x, palm_y;
 };
 EyePoint g_eye_point[2] = {};
+float g_palm_right_x = 0.0f;  // one walk: the palm in the right eye
 
 // The world to camera matrix of each eye pass and the half size of the
 // render, from the last frame that drew: the desktop test word "picture"
@@ -605,12 +615,17 @@ void DrawOneHalo(IDirect3DDevice7* device, const FarDraw& d,
 // target of the grip in its wide cone, and a target of a command in its tight
 // cone. Then each has its halo, gold for the grip and green for the trigger.
 // One object that is both has the gold halo.
+//
+// With command_look=1 the target of a command has no halo. Its mark is a
+// green ring on the land (overlay.cpp, BuildCommandRing). So each halo and
+// each glow on a mesh is a target of the grip, and a red far target stays
+// red.
 struct Halo {
   FarDraw draw;
   const Style* style;
 };
 
-int Halos(Halo out[4]) {
+int Halos(Halo out[5]) {
   int n = 0;
   FarDraw d, c, m;
   bool same = false;
@@ -648,13 +663,20 @@ int Halos(Halo out[4]) {
     out[n].draw = v;
     out[n++].style = v.valid ? &kHaloHold : &kHaloInvalid;
   }
+  // THE OBJECT OF THE AIM OF A NEW BOOKMARK (bookmark_aim.cpp): the grip
+  // sets the bookmark on it.
+  FarDraw b;
+  if (BookmarkAimHalo(&b)) {
+    out[n].draw = b;
+    out[n++].style = &kHaloValid;
+  }
   return n;
 }
 
 // The halos, once in each eye pass of a frame. A target whose mesh glows has
 // no halo (target_glow=1).
 void DrawHalo() {
-  Halo halos[4];
+  Halo halos[5];
   const int count = Halos(halos);
   if (count == 0) return;
   int eye = -1;
@@ -832,6 +854,10 @@ void HandGlowDraw() {
   if (!HandDirectGlowFacts(point, &length, &mode, &holding, &eye, &frame)) {
     return;
   }
+  // While the spell book is open, a grip on its page takes from the book.
+  // The page shows the point of the pick, so the glow of the world does not
+  // show (spell_book_point=1).
+  if (SpellBookHidesGlow()) return;
   if (eye < 0 || eye > 1 || g_asked_frame[eye] == frame) return;
   g_asked_frame[eye] = frame;
 
@@ -862,6 +888,21 @@ void HandGlowDraw() {
     p.x = at.x;
     p.y = at.y;
     p.meters = p.valid ? at.depth / units_per_meter : 0.0f;
+    {
+      float palm[3];
+      uint64_t palm_frame = 0;
+      int32_t palm_state = 0;
+      GlowDisc palm_at = {};
+      p.palm = HandExactPalm(palm, &palm_frame, &palm_state) &&
+               GlowProject(m, info->half_res_x, info->half_res_y, near_plane,
+                           palm, 0.0f, 0.0f, &palm_at);
+      p.palm_x = palm_at.x;
+      p.palm_y = palm_at.y;
+      if (p.palm && eye == 0 && OneWalkActive() && palm_at.depth > 0.0f) {
+        g_palm_right_x = palm_at.x +
+                         OneWalkShiftPerRhw() * near_plane / palm_at.depth;
+      }
+    }
     // ONE WALK (one_walk.cpp). The right eye has no pass of its own. Its
     // point and its camera are those of the left eye, moved by the disparity
     // of the depth (one_walk_math.h): x moves by per_rhw * near / depth, and
@@ -873,6 +914,7 @@ void HandGlowDraw() {
       if (right.valid && at.depth > 0.0f) {
         right.x += per_rhw * near_plane / at.depth;
       }
+      if (right.palm) right.palm_x = g_palm_right_x;
       for (int i = 0; i < 12; ++i) g_eye_matrix[1][i] = m[i];
       if (info->half_res_x > 0.0f) {
         g_eye_matrix[1][9] += per_rhw * near_plane / info->half_res_x;
@@ -977,7 +1019,7 @@ void HandGlowDraw() {
 // influence stops the press.
 int HandGlowTargets(TargetGlowMark* out, int max) {
   int n = 0;
-  Halo halos[4];
+  Halo halos[5];
   const int count = Halos(halos);
   for (int i = 0; i < count && n < max; ++i) {
     if (halos[i].draw.target == nullptr) continue;
@@ -1042,6 +1084,19 @@ bool HandGlowEyePoint(int eye, float* x, float* y, float* meters) {
   *x = p.x;
   *y = p.y;
   *meters = p.meters;
+  return true;
+}
+
+// For draw_hooks.cpp: the middle of the palm of the mod's hand in this eye,
+// from the same pass as HandGlowEyePoint. False when the mod does not draw
+// its hand, or the palm is not in the picture.
+bool HandGlowEyePalm(int eye, float* x, float* y) {
+  float hx = 0.0f, hy = 0.0f, meters = 0.0f;
+  if (!HandGlowEyePoint(eye, &hx, &hy, &meters)) return false;
+  const EyePoint& p = g_eye_point[eye];
+  if (!p.palm) return false;
+  *x = p.palm_x;
+  *y = p.palm_y;
   return true;
 }
 

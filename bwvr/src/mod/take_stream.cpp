@@ -13,14 +13,21 @@
 // THE PROBLEM. In a take at a distance the Hand is the real hand, and it is
 // not over the source. The pieces then come out of the land under the Hand.
 //
+// THE SAME WITH THE HAND AT THE SOURCE. The direct grab takes from a pile
+// with the real hand, and then the hand moves away or the player moves the
+// view. The game holds the Hand over the source only with the mouse, so new
+// pieces then start at the land under the real hand, away from the pile.
+//
 // WHAT THIS FILE DOES. A hook on that rule. After the rule of the game,
-// while the far grab has the source of a take at a distance, the mod writes
-// the place of each piece again from its age: a point on a curve from the
-// top of the source to the Hand (take_stream_math.h). It writes the velocity
-// of the curve too, because the tumble rule of the piece of wood reads it
+// while a take runs, the mod writes the place of each piece again from its
+// age: a point on a curve from the top of the source to the Hand
+// (take_stream_math.h). The source is the one of the far grab for a take at
+// a distance, else the source of the game's take (GInterfaceStatus+0x3C,
+// HandDirectTakeSource) with take_stream_hand=1. It writes the velocity of
+// the curve too, because the tumble rule of the piece of wood reads it
 // (AppearanceRuleTumble::ModifyAtomCore 0x006A6200). The game makes and
-// deletes the pieces as before. With the Hand at the source the far grab has
-// no take, and the line of the game stays.
+// deletes the pieces as before. With take_stream_hand=0 a take with the Hand
+// at the source has the line of the game.
 //
 // THE TOP OF A SOURCE is the point of its drawn mesh, which is the base of
 // the mesh, plus the height at which the game holds the Hand over the source
@@ -68,6 +75,8 @@
 
 void ModLog(const char* format, ...);
 void ControllersGesturePulse(float amplitude, float seconds);
+bool HandDirectTakeSource(void** object, const char** name);
+float HandDirectRoomUnits();
 // This file: the switch of the A/B key (below the namespace).
 void TakeStreamChange(const char* by);
 
@@ -118,6 +127,10 @@ const AgeFn f_Age = reinterpret_cast<AgeFn>(kAtomAge);
 const PosnFn f_Posn = reinterpret_cast<PosnFn>(kGesturePosn);
 
 bool g_on = true;           // take_stream
+bool g_hand = true;         // take_stream_hand
+bool g_trace = false;       // take_stream_test_trace
+// The lines of take_stream_test_trace in one stream.
+const int kTraceLines = 400;
 bool g_keys = false;        // test_keys
 bool g_key_down = false;
 bool g_hooked = false;
@@ -142,6 +155,8 @@ struct Seen {
 struct Stream {
   bool runs;
   bool placing;      // the mod places its pieces
+  bool distant;      // a take at a distance, else with the Hand at the source
+  int traced;        // lines of take_stream_test_trace
   void* source;
   float point[3];    // the last point of the mesh of the source
   float height;      // the last height that the game gave for the source
@@ -191,23 +206,52 @@ bool Lives(void* object, void* vtable) {
   return *static_cast<void* const*>(object) == vtable;
 }
 
+const char* Kind(bool distant) {
+  return distant ? "a take at a distance"
+                 : "a take with the Hand at the source";
+}
+
 void End(const char* why) {
   if (!g_stream.runs) return;
   g_stream.runs = false;
   if (g_stream.placing) {
-    ModLog("take stream  : the stream of the take at a distance is over "
-           "(%s). The mod placed %llu pieces in %llu frames. The rule of the "
-           "game ran %llu times, %llu of them a second time in a frame. The "
-           "longest way was %.1f units, and the top of the source went from "
-           "%.1f to %.1f, frame %llu", why, g_stream.pieces, g_stream.frames,
-           g_stream.calls, g_stream.second, g_stream.longest,
+    ModLog("take stream  : the stream of %s is over (%s). The mod placed "
+           "%llu pieces in %llu frames. The rule of the game ran %llu times, "
+           "%llu of them a second time in a frame. The longest way was %.1f "
+           "units, and the top of the source went from %.1f to %.1f, frame "
+           "%llu", Kind(g_stream.distant), why, g_stream.pieces,
+           g_stream.frames, g_stream.calls, g_stream.second, g_stream.longest,
            g_stream.first_top, g_stream.top, g_frame);
   } else {
-    ModLog("take stream  : the stream of the take at a distance is over "
-           "(%s). The game placed the pieces for %llu frames. Its rule ran "
-           "%llu times, %llu of them a second time in a frame, frame %llu",
-           why, g_stream.frames, g_stream.calls, g_stream.second, g_frame);
+    ModLog("take stream  : the stream of %s is over (%s). The game placed "
+           "the pieces for %llu frames. Its rule ran %llu times, %llu of "
+           "them a second time in a frame, frame %llu",
+           Kind(g_stream.distant), why, g_stream.frames, g_stream.calls,
+           g_stream.second, g_frame);
   }
+}
+
+// The source of the take now: the far grab has it for a take at a distance,
+// and the game for a take with the Hand at the source. False with no take.
+bool TakeSource(FarTakeSource* s, bool* distant) {
+  if (FarGrabTakeSource(s)) {
+    *distant = true;
+    return true;
+  }
+  void* object = nullptr;
+  const char* name = nullptr;
+  if (!HandDirectTakeSource(&object, &name)) return false;
+  *distant = false;
+  s->object = object;
+  // The source lives now, so its table is the first word.
+  s->vtable = Readable(object, sizeof(void*))
+                  ? *static_cast<void* const*>(object) : nullptr;
+  s->name = name;
+  // LatchFrame reads the point of the mesh. With no mesh the point is no
+  // number, and the line of the game stays.
+  for (int i = 0; i < 3; ++i) s->position[i] = NAN;
+  s->units_per_meter = HandDirectRoomUnits();
+  return true;
 }
 
 // The first call of the rule in a frame: the two ends of the curve, and
@@ -216,8 +260,9 @@ void LatchFrame(const uint8_t* rule, const uint8_t* collection) {
   g_latch.frame = g_frame;
   g_latch.place = false;
   FarTakeSource s = {};
-  if (!FarGrabTakeSource(&s)) {
-    End("the far grab has no take now");
+  bool distant = false;
+  if (!TakeSource(&s, &distant)) {
+    End("no take now");
     return;
   }
   // The top of the source: the point of its mesh now, and the height of the
@@ -252,13 +297,14 @@ void LatchFrame(const uint8_t* rule, const uint8_t* collection) {
   const float life = Float(rule + kRuleLife);
   const bool ends_ok = have_hand && take_stream_math::Finite3(top) &&
                        take_stream_math::Finite3(hand) && life > 0.0f;
-  const bool place = take_stream_math::Places(g_on, true, ends_ok);
+  const bool place =
+      take_stream_math::Places(g_on, distant || g_hand, ends_ok);
   g_latch.life = life;
   g_latch.curve = take_stream_math::Make(top, hand);
   g_latch.place = place;
 
   if (g_stream.runs && g_stream.source != s.object) {
-    End("the far grab has a different source");
+    End("the take has a different source");
   }
   if (g_stream.runs && g_stream.placing != place) {
     End(place ? "the mod places the pieces now"
@@ -266,6 +312,7 @@ void LatchFrame(const uint8_t* rule, const uint8_t* collection) {
   }
   const float way = place ? take_stream_math::Length(g_latch.curve, 16) : 0.0f;
   if (g_stream.runs) {
+    g_stream.distant = distant;
     memcpy(g_stream.point, point, sizeof(point));
     g_stream.height = height;
     g_stream.top = top[1];
@@ -275,6 +322,7 @@ void LatchFrame(const uint8_t* rule, const uint8_t* collection) {
   g_stream = {};
   g_stream.runs = true;
   g_stream.placing = place;
+  g_stream.distant = distant;
   g_stream.source = s.object;
   memcpy(g_stream.point, point, sizeof(point));
   g_stream.height = height;
@@ -283,26 +331,30 @@ void LatchFrame(const uint8_t* rule, const uint8_t* collection) {
   g_stream.longest = way;
   const char* name = s.name != nullptr ? s.name : "unknown";
   if (!place) {
-    ModLog("take stream  : the stream of a take at a distance starts. The "
-           "source %p (%s) has its point at %.1f %.1f %.1f and its top at "
-           "%.1f, and the Hand is at %.1f %.1f %.1f. The pieces are on the "
-           "line of the game, from the land under the Hand, frame %llu "
-           "(take_stream=%d%s)", s.object, name, point[0], point[1], point[2],
-           top[1], hand[0], hand[1], hand[2], g_frame,
-           g_on ? 1 : 0, g_on ? ", but an end of the curve is no number" : "");
+    ModLog("take stream  : the stream of %s starts. The source %p (%s) has "
+           "its point at %.1f %.1f %.1f and its top at %.1f, and the Hand is "
+           "at %.1f %.1f %.1f. The pieces are on the line of the game, from "
+           "the land under the Hand, frame %llu (take_stream=%d, "
+           "take_stream_hand=%d%s)", Kind(distant), s.object, name, point[0],
+           point[1], point[2], top[1], hand[0], hand[1], hand[2], g_frame,
+           g_on ? 1 : 0, g_hand ? 1 : 0,
+           g_on && (distant || g_hand)
+               ? ", but an end of the curve is no number"
+               : "");
     return;
   }
   const float dx = hand[0] - top[0];
   const float dy = hand[1] - top[1];
   const float dz = hand[2] - top[2];
   const float straight = sqrtf(dx * dx + dy * dy + dz * dz);
-  ModLog("take stream  : the stream of a take at a distance starts. The "
+  ModLog("take stream  : the stream of %s starts. The "
          "source %p (%s) has its point at %.1f %.1f %.1f and its top at %.1f "
          "(the game gives a height of %.2f), and the Hand is at %.1f %.1f "
          "%.1f. The way is %.1f units long (%.2f m of the room, %.1f units "
          "straight), and its top is %.1f units over the higher end. A piece "
          "lives %.2f s, and %.0f pieces start in a second. The mod places "
-         "the pieces on the curve, frame %llu (take_stream=1)", s.object,
+         "the pieces on the curve, frame %llu (take_stream=1)", Kind(distant),
+         s.object,
          name, point[0], point[1], point[2], top[1], height, hand[0], hand[1],
          hand[2], way,
          s.units_per_meter > 0.0f ? way / s.units_per_meter : 0.0f, straight,
@@ -345,6 +397,36 @@ void Place(const uint8_t* collection) {
   }
   memcpy(g_stream.seen, seen, sizeof(Seen) * count);
   g_stream.seen_count = count;
+}
+
+// take_stream_test_trace=1, a test aid: once a frame, the top of the source,
+// the Hand, and the place of the newest piece after the rule (and after the
+// mod, when it places the pieces). On the line of the game the newest piece
+// is at the land under the Hand of its start.
+void Trace(const uint8_t* collection) {
+  if (g_stream.traced >= kTraceLines) return;
+  ++g_stream.traced;
+  const uint8_t* newest = nullptr;
+  float young = 1e9f;
+  uint8_t* atom = Ptr(collection + kCollectionFirst);
+  for (int n = 0; atom != nullptr && n < kMaxPieces; ++n) {
+    const float age = f_Age(atom, nullptr);
+    if (age < young) {
+      young = age;
+      newest = atom;
+    }
+    atom = Ptr(atom + kAtomNext);
+  }
+  float at[3] = {0.0f, 0.0f, 0.0f};
+  if (newest != nullptr) memcpy(at, newest + kAtomPlace, sizeof(at));
+  const take_stream_math::Curve& c = g_latch.curve;
+  ModLog("take stream  : trace, frame %llu, %s: the top of the source at "
+         "%.1f %.1f %.1f, the Hand at %.1f %.1f %.1f, the newest piece "
+         "(%.2f s old) at %.1f %.1f %.1f",
+         g_frame, g_latch.place ? "the mod places the pieces"
+                                : "the line of the game",
+         c.p[0][0], c.p[0][1], c.p[0][2], c.p[3][0], c.p[3][1], c.p[3][2],
+         newest != nullptr ? young : -1.0f, at[0], at[1], at[2]);
 }
 
 void ArrivalsEnd() {
@@ -406,6 +488,7 @@ bool __fastcall h_Rule(void* rule, void* unused, void* collection) {
     ++g_stream.second;
   }
   if (g_latch.place) Place(static_cast<const uint8_t*>(collection));
+  if (first && g_trace) Trace(static_cast<const uint8_t*>(collection));
   return r;
 }
 
@@ -414,6 +497,13 @@ const char* Words(bool on) {
               "curve from the top of the source to the Hand"
             : "The pieces of the stream of a take at a distance are on the "
               "line of the game, from the land under the Hand";
+}
+
+const char* HandWords(bool on) {
+  return on ? "A take with the Hand at the source has the curve too, from "
+              "the top of the source of the take of the game"
+            : "A take with the Hand at the source has the line of the game, "
+              "from the land under the Hand";
 }
 
 // THE A/B KEY (test_keys=1): Ctrl and Shift with the minus key of the row of
@@ -457,6 +547,11 @@ void TakeStreamSetOptions(int take_stream, bool test_keys) {
   g_keys = test_keys;
 }
 
+void TakeStreamSetHand(int hand, int trace) {
+  g_hand = hand != 0;
+  g_trace = trace != 0;
+}
+
 void TakeStreamInstall() {
   if (g_hooked) return;
   static const uint8_t kRuleBytes[] = {0x83, 0xEC, 0x50, 0x57, 0x8B, 0xF9};
@@ -483,6 +578,10 @@ void TakeStreamInstall() {
          g_hooked ? Words(g_on)
                   : "The hook is missing, so the pieces are on the line of "
                     "the game");
+  if (g_hooked) {
+    ModLog("take stream  : take_stream_hand=%d. %s", g_hand ? 1 : 0,
+           HandWords(g_hand));
+  }
 }
 
 void TakeStreamFrame(uint64_t frame) {
@@ -497,7 +596,8 @@ void TakeStreamFrame(uint64_t frame) {
   // The game deletes the particle system at the end of a take, so its rule
   // does not run again.
   FarTakeSource s = {};
-  if (!FarGrabTakeSource(&s)) {
+  bool distant = false;
+  if (!TakeSource(&s, &distant)) {
     End("the take is over");
   } else if (frame > g_stream.last + kQuietFrames) {
     End("the rule of the game did not run for 30 frames");

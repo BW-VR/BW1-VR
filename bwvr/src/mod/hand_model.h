@@ -77,9 +77,42 @@ bool HandModelIndexTip(int hand, float out[3]);
 // True when a hand was built in this frame.
 bool HandModelBuilt();
 
+// The mesh of one hand (0 the left hand, 1 the right hand) as it was built
+// in this frame, in the world: *points has 3 floats a vertex, *index 3
+// vertices a triangle, and *alpha the opacity of each vertex, 0 to 255: the
+// alpha of the texture at the vertex times the opacity of the hand. Returns
+// the count of triangles, 0 when the hand was not built (hand_cut.cpp).
+int HandModelWorldMesh(int hand, const float** points, const uint32_t** index,
+                       const uint8_t** alpha, int* vertices);
+
 // The opacity of one hand (0 the left hand, 1 the right hand), 0 to 1. It
 // multiplies the alpha of the texture. It stays until the next call.
 void HandModelSetOpacity(int hand, float opacity);
+
+// THE CUT SCENE WINDOW (overlay.cpp, cutscene_hands). With `on` the next
+// builds take a light from straight up in place of the light of the game,
+// because the hands are in the room and not in the world. With FrontDepth on
+// the draw puts each depth at the front of the depth buffer
+// (cutscene_hands_math::FrontDepth).
+void HandModelSetRoomLight(bool on);
+void HandModelSetFrontDepth(bool on);
+
+// THE FLOW ON THE HAND (docs/hand.md, "The flow of a miracle on the Hand"):
+// the game's own flow, which it draws on its Hand while a miracle is in it.
+// The texture is the game's surface of S_Hand_Flow.raw on its device. A
+// texture point (u, v) of the mesh draws at (u * scale + du, v * scale + dv),
+// and the lit color of each vertex is `color` (the alpha and the color of the
+// player) times the light of the game.
+struct HandFlowGlow {
+  void* texture;   // IDirectDrawSurface7
+  uint32_t color;
+  float scale;
+  float du, dv;
+};
+
+// The hand (0 the left hand, 1 the right hand) that takes the flow in the
+// next draw, or -1 for none. The flow is copied.
+void HandModelSetFlow(int hand, const HandFlowGlow* flow);
 
 // In an eye pass: draws the hands of this frame with the camera of the eye.
 // Returns the count of triangles drawn, or -1 when the draw failed.
@@ -96,3 +129,7 @@ int HandModelDrawReflection(IDirect3DDevice7* device, const float camera[12],
 
 // Once a report window.
 void HandModelReport();
+
+// hand_two_sided: true when the hands draw both sides of each triangle. The
+// mesh of the game's Hand follows it too (hand_exact.cpp).
+bool HandModelTwoSided();

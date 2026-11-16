@@ -65,7 +65,9 @@ $deadline = (Get-Date).AddMinutes($Minutes)
 while ((Get-Date) -lt $deadline) {
     $idle = [int](& (Join-Path $sp 'idle_seconds.ps1'))
     $running = [bool](Get-Process runblack -ErrorAction SilentlyContinue)
-    if ($idle -ge 620 -and -not $running) {
+    # The owner's "test now" turns the wait for an idle PC off, as in
+    # desk_run.ps1.
+    if (($idle -ge 620 -or (Test-BwvrTestNow)) -and -not $running) {
         # A test save has no start dialog. The game opens its Main Menu over
         # the loaded game, and Get-BwvrMenuStart gives the words, the one
         # point and the keys that get the run through it. Only a click on

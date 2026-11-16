@@ -312,14 +312,15 @@ inline void QuadLayerChecks() {
     f.window = true;
     f.window_body = ql::MakeWindow(wl);
     const std::vector<uint32_t> k = Kinds(Frame(7, 1, f, pictures, &sent));
-    const uint32_t want[] = {ss::kFrame, ss::kWalkBegin, ss::kWalkEnd, ss::kPanel,
-                             ss::kCardPicture, ss::kCard, ss::kCardPicture, ss::kCard,
-                             ss::kCardPicture, ss::kCard, ss::kCardPicture, ss::kCard,
-                             ss::kWindow, ss::kFrameEnd};
-    bool same = k.size() == sizeof(want) / sizeof(want[0]);
-    for (size_t i = 0; same && i < k.size(); ++i) same = k[i] == want[i];
-    Check(same, "a frame: the panel, each card in the order of its index after its picture, then the window",
-          static_cast<double>(k.size()), 14);
+    std::vector<uint32_t> want = {ss::kFrame, ss::kWalkBegin, ss::kWalkEnd, ss::kPanel};
+    for (int c = 0; c < bwvr::kCards; ++c) {
+      want.push_back(ss::kCardPicture);
+      want.push_back(ss::kCard);
+    }
+    want.push_back(ss::kWindow);
+    want.push_back(ss::kFrameEnd);
+    Check(k == want, "a frame: the panel, each card in the order of its index after its picture, then the window",
+          static_cast<double>(k.size()), static_cast<double>(want.size()));
     Check(f.cards[2].card == 2 && f.cards[2].rect[2] == 32 && f.cards[2].texture_width == 64 &&
               f.cards[2].position[2] == -0.4f && f.cards[2].orientation[1] == 0.2f &&
               f.cards[2].width == 0.08f && f.cards[2].flags == ss::kCardVisible &&
@@ -399,11 +400,12 @@ inline void QuadLayerChecks() {
     const stream_ring::UnitInfo with = stream_ring::Inspect(frame_pictures.data(), frame_pictures.size());
     const std::vector<uint8_t> frame_cards = Frame(14, 1, f, pictures, &fresh);
     const stream_ring::UnitInfo without = stream_ring::Inspect(frame_cards.data(), frame_cards.size());
-    Check(gone == 1 && layer_records == 10 && stream_ring::KeepKind(ss::kCardPicture) &&
+    Check(gone == 1 && layer_records == 2 + 2 * bwvr::kCards &&
+              stream_ring::KeepKind(ss::kCardPicture) &&
               !stream_ring::KeepKind(ss::kCard) && !stream_ring::KeepKind(ss::kPanel) &&
               !stream_ring::KeepKind(ss::kWindow) && with.keep && !without.keep,
           "a frame with no walks keeps its layers and its pictures, and a picture of a card is kept as the pixels of a surface",
-          static_cast<double>(layer_records), 10);
+          static_cast<double>(layer_records), 2 + 2 * bwvr::kCards);
 
     // THE SAME CALLS (Normal): two frames with the same layers have the same
     // normal records, with a picture or without.
@@ -416,7 +418,8 @@ inline void QuadLayerChecks() {
     Check(a.size() > b.size() && ql::Normal(a.data(), a.size()) == ql::Normal(b.data(), b.size()) &&
               ql::Normal(a.data(), a.size()) != ql::Normal(c.data(), c.size()),
           "the same calls with and without the pictures have the same normal records, and 1 mm more does not",
-          static_cast<double>(ql::Normal(a.data(), a.size()).size()), 4 * 88 + 184 + 144);
+          static_cast<double>(ql::Normal(a.data(), a.size()).size()),
+          bwvr::kCards * 88 + 184 + 144);
   }
 
   // THE RULES OF XrScreen::BuildFrame.
@@ -427,7 +430,7 @@ inline void QuadLayerChecks() {
     hidden.flags = 0;
     wide.rect[0] = 30;
     flat.height = 0.0f;
-    other.card = 4;
+    other.card = bwvr::kCards;
     high.texture_height = 9000;
     Check(ql::CardShows(c) && !ql::CardShows(hidden) && !ql::CardShows(wide) &&
               !ql::CardShows(flat) && !ql::CardShows(other) && !ql::CardShows(high),
@@ -535,26 +538,35 @@ inline void QuadLayerChecks() {
       f.window_body.wall_size[k][0] = 1.0f;
       f.window_body.wall_size[k][1] = 1.0f;
     }
-    const bool all[4] = {true, true, true, true};
+    bool all[bwvr::kCards];
+    for (int c = 0; c < bwvr::kCards; ++c) all[c] = true;
     ql::LayerRef o[ql::kMostLayers];
     const int n = ql::Order(f, true, true, all, o);
-    const int want_kind[12] = {ql::kLayerProjection, ql::kLayerPanel, ql::kLayerPanel,
-                               ql::kLayerPanel, ql::kLayerCard, ql::kLayerCard,
-                               ql::kLayerCard, ql::kLayerCard, ql::kLayerWall,
-                               ql::kLayerWall, ql::kLayerWall, ql::kLayerWall};
-    const int want_index[12] = {0, 0, 1, 2, bwvr::kCardSubtitles, bwvr::kCardHintPointing,
-                                bwvr::kCardHintOther, bwvr::kCardRing, 0, 1, 2, 3};
-    bool same = n == 12;
-    for (int i = 0; same && i < n; ++i) same = o[i].kind == want_kind[i] && o[i].index == want_index[i];
+    const int card_order[bwvr::kCards] = {
+        bwvr::kCardSubtitles,       bwvr::kCardCreature,        bwvr::kCardHintPointing,
+        bwvr::kCardHintOther,       bwvr::kCardHintButton0,     bwvr::kCardHintButton0 + 1,
+        bwvr::kCardHintButton0 + 2, bwvr::kCardHintButton0 + 3, bwvr::kCardSheet,
+        bwvr::kCardRing,            bwvr::kCardRingRight,       bwvr::kCardBubble,
+        bwvr::kCardKeyboard,        bwvr::kCardRay,             bwvr::kCardRayTip};
+    std::vector<ql::LayerRef> want_order = {{ql::kLayerProjection, 0}, {ql::kLayerPanel, 0},
+                                            {ql::kLayerPanel, 1}, {ql::kLayerPanel, 2}};
+    for (int c = 0; c < bwvr::kCards; ++c) want_order.push_back({ql::kLayerCard, card_order[c]});
+    for (int k = 0; k < 4; ++k) want_order.push_back({ql::kLayerWall, k});
+    bool same = n == static_cast<int>(want_order.size()) && n == ql::kMostLayers;
+    for (int i = 0; same && i < n; ++i) {
+      same = o[i].kind == want_order[i].kind && o[i].index == want_order[i].index;
+    }
     Check(same,
-          "a frame of the world: the projection layer, the menu, the help, the Creature panel, the subtitle card, the hint cards, the ring, the four walls",
-          n, 12);
-    const bool no_ring[4] = {true, true, true, false};
+          "a frame of the world: the projection layer, the menu, the help, the Creature panel, each card in the order of XrScreen::BuildFrame, the four walls",
+          n, static_cast<double>(want_order.size()));
+    bool no_ring[bwvr::kCards];
+    for (int c = 0; c < bwvr::kCards; ++c) no_ring[c] = c != bwvr::kCardRing;
     const int n2 = ql::Order(f, true, false, no_ring, o);
-    Check(n2 == 8 && o[1].kind == ql::kLayerCard && o[3].index == bwvr::kCardHintOther &&
-              o[4].kind == ql::kLayerWall,
+    const int cards2 = bwvr::kCards - 1;
+    Check(n2 == 1 + cards2 + 4 && o[1].kind == ql::kLayerCard &&
+              o[4].index == bwvr::kCardHintOther && o[1 + cards2].kind == ql::kLayerWall,
           "with no panel image there is no panel quad, and a card with no picture does not show",
-          n2, 8);
+          n2, 1 + cards2 + 4);
     ql::FrameLayers s = f;
     s.window_body.screen = 1;
     const int n3 = ql::Order(s, true, true, all, o);

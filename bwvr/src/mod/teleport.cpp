@@ -60,6 +60,7 @@
 #include <string.h>
 
 #include "aim_smooth.h"
+#include "camera_zone.h"
 #include "controller_math.h"
 #include "controllers.h"
 #include "debug_menu.h"
@@ -349,6 +350,11 @@ bool ValidTarget(Mode mode, float x, float z, float ground, const char** why) {
     *why = "the target is outside the 3400 unit limit of the camera";
     return false;
   }
+  if (mode == kGod && !CameraZoneAllows(x, z)) {
+    *why = "the target is past the limit of the camera zone of the game "
+           "(god_zone_margin)";
+    return false;
+  }
   *why = "the target is land";
   return true;
 }
@@ -634,6 +640,17 @@ void TeleportRingChange(const char* by) {
   g_settings.ring_mode = g_settings.ring_mode != 0 ? 0 : 1;
   ControllersGesturePulse(0.5f, g_settings.ring_mode != 0 ? 0.24f : 0.08f);
   LogRuleMode(by);
+}
+
+// The settings window (settings_panel.cpp): teleport at once. With 0 the
+// press of A goes to the game again.
+bool TeleportSetOn(bool on, const char* by) {
+  if (!g_installed) return false;
+  g_settings.on = on;
+  ModLog("teleport     : %s: teleport=%d. %s", by, on ? 1 : 0,
+         on ? "Hold A to aim an arc, and let go of A to go to the ring"
+            : "A does the jump of the game");
+  return true;
 }
 
 int TeleportRingValue() {

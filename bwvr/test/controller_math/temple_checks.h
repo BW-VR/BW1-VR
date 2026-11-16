@@ -511,6 +511,84 @@ inline void TempleChecks() {
           "camera already", 0, 0);
   }
 
+  // The pixel of a press for the camera code of a room (temple_press_pixel).
+  {
+    const float k = 0.0174533f;
+    // A view as the engine builds it from a heading and a pitch, with a roll
+    // about the line of sight: columns right, up and forward.
+    const auto view = [k](float heading, float pitch, float roll, float out[9]) {
+      const float f[3] = {sinf(heading * k) * cosf(pitch * k), sinf(pitch * k),
+                          cosf(heading * k) * cosf(pitch * k)};
+      float r[3] = {f[2], 0.0f, -f[0]};
+      const float length = sqrtf(r[0] * r[0] + r[2] * r[2]);
+      r[0] /= length;
+      r[2] /= length;
+      const float u[3] = {f[1] * r[2] - f[2] * r[1], f[2] * r[0] - f[0] * r[2],
+                          f[0] * r[1] - f[1] * r[0]};
+      const float c = cosf(roll * k), s = sinf(roll * k);
+      for (int i = 0; i < 3; ++i) {
+        out[i * 3 + 0] = c * r[i] - s * u[i];
+        out[i * 3 + 1] = s * r[i] + c * u[i];
+        out[i * 3 + 2] = f[i];
+      }
+    };
+    // The hall at a render of 2760 by 2208 with a view angle of 90 degrees
+    // across. The camera of the game is at its rest pose, the head turns 30
+    // degrees to the right with a roll of 15 degrees, and it leans 2 units
+    // (27 cm) to the side. The end of the ray is on a door 40 units away.
+    const float hx = 1380.0f, hy = 1104.0f, fx = 1.0f, fy = 1.25f;
+    const float camera[3] = {0.0f, 9.92f, 18.32f};
+    float engine[9], head[9];
+    view(150.0f, 5.0f, 0.0f, engine);
+    view(150.0f, 5.0f, 15.0f, head);
+    const float eye[3] = {camera[0] + 2.0f * engine[0],
+                          camera[1] + 2.0f * engine[3],
+                          camera[2] + 2.0f * engine[6]};
+    const float aim[3] = {sinf(175.0f * k), 0.12f, cosf(175.0f * k)};
+    const float length = sqrtf(Dot(aim, aim));
+    float end[3];
+    for (int i = 0; i < 3; ++i) end[i] = eye[i] + aim[i] / length * 40.0f;
+    // The pixel of the pointer: the end, seen from the eye in the view of
+    // the head.
+    float head_x = 0.0f, head_y = 0.0f;
+    Check(PressPixel(head, eye, end, hx, hy, fx, fy, &head_x, &head_y),
+          "the end of the ray is in the view of the head", 1, 1);
+    float x = 0.0f, y = 0.0f;
+    Check(PressPixel(engine, camera, end, hx, hy, fx, fy, &x, &y),
+          "the end of the ray is in front of the camera of the engine", 1, 1);
+    float ray[3];
+    PixelRay(engine, hx, hy, fx, fy, x, y, ray);
+    Near("the ray of the camera code from the pixel of the press goes through "
+         "the end of the ray",
+         PointToRay(camera, ray, end), 0.0, 1e-3);
+    float old_ray[3];
+    PixelRay(engine, hx, hy, fx, fy, head_x, head_y, old_ray);
+    const float off = PointToRay(camera, old_ray, end);
+    Check(off > 5.0f,
+          "the ray of the camera code from the pixel of the view of the head "
+          "misses the end by more than 5 units", off, 5.0f);
+    // With no roll and no lean the view of the head is the view of the
+    // engine, and the pixel of the pointer already puts the ray of the
+    // camera code through the end.
+    float end_level[3];
+    for (int i = 0; i < 3; ++i) {
+      end_level[i] = camera[i] + aim[i] / length * 40.0f;
+    }
+    float plain_x = 0.0f, plain_y = 0.0f;
+    PressPixel(engine, camera, end_level, hx, hy, fx, fy, &plain_x, &plain_y);
+    float plain_ray[3];
+    PixelRay(engine, hx, hy, fx, fy, plain_x, plain_y, plain_ray);
+    Near("with no roll and no lean the pixel of the view of the head puts the "
+         "ray of the camera code through the end",
+         PointToRay(camera, plain_ray, end_level), 0.0, 1e-3);
+    // A point behind the camera has no pixel.
+    const float behind[3] = {camera[0] - 30.0f * engine[2],
+                             camera[1] - 30.0f * engine[5],
+                             camera[2] - 30.0f * engine[8]};
+    Check(!PressPixel(engine, camera, behind, hx, hy, fx, fy, &x, &y),
+          "a point behind the camera has no pixel", 0, 0);
+  }
+
   // The fade of the Temple in the second eye pass (temple_fade_eyes).
   {
     // The entry of the Temple: 1.2, to 0, and black.

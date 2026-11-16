@@ -21,7 +21,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#include "address_space_math.h"
+#include "memory_watch_math.h"
 
 extern void ModLog(const char* format, ...);
 // block_watch.cpp: the places of the large blocks, after each line, and
@@ -72,7 +72,7 @@ int IniKey(const char* key, int fallback) {
   return static_cast<int>(GetPrivateProfileIntA("bwvr", key, fallback, path));
 }
 
-void Walk(address_space::Summary* s, double* ms) {
+void Walk(memory_watch_math::Summary* s, double* ms) {
   LARGE_INTEGER hz, start, end;
   QueryPerformanceFrequency(&hz);
   QueryPerformanceCounter(&start);
@@ -80,7 +80,7 @@ void Walk(address_space::Summary* s, double* ms) {
   GetSystemInfo(&info);
   const uintptr_t top =
       reinterpret_cast<uintptr_t>(info.lpMaximumApplicationAddress);
-  address_space::Start(s);
+  memory_watch_math::Start(s);
   const bool unseen = BlockWatchOn();
   g_unseen_now = 1 - g_unseen_now;
   g_unseen_count[g_unseen_now] = 0;
@@ -90,10 +90,10 @@ void Walk(address_space::Summary* s, double* ms) {
   while (at < top) {
     MEMORY_BASIC_INFORMATION m;
     if (VirtualQuery(reinterpret_cast<LPCVOID>(at), &m, sizeof(m)) == 0) break;
-    const address_space::Region r = {
+    const memory_watch_math::Region r = {
         reinterpret_cast<uintptr_t>(m.BaseAddress), m.RegionSize,
         reinterpret_cast<uintptr_t>(m.AllocationBase), m.State, m.Type};
-    address_space::Add(s, r);
+    memory_watch_math::Add(s, r);
     if (unseen) {
       const bool private_part = m.State != MEM_FREE && m.Type == MEM_PRIVATE;
       const uintptr_t base = reinterpret_cast<uintptr_t>(m.AllocationBase);
@@ -111,7 +111,7 @@ void Walk(address_space::Summary* s, double* ms) {
     if (next <= at) break;
     at = next;
   }
-  address_space::Finish(s);
+  memory_watch_math::Finish(s);
   if (unseen) CloseUnseen(open_base, open_size);
   QueryPerformanceCounter(&end);
   *ms = hz.QuadPart > 0
@@ -120,7 +120,7 @@ void Walk(address_space::Summary* s, double* ms) {
 }
 
 DWORD WINAPI WatchThread(LPVOID) {
-  using namespace address_space;
+  using namespace memory_watch_math;
   double first_use = -1.0;
   double last_use = 0.0;
   double most_use = 0.0;

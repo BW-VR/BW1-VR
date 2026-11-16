@@ -381,4 +381,105 @@ inline bool FocusOnHead(bool key_on, bool player_is_camera,
          point_bits[1] == camera_bits[1] && point_bits[2] == camera_bits[2];
 }
 
+// THE BUILDING OF A SCAFFOLD IN THE HAND [V, runblack.exe 1.42].
+//
+// Scaffold+0x80 is the angle of the building that the scaffold makes, in
+// radians from 0 to 2 pi. Scaffold::ProcessInHand (0x006E8570) runs once a
+// game turn while the Hand carries the scaffold. It adds the speed of
+// GScaffoldInfo+0x114 (the info at Scaffold+0x28) to the angle, and takes
+// 2 pi away when the sum is more than 2 pi. Flag 0x200 of Scaffold+0x88
+// stops the add. MapCoords::IsSuitableForFixed tests the place with that
+// angle, and Scaffold::BuildBuilding (0x006E9250) gives the angle to the
+// planned building. Scaffold::DrawInHand (0x005181A0) draws the building at
+// the angle plus (ms % 100) / 100 of the speed, the part of the game turn
+// that is gone (the ms are at GGame+0x25053C). No key and no mouse input
+// turns the building: the plain game turns it by itself.
+//
+// The angle grows from +x to +z of the world (DrawInHand puts the x row of
+// the building at (cos, 0, sin)), and the world is left handed with y up. So
+// a larger angle turns the building to the left as the head sees it from
+// above.
+
+const float kTwoPi = 6.2831853f;
+
+// An angle in 0 to 2 pi.
+inline float WrapTwoPi(float a) {
+  a = fmodf(a, kTwoPi);
+  if (a < 0.0f) a += kTwoPi;
+  if (a >= kTwoPi) a -= kTwoPi;
+  return a;
+}
+
+// An angle in -pi to pi.
+inline float WrapPi(float a) {
+  a = fmodf(a, kTwoPi);
+  if (a > 0.5f * kTwoPi) a -= kTwoPi;
+  if (a <= -0.5f * kTwoPi) a += kTwoPi;
+  return a;
+}
+
+// THE ROLL OF THE WRIST. Quaternions x y z w in the LOCAL space of OpenXR:
+// x right, y up, -z forward. A positive roll turns the hand clockwise as the
+// player sees it along the arm (the roll of controller_math::FakeOrientation).
+//
+// The roll is the bank of the hand: the angle of its right axis below the
+// level, about its forward axis. A turn of the aim to the side or up and
+// down does not change the bank, so a hand that moves the scaffold over the
+// land does not turn the building. level is the cosine of the pitch of the
+// forward axis: near 0 the hand points straight down or up, and the bank
+// has no meaning.
+inline float HandBank(const float q[4], float* level) {
+  const float x = q[0], y = q[1], z = q[2], w = q[3];
+  // The y of the right axis (1, 0, 0) and of the up axis (0, 1, 0), turned.
+  const float right_y = 2.0f * (x * y + w * z);
+  const float up_y = 1.0f - 2.0f * (x * x + z * z);
+  *level = sqrtf(right_y * right_y + up_y * up_y);
+  return atan2f(-right_y, up_y);
+}
+
+// The turn of the hand about its own forward axis from `last` to `now`, in
+// radians from -pi to pi: the twist about -z of conj(last) * now, which is
+// 2 atan2(-z, w).
+inline float ForwardTwist(const float last[4], const float now[4]) {
+  const float ax = -last[0], ay = -last[1], az = -last[2], aw = last[3];
+  const float bx = now[0], by = now[1], bz = now[2], bw = now[3];
+  const float z = aw * bz + ax * by - ay * bx + az * bw;
+  const float w = aw * bw - ax * bx - ay * by - az * bz;
+  if (fabsf(z) < 1e-9f && fabsf(w) < 1e-9f) return 0.0f;
+  return WrapPi(2.0f * atan2f(-z, w));
+}
+
+// Below this level the hand points almost straight down or up (more than 72
+// degrees), and the step of the roll is the twist about the forward axis.
+const float kBankLevel = 0.3f;
+
+// The roll of the wrist from the pose of the last frame to the pose of now:
+// the change of the bank, or the twist when one of the two poses points
+// almost straight down or up. The sum of the steps of the frames is the roll
+// since the Hand took the scaffold. A turn of more than a half turn in one
+// frame counts as the shorter turn the other way.
+inline float RollStep(const float last[4], const float now[4]) {
+  float level_last = 0.0f, level_now = 0.0f;
+  const float bank_last = HandBank(last, &level_last);
+  const float bank_now = HandBank(now, &level_now);
+  if (level_last >= kBankLevel && level_now >= kBankLevel) {
+    return WrapPi(bank_now - bank_last);
+  }
+  return ForwardTwist(last, now);
+}
+
+// The angle of the building for a roll of the wrist since the Hand took the
+// scaffold: 1 to 1, and a clockwise turn of the wrist turns the building
+// clockwise as the head sees it from above (a smaller angle).
+inline float BuildingAngle(float angle_at_take, float roll_since_take) {
+  return WrapTwoPi(angle_at_take - roll_since_take);
+}
+
+// The angle to write before the game adds its speed in
+// Scaffold::ProcessInHand, so that the sum is `wanted`. The game takes 2 pi
+// away from a sum over 2 pi, so the result is in 0 to 2 pi.
+inline float AngleBeforeAdd(float wanted, float add) {
+  return WrapTwoPi(wanted - add);
+}
+
 }  // namespace village_math

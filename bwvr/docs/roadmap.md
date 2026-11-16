@@ -8,6 +8,10 @@ The doc of each area in `bwvr/docs` ends with the open questions and the
 known limits of that area. This file names the work, and the doc has the
 detail.
 
+The checks that only the owner in a headset can make, and the faults that
+the log of a normal play tells, are in `headset-checks.md`. The checks that
+a desktop run can prove are in R12. An item here keeps the work to build.
+
 ## Where it stands
 
 The mod is at version 1.2.0, an alpha for a small group of testers.
@@ -35,7 +39,9 @@ The known faults for a player are in `bwvr/installer/README.txt`.
 The most urgent part is first. An item that says "not run" or "not shown"
 is built, and no test has proven it.
 
-### Faults in play
+### Next
+
+These items come before the other work.
 
 - **Q1. The game with the profile of a player in a Quest 3: check it in the
   headset.** The game with the profile of the PC stopped on the loading
@@ -56,67 +62,76 @@ is built, and no test has proven it.
   - that "Tell the game that there is no internet" is on in the page
     Testing of the menu.
 
-- **B2. A catch at once: check it in a headset.** A press of the grip on
-  an object that moves (it falls, flies or rolls) puts the object in the
-  hand from the first frame after the press. The game sends its pick up at
-  once, the body of the object stays where it is, and the mod draws the
-  object in the Hand (`catch_at_once=1`, `grab.md`, "A catch at once"). No
-  such press is a click, so no rock splits. Desktop runs show it at the frame
-  rate of the rig and at 90 frames a second, with a rock in its fall, a rock
-  that the hand threw up, a grip of 50 ms, a throw and a drop after the
-  catch, and a fetch from a distance of a tree that still moves.
 
-  Check in a headset, with a real hand:
-  - that a rock in its fall, a rock that you threw up and a rock that rolls
-    on the land is in the hand at the press: it does not move on, and it
-    does not jump,
-  - that its way to its place in the hand (0.12 s) looks right when it was
-    15 to 23 cm from the finger tip at the press,
-  - that it leaves the hand as each held object does: a throw with the speed
-    of the hand, or a drop,
-  - that an object that still moves comes from a distance with the glide
-    from the press, and does not wait at its place first,
-  - that no grip on an object that moves breaks a rock,
-  - that the guard of a throw does not stop a catch (`catch_moving=3`: the
-    guard ends when the grip is fully open).
+- **B35. A thrown object that hits the water turns fast.** A rock of
+  `throw_queue.ps1 -Runs rockfast` that lands in the sea turns 2.36 times a
+  second of the picture with no point that touches, over the cap of 1.5
+  turns a second (`throw_turn`, `throw.md`, "The turn of a thrown
+  object"). The cap acts in 0 steps there. The table of `throw.md` for a
+  tree and a rock needs a run in which each throw lands on the land.
+- **P20. The spell book: the open parts.** A tap of B (or X) opens a spell
+  book over the hand that does not point, and the pointing hand pulls a
+  miracle out of it with the grip: the game's own request (`spell_book=1`,
+  `spell_book_b=1`, `spell_book_pull_cm=20`, the orbs of the game on a ring
+  `spell_book_ring=1`, `spell_book_orbs=1`, `debug_all_miracles` for tests
+  on the debug page, group Miracles, `miracles.md`, "The spell book"). The
+  palm that turns up shows the sheet of the gestures (`gesture_sheet=1`).
+  The recipe `village_run.ps1 -Kind book` shows the
+  open, the halo, the card, the pull, the spring back, the take and a
+  refusal. The checks of the book, the row of gestures and the draw are in
+  `headset-checks.md`, "What the owner checks", and in R12. Open:
+  - No line of a card says that B held down draws a gesture while the Hand
+    is empty. The sheet of the gestures shows the shapes over the palm.
+  - Only a headset shows if the sheet of the gestures is easy to read over
+    the palm, and if a tap of B opens the book with no gesture by mistake.
+  - The book of all miracles (`debug_all_book=1`, 34 items on 6 pages,
+    `miracles.md`, "The book of all miracles") and the debug row "Spawn all
+    miracle orbs" have no desktop run yet: the recipes `village_run.ps1
+    -Kind allbook` and `-Kind orbsave` wait for the test laptop. No run has
+    cast a power level (Increase, Extreme), or the Creature miracles Weak,
+    Compassion, Angry and Itchy, in the mod. The tally line of each report
+    window says which of the 34 a session cast.
+  - Only a headset shows if the seals "Back" and "Next" are easy to pick,
+    and if the orbs on the land are easy to reach.
+  - A save keeps the miracles that "Unlock all" gives the towns
+    (`miracles.md`, "What a save keeps"). The mod deletes its orbs and puts
+    the limit of prayer power back before each save, but it does not take
+    the miracles of the towns back. The recipe `village_run.ps1 -Kind
+    orbsave` waits for the test laptop.
+  - The orbs in the cells: only a headset shows how they look in their
+    holes of the page, with the land behind the glass.
+  - The leash gestures and the scribble are not in the book.
+### Faults in play
 
-  The test key (Ctrl and Shift with Backspace) gives the pick up of the game
-  for a comparison: the object moves on for 0.3 s and then jumps into the
-  hand. Still open:
-  - Not shown: a grip on an object that rolls for more than 1 s. The recipes
-    `rollnear`, `rollfar`, `droproll` and `treenear` do not reach that state
-    on the desktop (`bwvr/tools/desk/README.md`, "Known limits of the
-    recipes").
-  - Not shown in a run: the guard of a throw. The scripted grip opens in one
-    frame, so it is fully open at once. The math checks have the rule.
-  - A press with no target when a ball rolls 23 to 32 cm from the Hand's
-    point: the object is past its reach of the pick, and the aim is not on
-    it, so the grip does nothing.
-  - A tree that is let go comes to rest in about 1 s now
-    (`throw_tree_settle`, `throw.md`, "The landing of a tree"). Not shown:
-    a far target that hides and shows by itself (not seen in a desktop
-    run), a tree thrown fast across the land, and the look in a headset.
-    A tree that does not move for 0.5 s is at rest, also while its torque
-    is over the limit of the rest test of the game (`throw_land_rest`,
-    `throw.md`, "The rest after a landing"). A tree thrown at 3 m/s left
-    the physics 2.6 and 4.3 s after the release (`throw_queue.ps1 -Runs
-    tree`).
-- **B4. The lean alone at a place where the game plants a tree.** The card
-  says "Hold upright to plant" for a tree that leans more than 0.2 rad in the
-  Hand, and the tree has the same lean in the physics of the game
-  (`throw_queue.ps1 -Runs treelean -NewGame` in `bwvr/tools/desk`). That run
-  is at a place where a body is in the way, so it does not show that the lean
-  alone stops the planting. Not run: the turn of `treelean` at the place of
-  `-Runs treeleft`, where the game plants an upright tree. The card does not
-  count a near object of a class whose body the mod does not make: a
-  fragment, a field crop, a chess piece, the heart of a citadel and a shield
-  (`grab.md`, "The test of the mod").
-- **B1b. The roots pile of a far grab.** `far_roots_at_tree=1` puts the pile
-  at the roots, as for a tree that the Hand takes. Only a headset shows
-  whether that is what the player means by the "pit" at the roots. Not
-  run: a tree that comes from a distance and is then planted again. A
-  tree that is thrown, or that falls from more than `release_fall_cm`,
-  is not planted by the game: it takes the path of a dead tree.
+- **B38. Vulkan: white or invisible story people, and crashes with no
+  address space left.** With `backend=vulkan` (an NVIDIA RTX 5070 Ti, a new
+  game), the Lost Brother and the Lost Sister of Land 1 draw flat white and
+  are invisible after their quest (only the eyes show), Sable turns white at
+  the end of the cow stone, and the game stops in `nvoglv32.dll` at the
+  choice of the Creature. A second player (SteamVR, a render of 4096 by
+  3966) had a crash in `vrclient.dll`. In both logs the dump failed with no
+  memory (`backend.md`, "The address space"). The launcher now sets
+  `LARGE_ADDRESS_AWARE` in `runblack.exe` (`large_address=1`), so the game
+  has 4 GB. Desktop runs with all memory above 2 GB (`test_high_memory=1`)
+  played as the runs with 2 GB did, with both renderers and through the
+  choice of the Creature. `vk_upload_keep=1` keeps the old picture of a
+  texture when the upload of its new image fails. The log has the address
+  space and a reason line for each texture read that gives no image ("A
+  read with no new image"). Testers still get up to two crashes a day,
+  with the God view and with the flat view. The log lines of the crash and of
+  the white people are in `headset-checks.md`, "Play as normal and send the
+  log". The invisible body after the
+  quest has no known cause yet.
+- **B43. The clouds of a Storm in the God view.** The game flattens a sky
+  cloud near the horizon of the eye, and the eye of the God view is low and
+  near the clouds of a Storm, so they made a flat grey band.
+  `cloud_round_near=1000` keeps a near sky cloud round, and
+  `cloud_fade_near_cm=15` with `cloud_fade_far_cm=60` clears a cloud near
+  the eye (`backend.md`, "Clouds"). A desktop run shows no band. Late in the
+  storm a round cloud that is half clear lies over the Temple. With
+  `cloud_round_near=0` and the fade, only a thin band shows at the horizon.
+  Open: the owner chooses the look in the headset (round clouds or flat
+  clouds, each with the fade).
 - **B6. A script that waits for the dialogue has the camera of the game.**
   A script that has the camera and waits for the dialogue shows the camera
   of the game with a held shot and no cinema bars, and not the God view
@@ -125,57 +140,31 @@ is built, and no test has proven it.
   `controller-hints.md`, section 10). No run and no headset session has
   shown it.
 
-- **B10. A thrown object that touches another object: check the picture in
-  a headset.** In a substep where another object touches the thrown object,
-  the game runs one step, and the mod gives that substep 5 ms of the picture
-  (`throw_draw=1`, `throw.md`, "The picture between the steps"). So the
-  object moves through the touch at the speed of the game's own time, and
-  the picture does not stand and jump. A desktop run with a thrown villager
-  shows it, and the stand and jump with `throw_draw=0` (`village_run.ps1
-  -Kind throw` in `bwvr/tools/desk`). Only a headset shows whether the slower
-  move in the touch looks right. The test key (Ctrl and Scroll Lock) gives
-  the rule 0 for a comparison. Not run: a picture that stays at the place of
-  a guess (the math checks cover it). A run shows the clock that falls back
-  after a wait.
-- **B11. A tree that comes to rest while the Hand takes it: check it in a
-  headset.** The game makes a dead tree of a tree that fell when the tree
-  comes to rest, and it deletes the tree. The Hand has an object from the
-  press, and the game puts it in the Hand 2 or 3 game turns later. With the
-  rule of the game, a tree that comes to rest in those turns leaves the Hand
-  at once, and the Hand is empty with the grip closed. With
-  `catch_rest_guard=1` the tree does not come to rest in those turns: it
-  stays a tree, and it is in the Hand until the grip opens (`grab.md`, "An
-  object that comes to rest while the Hand takes it"). The take starts at
-  the lock of a far grab. With `catch_at_once=1` the body of the tree does
-  not move after the press, so the rest can come only in the lock and the
-  pull. Desktop runs show both ends: with the rest of the
-  game itself in a turn of the take (one run with each value), and with a
-  test key that makes the rest in the first turn in which the Hand has the
-  tree (`throw_queue.ps1 -Runs treedropend -More 'catch_at_once=0'` in
-  `bwvr/tools/desk`, and the same with `catch_rest_guard=0`). Check in a headset that a tree
-  which fell comes to the hand each time. The test key (Ctrl, Shift and
-  Scroll Lock) gives the rule of the game for a comparison.
-- **B13. The Temple in a headset: check the view, and find the black
-  frames of the guide.** In a room the head owns the view: each eye pass
-  draws from the head pose of the frame, with its roll and the place of its
-  eye (`temple_view=1`). The head does not turn the camera of the room
-  (`temple_camera_screen=1`), and the fade of the Temple shows in both eyes
-  (`temple_fade_eyes=1`). `controllers.md`, 11.4, has the three rules. The
-  math checks cover them. Still open:
-  - No desktop run has shown the three rules. The recipes are in
-    `controllers.md`, 11.9. Make those runs first.
-  - Check in a headset: the room stays still and level when the head turns,
-    tilts and leans, and it has depth. The left eye is not dark at the entry
-    of the Temple, at a change of the room and at the way out. A look down at
-    the pool of the hall does not move the player. The test keys (Shift and
-    the slash key of the number pad, Ctrl, Shift and the plus key) give the other
-    ways for a comparison.
+- **B10. A thrown object that touches another object.** In a substep where
+  another object touches the thrown object, the game runs one step, and the
+  mod gives that substep 5 ms of the picture (`throw_draw=1`, `throw.md`, "The
+  picture between the steps"). So the object moves through the touch at the
+  speed of the game's own time, and the picture does not stand and jump. A
+  desktop run with a thrown villager shows it, and the stand and jump with
+  `throw_draw=0` (`village_run.ps1 -Kind throw` in `bwvr/tools/desk`). The
+  check of the look is in `headset-checks.md`. Not run: a picture that stays
+  at the place of a guess (the math checks cover it). A run shows the clock
+  that falls back after a wait.
+- **B13. The view of the Temple, and the black frames of the guide.** In a
+  room the head owns the view: each eye pass draws from the head pose of the
+  frame, with its roll and the place of its eye (`temple_view=1`). The head
+  does not turn the camera of the room (`temple_camera_screen=1`), and the
+  fade of the Temple shows in both eyes (`temple_fade_eyes=1`).
+  `controllers.md`, 11.4, has the three rules. The math checks cover them.
+  Still open:
+  - A desktop run shows the roll of the head in a room with `temple_view=1`
+    and a level room with 0, and the cut of the hall to its rest pose. Not
+    shown: the place of each eye, and the fade in both eyes (R12).
   - Single black frames showed at random times in the guide of the first
-    visit of the hall. The cause is not known. In that session the camera of
-    the hall was at its view of the pool for the whole guide, and the mod now
-    keeps it at its rest pose. If the black frames stay, a session with
-    `eye_test_luma=1` names each black frame of the render of the game in the
-    log (`backend.md`, "Testing without a headset").
+    visit of the hall. The cause is not known.
+  - The check of the view is in `headset-checks.md`, "The rooms of the
+    Temple", and the log line of the black frames is in "Play as normal and
+    send the log".
   - Not built: the depth of a guide in the cut scene window, and a ray of the
     room that starts at the eye (`controllers.md`, 11.9).
 - **B14. In a pass the second eye does not have zero as its frame time.**
@@ -198,23 +187,20 @@ is built, and no test has proven it.
   built: a hook on `StartFrame` for the scene walk, as the intro has for its
   call (`intro.md`). First find each reader that divides by the number: the
   game never has less than 1 there.
-- **B16. The left eye showed pictures of frames before: check it in a
-  headset.** In a headset session the left eye started to show faint
-  pictures that came late, and the right eye did not. In play the game
-  does not clean its render target: the sky dome is the clean of a frame
-  (`LH3DRender::g_mode_cleaning` is 0). The two eye passes share that
-  target. So a pixel that an eye pass does not cover keeps the picture of
-  the other eye: one frame old for the left eye, and of the same moment for
-  the right eye. Each eye pass now starts from its own frame before
-  (`eye_clean=1`, `stereo-artifacts.md`, "The frame before of each eye").
-  No desktop run has shown it: that section has the two runs that are made
-  for it. Still open:
+- **B16. The left eye showed pictures of frames before.** In a headset session
+  the left eye started to show faint pictures that came late, and the right
+  eye did not. In play the game does not clean its render target: the sky dome
+  is the clean of a frame (`LH3DRender::g_mode_cleaning` is 0). The two eye
+  passes share that target. So a pixel that an eye pass does not cover keeps
+  the picture of the other eye: one frame old for the left eye, and of the
+  same moment for the right eye. Each eye pass now starts from its own frame
+  before (`eye_clean=1`, `stereo-artifacts.md`, "The frame before of each
+  eye"). No desktop run has shown it: that section has the two runs that are
+  made for it. Still open:
   - Not known: which thing of the game left such pixels in that session.
     The log of the session cannot place it.
-  - Check in a headset that no eye shows an old picture. Shift and Page
-    Down (`test_keys=1`) give the shared render target for a comparison.
-    If the fault shows again, the log line `eye clean : an eye pass drew no
-    sky` names the scene of that frame.
+  - The log line of the fault is in `headset-checks.md`, "Play as normal
+    and send the log".
   - Not run: the video of a falling spell, the one scene of play that draws
     no sky. The first frame of such a scene is drawn as before.
 - **B17. The size of a speech bubble, and the name of a villager in a
@@ -225,150 +211,19 @@ is built, and no test has proven it.
   18.5 has the recipes). Still open:
   - The size of a bubble comes from the depth of the sign in units, with no
     change for the scale of the God view.
-  - Check in a headset that the name of a villager reads as well as a
-    bubble. The ring item `details` with the Hand on a villager shows it.
-- **B18. A flash of lightning in the left eye only: check it in a
-  headset.** In a headset session the white flashes of the lightning at the
-  end of the quest of the singing stones showed in the left eye only. A
-  lightning of a storm makes the land white with a light on the land, and
-  the game keeps the lights on the land in a list that each scene walk
-  empties. The second eye pass gets each light that it does not add itself
-  (`land_light_eyes=1`, `backend.md`, "The lights on the land in the second
-  eye pass"). A desktop run shows it with the test light
-  (`land_light_test=1`), which is the light of a lightning of a storm. Still
-  open:
-  - No run had a real lightning. Check in a headset that the land is white
-    in both eyes at a lightning of a storm and at the Lightning Bolt
-    miracle. Ctrl, Shift and the Menu key (`test_keys=1`) give the left eye
-    only for a comparison.
-  - Not known: whether the flash of that session was a light on the land.
-    If a flash still shows in one eye, the lines `land light` in the log of
-    that session have the count of the lights of each group at that time. A
-    flash with no such line is not a light on the land. `backend.md`, "The
-    color over the picture at the end of a frame", has the two full screen
-    draws of the end of a frame. The listing shows both in each eye pass on
-    the land.
-- **B19. A take at a distance from a pile of a miracle.** When the Hand
-  takes all of such a pile at a distance, the game deletes the pile, and the
-  grip must carry the load (`far_take_carry`, `grab.md`, "A bulk source at a
-  distance"). The desktop runs make the case with a test key and a pile of
-  the store. Open: a headset session with the pile of a wood or a food
-  miracle.
-- **B20. The loop of a bulk take.** In the God view the ears decide the
-  start of the loop that the game plays while the Hand takes wood or grain
-  (`audio_take_loop`, `audio.md`, 6.4), and a desktop run has the loop in the
-  stream. Open: only a person can hear the loop and say how loud it is
-  beside the other sounds. Each other sound that the game asks for at the
-  Hand with no object keeps the test of the game camera (`audio.md`,
-  section 12).
-- **B21. The start of the headset session on a thread of the mod: check it
-  in a headset.** With no headset, the tries to start a session run on a
-  thread of the mod, with one instance for all tries (`vr_start=1`,
-  `backend.md`, "The start of the headset session"). The frame thread does
-  not wait for a call into the runtime, and the log says when a call does
-  not come back. A desktop run with no headset shows the tries and the
-  frames while they run. When the session part fails after the thread found
-  the headset, the mod falls back to the tries of `vr_start=0`. Still open:
-  - Check in a headset that the session starts when the headset connects in
-    the 2 minutes of the tries, and when it is connected before the start of
-    the game.
-  - Check the fall back in a headset with `vr_start_test_fail_session=1`:
-    the log has the line of the fall back, and the session starts on the
-    frame thread.
-- **B22. The glow at the Hand's point with one walk: check it in a
-  headset.** In one walk the mod draws the glow for each eye by itself, and
-  the right eye has it at the eye difference of the Hand's point
-  (`one_walk_marks=1`, `backend.md`, "The cards and the marks of the mod").
-  A desktop run shows the glow of the right eye at its place in each pose of
-  a hand that turns. The glow is off by default (`hand_glow=0`). Still open:
-  - Check in a headset that the glow stays at one place on the hand when the
-    hand turns. Ctrl, Shift and the right square bracket key (`test_keys=1`)
-    give the right eye the glow by the rhw of its disc for a comparison.
-- **B23. The card of a signpost with one walk: check it in a headset.** In
-  one walk the mod draws the card of a speech bubble for each eye by itself,
-  and the right eye has the box and the text at the eye difference of the
-  sign (`one_walk_marks=1`, `ui-layer.md`, section 18). A desktop run shows
-  the card of the right eye at its place in its own walk. The hint cards and
-  the subtitle card are quad layers, and one walk does not draw them. Still
-  open:
-  - Check in a headset that the text of a signpost is in its box and easy to
-    read with one walk. Ctrl, Shift and the right square bracket key
-    (`test_keys=1`) give the right eye the card by the rule of each other
-    batch for a comparison.
-- **B24. After a cut scene the controllers do nothing until a press.** The
-  headset turns off a controller that the player holds still in a long cut
-  scene, and a press of a button turns it on again (`controllers.md`,
-  section 6, "A controller that is still turns off"). The mod cannot turn a
-  controller on. Still open: check in a headset whether a still controller
-  stays on when the setting of the headset that switches between the
-  controllers and the hands is off.
-- **B26. The tutorial: the steps that no run and no session has.** Each step
-  of the tutorial waits for an input that a VR player can give with the
-  controls of the mod (`god-view.md`, section 7, "The steps of the
-  tutorial"). A desktop run and the log of a session in the headset show the
-  tutorial of Land 1 from the walk to the village to the texts after the zoom
-  lesson. Still open:
-  - The end of the build of the Temple, the missionaries and the lessons of
-    Land 2 (the gestures, the shield) have no run and no session.
-  - The fireball challenge of Land 2 holds the view still, and its three
-    seeds are more than 200 units from the place of the God view. The far
-    grab has no range limit while the game holds the view still
-    (`far_grab_still_m`, `grab.md`, "The range in a view that the game holds
-    still"). Check in a headset that the far grab fetches each seed from
-    there, that a throw reaches the huts, and that the challenge ends. The
-    shield challenge holds the view still too: check that its seeds are in
-    reach.
-  - The lessons of the Gods' Playground after the step of the turn have no
-    run. A desktop run shows the first walk of the Island Keeper and the step
-    of the turn only with `script_view=0`. With `script_view=1` the Keeper did
-    not start his walk, also when an eye picture showed him in the view
-    (`god-view.md`, section 7). Find out if the view test of the head is
-    too narrow, or if only the fixed head of the run is at fault.
-  - The game tells the player to press F2 for the Gods' Playground, and no
-    page of the ring has the item `playground` by default.
-- **B27. The walk with the stick is not smooth in the headset.** The walk
-  itself is even: each frame moves the view at the speed of the push, and no
-  limit, hill or switch stops it on some frames (`god-view.md`, section 5.7,
-  "An even walk"). The likely cause is the frame rate: about 97 frames each
-  second on a display of 120 Hz with Space Warp off, about one refresh in
-  five has no new frame. The headset then shows the frame before again, so a
-  move of the view stops for a refresh and jumps. Wanted: a headset session with a walk. The line of the end of
-  each walk counts the frames that came more than one refresh late. Compare
-  a walk at 120 Hz with a walk at 90 Hz in Virtual Desktop, or with Space
-  Warp on. If the walk is even at 90 Hz, the fault is the frame rate, and
-  this item goes to the performance work.
-- **B30. The gift of an object to the Creature: check it in a headset.**
-  An object in the Hand that the player lets go at the Creature is a gift,
-  with the leash on and with no leash. The gift goes on while the hand is at
-  the Creature (`creature_gift=1`), and a Creature that is the target of
-  the object stays the target to 6 cm (`hold_creature_stay=1`,
-  `creature.md`, section 2.9). Desktop runs show a pig that the Creature
-  takes with the leash on, and the game that ends the same gift with
-  `creature_gift=0` (`creature_recipe.ps1 -Kind gift` in
-  `bwvr/tools/desk`). Check in a headset, with a real hand:
-  - The Creature takes a pig at the first opening of the grip, with the
-    leash on and with no leash.
-  - A move of the hand away from the Creature keeps the object in the Hand.
-  - 20 cm (`creature_gift_cm`) is a good reach, and the halo on the
-    Creature is steady while the hand is at it.
-- **B31. With the leash on, a grip at a distance takes nothing from some
-  objects.** The grab at a distance has no test of the leash: with the
-  leash on it takes each object in its range. Three rules stop a grip
-  there, and the halo does not tell them apart:
-  - The target of a Creature command has its halo to 10 m of the room from
-    the head (`creature_command_max_m`), and the grab at a distance takes an
-    object to 2 m (`far_grab_max_m`). So a tree at 2.2 m has the halo of a
-    command, and a grip on it takes nothing.
-  - The game does not let the Hand take the object that holds a tied
-    leash. A press on that object is a press for the leash (hand mode
-    `0x20`), at the Hand and from a distance.
-  - Near objects win (`grab.md`): an object that a press acts on near the
-    Hand's point turns the grab at a distance off. A Creature on the leash
-    comes to the Hand, so this happens more often with the leash on.
-
-  To decide: a halo or a line of the card that shows which objects the
-  grip takes, a longer range of the grab while the leash is on, or no
-  change.
+  - The check of the name is in `headset-checks.md`, "The words over the
+    land".
+- **B18. A flash of lightning in the left eye only.** In a headset session
+  the white flashes of the lightning at the end of the quest of the singing
+  stones showed in the left eye only. A lightning of a storm makes the land
+  white with a light on the land, and the game keeps the lights on the land
+  in a list that each scene walk empties. The second eye pass gets each
+  light that it does not add itself (`land_light_eyes=1`, `backend.md`,
+  "The lights on the land in the second eye pass"). A desktop run shows it
+  with the test light (`land_light_test=1`), which is the light of a
+  lightning of a storm. No run had a real lightning. Not known: whether the
+  flash of that session was a light on the land. The log line of
+  the flash is in `headset-checks.md`, "Play as normal and send the log".
 - **B36. The address space of 2 GiB runs full: check the fix in a
   headset.** Headset sessions with `backend=vulkan` ended after 7 to 16
   minutes, when the 2 GiB of addresses of `runblack.exe` were full
@@ -384,29 +239,6 @@ is built, and no test has proven it.
   "memory" stays near its value after the load, and the process heap does
   not grow, in a session of 30 minutes or more.
 
-- **B32. A fight of Creatures: test the grip and the marks in the
-  headset.** The grip with the Hand at a Creature is the attack or the
-  block of the game, at the place of the body that is nearest to the Hand
-  (`fight_grip=1`). The marks of the fight are at their place on the body
-  (`fight_mark_depth=1`). No desktop run reaches a fight, so only the math
-  checks and the code show it (`creature.md`, section 6). To see in the
-  headset: the attack and the block act at the first grip, and the stars
-  sit on the body in both eyes.
-- **B37. The note over a Creature that learns: check it in a headset.** The
-  yellow percent of a lesson over the Creature has the depth of the
-  Creature in both eyes (`note_depth=1`, `ui-layer.md`, section 19). Desktop
-  runs with the test key `note_test` show it with both renderers. No run and
-  no session has a note that the game made by itself, from a miracle that
-  the Creature sees. To see in the headset: the note shows one time, over
-  the head of the Creature.
-- **B38. A hint at the game's Hand: check it in a headset.** While the game
-  places the Hand (the mouse, or controllers that are not tracked), a
-  tooltip or a hint of the game at the Hand has the depth of the Hand in
-  both eyes (`hint_hand_depth=1`, `ui-layer.md`, section 15.6). Desktop runs
-  with the test keys show it with both renderers, in one walk and in two
-  walks. No run had a real tooltip of a thing under the Hand in that state.
-  Only a headset can show that the yellow text at the Hand then shows one
-  time.
 - **B33. The water with the leash on: test it in the headset.** While the
   ring of the leash is on the left wrist, the icon of the kind of leash at
   the lower right of the view is hidden (`leash_icon_hide=1`, test key Ctrl
@@ -431,7 +263,7 @@ is built, and no test has proven it.
   The A/B key is Ctrl, Shift and H. Not run: a story, a cut scene, a point
   or a throw at the player, and a Creature of a different player.
 
-- **B35. The game ends with "abnormal program termination" after a fetch
+- **B44. The game ends with "abnormal program termination" after a fetch
   of a dead tree.** In a headset session on the second island, the Hand
   took a dead tree from a distance. About 0.3 s after the glide the game
   ended with the box of `abort`, with no line in the log and with no dump.
@@ -462,178 +294,20 @@ that moves while the Hand takes it.
 
 ### Changes to the controls
 
-- **P1. The choice of a far target, and the walk mode of a command: test
-  them in the headset.** A living thing in its cone comes before each thing
-  that is not living, and a living thing that has the halo keeps it past its
-  cone (`far_grab_choice=2`, `far_grab_stay=1`, `grab.md`, "The cone and the
-  choice"). A quest character is a living thing for this choice. A press of
-  the trigger on an object becomes a walk when the aim leaves the object
-  (`creature_command_rule=4`, `creature.md`, section 4.1). The math checks
-  and desktop runs show the rules, with a villager beside a tree and a rock.
-  No run had a quest character beside a tree. Check in a headset:
-  - the quest in which a man leads the children away: the halo goes to the
-    man with trees around him, and it stays on him while the hand shakes,
-  - the children behind the man: the aim on one of them takes the halo from
-    the next one when it is 1 degree nearer to the ray,
-  - the cone of a living thing of 4 degrees (`far_grab_living_deg`) and the
-    stay margin of 3 degrees (`far_grab_stay_deg`): a tree, a rock and a pile
-    of a store beside a villager must still be easy to take,
-  - the other values, by Ctrl and Delete (4 balls with ranks, 3 balls, 1 the
-    bias, 0 one point) and by Ctrl and Backspace (`far_grab_stay`),
-  - the walk mode with a real trigger: the 100 ms before a press on an object
-    becomes a walk, the tick at that time, and rule 3 by Ctrl and Numpad 5.
-
-  Open numbers: the least size of 2 degrees, and the range of 10 m for a
-  Creature command. The screen test offers an object to the pick by its base
-  point (12 degrees), so a tall tree that the ray crosses only at its crown,
-  far from its base, is a candidate only when the draw offers it by the pixel.
-
-  The Creature, a miracle and a signpost in the aim (`far_grab_creature`,
-  `far_grab_miracle`, `far_grab_sign`, `grab.md`, "The cone and the
-  choice"): the aim measures your Creature by its body, a miracle that the
-  Hand can take is in the first rank, and a signpost is in the last rank.
-  The math checks and desktop runs show the rules, with a miracle beside a
-  signpost and with a thing of no rank beside the Creature. No run had a
-  tree or a signpost beside the Creature, a large Creature, or a miracle of
-  a quest. Check in a headset:
-  - the aim on the body of your Creature gives it the halo with a tree or a
-    signpost beside it, and a tree beside it is still easy to take,
-  - a miracle beside a signpost takes the halo, and it keeps it,
-  - a signpost is still easy to choose with the aim on it.
-
-  A signpost and the Creature at the Hand (`hand_sign_last`,
-  `hand_wide_creature`, `grab.md`, "The rule of the choice" and "Near
-  objects win"): a signpost that the Hand's point is not in comes last, it
-  does not turn the grab from a distance off, and the Creature has the wide
-  reach of 15 cm. The math checks and desktop runs show the rules. No run
-  had a miracle in the wide reach beside a signpost, or a grip that stays
-  closed on the Creature in the wide reach. Check in a headset:
-  - a miracle or the Creature beside a signpost is the target of the grip,
-    and the aim keeps its target with the hand beside a signpost,
-  - a signpost is still easy to tap: with the Hand's point in it, or with
-    no other target in reach and no target of the aim,
-  - the grip on the Creature from 4 to 15 cm: the leash click, and the start
-    of the Creature state with the hand that far from the body.
-
-  A tree, a building or a pile at the Hand (`far_grab_beside_loose=1`,
-  `grab.md`, "Near objects win"): one that the Hand's point is not in does
-  not turn the far grab off, and it gives way to a far target. The math
-  checks and desktop runs at the Village Store show the rule. Check in a
-  headset:
-  - the aim past a tree, a house or a pile with the hand beside it, at the
-    Creature too,
-  - a tree, a house or a pile is still easy to take or to tap: with the
-    Hand's point in it, or with the aim on no far target.
-- **P2. The Creature looks at the player: check it in the headset.** Where a
-  plan of the Creature looks at the camera of the player, the Creature looks
-  at the player's head (`creature_look_head=1` with `creature_player_head=0`,
-  `creature.md`, sections 5.5 and 5.6).
-  Desktop runs show the angles of the game. They do not show that the head
-  of a small Creature turns visibly on the screen. Check in a headset that
-  the eyes meet the player's eyes, with a larger Creature near the player.
-- **P2. The stay of the Creature: test it in the headset.** A grip from a
-  distance that stays closed on the Creature makes it stop and stay until
-  the grip opens. A short grip changes the leash when it opens
-  (`creature_hold_stay=1`, `creature.md`, section 5.3). The stay is the
-  locked select of the game, with no stroke, no lesson and no camera.
-  Desktop runs show it with a Creature that stands and with a Creature that
-  walks. Check in a headset:
-  - the hold time of 350 ms with a real grip (`creature_hold_stay_ms`),
-  - that the Creature turns to your head (B34), and how its head follows
-    the real hand (`creature_stay_look`),
-  - whether the halo, the pulse and the card show well that the stay is on.
-
-  The leash click, the stay and a command act on the Creature of the local
-  player only: the code compares each Creature with the Creature of that
-  player, and a Creature that is not the player's own is no far target
-  (`creature.md`, section 5.1, "Only your own Creature"). The math checks
-  have the rule. Not run: the aim and the grip at a Creature that is not
-  the player's (`aim_queue.ps1 -Runs other` in `bwvr/tools/desk`), and a
-  game with the Creature of a different god (a skirmish or a multiplayer
-  game).
-
-  The test key (Shift and End) gives the leash click at the close of the
-  grip for a comparison. Not run: a start that the game refuses, and a grip
-  that closes again before the end of a stay went to the game.
-- **P4. A choice of control scheme, the default of the zoom, and a two
-  hand grab as in Deisim.**
-  - A choice of control scheme: more options, so that each player chooses
-    how the controls work. The launcher offers the turn in steps, the zoom
-    in steps or smooth, the center of the zoom, the walk with the stick of
-    the other hand (along the direction of the head, along the direction of
-    the controller, or off), and the grip that grabs the world
-    (`launcher.md`, "Moving around" and "Controllers"). The layout of the
-    buttons of the other hand has an ini key and no row (`button_layout`,
-    `controllers.md`, 5.1). Not built: a smooth turn with the stick, and a
-    choice in the game (the launcher runs before the game). Keep the scheme
-    of now as the default.
-  - The default of the zoom: the stick zooms in steps of 1.5 times, and
-    `god_zoom_smooth=1` gives a smooth zoom while the stick is held
-    (`god-view.md`, section 2). Compare the two in a headset with the test
-    key (Ctrl, Shift and Insert), set the top rate (`god_zoom_smooth_ms`),
-    and choose the default.
-  - A two hand grab as in Deisim: the player holds both grips, and the
-    hands make the world smaller or larger and turn it. The mod has a
-    version of this (`god-view.md`): both grips turn the land about up and
-    scale it with the spread of the hands, about the land point under the
-    middle of the hands. Before the work starts, compare the controls of
-    the mod with the controls of Deisim. Points to compare: the turn is
-    only about up here, the height of the land stays, and the grip of the
-    Hand also takes objects.
-- **P13. The walk with the stick and the layout of the left controller:
-  check them in a headset.** The stick of the hand that does not point moves
-  the player over the land of the God view while it is pushed
-  (`move_stick=1`, `god-view.md`, section 5.7). The menu button of the left
-  controller opens the game menu, Y opens the ring, and X has no job
-  (`button_layout=1`, `controllers.md`, 5.1). The math checks and desktop
-  runs show the rules. Check in a headset, with `test_keys=1`:
-  - The comfort of the walk, with the head as the direction and with the
-    controller as the direction. Shift and the Menu key of the keyboard
-    change `move_stick` from 1 to 2, to 0 and back.
-  - The comfort of the follow of the land (`move_stick_follow_land=1`, the
-    launcher row "Walk follows the land"): whether the view goes up and down
-    calmly on the hills, and whether the land stays near enough to the hands
-    on a steep slope. The filter is 50 cm of the walk behind the land.
-  - The top speed of 150 cm of the room for each second
-    (`move_stick_speed_cm`), near the land and far out, and the dead zone of
-    the stick.
-  - Whether Y is easy to hold while the hand moves to an item of the ring.
-    Ctrl and the Menu key change `button_layout` between 1 and 0.
-  - That the left menu button always comes to the game. Virtual Desktop can
-    keep that button for its own menu (`controllers.md`, section 6), and
-    with `button_layout=1` no other button opens the game menu.
-
-  Not run: a small push of the stick, the edge of the map, a push with the
-  switch for the drag off, an Index controller, and a controller with no
-  face buttons.
-- **P14. The stream of a take at a distance: check it in a headset.** In a
-  take at a distance the pieces of wood or grain go on a curve from the top
-  of the source to the Hand (`take_stream`, `grab.md`, "The stream of a take
-  at a distance"). Desktop runs show the curve from a pile of wood of the
-  Village Store, with the Hand 0.27 m to the side of the pile and 0.5 m over
-  it. Open:
-  - Only a headset can show whether the curve reads well in depth, and how
-    it looks with a hand that moves. The test key is Ctrl, Shift and the
-    minus key.
-  - A piece lives 1 s for each length of the way, and 8 pieces start in a
-    second. So on a way of 2 m the pieces are 25 cm apart, and they go 2 m
-    in a second. If that does not read well, the rule has both values
-    (`RaiseTime` at `+0x2C`, `EmitRate` at `+0x30`), and the hook can change
-    them for a take at a distance.
-  - No run has shown the stream from a pile of food, a field or
-    the pile of a miracle, a way that is long along the floor, and a pile
-    that goes down in the take.
-- **P15. The glow on the mesh of a target: check it in a headset, and the
-  targets that keep the halo.** The mesh of a target of the Hand glows in
+- **P2. A fast click on the Creature with the leash on.** With the leash
+  on, the game starts its press on the Creature 17 to
+  22 frames after the grip closes (2 to 7 frames with the leash off). So a
+  grip of 100 ms with the leash on gives no leash click
+  (`creature_recipe.ps1 -Kind wide`). Not known whether a fast click on the
+  Creature with the leash on takes the leash off in the plain game.
+- **P15. The glow on the mesh of a target, and the targets that keep the
+  halo.** The mesh of a target of the Hand glows in
   the color of its halo, with a pulse and a band of light that goes up the
   mesh (`target_glow=1`, `hand-model.md`, "The glow on the mesh of a
   target"). Desktop runs show it in both eyes on a rock, a villager, a bush,
-  a pile and the Village Store. Open:
-  - Only a headset shows whether the strength is right by day and by night
-    (`target_glow_pct`, 45), whether the pulse and the band of light are calm
-    enough at the size of the God view, and whether a small target needs
-    more than the light on its mesh. The test key steps `target_glow`
-    through the glow, the halo and both.
+  a tree, a pile and the Village Store. Open:
+  - The check of the strength, the pulse and the band of light is in
+    `headset-checks.md`, "The aim and the halo".
   - The Creature (`LH3DCreature::DrawNow`, `0x0048E260`) and a building in
     work (`0x00517F90`) do not draw through `Game3DObject::AddForDrawing`.
     They keep the halo. Wanted: the glow on their mesh.
@@ -644,25 +318,6 @@ that moves while the Hand takes it.
   - The light is even on the mesh. A glow that follows the bright parts of
     the texture needs a second draw of the triangles with additive blend.
     Not built.
-- **P16. The margin around the view: check it in a headset.** "Margin around
-  the view" in the launcher (`fov_margin_pct`, 0 to 30, default 0) makes the
-  render go past the view of the headset on each side (`backend.md`, "A
-  margin around the view"). No run has shown it: a desktop run has no
-  headset, and only a session with a headset reads the key. Check in a
-  headset:
-  - That the world keeps its place and its scale with a margin, and that the
-    Hand and the pointer are where the controller is.
-  - That a fast turn of the head shows less black at the edge, and which
-    margin is enough at 90 Hz and at 120 Hz.
-  - The cost in frame time (`profile=1`).
-  - The interface in the eye pictures (the Creature panel, a tooltip): with a
-    margin it is larger and farther from the middle. Not known: whether that
-    needs a correction.
-- **P17. A cut scene with no window: check it in a headset.** The launcher
-  row "Cut scenes", "Around you" (`cutscene_immersive=1`) plays a cut scene
-  around the player, with no window and with the camera of the game and all
-  its motion (`script_camera=0`). The window stays the default. No run has
-  shown it: a desktop run has no head to feel the motion.
 - **P18. The hold of the God view at the start of a story: run it and check
   it in a headset.** When a story takes the camera (a tap on a scroll), the
   God view keeps its view until the cut scene window is closed
@@ -681,11 +336,11 @@ that moves while the Hand takes it.
 - **P19. A story starts at the head: check it in a headset.** When a script
   takes the camera in the God view, the game camera goes to the head, so the
   move of the story starts there and not 300 units above the player
-  (`story_start_at_head=1`, `god-view.md`, section 17). Check in a headset,
+  (`story_start_at_head=1`, `god-view.md`, section 18). Check in a headset,
   with "Around you" and with the window: the scroll of a silver quest, the
   cut to the life size scale at the head, and the move after it. The A/B key
   is Ctrl, Shift and S.
-- **P5. Hand tracking.** The player plays with the hands and no
+- **P5. Hand tracking.** On hold. The player plays with the hands and no
   controllers: the Hand follows the real hand and its fingers, one to one,
   as it follows a controller. The mod asks for `XR_EXT_hand_tracking` for
   finger tracking on the controllers (`hand-model.md`, "Finger tracking"),
@@ -694,7 +349,7 @@ that moves while the Hand takes it.
   Then choose a gesture for each control: the grip, the trigger, the stick,
   and A, B, X and Y. The rules of the Hand stay: the real hand, one to one,
   and no motion that the player did not make.
-- **P18. The fit of the hand and finger tracking: check them in a headset.**
+- **P26. The fit of the hand and finger tracking: check them in a headset.**
   The six `hand_fit` keys move and turn both hands against the grip pose,
   and `finger_tracking` bends the fingers as the real fingers on a
   controller that sees them (`hand-model.md`). A desktop run showed the fit
@@ -704,11 +359,17 @@ that moves while the Hand takes it.
   in the headset, with the controllers and no restart, is not built: the
   player sets the values in the launcher of the PC, and the menu of the
   headset app does not show them.
-- **P7. A view for videos.** A 16:9 view in the game window with the cards
-  and the subtitles in it and a smoothed head, for a capture on the PC.
-- **P8. Pictures in the hints.** A flat picture of each button, then a
-  picture of the controller with the button lit, then a 3D model of the
-  controller (`controller-hints.md`).
+- **P7. A view for videos** (`video_view`, `backend.md`, "The view for
+  videos"). Open:
+  - The height changes in the game only on the debug window ("Video
+    height"). A row of a settings panel or of the ring is not built.
+  - With dxwrapper the view does not show. A copy through a DXGI swapchain
+    of the Direct3D 11 device of the session is possible, with the limits
+    in `backend.md`, "The view for videos with dxwrapper".
+  - No headset session has run it. The cost in a session is in the lines
+    `vk window` and `vk video` of the report. The session path of the quad
+    layers (the copy of each card on the GPU, the panel quads of
+    `ui_panel=1`, a screen in the room) has run in no session.
 - **P9. The pointer on the interface panel** and the screens with no scene
   (menus, loading, videos) on a panel in the room, with a session of the mod
   on the PC (`ui-layer.md`, sections 5 and 6). The headset app has them: the
@@ -716,35 +377,134 @@ that moves while the Hand takes it.
   keyboard of the app on a dialog box there (`controllers.md`, sections 12
   and 13). Open in the headset app: the last pixel of the world when the
   ray leaves the panel quads (`ui-layer.md`, 5.5).
-- **P10. The tabletop mode** (play mode 3) is a test mode. Not built: a
+- **P10. The tabletop mode** (play mode 3) is a test mode, on hold. Not built: a
   game camera over the table, the mouse, the wheel, the stick and the
   double click for the table, the ring and the depth key for the key color,
   and the place of the table in a real room (`tabletop.md`).
-- **P11. The intro in stereo** (`intro_vr`, off by default) needs a headset
-  check (`intro.md`, "What only a headset can show"). Each eye has its own
-  trails, the mark beside the logo has the depth of the logo, and the view
-  goes along the camera path of the game with no turn (`intro_motion=1`).
-  With `test_keys=1`, while the logo plays:
-  - Is the doubling gone for the eye? Shift and Page Down switch
-    `intro_eye_trails`, and Shift and Delete switch `intro_text_place`.
-  - Is the motion comfortable? Shift and Page Up step `intro_motion`: 2 is
-    the orbs as a model in a room that stays still (it keeps the design
-    rule "no motion that the player did not make"), 3 is the camera of the
-    game with its turns, 0 is the still camera. `intro_speed_pct` makes the
-    path slower. Then choose the default, and decide if `intro_vr` goes on.
-  - Does the push in 3D feel right? Each hand takes the orbs in its reach
-    with its own motion, one to one (`intro_push_3d=1`, a reach of
-    `intro_push_radius_cm=30`), and the hand models show while the hands
-    move (`intro_hand_show=1`). An orb in front of a hand draws over it
-    (`intro_hand_depth=1`). With `intro_distance_cm=300` the hands reach the
-    orbs in the orbit at the start.
-    Shift and Insert switch the push in 3D, Shift and Backspace step
-    `intro_hand_show`, and Shift and Pause switch `intro_hand_depth`.
-  - Not built: a speed for the orbs that a hand moved, and a push of the
-    hand in the flat intro (`intro.md`, "Open work").
 - **P12. Ideas from Half-Life: Alyx** that are not built are in
   `research-hla.md`, for the far grab, the teleport, the hands, the hints,
   the sound and comfort.
+- **P21. A take at the Hand stops when the hand moves away.** With the grip
+  closed at a pile of the store, the take stops when the hand moves out of
+  the area of the pile. A take at a distance (the ray) keeps on while the
+  player moves (`grab.md`, "A bulk source at a distance"). Wanted: the take
+  at the Hand acts as the take at a distance. The game has no test of the
+  distance: it ends a take only when the source is gone or empty, the Pot
+  is full, or the Hand is outside the influence
+  (`GInterfaceStatus::Process` `0x005DC4E0`). The desktop run cannot make
+  the fault happen with a steady grip: in `village_run.ps1 -Kind neartake`
+  the take goes on with the hand 15, 36 and 48 cm of the room from the
+  pile, until the grip opens. The likely cause is a real squeeze that falls
+  fast for a moment, which opens the grip (`grip_fast_open`). So
+  `near_take_keeps=1` lets only a grip below 35% end a bulk take, and the
+  same run makes such a fall with the word `gripdip`. Open: a headset log of
+  a take with the hand moved away (`headset-checks.md`, "Play as normal and
+  send the log").
+- **P24. The Hand stops at a house, a rock and a tree.** The drawn hands
+  stop at the land and at the box of a house and a rock and the trunk of a
+  tree (`hand_land_stop`, `hand_object_stop`, `hand-model.md`, "The Hand
+  stops at the land"). The head blinder counts the same solids
+  (`head_blinder_objects`, `god-view.md`, section 5.9). Open: the desktop
+  runs `village_run.ps1 -Kind housestop` and `-Kind headhouse`, each key at
+  1 and 0. A solid is the box of the whole mesh, so an open building is no
+  solid. The game's own collision of a building could give its walls.
+
+### New features: miracles, comfort and help
+
+The order is the order of the work. Each one gets a key whose old value
+keeps the mod as it is.
+
+**Miracles and gestures**
+
+- **F6. The fireball and the speed of a throw.** On hold: the owner tests
+  the throw with the mod's own physics first. A fireball leaves with the top
+  speed of the grip of the real hand (`miracle_throw`, `throw.md`, "A thrown
+  miracle"), and then has the game's physics. If it flies short or far in a
+  headset, a key scales that speed. For other objects, a key
+  `throw_speed_pct` (100: the real speed) can make a throw stronger.
+**Comfort and moving**
+
+- **F11. The controls of the player in the headset.** The VR Settings
+  window, the welcome page and the page Controls with the models of the
+  controllers are in (`ui-layer.md`, 24 and 24.6, `controllers.md`, 5.7).
+  Open:
+  - The desktop runs of the page Controls (`village_run.ps1 -Kind
+    controls`: a list, a new job that acts, Reset Defaults, and
+    `hint_profile`). A desktop run has a Touch controller only: the profile
+    of a real Index, wand or Mixed Reality controller needs a headset with
+    that controller.
+  - The controller in the hand with its lit buttons and their cards
+    (`hint_style=2`, `controller-hints.md`, 9.14). Desktop runs show the
+    cards on the outer side of each hand, level in the view, with no
+    crossings, with a continuous ink outline, at 0.2 to 0.6 ms a frame.
+    The model is on the frame of the WebXR model, fitted on the grip pose
+    of Virtual Desktop, the Oculus runtime and SteamVR (`grip_fit=1`,
+    `controller-hints.md`, 9.15), and the VR Settings window has a trim of
+    5 mm steps. The hand has the angle of the palm pose of the runtime at
+    the same grip point (`hand_angle=1`, `hand.md`, "The angle of the
+    hand"), with a trim in degrees on the debug page. Only a headset can
+    show that they are on the real controllers and the real hands, and
+    whether the cards read at 55 cm (`headset-checks.md`, 5 and 21).
+
+**The village, the Creature and the help**
+
+- **F27. The hand in front of a page.** The page of the spell book and of
+  the ring has a hole for each eye where a hand or the bubble of a pull is
+  in front of it (`card_hand_front=1`, `card_hand_both_sides=1`,
+  `card_ball_cut=1`, `ui-layer.md` 28). Open: the first cut after a move
+  takes 1 to 3 ms on the test laptop (0.05 ms on average). Where the
+  texture of the game makes the palm almost clear, the land shows in the
+  hole beside the arm. The controller model of the hints and the hand fight
+  in depth where their surfaces meet (the owner sees it in the headset).
+  The likely cause: `hint_model.cpp` draws the faint front faces of the
+  body with the depth write before the mesh of the hands, so each part of
+  the faint hand behind or inside the body fails the depth test, and the
+  land shows there through the faint body. A fix changes the order or the
+  depth write of the two draws, in both renderers, together with the draw
+  of the hand with no culling.
+- **F22. Words that the card never shows.** The card shows the game's
+  "Drop" and "Throw" with the word of the grip (`controller-hints.md`,
+  9.9). The second VR mod leaves those two words out
+  (`hidden_hints=Throw,Drop`), because the arm decides at the opening of the
+  grip whether the object drops or flies. Open: whether the player wants a
+  list of the game's words that the card leaves out.
+- **F23. The sea with depth.** On hold. `sea_depth=1` puts the land of the
+  sea under the water and fades it into the sea by its depth (backend.md,
+  "The sea with depth"). It is off by default, because in a headset the
+  land of the coast has holes and the parents on the beach in the intro
+  cut scene stand over the ground. The owner found the flat sea of the game
+  good enough. Open: the other VR mod lists a fix of the sea, and it is
+  maybe a fault of the depth test of the sea draw (the sea draws with the
+  depth test ALWAYS), not the depth of the land. Find what that fix is
+  before more work here.
+- **F24. No wait of 20 ms at the stop of a sound.** `audio_stop_wait=0`
+  skips the wait only for the sounds of the mod's mixer. The other sounds
+  keep it: the logs of desktop runs have 1 or 2 such stops in each run. The
+  log names each one (`audio.md`, 7.6): the kind of the sound, its
+  wave and the time of the wait. In nine desktop runs each run had one such
+  stop, at frame 0: an effect that QMixer plays (2 channels, 22050 Hz,
+  31.25 s), 500 to 532 ms after its play, with a wait of 20.3 to 21.0 ms.
+  So at the start only, not in play. Open: whether a play has more of them
+  (the log of a play shows it, `headset-checks.md`).
+- **F26. The first open of the VR Settings window.** The warm draws the
+  page, the tabs and the rows of the first group of the settings, and a
+  thread draws the pictures of the models of the page Controls
+  (`panel_warm`, `ui-layer.md`, 23.3 and 24.6). With the page and the tabs
+  only, the first picture took 4.3 ms (4.8 ms with no warm). Off the game,
+  the pictures of two Touch Plus models take 42 ms each, and a picture of
+  the page 3.7 ms. Open: the times in a desktop run.
+
+### Faults of the plain game
+
+These faults are in the game with the unofficial patch v1.42, not in the
+mod. A fix is a change of behavior, with a key whose old value keeps the
+game as it is.
+
+- **G1. Silver Scrolls of Land 3.** On hold until the owner plays Land 3.
+  Testers report that a guru (a yogi) sees the player from behind, and that
+  trees go away in the puzzle of the trees. Not known: the quest of each
+  fault, and the script or the code that has it. Make each fault occur in a
+  desktop run first.
 
 ### Built, and not proven or not finished
 
@@ -807,42 +567,65 @@ that moves while the Hand takes it.
   5. **Pictures between the walks, by depth.** For a view that is still too heavy, a picture
      between two walks comes from the last picture and its depth. This is the largest work, and
      the edges of near objects can show faults.
+- **N19. The model cull distance on a busy land.** `cull_distance` (default
+  5x) draws the map objects to 3500 units, and the fog moves out as far
+  (`backend.md`, "Models are drawn further out"). On Land 1 it costs no
+  measurable frame time, and the list of map objects stays under 1100 of
+  2999. Open: a land with large towns and forests (Land 2 to 5). It needs a
+  test save of such a land, and `make_test_save.ps1` makes saves of Land 1
+  only.
+- **P25. The glow alone and the ray over the panels.** With
+  `ray_glow_only=1` the glow is the whole ray, the tether and the arc, with
+  no tube under it (`hand-model.md`, "The glow ribbons"). With
+  `ray_over_panels=1` the menu ray goes over the panels in the room as a
+  quad layer of its own, with a mark at its end (`ui-layer.md`, 25). The
+  desktop runs show the arc, the tether and the menu ray with each look, and
+  the strip over the welcome page and the settings window in the view for
+  videos. Open: a run of `village_run.ps1 -Kind rayover` with the hand below
+  the eyes, which ends the strip on a button with its mark on the paper.
+- **F5. The stream of the influence at the hand.** The hook that ends the
+  stream of the game at the Hand's point is built, but no desktop run had a
+  stream of the game, so `influence_stream_hand` is 0. The update of the
+  game keeps the land point of the interface, which in the God view can be
+  away from the land under the Hand (`miracles.md`, "The influence at the
+  hand"). The report of `scene_run.ps1 -Kind edge` has the state of the
+  stream. Open: which state stops it, and then a run that shows the stream
+  at the Hand.
+- **F5. The hologram at the edge.** The glow of the edge of the influence is
+  a red hologram on the wall of the edge, near each hand, on the discs of
+  the game (`influence_wall_look=1`, `miracles.md`, "The glow at the edge").
+  It waits for its desktop runs (`scene_run.ps1 -Kind edge` and `-Kind
+  edgeside`). Open: the look in a headset (size, light, the speed of the
+  rings), and an edge of an influence ring of a script, where the hologram
+  comes from the search of the rays.
 - **N1. The frame time.** `bench_run.ps1` measures six fixed scenes on the
   desktop, and `profile=1` gives the same numbers for a session in a headset
   (`backend.md`, "Frame cost"). Still open:
-  - **A session in a headset with `profile=1`.** No such session has run. A
-    desktop run has no wait for the runtime, no copy to the bridge, no
-    compositor and no encoder. The lines `frame cost   : window` of the log
-    say what these cost. They also say what a slow frame is made of when it
-    is not a game turn. Set the key after the last save of the launcher.
+  - **The log lines** of the frame time in a headset are in
+    `headset-checks.md`, "Play as normal and send the log". A desktop run
+    has no wait for the runtime, no copy to the bridge, no compositor and
+    no encoder.
   - **Frames of about 100 ms in a headset.** The worst frame of many report
     windows of a session through Virtual Desktop is 94 to 108 ms, with
     `backend=vulkan` and with `backend=dxwrapper`. The time is in the calls
     of the runtime, not in the game turn, the scene walks or the files
     (`backend.md`, "The slow frames"). The line `runtime calls:` names the
-    call. Next steps: a session that reads that line while the player turns
-    the head and while the player keeps the head still, with the performance
-    overlay of Virtual Desktop on (the latency of the network and the frames
-    that the headset drops), and a session with `xr_vulkan=0` and
-    `backend=dxwrapper` for a comparison.
-  - **About 100 frames a second at 120 Hz with Virtual Desktop.** The
-    runtime says that the display has 120 Hz, and it takes a frame each 10
-    ms. The frame of the mod is ready about 6 ms before that with
-    `backend=vulkan` (`backend.md`, "The refresh rate of the headset"). So
-    the cap is in the runtime. Next steps: a session that reads the lines
-    `refresh rate :` and `display      :`, a session with
-    `refresh_rate_hz=-1`, and `bwvr-xrtest 30 vulkan hz=-1` for the pace of
-    the runtime with no game. Then a session with a smaller render size,
-    and one with the performance overlay of Virtual Desktop on (the time of
-    the encoder).
+    call.
+  - **About 100 frames a second at 120 Hz with Virtual Desktop.** The cap
+    is in the runtime. With Virtual Desktop on a Quest 3 the headset offers
+    one rate, 120 Hz (`XR_FB_display_refresh_rate`), and `xrWaitFrame` gives
+    a display period of 8.33 ms. But the display times come 10.0 ms apart
+    (99.3 to 99.6 Hz), with 0 to 2 late steps in 450 frames, and the scene
+    walks of both eyes take about 3 ms of the frame (`backend.md`, "The
+    refresh rate of the headset"). `refresh_rate_hz` cannot help, because
+    there is no other rate.
   - **The wait at the stop of a sound.** The mod skips the 20 ms that
     the audio DLL waits on the frame thread at the stop of a sound
     (`audio_stop_wait=0`, `audio.md`, 7.6). In a desktop run the worst frame
     at the village, less the copy to the monitor, is 10 to 12 ms with the key
-    at 0, and 32 to 72 ms with the key at 1. A headset session showed no fault of
-    the sounds. With `test_keys=1`, Ctrl and Pause change the
-    key while the game runs. A sound that QMixer plays (an advisor, the
-    speech of a story) keeps the wait.
+    at 0, and 32 to 72 ms with the key at 1. A headset session showed no fault
+    of the sounds. A sound that QMixer plays (an advisor, the speech of a
+    story) keeps the wait.
   - **The wait of about 30 ms in the audio turn on the Steam Frame.**
     4 to 10 times in 10 s `QSWaveMixPlayEx` takes 17 to 30 ms for a sound of
     the atmosphere, also with `audio_stop_wait=0`. The time is in the code of
@@ -869,11 +652,6 @@ that moves while the Hand takes it.
     the game writes the alignment of the player and the mind of the Creature.
     Its file calls take 2 ms most times, and they took 28 ms one time. A load
     of these files before the game needs them is not built.
-  - **The read ahead of the files in a headset** (`file_read_ahead=1`,
-    `backend.md`, "The read ahead of the files of the game"). On the desktop
-    the worst game turn after the start is 7.2 ms in place of 30.7 ms. Not
-    shown: a session in a headset, and the load of a saved game with the
-    read ahead. With `test_keys=1`, Shift Q changes the key in play.
   - **The texture of 32 by 32 that the land draw writes.** With two writes
     in one scene walk, its two locks take 0.6 ms for each eye pass. That is
     1.2 to 1.5 ms of a frame of 8.7 to 10 ms at the door of the Temple. With
@@ -882,30 +660,11 @@ that moves while the Hand takes it.
     `Lock` of dxwrapper does for a surface that a copy used in the same
     frame. Then name the thing that the second write is for (the list at
     `0x00FAA7E0` of `LH3DIsland::Draw`).
-  - **One walk of the scene for both eyes.** It is on by default
-    (`one_walk`, `backend.md`, "One walk for both eyes"). The batches
-    of eye pass 0 go to a wide target, and a hook draws each one again for
-    the right eye, moved by the disparity of its `rhw`. On the desktop the
-    scene time of `verify_build.ps1` went down by 35 to 40 percent. Not shown:
-    a session in a headset with a person in it, and its feel.
-  - **The read ahead of the subtitle card, and `frame_send=2`.** With
-    `frame_send` 1 and 2 the frame thread does not wait for the GPU, but the
-    read of the copy of the subtitle card did (`ui-layer.md`, 17.2). The
-    read ahead takes that wait away (`subtitle_read_ahead=1`). Not shown: a
-    headset session with `frame_send=2` and the card on, and its frame
-    rate against `frame_send=0`. The default 0 came from headset sessions
-    in which the card read had that wait. A desktop run cannot show it:
-    with no headset the mod makes no wait for the GPU, and no thread has a
-    frame to send, so `bench_run.ps1` gives the same numbers for each value
-    of `frame_send`. The comparison needs two sessions in a headset with
-    `profile=1`, at one place with a still head.
-  - **The merge of draw calls in a headset.** The mod gives a row of draw
-    calls with one state to Direct3D as one draw call (`draw_merge=1`,
-    `backend.md`, "One draw call for a row of draw calls"). Desktop runs of
-    the six scenes show the same triangles and 0.4 to 0.8 ms less in a frame.
-    Not run: a headset session, and the check of the triangles in the Temple,
-    in a story, in a fight of Creatures and with the effect of a miracle
-    (`draw_merge_test=1` in the ini for one session).
+  - **The default of `frame_send`.** It stays 0 until a play with each value
+    and the subtitle card on (`headset-checks.md`, "The cost of a key in a
+    headset") compares them (`subtitle_read_ahead=1`,
+    `ui-layer.md`, 17.2). A desktop run cannot show it: with no headset the
+    mod makes no wait for the GPU.
   - **The cost of the lock of the Direct3D 9 device.** A device for two
     threads takes a lock on each call. A sampling profile of the frame
     thread had 3.8 percent of its samples in critical sections (`backend.md`,
@@ -933,172 +692,158 @@ that moves while the Hand takes it.
     headset (SteamVR, Steam Frame) over the island with the filter, the
     buffers and one draw for both eyes, the scene walks are 4.5 to 5 ms, and
     the flush (`gpu_flush`) makes the time from `xrWaitFrame` to the end of
-    `xrEndFrame` 6.3 to 7.4 ms in place of 8.6 to 9.1 ms. Open: more
-    sessions in a headset (the Temple, a story, a load of a saved game), one
-    start that stopped at the logos with `gpu_flush=128` (`hang_watch=1`
-    shows the place if it comes again), then the default value of
-    `render_thread`. The two vertex loops of the engine run with SSE, with
-    the bits of the game (`fast_transform`, `backend.md`, "The vertex loops
-    with SSE"): 0.25 ms less of the scene walks in a desktop run. Not run: a
-    headset session with it. The calls of Direct3D 7 of a walk can go to a
-    thread of their own (`d3d7_thread`, `backend.md`, "The thread of
-    Direct3D 7", on by default), with the same pixels in a desktop run and
-    no fault in a headset at 144 Hz. The end of a walk does not wait for
-    the render thread (`render_thread_late_end`, `backend.md`, "The late
-    end of a walk"): the scene walks over the island are 2.6 to 3.0 ms in
-    a headset at 144 Hz. The threads of the mod spin only for a short time
-    and then sleep (`thread_wait`, `backend.md`, "How the threads wait"):
-    in desktop runs with 4 to 16 cores the frames are as fast, and the
-    process uses about 0.5 cores less. Not run: a headset session with it.
-    The D3D7 thread merges the rows of draws with one state
-    (`d3d7_thread_merge`), so the frame thread copies the vertices of a
-    draw one time. **The goal of a port to the Steam Frame and the Quest 3
-    standalone** needs fewer layers of x86 code for each draw. The plan,
-    in steps that a desktop run can check: (A) a Vulkan renderer of the
-    scene walks in place of dxwrapper and Direct3D 9 (`backend.md`, "The
-    Vulkan renderer"; the same picture as Direct3D 9, with the hand and the
-    overlays of the mod and both eyes in one pass). Its eye pictures go
-    straight into an OpenXR session with Vulkan (`xr_vulkan=1`, "The
-    session with Vulkan"), and so do the pixels of the CPU: the cards, the
-    walls of the cut scene window and an eye picture of the CPU
-    (`xr_vulkan_upload`). The draws for the panel target go into a panel
+    `xrEndFrame` 6.3 to 7.4 ms in place of 8.6 to 9.1 ms. Desktop runs give the
+    same picture with `render_thread` at 1 and 0: 0.06 to 0.15 percent of the
+    pixels differ, as between two frames of one value. Open: the cost in
+    `headset-checks.md`, "The cost of a key in a headset", then the default
+    value of `render_thread`. One start stopped at the logos with
+    `gpu_flush=128` (`hang_watch=1` shows the place if it comes again). The two
+    vertex loops of the engine run with SSE, with the bits of the game
+    (`fast_transform`, `backend.md`, "The vertex loops with SSE"): 0.25 ms less
+    of the scene walks in a desktop run. The calls of Direct3D 7 of a walk can
+    go to a thread of their own (`d3d7_thread`, `backend.md`, "The thread of
+    Direct3D 7", on by default), with the same pixels in a desktop run and no
+    fault in a headset at 144 Hz. The end of a walk does not wait for the render
+    thread (`render_thread_late_end`, `backend.md`, "The late end of a walk"):
+    the scene walks over the island are 2.6 to 3.0 ms in a headset at 144 Hz.
+    The threads of the mod spin only for a short time and then sleep
+    (`thread_wait`, `backend.md`, "How the threads wait"): in desktop runs with
+    4 to 16 cores the frames are as fast, and the process uses about 0.5 cores
+    less. The D3D7 thread merges the rows of draws with one state
+    (`d3d7_thread_merge`), so the frame thread copies the vertices of a draw one
+    time. **The goal of a port to the Steam Frame and the Quest 3 standalone**
+    needs fewer layers of x86 code for each draw. The plan, in steps that a
+    desktop run can check: (A) a Vulkan renderer of the scene walks in place of
+    dxwrapper and Direct3D 9 (`backend.md`, "The Vulkan renderer"; the same
+    picture as Direct3D 9, with the hand and the overlays of the mod and both
+    eyes in one pass). Its eye pictures go straight into an OpenXR session with
+    Vulkan (`xr_vulkan=1`, "The session with Vulkan"), and so do the pixels of
+    the CPU: the cards, the walls of the cut scene window and an eye picture of
+    the CPU (`xr_vulkan_upload`). The draws for the panel target go into a panel
     of the renderer, which the subtitle card and the panel layer take
     (`vk_panel`). In a session with Vulkan a walk of one walk goes to the
     renderer alone, and the D3D7 thread gives no draw of it to dxwrapper
-    (`vk_only`, "The walk without Direct3D 9"; on the desktop the render
-    thread then has 1 draw of a frame in place of 773). Not run in a
-    headset: `xr_vulkan_upload`, `vk_panel` in a session, `vk_only`. Still
-    on Direct3D 9: a menu, a loading screen, a video and a frame of two
-    walks, which go through the GPU bridge and a relay of Direct3D 11, and
-    the calls that set a state. (A2) A backend of the mod makes DirectDraw
-    7 and Direct3D 7 on Vulkan in place of dxwrapper (`backend=vulkan`,
-    `backend.md`, "The backend of the mod on Vulkan"): on the desktop the
-    game runs from the logos to the start dialog of a new game with no
-    Direct3D 9, and the renderer draws each draw. One walk, or the two
-    walks of the eyes, give one image with both eyes for a session with
-    Vulkan, and the help text goes into the panel of the renderer for the
-    subtitle card. `ddraw_census=1` with `backend=system` lists the calls
-    that the game makes. With `backend=vulkan` the mod uses only Vulkan
-    (`vulkan_only`, `backend.md`, "Only Vulkan"): no part for Direct3D 9
-    starts, the session has no Direct3D 11 device, and the window of the
-    game has a swapchain of Vulkan (`vk_window`, "The window with
-    Vulkan"). A session in the headset ran with no Direct3D 11 device.
-    The installer keeps dxwrapper: it is the renderer Direct3D 9 for a PC
-    with no Vulkan 1.3, and the renderer of "Play, no VR". Next for the
-    backend: check the light maps of the
-    rooms of the Temple in the headset (`vk_stage1`, Shift E, `backend.md`,
-    "The second stage"), and find the part of the long frames after the load
-    of a saved game that the hold of the last frame does not take
-    (`xr_hold_ms`, the line `slow frame`, `backend.md`, "The hold of the
-    last frame"). Foveated
-    rendering (`foveation`, `backend.md`, "Foveated rendering") gives the eye
-    pictures of the renderer fewer shades away from the gaze of an eye
-    tracker, or from straight ahead, and foveated resolution
+    (`vk_only`, "The walk without Direct3D 9"; on the desktop the render thread
+    then has 1 draw of a frame in place of 773). Still on Direct3D 9: a menu, a
+    loading screen, a video and a frame of two walks, which go through the GPU
+    bridge and a relay of Direct3D 11, and the calls that set a state. (A2) A
+    backend of the mod makes DirectDraw 7 and Direct3D 7 on Vulkan in place of
+    dxwrapper (`backend=vulkan`, `backend.md`, "The backend of the mod on
+    Vulkan"): on the desktop the game runs from the logos to the start dialog of
+    a new game with no Direct3D 9, and the renderer draws each draw. One walk,
+    or the two walks of the eyes, give one image with both eyes for a session
+    with Vulkan, and the help text goes into the panel of the renderer for the
+    subtitle card. `ddraw_census=1` with `backend=system` lists the calls that
+    the game makes. With `backend=vulkan` the mod uses only Vulkan
+    (`vulkan_only`, `backend.md`, "Only Vulkan"): no part for Direct3D 9 starts,
+    the session has no Direct3D 11 device, and the window of the game has a
+    swapchain of Vulkan (`vk_window`, "The window with Vulkan"). A session in
+    the headset ran with no Direct3D 11 device. The installer keeps dxwrapper:
+    it is the renderer Direct3D 9 for a PC with no Vulkan 1.3, and the renderer
+    of "Play, no VR". Next for the backend: find the part of the long frames
+    after the load of a saved game that the hold of the last frame does not take
+    (`xr_hold_ms`, the line `slow frame`, `backend.md`, "The hold of the last
+    frame"). Foveated rendering (`foveation`, `backend.md`, "Foveated
+    rendering") gives the eye pictures of the renderer fewer shades away from
+    the gaze of an eye tracker, or from straight ahead, and foveated resolution
     (`fovea_res`, "Foveated resolution") makes each eye picture from an outer
-    image with fewer pixels and a centre image with more. On a Radeon RX
-    7900 XTX neither takes time off the GPU, because the time is in the
-    draws. The centre follows the gaze of OpenXR or of OSC (Steam Link of
-    the Steam Frame). On the Steam Frame the centre of `fovea_res` follows
-    the gaze of OpenXR. There `fovea_res_layer=1` shakes the picture
-    (`backend.md`, "The middle as its own layer", the known limit): find
-    the cause in the compositor, or keep 0 there. Not run with an eye
-    tracker: `foveation`. Check with `foveation_show=1` that the marks
-    follow the gaze (`backend.md`, "Foveated rendering", the open points). (B) one draw
-    for many copies of a mesh (about 870 draws of a frame are 36 meshes);
-    (C) a new renderer of the land, after a count of its draws. (D) The
-    headset app for Android (`android.md`): an APK for the Quest 3 and for
-    other headsets with Android and OpenXR. It has an OpenXR session with
-    Vulkan, the settings of the launcher in a menu in the form of the menu
-    of the game, and the check of the game folder on the headset. It has
-    the Vulkan renderer of the mod, which draws a stream of the walks that
-    the mod records on the PC (`vk_stream_record`): in the emulator its
-    pictures of the game are the same as the pictures of the PC, to the
+    image with fewer pixels and a centre image with more. On a Radeon RX 7900
+    XTX neither takes time off the GPU, because the time is in the draws. The
+    centre follows the gaze of OpenXR or of OSC (Steam Link of the Steam Frame).
+    On the Steam Frame the centre of `fovea_res` follows the gaze of OpenXR.
+    There `fovea_res_layer=1` shakes the picture (`backend.md`, "The middle as
+    its own layer", the known limit): find the cause in the compositor, or keep
+    0 there. Not run with an eye tracker: `foveation`. Check with
+    `foveation_show=1` that the marks follow the gaze (`backend.md`, "Foveated
+    rendering", the open points). (B) one draw for many copies of a mesh (about
+    870 draws of a frame are 36 meshes); (C) a new renderer of the land, after a
+    count of its draws. (D) The headset app for Android (`android.md`): an APK
+    for the Quest 3 and for other headsets with Android and OpenXR. It has an
+    OpenXR session with Vulkan, the settings of the launcher in a menu in the
+    form of the menu of the game, and the check of the game folder on the
+    headset. It has the Vulkan renderer of the mod, which draws a stream of the
+    walks that the mod records on the PC (`vk_stream_record`): in the emulator
+    its pictures of the game are the same as the pictures of the PC, to the
     pixel (`emu_replay_test.ps1`). The emulator also runs the menu
     (`emu_test.ps1`) and the session with an OpenXR test runtime
-    (`emu_xr_test.ps1`). The stream can be live: the mod writes each frame
-    of its walks into a ring file (`vk_stream_live`), and a thread of the
-    app reads the frames from the same file (`stream_live`). In a desktop
-    run the frames of the ring have the bytes of the record of the same run
+    (`emu_xr_test.ps1`). The stream can be live: the mod writes each frame of
+    its walks into a ring file (`vk_stream_live`), and a thread of the app reads
+    the frames from the same file (`stream_live`). In a desktop run the frames
+    of the ring have the bytes of the record of the same run
     (`live_stream_run.ps1`), and in the emulator the app takes them from a
-    second process and draws the pictures of the PC
-    (`emu_live_test.ps1`). The APK carries Wine 11.0
-    in the WoW64 mode for each ABI (`wowbox64.dll` of Box64 on ARM64), and
-    the app unpacks it, makes a prefix and runs a 32 bit test program in it
-    (`android.md`, "Wine in the app"): in the emulator with the x86_64
-    tree. "Play in VR" and "Play, new game" start `runblack.exe` in Wine with
-    the `ddraw.dll` of the APK as a known DLL, `vk_device=0`, the live
-    stream and the input channel (`android.md`, "Play in the app"). On a
-    Quest 3 the arm64-v8a tree runs the test program and the game with
-    `wowbox64.dll` to the dialog of a new profile, and the mod reads the
-    input channel under Box64. The logos, the videos, the front end and the
-    dialog boxes go into the live stream as screen frames, and the app shows
-    them on a quad fixed in the room (`android.md`, "The screens with no
-    scene"). A controller points at a dialog box on the screen quad, the
-    trigger clicks, and the keyboard of the app types the name of a new
-    profile. A controller points at a dialog box of a frame of the scene on
-    the panel quads in the same way (`android.md`, "The dialog boxes by the
-    controllers"). `push_profile.ps1` copies the profile of the player of
-    the PC (the values of the registry and the files) to the game folder of
-    the app, and "Play" imports its values into the registry of the prefix
-    one time for each copy (`pc_profile`, `android.md`, "The profile of
+    second process and draws the pictures of the PC (`emu_live_test.ps1`). The
+    APK carries Wine 11.0 in the WoW64 mode for each ABI (`wowbox64.dll` of
+    Box64 on ARM64), and the app unpacks it, makes a prefix and runs a 32 bit
+    test program in it (`android.md`, "Wine in the app"): in the emulator with
+    the x86_64 tree. "Play in VR" and "Play, new game" start `runblack.exe` in
+    Wine with the `ddraw.dll` of the APK as a known DLL, `vk_device=0`, the live
+    stream and the input channel (`android.md`, "Play in the app"). On a Quest 3
+    the arm64-v8a tree runs the test program and the game with `wowbox64.dll` to
+    the dialog of a new profile, and the mod reads the input channel under
+    Box64. The logos, the videos, the front end and the dialog boxes go into the
+    live stream as screen frames, and the app shows them on a quad fixed in the
+    room (`android.md`, "The screens with no scene"). A controller points at a
+    dialog box on the screen quad, the trigger clicks, and the keyboard of the
+    app types the name of a new profile. A controller points at a dialog box of
+    a frame of the scene on the panel quads in the same way (`android.md`, "The
+    dialog boxes by the controllers"). `push_profile.ps1` copies the profile of
+    the player of the PC (the values of the registry and the files) to the game
+    folder of the app, and "Play" imports its values into the registry of the
+    prefix one time for each copy (`pc_profile`, `android.md`, "The profile of
     the PC"). Open: the profile of a player in a headset (Q1), the sound in a
-    headset (the audio driver `wineaaudio` of patch 0003 gives the sound of
-    Wine to AAudio, `audio.md`, "In Wine on Android"), the pace of the
-    frames with `vk_device=0` in a headset (`vk_pace`, `android.md`, "The
-    pace of the frames"), the test reader of
-    `input_channel_run.ps1 -Live` with screen frames, the time of the copy
-    of a screen frame (the logos at 35 frames a second with the pace), and
-    the screen quad in a headset. The input of
-    the session goes to the mod through a second file, the input channel
+    headset (the audio driver `wineaaudio` of patch 0003 gives the sound of Wine
+    to AAudio, `audio.md`, "In Wine on Android"), the pace of the frames with
+    `vk_device=0` in a headset (`vk_pace`, `android.md`, "The pace of the
+    frames"), the test reader of `input_channel_run.ps1 -Live` with screen
+    frames, the time of the copy of a screen frame (the logos at 35 frames a
+    second with the pace), and the screen quad in a headset. The input of the
+    session goes to the mod through a second file, the input channel
     (`input_live` in the app, `xr_input` in the mod, `android.md`, "The input
     channel"): the views, the hands, the display time, the focus and the
-    recenter, and the pulses back. Open for the input channel: the input of
-    a game frame in a headset (the game did not reach a frame of the scene
-    there yet). The mod gives the app the values of
-    the projection layer of each frame in the frame of the live stream (a
-    record `kView`), and the app shows the eye pictures in a projection
-    layer (`stream_projection`, `android.md`, "The projection layer"). The
-    cards, the panel quads and the cut scene window of the session go into
-    the same frame (records `kCard`, `kCardPicture`, `kPanel`, `kWindow`),
-    and the app shows them as quad layers over the projection layer in the
-    order of the session of the mod (`xr_input_layers`, `stream_layers`,
-    `android.md`, "The quad layers"). Open for it: a real headset, and the
-    intro, which gives no frame of the live stream. With `vk_device=0` the
-    mod makes no Vulkan device, so only the app draws the walks (`android.md`,
-    "No Vulkan device of the mod"). Open for it: the subtitle card, which
-    then has no pixels, and a frame of the game in Wine. A frame goes into the
-    ring at the end of its first walk with both eyes, and in a desktop run each frame after
-    a frame with the whole state was at the reader in its own game frame. A
-    skip of the app and a drop of the writer keep the records of state and
-    lose only the walks, and the queue of the app keeps 3 frames whole, so a
-    slow reader does not hold the frame thread of the game. Open for the
-    live stream: the ring file under Wine and Box64, the walks that keep
-    the picture of the walk before (`vk_keep_picture`, the intro) after a
-    frame with no walks, and a run in a scene with more than one walk in a
-    frame or with records after the walk with both eyes (no run had such a
-    tail, and the move of the tail has no math check). A frame with kStart
-    drops the tail before it, also its kGaze and kOnlyFrame. No desk run
+    recenter, and the pulses back. Open for the input channel: the input of a
+    game frame in a headset (the game did not reach a frame of the scene there
+    yet). The mod gives the app the values of the projection layer of each frame
+    in the frame of the live stream (a record `kView`), and the app shows the
+    eye pictures in a projection layer (`stream_projection`, `android.md`, "The
+    projection layer"). The cards, the panel quads and the cut scene window of
+    the session go into the same frame (records `kCard`, `kCardPicture`,
+    `kPanel`, `kWindow`), and the app shows them as quad layers over the
+    projection layer in the order of the session of the mod (`xr_input_layers`,
+    `stream_layers`, `android.md`, "The quad layers"). Open for it: a real
+    headset, and the intro, which gives no frame of the live stream. With
+    `vk_device=0` the mod makes no Vulkan device, so only the app draws the
+    walks (`android.md`, "No Vulkan device of the mod"). Open for it: the
+    subtitle card, which then has no pixels, and a frame of the game in Wine. A
+    frame goes into the ring at the end of its first walk with both eyes, and in
+    a desktop run each frame after a frame with the whole state was at the
+    reader in its own game frame. A skip of the app and a drop of the writer
+    keep the records of state and lose only the walks, and the queue of the app
+    keeps 3 frames whole, so a slow reader does not hold the frame thread of the
+    game. Open for the live stream: the ring file under Wine and Box64, the
+    walks that keep the picture of the walk before (`vk_keep_picture`, the
+    intro) after a frame with no walks, and a run in a scene with more than one
+    walk in a frame or with records after the walk with both eyes (no run had
+    such a tail, and the move of the tail has no math check). A frame with
+    kStart drops the tail before it, also its kGaze and kOnlyFrame. No desk run
     compared a frame of state of the writer with the record. The picture of
     frame 3002 of the test save changes with the time of the run, so a desk
-    comparison of pictures needs runs close in time (A, B, A).
-    With the render
-    thread, one walk draws most batches in one draw for both eyes (`one_walk_merge`, `backend.md`, "One
-    draw for both eyes"). Before the thread, with one walk, a view of the
-    whole island has about 1500 batches and a scene walk of 9.5 to 11 ms,
-    and the runtime then shows 45 frames a second. Of that walk about 6 ms
-    are Direct3D 9, the driver of AMD and the kernel, and less than 3 ms are
-    the game (`profile_sample`, `backend.md`, "Where the time of the scene
-    walk goes"). So the thread takes the calls of dxwrapper to Direct3D 9,
-    not the calls of the game to dxwrapper. For 90 frames a second the scene
-    walk must be under about 6 ms, because the frame waits 3 to 4 ms for the
-    GPU after it. Most of that wait is the driver, which gives the calls to
-    the GPU late: the GPU works about 2 ms on the walks of a frame
-    (`profile_gpu`).
-    DXVK can take the place of the Direct3D 9 of Windows (`d3d9_backend=1`,
-    `backend.md`, "DXVK under dxwrapper"): the render thread is busy 0.95 ms
-    in place of 2.1 ms in a desktop run, with the same picture. Open: a
-    headset session with it, a GPU of NVIDIA or Intel, a PC with two GPUs,
-    and then the default value. The installer does not ship DXVK yet.
+    comparison of pictures needs runs close in time (A, B, A). With the render
+    thread, one walk draws most batches in one draw for both eyes
+    (`one_walk_merge`, `backend.md`, "One draw for both eyes"). Before the
+    thread, with one walk, a view of the whole island has about 1500 batches and
+    a scene walk of 9.5 to 11 ms, and the runtime then shows 45 frames a second.
+    Of that walk about 6 ms are Direct3D 9, the driver of AMD and the kernel,
+    and less than 3 ms are the game (`profile_sample`, `backend.md`, "Where the
+    time of the scene walk goes"). So the thread takes the calls of dxwrapper to
+    Direct3D 9, not the calls of the game to dxwrapper. For 90 frames a second
+    the scene walk must be under about 6 ms, because the frame waits 3 to 4 ms
+    for the GPU after it. Most of that wait is the driver, which gives the calls
+    to the GPU late: the GPU works about 2 ms on the walks of a frame
+    (`profile_gpu`). DXVK can take the place of the Direct3D 9 of Windows
+    (`d3d9_backend=1`, `backend.md`, "DXVK under dxwrapper"): the render thread
+    is busy 0.95 ms in place of 2.1 ms in a desktop run, with the same picture.
+    Open: the check in `headset-checks.md`, a GPU of NVIDIA or Intel, a PC with
+    two GPUs, and then the default value. The installer does not ship DXVK yet.
   - **The other render ideas have a small gain.** A projection off the centre
     for each eye: a view of 70 to 98 degrees changes the walk by 4 percent
     (`backend.md`, "A wide view is nearly free"). So a narrower cull saves
@@ -1111,32 +856,60 @@ that moves while the Hand takes it.
     one state"). With one walk, each of its 1580 to 2610 state calls in a
     frame changes a value. The texture filter of the mod adds about 4 calls
     in a frame.
-- **N2. The hands that react.** Not shown on the desktop: a rock and the
-  crown of a tree as a body, a villager that walks into a still hand, and a
+- **N2. The hands that react.** In a headset the fingers rest on objects
+  that move (rocks, trees, villagers), but not on buildings, and the player
+  saw nothing of the fingers in the sea. The mod now offers to the pick each
+  object whose ball round its box is near the Hand's point or near the
+  middle of either hand (`hand_feel_offer`), gives the part of a hand of the
+  mesh under the sea the color of the sea (`hand_feel_water_look`), and
+  starts a ring of the game on the water where a finger tip goes in
+  (`hand_feel_ripple`). A desktop run shows the offer at work: 824 more
+  objects near the hand in 450 frames, at no measurable cost. Eye pictures
+  with Vulkan and with dxwrapper show the sea and the hand over it in both
+  eyes. A finger tip in the sea starts the ring of the game with
+  `hand_feel_ripple=1`, and none with 0. In the test save `temple` the
+  fingers go into the body of the Village Store, and with `hand_feel_offer=0`
+  the pick gets no more objects and the fingers act the same
+  (`village_run.ps1 -Kind wall`). Not shown yet: a finger at the wall of a
+  house, and the look of the water in a picture. The plain sea of the God
+  view writes no depth, and no layer of the water that shows a thing in it
+  is missing (`hand-model.md`, "What the game draws of the sea"). Not
+  proven: why the fingers did not rest on a house in the headset. The code that reads the game shows two causes:
+  the hand that does not point got only the bodies near the Hand's point, and
+  a palm in the box of a small house turns that body off. Open: a body is the
+  box of the whole mesh, and the boxes of the parts of a mesh (walls, roof)
+  are not known in memory, so a round or a large building has no body at its
+  walls when the hand is smaller than it. Not shown on the desktop: a rock and
+  the crown of a tree as a body, a villager that walks into a still hand, a
   tree taken with the palm to the side, and a picture from the side of a
-  finger tip that bends at a wall. The box of the Creature does not follow
-  its animation, and the box of a hut with its roof down to the land stops a
-  finger in the air before the roof. The thumb does not go round the trunk of a tree in
-  the Hand: the open thumb is in the trunk. The idle wave is off
+  finger tip that bends at a wall. The box of the Creature does not follow its
+  animation, and the box of a hut with its roof down to the land stops a
+  finger in the air before the roof. The thumb does not go round the trunk of
+  a tree in the Hand: the open thumb is in the trunk. The idle wave is off
   (`hand_feel_idle`).
 - **N3. The hand model.** The game's finger animations are not played (a
   pose is a curl for each finger). The shadow of the Hand on the land has
   the game's fingers. The textures of an edited hand file are not read.
 - **N4. The Temple.** Not done: a click on a frame of the Challenge Room,
   a text of the Library, a value of the options box, a drag of a scroll.
-  Suspects: the picture of a new save is flat magenta, the waist point is
-  8.4 units higher after a load, the ray ends short of the pointer in the
-  left eye in a dialog box inside the Temple, and the leash posts are 1.4
-  cm from each other at the scale of the start. In the ring menu: with
+  Not seen in a run: the picture of a save in the Save Game Room, which the
+  game now makes from the eye picture (backend.md, "The save picture").
+  Suspects: the waist point is 8.4 units higher after a load, the ray ends
+  short of the pointer in the left eye in a dialog box inside the Temple,
+  and the leash posts are 1.4 cm from each other at the scale of the start. In the ring menu: with
   `button_layout=0` a thumb on the left stick can open it, and a jump to the
   town or to a bookmark takes the heading of the game camera.
 - **N5. The village.** Not run: food, an animal or crops set down at a
   store, the altar, a gift to the Creature, the red halo outside the
   influence, a Workshop that gives scaffolds, villagers that make chants,
   and Heal from its icon at the Worship Site.
-- **N6. Miracles.** Not run: teleport, the Creature miracles other than
-  Strong and Freeze, and each reason of a refusal but "needs a Creature"
-  and "needs a circle on the land".
+- **N6. Miracles.** Not run: each reason of a refusal but "needs a
+  Creature" and "needs a circle on the land". Open:
+  - Heal has no run: a test save of Land 1 has no sick villager. The log
+    check is in `headset-checks.md`, "Play as normal and send the log".
+  - A shield of a small circle loses about 24 of its life a second, so a
+    circle of 23 cm lasts about 3.5 minutes. The cost grows with the square
+    of the size, as in the plain game.
 - **N8. The scripts and the engine camera.** The scripts get the place of
   the player. Not changed: the 114 markers at "camera position",
   `GetFacingCameraPosition`, and the other readers of the engine camera.
@@ -1146,7 +919,7 @@ that moves while the Hand takes it.
 - **N10. The cut scene window.** Limits: the plane stays near for some
   seconds after a near thing left, a thing smaller than one grid cell can
   be in front, and the advisors are in the measure.
-- **N11. The God view.** No desktop run: the mouse pan, the events that a
+- **N11. The God view.** No desktop run: the events that a
   step of the tutorial waits for, and the load of a saved game in play (a
   run with a test save shows the load at the start of the game). Of the
   teleport, not run: the red arc on the sea, the aim at the sky, the cancel
@@ -1159,14 +932,25 @@ that moves while the Hand takes it.
   and a second object in the Hand (`grab.md`).
 - **N13. The exact Hand.** No desktop run in the PlayAnim state. The Totem
   and the Citadel states are not read (`hand.md`).
-- **N14. The throw.** Not tested: a throw into a pile, and whether a thrown
-  villager lives (`throw.md`).
-- **N15. The interface panel** (`ui_panel=1`). Desktop runs with the input
-  channel and the emulator show the panel quads and the clicks of the ray on
-  them. No run with a session of the mod on the PC, and never seen in a
-  headset (`ui-layer.md`, section 9).
+- **N14. The throw.** Not tested: a rock thrown into a pile (`throw.md`).
+  Open: after a landing at 6.5 m/s a thrown villager hops 2.2 m high in the
+  room, for 2.8 s. The bounce keeps 50 percent of the speed, in the time of
+  the game. The physics constants of the game give a villager much more
+  damping than a rock (`Data\PhysicsConstants.txt`, row 7: SpringK 26.25,
+  DampK 3.05), so a large hop is not expected. Not known whether the plain
+  game makes so high a hop.
+- **N15. The interface panel** (`ui_panel=1`). A desktop run shows the
+  route of the batches to the panel and none in the eyes (`ui-layer.md`,
+  section 9). Desktop runs with the input channel and the emulator show the
+  panel quads and the clicks of the ray on them. Not run: a scripted click
+  with the menu only on the panel with a session of the mod on the PC, and
+  the quads in a headset.
 - **N17. Headset coverage.** Quest 3 through Virtual Desktop and Steam Frame
   through Proton have game coverage. Other headsets and runtimes need tests.
+  A headset with canted views (Pimax) needs a test: with `eye_cant=1` each
+  eye draws with the turn of its own view (backend.md, "Canted views"). A
+  player with a Pimax must say if the two pictures fuse in play, and the log
+  line `eye cant` gives the cant of his views.
 - **N18. The x64 host for Steam Frame** (`xr_bridge=1`). Not tested: all
   controls, the haptics, the loss of the device, long sessions, and the
   install and the uninstall of the add-on on a clean setup. The game ran
@@ -1360,7 +1144,7 @@ that moves while the Hand takes it.
   buttons the Steam Frame gives to the app (the lines `trace : buttons` of
   `bwvr-quest.log`), the cost of the recorder on the Frame, and the clock
   shift that the join finds.
-- **N19. The display rate of the headset app** (`display_hz`, the row
+- **N38. The display rate of the headset app** (`display_hz`, the row
   "Display rate", `android.md`, "The display rate"). The emulator with the
   test runtime shows the row, the requests, the event and the pace of the
   game in Wine at 90 Hz. Not shown: each rate in a headset (the feel of the
@@ -1449,14 +1233,7 @@ that moves while the Hand takes it.
   with the picture of the walk before), then the same view with
   `ring_slot_order=1` and 0 (the debug page, row "Slot order"), with
   `frame_queue=0` and 1, and with `xr_eye_direct=0` and 1.
-- **N22. Haptics from the world: check it in a headset.** With
-  `world_haptics=1` the hand feels the purr of a stroke, the beat of a
-  living thing in the Hand, the land under a grip, the thump of a landing
-  and of a tree that comes out, the charge of a miracle and the pieces of a
-  take (`hand-model.md`, "Haptics from the world"). Only a headset shows
-  how each pattern feels, and whether a new target and a lock stay clear.
-  The mod reads no type of the ground, so rock and grass feel the same.
-- **N23. The control scheme "Trigger is grab"** (`controls=1`,
+- **N39. The control scheme "Trigger is grab"** (`controls=1`,
   `controllers.md`, 5.7). No headset session yet. Only a headset shows how
   the choice of the press feels, and whether the boost of 5 times is a good
   speed.
@@ -1475,9 +1252,6 @@ that moves while the Hand takes it.
 
 ### The repo, the release and the tools
 
-- **R1. The installer and a person.** No person has run the installer on a
-  real game folder and told the result: the install, an update over a
-  build that is installed, and the uninstall.
 - **R2. No desktop run chooses a Creature at the Creature select.** A
   Creature in a pen has no player. A grip on it starts no Creature state, a
   press of the trigger there starts a drag of the land, and the double click
@@ -1486,6 +1260,15 @@ that moves while the Hand takes it.
   there, and make a recipe for it: no run shows that choice with the
   controllers. The recipes with the Creature state start in the test save
   `temple`.
+- **R11. The run `vc` of `verify_build.ps1` does not reach the Creature.**
+  At a render of 3600 by 2880 and with the profile of the new install, the
+  recipe of the Creature at the door of the Temple (test save `temple`)
+  has no Creature to touch, so "the Creature state starts" is missing in
+  each build. The other runs of `verify_build.ps1` pass. The cause is the
+  profile, not the recipe (`creature.md`, section 8): in the test save of
+  the old profile the Creature draws only its shadow, and "Keep your old
+  Creature" keeps no Creature with the new profile. Needs a profile with a
+  Creature, and then `make_test_save.ps1 -Name temple`.
 - **R3. The game window is in front in a desktop run.** Windows gives the
   front to the game window of a run on a PC that nobody uses, with no call
   of the game process (`bwvr/tools/desk/README.md`, and `backend.md`, "Who
@@ -1515,14 +1298,138 @@ that moves while the Hand takes it.
   block stops there, and no run starts. With no `try` block the wait goes
   on. It happened one time, with two queues of runs that waited for each
   other.
-- **R9. No recipe shows a stay that stops a walk.** `creature_recipe.ps1
-  -Kind stay` makes three stays of a Creature that stands (`creature.md`,
-  6.2). A grip from a distance in the walk of `-Kind tie` can show it.
 - **R10. Two test keys on one key.** Ctrl and the 9 key of the number pad is
   the test key of `creature_palm_point` (`hand_direct.cpp`) and of the take
   from a forest (`forest_take.cpp`). Ctrl and the 1 key of the number pad
   is the test key of the ways of the ring (`radial_menu.cpp`) and of
-  `god_camera_at` (`stereo.cpp`). The debug page of the ring has one item for
-  each of the four. The keys of the keyboard that no code of the game or of
+  `god_camera_at` (`stereo.cpp`). The debug page has one switch for each of
+  the four. The keys of the keyboard that no code of the game or of
   the mod reads are few: a new test key needs a search first (`backend.md`,
   the hotkey table).
+- **R12. Checks that a desktop run can prove.** These checks need no person
+  in the headset: the scripted controller, the log and the eye pictures of
+  both eyes can prove them. Prove a line with a desktop run, then remove the
+  line and write the result in the doc of the area. A fault gets its own
+  item. Each line names the nearest recipe, or says "needs a recipe".
+  - The God view:
+    - A steep slope that keeps the land near the hands
+      (`move_stick_follow_land`):
+      `village_run.ps1 -Kind walk` goes over the sea and a coast, and no
+      hill comes within 10 cm of the head. Needs a walk over a hill.
+    - The Island Keeper of the Gods' Playground with `script_view=1`:
+      the way of `god-view.md`, section 7, from the test save `temple`.
+      Needs the measured point of "Yes." and the place of the Keeper. The
+      quest `FollowUs`: `spawn_run.ps1 -Choice normal` to the first story of
+      a new game.
+  - The Hand and grabs:
+    - A finger that touches a villager, and the shape of each pose of the
+      mesh in the eye pictures: `hand_run.ps1 -Kind one` with a villager and
+      a nearer zoom.
+    - The shape of the left hand model (`left_hand=1`) in the eye pictures:
+      `hand_run.ps1 -Kind left` with the zoom steps of `-Kind near`. At the
+      scale of `-Kind left` the hands are too small to judge.
+    - The limits of the far grab near an object (10 and 15 cm, `hand
+      pick`): `hand_run.ps1 -Kind one` with `far_grab=1`.
+    - The glow on a mesh of the sorted list (P15). Needs a recipe: no
+      target of `village_run.ps1 -Kind tglow` is a mesh of the sorted list.
+    - A living thing beside a rock or a pile gets the halo, and the halo
+      stays on it: `village_run.ps1 -Kind choice` at a rock and at a pile.
+    - A signpost in the aim, and a signpost beside a miracle or the Creature
+      at the Hand: `village_run.ps1 -Kind aimsign`. The word `aimfar` does
+      not find the silver scroll at the door, because the draw gives scrolls
+      a list of their own.
+    - The grip on the Creature at 12 to 15 cm: `creature_recipe.ps1 -Kind
+      wide` has grips at 9.7 and 11.1 cm only (the steps `slap` and the
+      pull). Needs a step to that distance.
+    - A far aim past a near house, and past a pile that is not in a
+      building: `village_run.ps1 -Kind aimpast`. At the house of the test
+      save `temple` a villager and a scroll are near the Hand's point, so
+      the far grab stays off. The pile there is in the body of the Village
+      Store.
+    - The far grab of a villager in a crowd. Needs a recipe.
+    - A tree that comes to rest in a take, at the Hand and from a distance
+      (B11). Needs a recipe: `throw_queue.ps1 -Runs treedropend` gives no
+      line `hand take ... came to rest`, at 60 frames a second and with no
+      pace.
+    - A take at a distance from a pile of Food, and from a pile that
+      `miracle_run.ps1` makes (B19): `village_run.ps1 -Kind fartake`.
+    - The Hand stays at the controller in a bulk take (`hand bulk`). Needs a
+      log line: no line of the take frames of `village_run.ps1 -Kind store`
+      gives the place of the Hand against the controller.
+    - A finger that bends at the wall of a house, a rock and the crown of a
+      tree as a body, a villager that walks into a still hand, and a tree
+      with the palm to the side (N2): `village_run.ps1 -Kind wall`. At 44.4
+      units a meter the Hand's point goes into the body of the house and no
+      finger does. At 13.2 units a meter no house is within 2 m of the room.
+    - A small object in a pinch does not glide at a change of the zoom:
+      `village_run.ps1 -Kind pinch` keeps the pinch, but the rock is too
+      small in the eye pictures. Needs a nearer zoom, or a log line of the
+      place of the object in the Hand.
+  - Throws:
+    - A rock thrown into a pile (N14): `village_run.ps1 -Kind throwpile`
+      with a rock in place of the wood.
+    - A tree thrown fast across the land and onto a slope comes to rest in
+      about 1 s, and a tree still rolls on a slope: `throw_queue.ps1 -Runs
+      tree` with a fast throw that lands on the land, not in the sea.
+  - The Creature:
+    - The Creature tutorial goes on after a press on the Creature
+      (`creature_camera`). Needs a recipe.
+    - A command: a tap at a place on the land, at a villager and at a
+      building: `creature_recipe.ps1 -Kind walk` and `aim_queue.ps1 -Runs
+      cmd1b` with these targets.
+  - The village:
+    - The fish of a fish farm: the halo, the grip in the fish and the far
+      grab (B36). Needs a recipe.
+    - Wood onto a scaffold. Needs a recipe: `village_test_scaffolds` makes
+      the first scaffold at the place of the pile in the store, so the wood
+      goes onto the pile. The scaffolds must be away from the store.
+    - The reach of a scroll near its limit of 10 cm (`scroll_reach_cm`) at
+      each scale, and a scroll near the Hand at about 4000 units a meter:
+      `hand_run.ps1 -Kind one` at other scales.
+  - Miracles:
+    - The limits of the target of a Creature miracle (3 cm, 6 degrees), and
+      the limit of 0.6 m/s of a shake that takes a miracle out. Needs a
+      recipe near each limit: `miracle_run.ps1 -Kind creature` and `-Kind
+      cancel` stay far inside them.
+    - The effect of each miracle: each line "To prove" of `headset-checks.md`,
+      "The miracles of the game" (N6): `miracle_run.ps1` with `-Seeds`.
+      Water on a field and on a forest needs a test save with a field or a
+      forest near the Hand.
+  - The Temple:
+    - The place of each eye in a room with one walk and with `one_walk=0`,
+      and the fade in both eyes with `one_walk=0` (`temple_fade_eyes`, B13):
+      `temple_run.ps1` with the view recipe of `controllers.md`, 11.9. Open:
+      in the Save Game Room the word `look` does not turn the camera with
+      `temple_camera_screen` at 1 or at 0. Find what the plain game does
+      there.
+    - The game's Hand does not show in the Save Game Room with
+      `temple_hide_hand=1`: `temple_run.ps1` with the door recipe and a shot
+      with the ray on in that room.
+    - A click on a pad of the pool, on a scroll, and on a control of the
+      Challenge Room and of the Library (`temple       : the game gets the
+      mouse message`): `temple_run.ps1 -Rooms`.
+  - Menus and cards:
+    - The keyboard for the name of a new god at the first start of a profile
+      (`keyboard     :`). Needs a recipe.
+    - A help text of the game with the words of the mouse in an eye picture,
+      after a change from the controller to the mouse:
+      `creature_recipe.ps1 -Kind leash` with `help_test=1` and
+      `mouse_owner_test_frame`. The census changes at once, but no help text
+      with a word of the device shows after the change.
+    - The hint at the game's Hand (`hint_hand_depth`) in an eye picture at a
+      nearer zoom.
+      Needs a recipe: `village_run.ps1 -Kind tooltip` is the recipe of the
+      tooltip.
+  - The intro:
+    - A still hand with no flicker of one frame: `intro_run.ps1` with the
+      scripted hands of its header. Needs a log line: a count of the changes
+      of the show of a hand.
+  - The picture and the backend:
+    - The sun with a head that moves in steps. A still head gives the same
+      sun with `sun_glare` 0 and 1, and 2 hides the glare. Needs a recipe
+      with head steps: `temple_run.ps1 -NoEnter` with `sky_test_hour=13`.
+    - The merge of draw calls (`draw_merge_test=1`) in a fight of Creatures:
+      0 eye passes with a different checksum. Needs a recipe with a fight.
+- **R13. A fault of a desktop script.** `temple_run.ps1 -SaveTest` with
+  `menu_room_test=1` makes no save: the start dialog of the new game stays
+  up, and the ring does not open.

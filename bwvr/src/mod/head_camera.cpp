@@ -84,6 +84,10 @@ void EyeStaleCallEnd(bool restore);
 void StereoRoomCamera();
 // head_pose.cpp: the world units in a meter of the room.
 float HeadPoseScale();
+// one_walk.cpp: the pass of the left eye also draws the right eye, and the
+// distance of the eyes of that pass in world units.
+bool OneWalkActive();
+float OneWalkSeparation();
 // script_camera.cpp: the shot the story camera holds, in place of the pose
 // the caller asked for. True when there is one.
 bool ScriptCameraRenderPose(uintptr_t caller, const float* position,
@@ -116,6 +120,8 @@ bool TabletopCamera(const float asked_position[3], const float asked_focus[3],
 // cutscene_window.cpp: this frame draws as the stereoscopic window. The game
 // camera then goes through with no head on it, as in play mode 1.
 bool CutsceneWindowFlat();
+// stereo.cpp: the head of the frame, at the main camera call.
+void StereoHeadForCamera();
 
 namespace {
 
@@ -274,12 +280,31 @@ float g_room_eye[3] = {0.0f, 0.0f, 0.0f};  // the eye of pass 0, this frame
 uint64_t g_room_eye_frame = 0xFFFFFFFFFFFFFFFFull;
 uint64_t g_room_pairs = 0;
 float g_room_apart_least = 0.0f, g_room_apart_most = 0.0f;  // cm of the room
+// The pairs of one walk, of g_room_pairs, and how far the eye of a pass was
+// from the middle of the head, in cm of the room.
+uint64_t g_room_one_walk_pairs = 0;
+uint64_t g_room_offsets = 0;
+float g_room_offset_least = 0.0f, g_room_offset_most = 0.0f;
+
+void CountApart(float apart) {
+  if (g_room_pairs == 0 || apart < g_room_apart_least) {
+    g_room_apart_least = apart;
+  }
+  if (g_room_pairs == 0 || apart > g_room_apart_most) {
+    g_room_apart_most = apart;
+  }
+  ++g_room_pairs;
+}
 
 // After the engine built the camera of a room in an eye pass. level is the
 // room of this call: the world up and the heading of the room camera.
 void RoomPassBuilt(bool with_eye, const float level[9]) {
-  // The roll and the place of the eye of this pass, on the camera that the
-  // engine built just now.
+  // The camera that the engine built just now is the middle of the head.
+  float middle[3] = {0.0f, 0.0f, 0.0f};
+  const float* built = UnscaledRotation();
+  const bool have_middle = !IsBadReadPtr(built, sizeof(float) * 12);
+  if (have_middle) temple_math::EyeOfMatrix(built, middle);
+  // The roll and the place of the eye of this pass, on that camera.
   if (with_eye) StereoRoomCamera();
 
   // What the pass draws the room from, read from the matrix of the engine,
@@ -299,22 +324,35 @@ void RoomPassBuilt(bool with_eye, const float level[9]) {
   if (roll > g_room_roll_most) g_room_roll_most = roll;
   float eye[3];
   temple_math::EyeOfMatrix(now, eye);
+  const float scale = HeadPoseScale();
+  const float cm = 100.0f / (scale > 0.0f ? scale : 1.0f);
+  if (have_middle) {
+    const float offset = temple_math::Distance(eye, middle) * cm;
+    if (g_room_offsets == 0 || offset < g_room_offset_least) {
+      g_room_offset_least = offset;
+    }
+    if (g_room_offsets == 0 || offset > g_room_offset_most) {
+      g_room_offset_most = offset;
+    }
+    ++g_room_offsets;
+  }
   const int pass = StereoPassEye();
-  if (pass == 0) {
+  if (pass == 0 && OneWalkActive()) {
+    // ONE WALK (one_walk.cpp). The pass of the left eye also draws the right
+    // eye: each vertex moves by the disparity of its depth, which is the
+    // view from the camera of this pass moved by the separation of one walk
+    // along its right axis. That axis has the roll of the pass.
+    const float right[3] = {now[0], now[3], now[6]};
+    const float separation = OneWalkSeparation();
+    float other[3];
+    for (int i = 0; i < 3; ++i) other[i] = eye[i] + right[i] * separation;
+    CountApart(temple_math::Distance(other, eye) * cm);
+    ++g_room_one_walk_pairs;
+  } else if (pass == 0) {
     for (int i = 0; i < 3; ++i) g_room_eye[i] = eye[i];
     g_room_eye_frame = g_frame;
   } else if (pass == 1 && g_room_eye_frame == g_frame) {
-    const float scale = HeadPoseScale();
-    const float apart =
-        temple_math::Distance(eye, g_room_eye) / (scale > 0.0f ? scale : 1.0f) *
-        100.0f;
-    if (g_room_pairs == 0 || apart < g_room_apart_least) {
-      g_room_apart_least = apart;
-    }
-    if (g_room_pairs == 0 || apart > g_room_apart_most) {
-      g_room_apart_most = apart;
-    }
-    ++g_room_pairs;
+    CountApart(temple_math::Distance(eye, g_room_eye) * cm);
   }
 }
 
@@ -427,6 +465,12 @@ void PlaceCamera(const float* position, const float* focus, bool intro,
   }
   float h[9];
   float lean[3];
+  // THE HEAD OF THE FRAME, before the main call reads it. stereo.cpp locates
+  // the head for the display time of this frame (head_pose_frame).
+  if (!intro && g_world_is_up && g_enabled && !g_in_scene &&
+      g_frame != g_recorded_frame) {
+    StereoHeadForCamera();
+  }
   // Not until the world is up. UpdateCamera runs during loading and in menus
   // too, and those cameras are not ours to move. The intro is the one
   // exception, and it asks by name.
@@ -1056,16 +1100,24 @@ void HeadCameraReport() {
   if (g_room_passes > 0 || g_room_game_calls > 0) {
     // The check line of the view of a room. With temple_view=1 the first
     // number must be 0, and the eyes must be the distance of the eyes apart.
+    // In one walk the right eye is the camera of the left eye moved by the
+    // separation of one walk, so its pairs say how far one walk moved it.
+    // The distance of the eye of a pass from the middle of the head is a
+    // read of the matrix before and after the mod gave the pass its eye.
     ModLog("temple       : in %llu eye passes the game built the camera of a "
            "room. The view of the pass was %.2f degrees at the most from the "
            "head pose of its frame, and the roll of that pose was %.1f "
            "degrees at the most. The cameras of the two eyes were %.2f to "
-           "%.2f cm of the room apart in %llu frames (temple_view=%d). %llu "
-           "passes had no head pose of the frame. %llu camera calls of a "
-           "room went through with no head, for the camera code of the room",
+           "%.2f cm of the room apart in %llu frames, %llu of them in one "
+           "walk, where the right eye is the left eye moved by the separation "
+           "of one walk. The camera of a pass was %.2f to %.2f cm of the room "
+           "from the middle of the head (temple_view=%d). %llu passes had no "
+           "head pose of the frame. %llu camera calls of a room went through "
+           "with no head, for the camera code of the room",
            g_room_passes, g_room_off_most, g_room_roll_most,
-           g_room_apart_least, g_room_apart_most, g_room_pairs, g_room_view,
-           g_room_passes_no_head, g_room_game_calls);
+           g_room_apart_least, g_room_apart_most, g_room_pairs,
+           g_room_one_walk_pairs, g_room_offset_least, g_room_offset_most,
+           g_room_view, g_room_passes_no_head, g_room_game_calls);
   }
   g_room_passes = 0;
   g_room_passes_no_head = 0;
@@ -1074,6 +1126,9 @@ void HeadCameraReport() {
   g_room_roll_most = 0.0f;
   g_room_pairs = 0;
   g_room_apart_least = g_room_apart_most = 0.0f;
+  g_room_one_walk_pairs = 0;
+  g_room_offsets = 0;
+  g_room_offset_least = g_room_offset_most = 0.0f;
   g_flat_records = 0;
   g_table_records = 0;
   g_table_restores = 0;

@@ -29,7 +29,9 @@
 // IN THE GOD VIEW (play_mode=4, docs/god-view.md) the picture does not come
 // from the game's camera. A snap turn and a wheel step then step the God
 // view, and after the game's update the game camera goes over the player's
-// place, the way the snap turn writes it (GodAfter). A tilt key moves the
+// place, the way the snap turn writes it (GodAfter). With snap_turn=4 the
+// stick and a held turn key turn the God view smoothly (SmoothTurnRequest,
+// ApplyGodTurnHold in tabletop.cpp). A tilt key moves the
 // ground of the God view (GodTiltKeys). A land drag of the game does not
 // move the game camera, and the mouse pans the God view in its place
 // (GodDragAfter, and MousePan in tabletop.cpp).
@@ -47,6 +49,8 @@
 #include <stdio.h>
 
 #include "MinHook.h"
+#include "camera_zone.h"
+#include "comfort_math.h"
 #include "controllers.h"
 #include "table_math.h"
 
@@ -70,6 +74,10 @@ int TeleportJumpEvent();
 bool TabletopGodOwnsView();
 bool TabletopGodStep(int zoom, int ground);
 bool TabletopGodTurn(int direction, float degrees);
+// The smooth turn of the God view (snap_turn=4): the request for the next
+// main camera call, and the degrees that it turned since the last call.
+bool TabletopGodTurnHold(float share, float degrees_per_second);
+float TabletopGodTakeSmoothTurn(int* direction);
 bool TabletopGodGameCamera(float position[3], float focus[3],
                            uint64_t* version);
 // The view only turned since the last pair of camera and view.
@@ -90,6 +98,8 @@ void TabletopGodLookPoint(const float position[3], const float focus[3],
                           float out[3]);
 // A test with no key press: the test keys of the place at a game camera.
 void TabletopGodSpawnToggle();
+// hand_direct.cpp: the CHand of the last frame, or null.
+void* HandDirectGameHand();
 
 namespace {
 
@@ -164,9 +174,17 @@ const uintptr_t kGlideTime = 0x009CE614;
 // exactly the keys. Left is positive.
 const uintptr_t kKeyTurn = 0x00C5B0C8;
 const uintptr_t kKeyTilt = 0x00C5B0C4;
-// Set while the Hand drags the land.
+// CameraModeNew3::Update writes these on each update [V]. kHandDragA is
+// ControlMap::IsActionPerformed(2), the Action button of the game
+// (BINDABLE_ACTION_ACTION, 0x0045ABA0). kHandDragB is set in the land drag
+// (interface hand mode 0x14), or in hand mode 0x1B while the Move button is
+// held (0x0045ABCA). With both buttons down the update clears the two and
+// turns and zooms the camera.
 const uintptr_t kHandDragA = 0x00C5B0B4;
 const uintptr_t kHandDragB = 0x00C5B0F0;
+// CHand: the Hand state, and the state of a miracle in the Hand.
+const int kHandState = 0x4878;
+const int32_t kStateGrain = 8;
 
 // The wheel. CMouse::ProcessButtons adds the DirectInput wheel total, 120 for
 // a click, to this int and keeps the sum until a reader clears it. Action 3
@@ -277,6 +295,19 @@ ULONGLONG g_turn_request_tick = 0;
 const ULONGLONG kTurnRequestMs = 300;
 ULONGLONG g_last_snap_tick = 0;
 ULONGLONG g_blink_until = 0;
+// THE SMOOTH TURN of the God view (snap_turn=4): on, and the degrees a
+// second of a full push (smooth_turn_speed). g_snap_degrees is 45 then, for
+// the turns that have no smooth turn. smooth_help is the degrees that the
+// smooth turn turned and that sent no turn event yet. The counts are the
+// requests that the God view took, the ones that MayTurn and a grab
+// refused, and the turn events that the smooth turn owed.
+bool g_smooth_turn = false;
+float g_smooth_speed = 90.0f;
+float g_smooth_help = 0.0f;
+uint64_t g_smooth_given = 0;
+uint64_t g_smooth_refused = 0;
+uint64_t g_smooth_grab_refused = 0;
+uint64_t g_smooth_events = 0;
 
 // How far the mouse moves for one snap, in mouse counts, and the shortest
 // time between two snaps from the mouse.
@@ -459,16 +490,67 @@ bool FinishFlight(uint8_t* mode, float elapsed_before) {
   return true;
 }
 
+// A miracle is in the Hand (the Grain state).
+bool MiracleInHand() {
+  const uint8_t* hand = static_cast<const uint8_t*>(HandDirectGameHand());
+  if (hand == nullptr || IsBadReadPtr(hand + kHandState, sizeof(int32_t))) {
+    return false;
+  }
+  return *reinterpret_cast<const int32_t*>(hand + kHandState) == kStateGrain;
+}
+
 // Whether the camera may turn now. The script's own switch comes first: the
 // tutorial turns the controls on one at a time, and a turn it has not
 // allowed yet must not happen.
+//
+// THE ACTION BUTTON WITH A MIRACLE. While a miracle is in the Hand, the grip
+// is the Action button of the game (docs/miracles.md, "The grip casts"), and
+// the closed grip of a charge, a pour or a circle holds it. The Action button
+// alone does not move the camera of the game, so it does not stop a turn
+// then. The land drag still stops it.
+// The cause that stops a turn now, or null when the camera may turn.
+const char* WhyNoTurn(uint8_t* mode, uint32_t features) {
+  if ((features & kFeatureTurn) == 0) return "the script has the turn off";
+  if (mode[kModePivotForced] != 0) return "a script holds the pivot";
+  if (*reinterpret_cast<int32_t*>(mode + kModeFight) != 0) return "a fight";
+  if (*reinterpret_cast<int32_t*>(kHandDragA) != 0 && !MiracleInHand()) {
+    return "the Action button of the game is held";
+  }
+  if (*reinterpret_cast<int32_t*>(kHandDragB) != 0) return "a land drag";
+  return nullptr;
+}
+
 bool MayTurn(uint8_t* mode, uint32_t features) {
-  if ((features & kFeatureTurn) == 0) return false;
-  if (mode[kModePivotForced] != 0) return false;
-  if (*reinterpret_cast<int32_t*>(mode + kModeFight) != 0) return false;
-  if (*reinterpret_cast<int32_t*>(kHandDragA) != 0) return false;
-  if (*reinterpret_cast<int32_t*>(kHandDragB) != 0) return false;
-  return true;
+  return WhyNoTurn(mode, features) == nullptr;
+}
+
+// The log of a turn that a miracle in the Hand lets through, and of a
+// refused turn, a few times a run. The smooth turn asks on each update while
+// the stick is held, so it has a line only when its cause changes.
+int g_turn_cause_logs = 0;
+const int kMaxTurnCauseLogs = 30;
+const char* const kMiracleLetsTurn = "miracle";
+const char* g_smooth_cause = nullptr;
+
+void LogTurnCause(uint8_t* mode, uint32_t features, bool smooth) {
+  const char* why = WhyNoTurn(mode, features);
+  const bool action = *reinterpret_cast<int32_t*>(kHandDragA) != 0;
+  const char* cause =
+      why != nullptr ? why
+                     : (action && MiracleInHand() ? kMiracleLetsTurn : nullptr);
+  if (smooth) {
+    if (cause == g_smooth_cause) return;
+    g_smooth_cause = cause;
+  }
+  if (cause == nullptr || g_turn_cause_logs >= kMaxTurnCauseLogs) return;
+  ++g_turn_cause_logs;
+  if (why != nullptr) {
+    ModLog("comfort      : the %s turn is refused: %s", smooth ? "smooth" : "snap",
+           why);
+  } else {
+    ModLog("comfort      : the %s turn goes on while a miracle in the Hand "
+           "holds the Action button of the game", smooth ? "smooth" : "snap");
+  }
 }
 
 // Turn a point about the position, about world up. A positive angle turns
@@ -511,6 +593,44 @@ void OweTurnEvents(int direction, unsigned input) {
   g_turn_owed_direction = direction;
   g_turn_owed_input = input;
   g_turn_clock = *reinterpret_cast<const int32_t*>(kHelpClock);
+}
+
+// THE TURN EVENTS OF THE SMOOTH TURN. The degrees that the smooth turn
+// turned since the last update count for the tutorial as the game's own
+// turn of that angle: one turn event for each turn_help_degrees (45 with
+// turn_help_degrees=0, comfort_math::SmoothTurnEvents). PayTurnEvents sends
+// them, one in each game turn.
+void SmoothTurnHelp() {
+  int direction = 0;
+  const float degrees = TabletopGodTakeSmoothTurn(&direction);
+  if (degrees == 0.0f || direction == 0) return;
+  const int events = comfort_math::SmoothTurnEvents(&g_smooth_help, degrees,
+                                                    g_turn_help_degrees);
+  if (events <= 0) return;
+  g_smooth_events += static_cast<uint64_t>(events);
+  g_turn_owed += events;
+  if (g_turn_owed > 64) g_turn_owed = 64;
+  g_turn_owed_direction = direction;
+  g_turn_owed_input = kInputKeys;
+}
+
+// A REQUEST OF THE SMOOTH TURN for the next main camera call: share from -1
+// (full left) to 1 (full right). It has the tests of a snap turn: no grip
+// holds the world, and MayTurn (the turn switch of the script, a fight, a
+// drag of the Hand). False when a test or the God view refused it.
+bool SmoothTurnRequest(uint8_t* mode, uint32_t features, float share) {
+  if (ControllersGrabHeld()) {
+    ++g_smooth_grab_refused;
+    return false;
+  }
+  if (mode != nullptr) LogTurnCause(mode, features, true);
+  if (mode == nullptr || !MayTurn(mode, features)) {
+    ++g_smooth_refused;
+    return false;
+  }
+  if (!TabletopGodTurnHold(share, g_smooth_speed)) return false;
+  ++g_smooth_given;
+  return true;
 }
 
 // One owed turn event in a game turn that has none yet from the mod.
@@ -694,7 +814,12 @@ void GodAfter(uint8_t* mode) {
   float position[3], focus[3];
   uint64_t version = 0;
   if (!TabletopGodGameCamera(position, focus, &version)) return;
-  if (version == g_god_written) return;
+  // A push of the player past the limit of a camera zone of the game: the
+  // game camera goes out of the zone for this update, so the game plays its
+  // sound of the block and moves its camera back in (camera_zone.cpp).
+  float bump[2] = {0.0f, 0.0f};
+  const bool bumped = CameraZoneTakeBump(&bump[0], &bump[1]);
+  if (version == g_god_written && !bumped) return;
   uint8_t* camera = CameraOf(mode);
   if (camera == nullptr) return;
   g_god_written = version;
@@ -714,6 +839,13 @@ void GodAfter(uint8_t* mode) {
     }
     table_math::TurnAboutFocus(focus, turned, position);
     ++g_god_focus_kept;
+  }
+  // In a camera zone of a script the game camera stays in the zone, so the
+  // game does not push it back and shake the view.
+  CameraZoneKeepCamera(focus, position);
+  if (bumped) {
+    position[0] = bump[0];
+    position[2] = bump[1];
   }
   if (PointDistance(now_position, position) < 0.01f &&
       PointDistance(now_focus, focus) < 0.01f) {
@@ -1463,6 +1595,7 @@ int __fastcall h_IsActionPerformed(void* self, void* unused, int action) {
 // of the mod around it. h_ModeUpdate puts the watch of the game camera
 // around all of it.
 void ModeUpdate(uint8_t* mode, void* unused) {
+  SmoothTurnHelp();
   PayTurnEvents(mode);
   HeadTiltHelp(mode);
   // The tutorial turns the camera controls on one at a time: a log line for
@@ -1500,12 +1633,14 @@ void ModeUpdate(uint8_t* mode, void* unused) {
   uint32_t* features = reinterpret_cast<uint32_t*>(kEnabledFeatures);
   const uint32_t features_before = *features;
   int key = 0;
+  int key_held = 0;
   if (Snapping()) {
     // A turn key counts once per press.
     float* key_turn = reinterpret_cast<float*>(kKeyTurn);
     const int held = *key_turn > 0.0f ? -1 : (*key_turn < 0.0f ? 1 : 0);
     if (held != 0 && held != g_last_key) key = held;
     g_last_key = held;
+    key_held = held;
     *key_turn = 0.0f;
     *reinterpret_cast<float*>(kKeyTilt) = 0.0f;
     // No smooth turn and no tilt from any other path while the game runs
@@ -1528,6 +1663,16 @@ void ModeUpdate(uint8_t* mode, void* unused) {
   GodAfter(mode);
   TeleportAfter(mode);
   if (!Snapping()) return;
+
+  // THE SMOOTH TURN OF THE TURN KEYS (snap_turn=4). In the God view a held
+  // turn key turns the view at the full speed, in each update while it is
+  // held, and a press makes no snap turn.
+  if (g_smooth_turn && TabletopGodOwnsView()) {
+    if (key_held != 0) {
+      SmoothTurnRequest(mode, features_before, static_cast<float>(key_held));
+    }
+    key = 0;
+  }
 
   // The middle mouse turns once for every so many counts sideways.
   if (g_middle && !g_middle_before) g_middle_counts = 0;
@@ -1560,6 +1705,7 @@ void ModeUpdate(uint8_t* mode, void* unused) {
     ++g_grab_turns_refused;
     return;
   }
+  LogTurnCause(mode, features_before, false);
   if (!MayTurn(mode, features_before)) {
     ++g_refused;
     return;
@@ -1678,7 +1824,13 @@ void ComfortCameraSetOptions(int snap_degrees, bool instant_jumps, bool glide,
   g_glide = glide;
   g_blink_ms = static_cast<DWORD>(blink_ms > 0 ? blink_ms : 0);
   if (g_installed) ApplyGlide();
-  if (g_snap_degrees > 0.0f) {
+  if (g_smooth_turn && g_snap_degrees > 0.0f) {
+    ModLog("comfort      : snap_turn=4. In the God view the stick and a held "
+           "turn key turn the view smoothly, %.0f degrees a second for a full "
+           "push (smooth_turn_speed). The middle mouse and the other views "
+           "turn in steps of %.0f degrees. No tilt from the middle mouse",
+           g_smooth_speed, g_snap_degrees);
+  } else if (g_snap_degrees > 0.0f) {
     ModLog("comfort      : turn in steps of %.0f degrees, and no tilt from "
            "the middle mouse", g_snap_degrees);
   } else {
@@ -1687,6 +1839,14 @@ void ComfortCameraSetOptions(int snap_degrees, bool instant_jumps, bool glide,
   ModLog("comfort      : jumps %s, the camera %s, blink %u ms",
          instant_jumps ? "land at once" : "fly as the game flies them",
          glide ? "glides" : "stops with the mouse", g_blink_ms);
+}
+
+// snap_turn=4 (mod_main.cpp): the smooth turn of the God view, and its speed.
+// Before ComfortCameraSetOptions, which logs it.
+void ComfortCameraSetSmoothTurn(bool smooth, int degrees_per_second) {
+  g_smooth_turn = smooth;
+  g_smooth_speed =
+      static_cast<float>(comfort_math::SmoothTurnSpeed(degrees_per_second));
 }
 
 void ComfortCameraSetTurnHelp(int degrees_per_event, bool keeps_focus,
@@ -1776,11 +1936,65 @@ bool ComfortCameraRequestTurn(int direction) {
   return true;
 }
 
+const void* ComfortCameraLastMode();
+
+// THE SMOOTH TURN from the stick (snap_turn=4, docs/god-view.md, section 4):
+// share from -1 (full left) to 1 (full right). The pump of the controllers
+// asks in each pass while the stick is held. The tests of a snap turn apply
+// at once, on the last camera mode of the player (SmoothTurnRequest), and
+// the God view turns at its next main camera call. False with no smooth
+// turn, with no God view, and when a test refused it.
+bool ComfortCameraRequestSmoothTurn(float share) {
+  if (!g_smooth_turn || !Snapping() || !TabletopGodOwnsView()) return false;
+  if (!(share == share) || share == 0.0f) return false;
+  const uint8_t* mode = static_cast<const uint8_t*>(ComfortCameraLastMode());
+  const uint32_t features =
+      *reinterpret_cast<const uint32_t*>(kEnabledFeatures);
+  return SmoothTurnRequest(const_cast<uint8_t*>(mode), features, share);
+}
+
+// True when the stick turns the God view smoothly (snap_turn=4).
+bool ComfortCameraSmoothTurn() { return g_smooth_turn && Snapping(); }
+
+// The degrees a second of a full push of the smooth turn.
+float ComfortCameraSmoothTurnSpeed() { return g_smooth_speed; }
+
 // True when snap turns replace the game's own turning and tilting.
 bool ComfortCameraSnapping() { return Snapping(); }
 
 // The angle of a snap turn, in degrees. 0 with the snap turns off.
 float ComfortCameraSnapDegrees() { return g_snap_degrees; }
+
+// The settings window (settings_panel.cpp): snap_turn, smooth_turn_speed
+// and blink at once. The next update of the game mode reads them.
+void ComfortCameraSetSnap(int degrees, bool smooth, const char* by) {
+  g_snap_degrees = static_cast<float>(degrees > 0 ? degrees : 0);
+  g_smooth_turn = smooth && g_snap_degrees > 0.0f;
+  if (g_smooth_turn) {
+    ModLog("comfort      : %s: the smooth turn of the God view now, at %.0f "
+           "degrees a second for a full push. Other turns go in steps of "
+           "%.0f degrees", by, g_smooth_speed, g_snap_degrees);
+  } else if (g_snap_degrees > 0.0f) {
+    ModLog("comfort      : %s: turn in steps of %.0f degrees now", by,
+           g_snap_degrees);
+  } else {
+    ModLog("comfort      : %s: the game's own smooth turning now", by);
+  }
+}
+
+void ComfortCameraSetTurnSpeed(int degrees_per_second, const char* by) {
+  g_smooth_speed =
+      static_cast<float>(comfort_math::SmoothTurnSpeed(degrees_per_second));
+  ModLog("comfort      : %s: smooth_turn_speed is %.0f degrees a second now%s",
+         by, g_smooth_speed,
+         g_smooth_turn ? "" : ". It acts when the turn is smooth");
+}
+
+void ComfortCameraSetBlink(int ms, const char* by) {
+  g_blink_ms = static_cast<DWORD>(ms > 0 ? ms : 0);
+  ModLog("comfort      : %s: a jump and a turn blink for %lu ms now", by,
+         static_cast<unsigned long>(g_blink_ms));
+}
 
 // The CameraModeNew3 whose update runs now, and null outside that update.
 // pointer_map.cpp uses it to find the camera code's rays.
@@ -1904,6 +2118,16 @@ void ComfortCameraReport() {
            g_turn_keeps_focus ? 1 : 0, HelpTurnCount(), g_tilt_paid,
            g_tilt_help_degrees);
     g_turn_paid = g_god_focus_kept = g_tilt_paid = 0;
+  }
+  if (g_smooth_given != 0 || g_smooth_refused != 0 ||
+      g_smooth_grab_refused != 0 || g_smooth_events != 0) {
+    ModLog("comfort      : the God view took %llu requests of the smooth turn. "
+           "MayTurn refused %llu and a grab of the world %llu. The smooth "
+           "turn owed %llu turn events to the help",
+           g_smooth_given, g_smooth_refused, g_smooth_grab_refused,
+           g_smooth_events);
+    g_smooth_given = g_smooth_refused = g_smooth_grab_refused = 0;
+    g_smooth_events = 0;
   }
   if (g_watch_moves != 0 || g_watch_small != 0 || g_watch_dropped != 0 ||
       g_watch_player != 0 || g_watch_settle != 0) {

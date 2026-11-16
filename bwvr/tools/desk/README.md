@@ -78,16 +78,34 @@ calls it. It keeps these rules, and a new script must keep them too:
   `MemoryLeaks.txt` with a path from its current folder. In its start that
   folder is the game folder. After the start it is the folder of the value
   `GameDir` of its key in the registry. A PC with a second install can have
-  that install there. When it is in Program Files and the game has no
-  administrator rights, Windows puts each write into the VirtualStore of the
-  user (`%LOCALAPPDATA%\VirtualStore\Program Files (x86)\...`). The guards
-  keep the files of that folder and of the game folder, and the first lines
-  of a run say where the writes go (`Get-BwvrPlayerFolders` in `game.ps1`).
+  that install there.
+- The VirtualStore. The game is a 32 bit program with no manifest. When it
+  has no administrator rights, Windows virtualizes its files in Program
+  Files, in ProgramData and in Windows. Each write that such a folder
+  refuses goes to the same path in the VirtualStore of the user:
+  `%LOCALAPPDATA%\VirtualStore` and the path with no drive, for example
+  `%LOCALAPPDATA%\VirtualStore\Program Files (x86)\Lionhead Studios
+  Ltd\Black & White`. After that, the game uses the VirtualStore copy of
+  each file that is there. This is also true for a read, and also when the
+  user can write in the folder now. So the files of the player can be in the
+  game folder, in its VirtualStore, or in both.
+- The guards keep `Profiles`, `Scripts\CreatureMind` and `MemoryLeaks.txt`
+  of each of these folders: the game folder, the folder of `GameDir`, and
+  the VirtualStore of each of the two (`Get-BwvrPlayerFolders` and
+  `Get-BwvrVirtualStore` in `game.ps1`). A folder that is not there before
+  the run gets an empty copy. After the run, each file that the run made in
+  it goes, and the folder goes too when it is then empty. The first lines of
+  a run say where the writes go and which profile folders the run uses.
 - The mod keeps the counts of the hint cards (`hint_learn=1`) in
   `bwvr-hint-counts.ini` beside `bwvr.ini`. `desk_test.ps1` gives each run
   the test key `hint_counts_test_file` with a file in the folder of the run,
   and deletes that file before the run. So a run starts with no counts, and
   it does not write the file of the player.
+- The settings window of the mod writes `bwvr.ini` (`ui-layer.md`, 24).
+  `desk_test.ps1` keeps the ini as the run left it as `bwvr.ini.run` in the
+  folder of the run, and then puts the ini of the player back. Each run has
+  `welcome_done=1`, so the welcome page does not show. A run of the welcome
+  page gives `welcome_done=0`.
 - The tools never write the registry. A run starts `runblack.exe` directly,
   not the launcher. The game writes its own values there. In its start it
   writes the values of the profile that it read, so each value stays the
@@ -104,7 +122,7 @@ calls it. It keeps these rules, and a new script must keep them too:
 
 | Script | What it is |
 | --- | --- |
-| `desk_run.ps1`, `desk_test.ps1` | One run of a DLL with extra ini keys. The base of each other script. `-Save <name>` starts the run in a test save. Each run starts with no `bwvr-vulkan-pending.txt` in the game folder, and the file of the player comes back after the run. `-VulkanPending <text>` starts the run with that file (`backend.md`, "The fall back of the renderer Vulkan") |
+| `desk_run.ps1`, `desk_test.ps1` | One run of a DLL with extra ini keys. The base of each other script. `-Save <name>` starts the run in a test save, with `start_new_game=0` when the run does not give that key. `-EmptySave` starts the run with slot 20 empty: the start of a profile with no save of the exit. With either one, `-Args '-CONTINUE'` gives the run the word of the launcher button "Play, continue". Each run starts with no `bwvr-vulkan-pending.txt` in the game folder, and the file of the player comes back after the run. `-VulkanPending <text>` starts the run with that file (`backend.md`, "The fall back of the renderer Vulkan") |
 | `make_test_save.ps1` | Makes a test save: a saved game that the game writes at the end of a test run. See "A fast start" |
 | `idle_seconds.ps1` | The time since the last input. A large number while the owner's "test now" flag holds |
 | `desk_state.ps1` | Reads the place of the real cursor, the window in front and the idle time |
@@ -116,8 +134,9 @@ calls it. It keeps these rules, and a new script must keep them too:
 | `aim_run.ps1`, `aim_queue.ps1` | The far fetch, the aim presets, the teleport |
 | `throw_queue.ps1` | Throws and landings |
 | `spawn_run.ps1` | A start with "Keep your old Creature": no story, the player at the Temple |
-| `creature_recipe.ps1` | The Creature state, strokes and a slap. With `-Kind leash`, `-Kind stay` or `-Kind tie`: the leash, the stay from a distance, and the leash tied to an object. With `-Kind click`: a text that waits for a click. With `-Kind walk`: the walk mode of a command. With `-Kind gift` or `-Kind giftfree`: the gift of an object to the Creature, with the leash on or with no leash |
+| `creature_recipe.ps1` | The Creature state, strokes and a slap. With `-Kind leash`, `-Kind stay` or `-Kind tie`: the leash, the stay from a distance, and the leash tied to an object. With `-Kind click`: a text that waits for a click. With `-Kind walk`: the walk mode of a command. With `-Kind gift` or `-Kind giftfree`: the gift of an object to the Creature, with the leash on or with no leash. With `-Kind open`: the Creature with no press. With `-Kind wide`: the leash click and the Creature state from a grip 10 and 11 cm from the Creature. With `-Kind walkstay`: a stay that stops a walk. With `-Kind shake`: a shake of the hand that takes the leash off |
 | `hand_run.ps1`, `village_run.ps1`, `temple_run.ps1`, `miracle_run.ps1` | Runs for the near hand, the village, the Temple and miracles. See "The scripts of one area" |
+| `scene_run.ps1` | The camera path of the Forest miracle, the hands in the cut scene window and the influence at the hand. See "The scripts of one area" |
 | `intro_run.ps1` | The Lionhead logo in stereo, with a picture of each eye each few seconds. The run does not skip the logos. See "The logos" |
 | `bench_run.ps1` | The frame cost measure: six still scenes, the numbers of each scene, the spread of some runs, and the comparison of two builds or of two sets of keys. See "The frame cost measure" |
 | `live_stream_run.ps1` | A run in the test save `pen` with the live stream of the walks (`vk_stream_live=1`) and the test reader of the PC (`bwvr_stream_reader.exe`), which comes late and compares each frame of the record of the run with the frame of the ring. See `android.md`, "The live stream" |
@@ -161,13 +180,15 @@ that `-NewGame` uses, and the length of a run in the test save.
 
 | Script | The start: the test save, and the row with `-NewGame` | The kinds and what they do | A run takes |
 | --- | --- | --- | --- |
-| `hand_run.ps1` | `pen`, "Skip straight to the Creature select" (`one`, `fixed`). `temple`, "Keep your old Creature" (`old`) | `one`: the grip in the air, at a scroll and at the crown of a tree, with `near_rule` 1 and 2. The head looks 25 degrees down. With `near_rule` 1 the grip at the scroll taps the scroll, and the grip at the crown has no target. With `near_rule` 2 the grip at the scroll takes the rock beside it and sets it down, and the grip at the crown takes the tree. `old`: the grip on the Creature, strokes and slaps. `fixed`: places from `-Points` and steps from `-Steps` | 44 s for `one`, 142 s for `old` |
+| `hand_run.ps1` | `pen`, "Skip straight to the Creature select" (`one`, `fixed`). `temple`, "Keep your old Creature" (`old`) | `one`: the grip in the air, at a scroll and at the crown of a tree, with `near_rule` 1 and 2. The head looks 25 degrees down. With `near_rule` 1 the grip at the scroll taps the scroll, and the grip at the crown has no target. With `near_rule` 2 the grip at the scroll takes the rock beside it and sets it down, and the grip at the crown takes the tree. `old`: the grip on the Creature, strokes and slaps. `fixed`: places from `-Points` and steps from `-Steps`. `near`: six zoom steps in (8.8 units for each meter), then the hand 20, 10, 7 and 5 cm in front of the head with an eye picture at each (`near_plane_cm`). `holdland`: the grip of the other hand holds the land with both hands still, then a second grip with one step of 10 cm (the lines `grab` count the frames in which the camera moved). `left`: `left_hand=1` with mirrored points, a grip over the land, and the menu button of each controller. `glow`: `hand_glow=1` and `hand_glow_idle=1`, the Hand's point over the land, 17 cm in the land with `hand_land_stop=0`, and at a rock. `forest`: `forest_take=1`, the fetch of one tree from a forest at the store of Land 1, then the aim away with the grip closed. `zone`: the walk with the stick out of the camera zone of the Creature select, and back. `mousepan`: the test mouse of the mod clicks "Continue Game" and drags the land, with no controller (give it `-Save temple`). `hints`: both controllers 40 cm ahead and 25 cm down, the grips turned 60 degrees up as a player holds them, in the view, with the cards of the land prompt on both hands and the left grip held (`hint_style=2`, give `prompts=2`). `angle`: the hands of `hints` with the fit of Virtual Desktop (`grip_fit_test=1`), eye pictures with `hand_angle` 1 and 0 (the word `anglekey`), then the right hand on its side with `hand_two_sided` 1 and 0 (the word `sideskey`). Give the kinds with eye pictures `-Set 'backend=dxwrapper\ddraw.dll;test_frame_rate=60'` | 44 s for `one`, 142 s for `old`, 20 to 30 s for the other kinds |
 | `throw_queue.ps1 -Runs <names>` | `pen`, "Skip straight to the Creature select" | A far fetch at the pen and a throw (`land`, `base`, `early`, `tree`, `sea`), the same at a different scale (`landout`, and `landin`, `landin2`, `landin3` and `landlife` for 66.7, 44.4, 29.6 and 7.5 units for each meter), a release with a still hand (`fall`, `fallold`), the same with a tree that the hand holds upright or turns by 30 degrees (`treeset`, `treelean`), the same with a tree that the hand sets down 6 cm to the left or to the right of its place (`treeleft`, `treeright`), a new grip on an object that falls, flies or rolls (the names with `drop`, `fly` and `roll`), a grip on a rock in its fall, on a rock that the hand threw up, on a rock on the land that still moves, and a grip of 50 ms on a rock in its fall (`dropnear`, `tossup`, `landgrip`, `dropshort`: with `-More 'catch_at_once=0'` the rock moves on until the game takes it, and with `-More 'catch_at_once=0;grip_press_hold=0'` the game takes each of these presses as a click), a throw after a catch of a rock in its fall (`catchthrow`), eye pictures of the frame of a catch and of 3 frames later (`catchshot`, with no `-Fps`), a fetch from a distance of a tree that still moves on the land (`catchfar`), and a tree that comes to rest while the Hand takes it (`treedropend`, with the test key `catch_rest_test` for the runs in which the tree does not come to rest by itself in the take). In `catchfar`, `treedropend` and `landgrip` the head looks 25 degrees down, so the object on the land is in the view. `treedropend` has the steps of `catchfar`: the lock comes 65 frames after the opening of the grip, before the tree comes to rest | 31 to 63 s each |
-| `aim_queue.ps1 -Runs <names>` | `pen`, "Skip straight to the Creature select" | The aim presets and the trim (`aim2`), a fetch of a thrown rock over the sea and from the sea (`move2`, `move1b`), a Creature command with the leash counted as on (`cmd1b`), the teleport at three scales (`ring1`, `ring0`), and the aim and the grip at a Creature that is not the Creature of the player (`other`) | 21 to 54 s each |
-| `creature_recipe.ps1` | `temple`, "Keep your old Creature" | `state`: the Creature state, strokes and a slap. `leash`: the leash on and off. `stay`: the stay from a distance. `tie`: the leash tied to an object, and the walk of the Creature to it. `click`: a text of the game that waits for a click, with the leash on and with the Hand off the view (`text_click`). `walk`: a held press of the trigger on an object while the aim goes to the land and comes back, a tap and a press that ends on the object (`creature_command_rule`). `gift`: the leash goes on, the Hand takes an object and opens the grip at the Creature, two times (`creature_gift`). `giftfree`: the same with no leash | 42 to 62 s |
-| `village_run.ps1` | `temple`, "Keep your old Creature" | `miracle`: a miracle from an icon of the Worship Site (`-Icon 3` is Food). `totem`, `charge`. `store`, `tree` and `job`: wood, a tree and a villager at the Village Store. `throw`: a thrown villager. `scaffold`, `build`, `site`, `probe`, `workshop`. `choice`: the aim steps from a villager to the tree nearest to him, past the tree, and back, and the log has each far target with its reason (`far_grab_choice`, `far_grab_stay`). `fartake`: a take at a distance from a pile of the Village Store with the grip closed, which the test key `far_test_take_gone` ends at its game turn 30 as the game ends the take of a pile that it deletes. The log shows who has the bundle then (`far_take_carry`), and with `audio_trace=1` the loop of the take (`audio_take_loop`). The lines `take stream` have the start and the end of the stream of the take (`take_stream`). `fartotem`: the totem from a distance with the grip closed for 400 frames, 3 steps up and 1 down, and eye pictures of the ghost and of the height of the pole while the grip holds it and after the release (`totem_take`, `totem_ghost`, `totem_hold`) | 31 to 63 s |
-| `miracle_run.ps1` | `temple`, "Keep your old Creature" | `creature`, `throw`, `cancel`, `place`, `shield`: a miracle from a seed that the test key `miracle_test_seeds` makes. `-Seeds` gives other seed types, and `-Steps` other steps | 44 to 57 s |
-| `temple_run.ps1` | `temple`, "Keep your old Creature" | The ring item `enter`, then the items of `-Rooms` on the ring of the Temple (`-Rooms "room_save@3400 leave@5600"`), and the steps of `-Steps`. Each choice of the ring holds Y of the left hand and steps the left hand to the item (`Get-BwvrRingChoice` in `game.ps1`). With `button_layout=0` in `-Set` it holds X. `-NoEnter` stays on the land. `-EnterFrame N` presses Y for `enter` at frame N and not at frame 820 (1400 for a new game with `backend=vulkan`). `-SaveTest` makes a save, and starts only when the profile has no saved game in the slots 0 to 13. It always starts in a new game | 180 s, or `-Seconds` |
+| `aim_queue.ps1 -Runs <names>` | `pen`, "Skip straight to the Creature select" | The aim presets and the trim (`aim2`), a fetch of a thrown rock over the sea and from the sea (`move2`, `move1b`), a Creature command with the leash counted as on (`cmd1b`), the teleport at three scales (`ring1`, `ring0`), and the aim and the grip at a Creature that is not the Creature of the player (`other`). `-Set` gives more ini keys to each run, for example `-Set 'test_frame_rate=60'` | 21 to 54 s each |
+| `creature_recipe.ps1` | `temple`, "Keep your old Creature" | `state`: the Creature state, strokes and a slap. `leash`: the leash on and off. `stay`: the stay from a distance. `tie`: the leash tied to an object, and the walk of the Creature to it. `click`: a text of the game that waits for a click, with the leash on and with the Hand off the view (`text_click`). `walk`: a held press of the trigger on an object while the aim goes to the land and comes back, a tap and a press that ends on the object (`creature_command_rule`). `gift`: the leash goes on, the Hand takes a pig (`seek_class=Pig,Pig`) and opens the grip at the Creature, two times (`creature_gift`). `giftfree`: the same with no leash. `open`: the Creature with no press: the Creature panel with the open hand and its stay of 3 s, the strokes and a swing with the grip open, then an object in the Hand for the hints of the game. With `-NewGame` it also shows the card of a save | 42 to 80 s |
+| `village_run.ps1` | `temple`, "Keep your old Creature" | `miracle`: a miracle from an icon of the Worship Site (`-Icon 3` is Food). `totem`, `charge`. `store`, `tree` and `job`: wood, a tree and a villager at the Village Store. `neartake`: a take at a pile with the grip closed while the hand moves away from the pile, with the facts of the take in the lines `hand bulk`. `land`: the real hand 12 cm in open land near the store, moved sideways there and taken up again, with an eye picture at each place (`hand_land_stop`). `throw`: a thrown villager. `throwlive`: a soft throw and a hard throw of a villager, with the census of the villagers of the town before and after each throw. `throwhouse`: a rock that the far grab fetches, let go with a still hand 60 cm of the room over a house, so it falls onto the roof. `throwhousefast`: the same rock thrown down onto the house at about 7.5 m/s. `throwhouselow`: the same throw from 5 units over the roof, so the real arc meets the house before the game's physics has the rock (`throw_arc_objects`). `throwpile`: wood from the pile of the Village Store, thrown from 25 cm before the head into the store at about 3 m/s. `scaffold`, `build`, `site`, `probe`, `workshop`. `turn`: a scaffold in the Hand and rolls of the wrist (the word `rot`), then a building site at the angle of the wrist (`scaffold_wrist_turn`). `choice`: the aim steps from a villager to the tree nearest to him, past the tree, and back, and the log has each far target with its reason (`far_grab_choice`, `far_grab_stay`). `fartake`: a take at a distance from a pile of the Village Store with the grip closed, which the test key `far_test_take_gone` ends at its game turn 30 as the game ends the take of a pile that it deletes. The log shows who has the bundle then (`far_take_carry`), and with `audio_trace=1` the loop of the take (`audio_take_loop`). The lines `take stream` have the start and the end of the stream of the take (`take_stream`). `fartotem`: the totem from a distance with the grip closed for 400 frames, 3 steps up and 1 down, and eye pictures of the ghost and of the height of the pole while the grip holds it and after the release (`totem_take`, `totem_ghost`, `totem_hold`). `palm`: the gesture pictures of the game at the corner of the screen and then in the row over the left palm, and the palm that turns up and opens the spell book (`gesture_panel`, `spell_book_palm`, the test key `gesture_panel_test_frame`). Give it `-Set 'backend=dxwrapper\ddraw.dll'` for eye pictures. `bookring`: the book of all miracles on its ring, opened and closed by a tap of B, a take of Storm and of Lightning Increase with their power up in the log, the turn of the page by "Next" in the middle of the ring, and the sheet of the gestures by the test key `gesture_sheet_test_frame`, with the pictures of the book, the sheet and the cut of each eye. Give it `-Set 'backend=dxwrapper\ddraw.dll'` for eye pictures. `walk`: the stick of the other hand pushes forward for 40 s from the door of the Temple, to the edge of the map. `wall`: the Hand's point at the side of a house (gap 0 and 1.5 cm in its body) and of the Village Store, with the lines `hand feel` and `haptics` (compare with `hand_feel_offer=0`). `housestop`: the Hand's point at the side of a house across the view, 3 cm out of the wall, 2 cm and 5 cm in its box, and out again, with eye pictures and the lines `hand land` of the touch of the solid (`hand_object_stop`). `headhouse`: the head over a house, 55 cm down into it and up again (the word `lean`), with eye pictures and the lines `head blinder` (`head_blinder_objects`). `pinch`: a rock in the closed grip, two zoom steps out and two in, with eye pictures after each step (`hand_pinch`). `aimsign`: the aim from the body of your Creature to the signpost at the door of the Temple and back (`far_test_aim_class=4`, `far_test_aim_toward=3`). `aimmiracle`: a one-off seed on the land, and the aim from it to the signpost and back (`far_test_aim_class=8`). `aimpast`: a far aim at a villager with the Hand's point 3 cm from a house, 7 cm from a tree and 4 cm over a pile. `tglow`: the Hand's point over the Village Store, a pile, a tree and a villager, with `target_glow_log=30` (a batch "after the call" is a mesh of the sorted list). `tooltip`: `hint_card=0` and `help_test=1`, the grip collects from a pile of the Village Store, and eye pictures of the tooltip "Amount" at the Hand's point (the lines `ui hint`). `small`: the Hand's point at a villager before the Village Store, eleven zoom steps in about the Hand to the lowest scale of 1 unit for each meter and one step at the limit, the left grip that lowers the land 80 cm, the hand 15 cm and 8 cm before the eyes, a lean of the head 60 cm forward toward the house that stopped the zoom, and five steps out past the life size scale, with eye pictures (`god_near_units_per_meter_x10`, `god_zoom_solid_stop`, `solid_house_inset_pct`, lines `god view`, `head blinder` and `near plane`). The kind runs 100 s. `controls`: the welcome page, its button VR Settings, the tab Controls of the VR Settings window, the list of the box "Y button" of the left controller and its item Recenter, a rest of the ray on the box "B button" of the right controller, Close, then a hold of the left stick click (the ring) and of Y (the recenter), with the pictures of the window (`ui-layer.md`, 24.6). `-Parts` gives the parts of the window for the word `aimdebug`. The kind has `test_frame_rate=60`. `rayover`: the hand 15 cm right, 25 cm down and 35 cm in front of the head, the ray on the button VR Settings of the welcome page, the press, the ray on a row of the settings window until its note shows, and a press of Close, with eye pictures at each rest and after the close and the first 3 pictures of the strip of the ray over the panels and the picture of the glow at its end (`ray_card_test_save`, `ui-layer.md`, 25). With `-Set 'video_view=1'` and the Vulkan renderer the shots also give `bwvr-vk-video-N.bmp`, the panels and the strip over the eye picture. The kind has `test_frame_rate=60` | 31 to 63 s |
+| `miracle_run.ps1` | `temple`, "Keep your old Creature" | `creature`, `throw`, `cancel`, `place`, `shield`: a miracle from a seed that the test key `miracle_test_seeds` makes. `away`: the leash tied to a lantern takes the Creature about 60 m of the game from its point at the pen, then Enlarge and Shrink on it from a distance (the lines `miracle watch` give the size of the drawn body). `fire`: the God view goes before the Village Store, a Fireball falls from a still hand onto the nearest house, and then a pour of Water over the fire. `firelong`: the same with a pour of 15 s. `pshield`: a Physical Shield from the circle, and a pig thrown at the dome (no rock is in reach at the door). `teleport`: two Teleport casts before the door of the Temple, about 35 units apart (the game refuses a cast at the Village Store), and a villager from the Village Store put on the first site. `storm`: a Storm from the circle, with the test key `sky_test_mist_log` (a line for each mist and sky cloud) and an eye picture before the cast. Give `-Set 'backend=dxwrapper\ddraw.dll;test_frame_rate=60'` for eye pictures. `-Seeds` gives other seed types, and `-Steps` other steps | 44 to 75 s |
+| `scene_run.ps1` | `temple`, "Keep your old Creature" | `forest`: a seed of Forest, the cast, and 25 s while the forest grows. The lines `script camera` say if a camera path plays (`miracle_camera_still`). `window`: the test key `cutscene_window_test_bars=300` puts the cut scene window up, and the hand steps to three points with an eye picture and a press of the trigger at each (`cutscene_hands`). `edge`: the test keys `influence_test_circle_cm=25` and `influence_test_circle_frame=230` make the influence a circle around the Hand's point at its first step, and the hand steps 5 cm at a time to 65 cm past that point and back, with an eye picture at each step: 25 cm inside the edge to 40 cm past it (`influence_fade`, `influence_stream_hand`, `influence_wall`). `edgeside`: the same circle, and the hand steps along the edge 10 cm inside it, 5 degrees of the circle a step, with an eye picture at each step. The lines `the hologram of the ... hand` give the angle of the edge point (`influence_wall_look`). Give `-Set 'backend=dxwrapper\ddraw.dll'` for eye pictures, and `test_frame_rate=60` with Vulkan | 30 to 70 s |
+| `temple_run.ps1` | `temple`, "Keep your old Creature" | The ring item `enter`, then the items of `-Rooms` on the ring of the Temple (`-Rooms "room_save@3400 leave@5600"`), and the steps of `-Steps`. Each choice of the ring holds Y of the left hand and steps the left hand to the item (`Get-BwvrRingChoice` in `game.ps1`). With `button_layout=0` in `-Set` it holds X. `-NoEnter` stays on the land. `-EnterFrame N` presses Y for `enter` at frame N and not at frame 820 (1400 for a new game with `backend=vulkan`). `-SaveTest` makes a save, and starts only when the profile has no saved game in the slots 0 to 13. It always starts in a new game. The header of the script has the recipe of the taps on the leash posts and the recipe of the debug pages of the ring (`debug_window=0`) | 180 s, or `-Seconds` |
+| `ring_run.ps1` | `temple` | The ring and its sheets, through `temple_run.ps1 -NoEnter`: `-Kind pages` (page 1 round, More, names and pause), `-Kind places` (the sheet of the places, the aim of a new bookmark on the land and on a living thing with the record of each bookmark after its grip, Land, a bookmark, a bin, B), `-Kind leash` (the sheet of the leashes). The header has the place of each tile | 35 to 60 s |
 
 What these scripts need:
 
@@ -207,8 +228,12 @@ Known limits of the recipes:
 - `throw_queue.ps1 -Runs rollfar` does not take the rock in its roll. The
   word `aimfar` comes 1.6 s after the release. The rock is then 1.1 to 1.2 m
   of the room from the Hand, and the land hides it from the head (the log
-  says "seen 0"), so it is no far target. `dropfarroll` takes a rock that
-  rolls after a fall.
+  says "seen 0"), so it is no far target.
+- `throw_queue.ps1 -Runs dropfarroll` does not take a rock in its roll at a
+  render of 2760 by 2208. The rock falls 44 cm, turns in place and is at
+  rest after about 1 s. The rock is then about 57 degrees below the middle
+  of the view, and that render shows 48.8 degrees, so the second `aimfar`
+  gets no target.
 - `throw_queue.ps1 -Runs landgrip` does not close the grip on the rock on
   the land. With the head 25 degrees down, the word `aimfar` takes a
   tortoise, because a living thing comes first in the aim. With `-More
@@ -249,6 +274,12 @@ Known limits of the recipes:
   throws, and the object then lands at a different place. Compare the place
   and the time of a landing in two runs only when the two lines `the flight
   of ... starts` have the same speed.
+- `village_run.ps1 -Kind throwhouse` and `-Kind throwhousefast` aim at the
+  house at 1850.2 2673.1 of the test save `temple` with fixed numbers (the
+  place `go`, and the gap of `seek_feel`). The rock hangs 7 to 13 units
+  toward -x from the Hand's point. A different save or a change of the
+  scripted hand needs new numbers. The line `first contact` says "(an
+  object)" when the rock touches the house.
 - In `throw_queue.ps1 -Runs early` the pick up of the game takes 2 or 3 game
   turns. It ends from 2 frames before the opening of the grip to 3 frames
   after it. So the release comes 17 to 64 ms after the opening, and the line
@@ -261,6 +292,10 @@ Known limits of the recipes:
   for a stay 0.2 to 2.7 s after its start. In one run of three of
   `hand_run.ps1 -Kind old` the Creature walked away before the third grip,
   and the third and the fourth grip had no target.
+- `creature_recipe.ps1 -Kind gift` and `-Kind giftfree` with no
+  `seek_class` can choose a place "hold" off the view (a fish farm at a
+  render of 2760 by 2208), and the controller code drops that press. Give
+  them `-Set "seek_class=Pig,Pig"`.
 - `village_run.ps1 -Kind scaffold` shows the join of two scaffolds and the
   tap that takes them apart. Its last opening of the grip makes no building
   site: the game has no place for a building there, and the hand is 18 cm
@@ -369,7 +404,9 @@ test save: each run is the start of a new game. The default base keys are
 windows before frame 3000 count, and the table also has the percent of the
 pixels that differ in the left eye: between frames 3000 and 3001 (one
 mode), and between frames 3001 and 3002 (the mode of the ini and mode 0).
-When the two numbers are close, the two modes give the same picture. Each
+The mod writes the pictures of these frames as `bwvr-shared-left-03001.bmp`
+to `03004`, and the script reads the first four left pictures from `03000`
+on. When the two numbers are close, the two modes give the same picture. Each
 run goes through `desk_run.ps1`, so it waits for the idle time as each run
 does. The table is also in `desk-perf-<Name>\summary.txt`.
 
@@ -410,10 +447,16 @@ screens take about 9 s and the Lionhead logo 33 s, so a run of 54 s (the
 default) has the whole logo. Each `-Every` seconds (4 by default) the mod saves a picture of
 each eye, `bwvr-eye-left-1NNNNN.bmp` and `bwvr-eye-right-1NNNNN.bmp`. NNNNN is
 the stereo frame of the logo. Each picture is 14 MB at a render of 2208 by
-2208. After the run the script prints the lines of the log with the tag
+2208. With `backend=vulkan` the pictures `bwvr-eye-*` and `bwvr-vk-right-*`
+of the logo are black. Read `bwvr-vk-left-*`: a name that ends in 0 is the
+walk of eye 0, and a name that ends in 1 is the walk of eye 1. The run has
+no scripted controller, so `test_frame_rate` does not act, and the logo runs
+at the frame rate of the PC. After the run the script prints the lines of
+the log with the tag
 `intro`: the camera for each second of the effect clock, and for each pair of
 pictures the pixels of some orbs. `-Set` gives other keys, for example the
-test keys `intro_motion_test_seconds` and `intro_push_test_px`.
+test keys `intro_motion_test_seconds` and `intro_push_test_px`, or scripted
+hands in the logo (the header of the script has the keys).
 
 ### The start of the tutorial
 
@@ -472,10 +515,12 @@ player ends the game. That is a whole saved game of that moment. `desk_run.ps1`
 copies the files of slot 20 that the game wrote in the run to the folder of
 the test saves, and only then does it put the profile back. A file of the
 slot that is older than the run is a file of the player, and the script does
-not copy it. The slot is in the folder that gets the writes of the game
-after its start (the folder of `GameDir`, or its VirtualStore). In the
-VirtualStore the game cannot write `SaveGame.inf`, so a test save made there
-has no `SaveGame.inf`, and the game loads it all the same. The guards of such
+not copy it. The game writes the slot in each profile folder where it finds
+the files of the slot, so the script copies the slot with the newest
+`20.sav`. When the game writes into the VirtualStore of a folder that
+refuses the write, it can write `SaveGame.inf` and rename `20.sav.tmp` only
+with `save_virtual_store=1` (`backend.md`, "A save in the VirtualStore"). A
+test save with no `SaveGame.inf` loads all the same. The guards of such
 a run are in "A run in which the game ends by itself". The last line is `SAVE MADE` or `SAVE NOT MADE`.
 
 A different name makes a save of your own: give `-Choice` (a row of the start
@@ -501,9 +546,13 @@ starts in its test save by default. Such a run does this:
 2. It takes the files of slot 20 out of the profile (the profile guard has
    them), and it puts the files of the test save in. It compares each file
    with the test save. When one is not the same, no game starts. The game
-   reads `20.sav` in the profile of the game folder, and the other files of
-   the slot in the folder of `GameDir` (see "What a run does to your PC").
-   When the two folders are not the same, the test save goes into both.
+   reads `20.sav` in the profile of the game folder, or in its VirtualStore
+   copy when that profile is in the VirtualStore. It reads the other files
+   of the slot in the folder of `GameDir` (see "What a run does to your
+   PC"). The test save goes into slot 20 of each profile folder in these
+   folders and in their VirtualStore (`Get-BwvrSaveProfiles` in `game.ps1`).
+   With no profile in the game folder and no profile in its VirtualStore,
+   no game starts.
 3. It starts the game with no `-NEWGAME`. The game then loads the saved game
    of slot 20 by itself. The game has no word of the command line that loads
    a saved game (`docs/backend.md`, "A test save").
@@ -596,8 +645,9 @@ Hand in the loaded game (`fake_controller_play_frame`).
 | `hand_run.ps1 -Kind old` | The test save `temple` | 700 | 163 s | 142 s |
 | `creature_recipe.ps1` | The test save `temple` | 800 | 65 to 80 s, 350 s for the five kinds | 42 to 62 s, 257 s for the five kinds |
 | `village_run.ps1` | The test save `temple` | 800 | 60 to 100 s, 809 s for the twelve kinds | 31 to 63 s, 457 s for the twelve kinds |
-| `miracle_run.ps1` | The test save `temple` | 800 | 75 s, 375 s for the five kinds | 44 to 57 s, 247 s for the five kinds |
+| `miracle_run.ps1` | The test save `temple` | 800 | 75 s, 375 s for the first five kinds | 44 to 57 s, 247 s for the first five kinds. 43 to 75 s for `away`, `fire`, `pshield`, `teleport` and `storm`, about 85 s for `firelong` |
 | `temple_run.ps1` | The test save `temple` | 800 | 190 s | 180 s |
+| `scene_run.ps1` | The test save `temple` | 800 | 100 s | 30 to 70 s |
 | `temple_run.ps1 -SaveTest` | A new game, `keep` | | 190 s | This run keeps the new game: its check reads the slots of the profile, and a run in a test save has the files of the test save in slot 20 |
 | `bench_run.ps1` | The test save `temple` | 800 | | 122 s for each run |
 | `exit_run.ps1` | A new game, with the start dialog up | | 150 s | This run tests the end of the game, and it needs no state of the game |

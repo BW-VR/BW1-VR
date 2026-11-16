@@ -41,13 +41,17 @@
 #include <string.h>
 
 #include "MinHook.h"
+#include "circle_aim_math.h"
 #include "controller_hints.h"
+#include "controller_math.h"
 #include "controllers.h"
 #include "creature_command_math.h"
+#include "debug_menu.h"
 #include "far_grab.h"
 #include "haptics.h"
 #include "miracle.h"
 #include "miracle_math.h"
+#include "miracle_throw.h"
 #include "teleport.h"
 #include "village.h"
 
@@ -62,6 +66,19 @@ void ControllersGesturePulse(float amplitude, float seconds);
 uint64_t ControllersFrameCount();
 uint64_t ControllersTestFrame(uint64_t key_frame, uint64_t frame);
 bool ControllersSecondButton();
+bool ControllersCardPose(int which, float grip_position[3],
+                         float grip_orientation[4], float head[3], bool* left);
+bool ControllersHeadTurn(float out[4]);
+void ControllersGrabPulse(int hands, float amplitude, float seconds);
+// tabletop.cpp: the hook of GGame::ClearMap is in.
+bool TabletopClearMapWatched();
+// mod_main.cpp: the hook of GameOSFile::SaveAllGame is in.
+bool ModSaveHooked();
+// spell_book.cpp: the flags of the Worship Sites before and after a save,
+// and the tally of the book of all miracles.
+void SpellBookBeforeSave();
+void SpellBookAfterSave();
+void SpellBookNoteCast(int type, int power_up, bool refused, const char* why);
 // head_pose.cpp: game units in a real meter.
 float HeadPoseScale();
 // hand_direct.cpp
@@ -72,6 +89,8 @@ float HandDirectRadius(void* object);
 const char* HandDirectClass(void* object);
 bool HandDirectCreatureBody(void* creature, float out[3]);
 bool HandDirectRecordTarget(void* object, const float position[3]);
+bool HandDirectOffer(void* object, const float position[3], float radius,
+                     const char** words);
 float HandDirectRoomUnits();
 bool HandDirectRealPoint(float out[3]);
 
@@ -88,6 +107,12 @@ const uintptr_t kMyInterface = 0x00555850;
 const int kFaceFlags = 0x39;         // 2 a right press, 0x40 a right release
 const int kFaceAction = 0x44;        // the interface action, 0 to 23
 const int kFaceInfluence = 0x48;     // the influence at the land point +0x3F0
+const int kFaceCircle = 0x17C;       // a byte: the game holds a matched circle
+// The matched circle (fn_0057A5E0): its middle, an LHPoint, and its size.
+// The cast at the land takes them (FUN_005D3340, 0x005D339C).
+const int kFaceCirclePlace = 0x180;
+const int kFaceCircleSize = 0x18C;
+const int kFaceCastCircle = 0x1AC;   // the circle of the cast: middle, size
 const int kFaceGesture = 0x1A4;      // a byte: the gesture of the next cast
 const int kFaceStatus = 0x39C;       // the local GInterfaceStatus
 const int kFaceHand = 0x3A0;         // the CHand
@@ -109,6 +134,7 @@ const int kStatusHolding = 0x90;     // a byte: the count of objects in the Hand
 // CHand.
 const int kHandState = 0x4878;
 const int kHandThrow = 0x48C8;       // the throw velocity, units per second
+const int kHandPlace = 0x78;         // the Hand of the game, an LHPoint
 const int kHandHeld = 0x4904;
 const int kHandFx = 0x4948;          // the effects of the Hand
 const int32_t kStateGrain = 8;
@@ -140,6 +166,13 @@ const int kInfoOnObject = 0x118;
 // cast rule (CAST_RULE_TYPE).
 const uintptr_t kSeedMagicInfo = 0x007290F0;
 const int kMagicCastRule = 0x34;
+// GMagicInfo: its magic type. GMagicRadiusSpellInfo (Storm, the shields):
+// the least and the most radius of the spell. SpellStormAndTornado::
+// InitWithPos (0x0072DAA0) and SpellShield::InitWithPos (0x0072B5F0) keep the
+// size of the cast between the two.
+const int kMagicType = 0x10;
+const int kMagicLeast = 0x58;
+const int kMagicMost = 0x5C;
 // OneOffSpellSeed::Create, cdecl (const MapCoords*, SPELL_SEED_TYPE,
 // POWER_UP_TYPE, float). The caller cleans 0x10 bytes (0x00722BD5).
 const uintptr_t kCreateOneOff = 0x0072A2F0;
@@ -171,8 +204,25 @@ const uintptr_t kCastOnObject = 0x005D30D0;
 // MapCoords::InBounds and MapCoords::IsLand, thiscall, no arguments.
 const uintptr_t kInBounds = 0x006042C0;
 const uintptr_t kIsLand = 0x00603720;
+// LH3DIsland::GetAltitude, thiscall on a MapCoords, the height in st0.
+const uintptr_t kAltitude = 0x00803090;
 // Influence::CalculatePlayerInfluence, cdecl, the value in st0.
 const uintptr_t kPlayerInfluence = 0x005CD170;
+// GInterfaceStatus::UpdateSpellInfo, thiscall (Spell*, PSysProcessInfo*),
+// ret 8. Spell::ProcessMaintainRequest (0x0072055D, through
+// GPlayer::UpdateSpellInfo) calls it on each game turn for the spell of a
+// player. It writes the gesture place of the particle system (info+0x0C) from
+// GInterfaceStatus+0xC8: the Hand of the game (CHand+0x78) that packet 0x15
+// or 0x16 sent and the last game turn took over. A spell that is cast in the
+// Hand then puts its cast place (Spell+0xCC) at that gesture place, and the
+// bolt of Lightning starts there (UR_Lightning::ActualModify 0x006914C0 with
+// CastingFromHand, the manager +0x30).
+const uintptr_t kUpdateSpellInfo = 0x005DC8F0;
+const int kInfoGesturePlace = 0x0C;  // PSysProcessInfo: an LHPoint
+const int kStatusHandSent = 0xA4;    // GInterfaceStatus: the Hand of the packet
+const int kStatusHandTurn = 0xC8;    // the Hand of the last game turn
+const int kStatusCamera = 0xB0;      // the camera of the game
+const int kSpellSeed = 0xAC;         // Spell: its SpellSeed
 // The held bits of the game's mouse: 1 the left button, 2 the right button.
 const uintptr_t kHeldBits = 0x00E85304;
 const float kMapScale = 6553.6f;
@@ -196,10 +246,14 @@ typedef int(__fastcall* TapFn)(void* face, void* unused, void* object);
 typedef int(__fastcall* RefuseFn)(void* self, void* unused, void* held,
                                   const MapCoords* at);
 typedef int(__fastcall* CoordsFn)(const MapCoords* at, void* unused);
+typedef float(__fastcall* AltitudeFn)(const MapCoords* at, void* unused);
 typedef float(__cdecl* PlayerInfluenceFn)(const MapCoords* at, void* player,
                                           int a, int b, int c);
+typedef void(__fastcall* UpdateSpellInfoFn)(void* status, void* unused,
+                                            void* spell, void* info);
 
 RefuseFn o_Refuse = nullptr;
+UpdateSpellInfoFn o_UpdateSpellInfo = nullptr;
 FaceFn o_CastAtLand = nullptr;
 FaceFn o_CastOnObject = nullptr;
 
@@ -233,10 +287,14 @@ struct Settings {
   bool button = true;        // miracle_cancel_button
   int tap_ms = 400;          // miracle_cancel_ms: the longest press that cancels
   bool seed_use = true;      // miracle_seed_use: the trigger uses a seed
+  bool circle_cast = true;   // miracle_circle_cast: a closed circle casts
+  bool circle_hand = true;   // miracle_circle_hand: the circle of the real hand
+  bool circle_aim = true;    // miracle_circle_aim: the ray draws the circle
   float cone_deg = 6.0f;     // miracle_cone_deg: a new target in the aim
   float keep_deg = 10.0f;    // miracle_keep_deg: the target stays to here
   float touch_cm = 3.0f;     // miracle_touch_cm
   float max_m = 4.0f;        // miracle_max_m: 0 is no limit
+  bool site_pick = true;     // miracle_site_pick: a teleport site is a candidate
   bool test_keys = false;    // test_keys: Ctrl and numpad 8 change miracle_hand
 };
 Settings g_settings;
@@ -258,6 +316,14 @@ int g_test_seed_count = 0;
 // asks for a cancel, as a shake does.
 uint64_t g_test_cancels[kMaxTestSeeds];
 int g_test_cancel_count = 0;
+// The test key miracle_test_orbs: the frames at which the orbs of all
+// miracles go onto the land, as the debug row "Spawn orbs" puts them.
+const int kMaxTestOrbs = 4;
+uint64_t g_test_orbs[kMaxTestOrbs] = {};
+int g_test_orb_count = 0;
+// The test key miracle_test_save_steps: the frame at which the mod deletes
+// the orbs as it does before a save, with no save.
+uint64_t g_test_save_steps = 0;
 
 bool IniPath(char path[MAX_PATH]) {
   const DWORD length = GetModuleFileNameA(nullptr, path, MAX_PATH);
@@ -391,6 +457,45 @@ uint64_t g_casts = 0;
 uint64_t g_refusals = 0;
 uint64_t g_cancels = 0;
 uint64_t g_uses = 0;
+uint64_t g_circle_casts = 0;
+uint64_t g_circle_moves = 0;
+
+// The path of the Hand's point while the grip draws a circle, in the world.
+const int kMaxCirclePoints = 256;
+float g_circle_path[kMaxCirclePoints][3];
+int g_circle_points = 0;
+bool g_circle_drawing = false;
+bool g_circle_moved = false;
+
+// THE AIM OF A CIRCLE (miracle_circle_aim=1), latched once a frame in
+// MiracleFrame: the ray of the pointing hand while a Storm or a shield is in
+// the Hand, its land point, and the path of that land point while the grip
+// draws the circle.
+struct Aim {
+  bool shows;          // the ray shows in this frame
+  bool draws;          // the grip draws the circle in this frame
+  bool have_land;      // the ray meets the land
+  float land[3];       // its land point, in the world
+  float direction[3];  // the direction of the ray, in the world
+  float distance;      // world units from the start of the ray to the land
+  float units;         // world units in a meter of the room
+  bool outside;        // the place of the cast is outside the influence
+  bool too_large;      // the circle of the path is larger than the spell
+  float least, most;   // the limits of the radius of the spell, or 0
+  int magic;           // the magic type of the seed
+};
+Aim g_aim = {};
+circle_aim_math::Path g_aim_path = {};
+uint64_t g_aim_shows = 0;      // frames with the ray, this window
+uint64_t g_aim_draws = 0;      // draws of a circle with the ray, this window
+bool g_aim_said_shows = false;
+bool g_aim_said_land = false;
+bool g_aim_said_large = false;
+// The limits of the radius of the spell of this seed and power level.
+const void* g_limit_seed = nullptr;
+int g_limit_power = -1;
+float g_limit_least = 0.0f, g_limit_most = 0.0f;
+int g_limit_magic = 0;
 uint64_t g_record_puts = 0;
 uint64_t g_record_clears = 0;
 uint64_t g_target_frames = 0;
@@ -549,6 +654,8 @@ int __fastcall h_Refuse(void* self, void* unused, void* held,
     g_refusal = WhyRefused(f, at, had_object);
     g_refusal_at = NowSeconds();
     ++g_refusals;
+    SpellBookNoteCast(f.info.type, f.power, true,
+                      miracle_math::RefusalWords(g_refusal));
     if (g_settings.on) HapticsPulse(haptics_math::kRefused);
     if (Log()) {
       ModLog("miracle      : the game refused the cast of %s at %.1f %.1f: "
@@ -598,6 +705,7 @@ void SaidCast(const Facts& f, bool on_object) {
     if (++g_pour_casts > 1) return;
     g_pour_from = g_frame;
   }
+  SpellBookNoteCast(f.info.type, f.power, false, "");
   if (!Log()) return;
   const int32_t* land =
       reinterpret_cast<const int32_t*>(f.face + kFaceNextLand);
@@ -608,6 +716,11 @@ void SaidCast(const Facts& f, bool on_object) {
            "0x11)%s, frame %llu", SeedName(f.info.type),
            object != nullptr ? HandDirectClass(object) : "object", object,
            object == g_target ? ", the target with the halo" : "", g_frame);
+    if (object != nullptr &&
+        reinterpret_cast<VirtualIntFn>(VTable(object)[kIsCreature / 4])(
+            object, nullptr) != 0) {
+      MiracleWatchCreature(object, SeedName(f.info.type));
+    }
   } else {
     ModLog("miracle      : the game casts %s at the land point %.1f %.1f "
            "(packets 0x4D and 0x12). The Hand moves at %.1f %.1f %.1f units "
@@ -618,6 +731,16 @@ void SaidCast(const Facts& f, bool on_object) {
                ? sqrtf(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]) / g_units
                : 0.0f,
            f.action, g_frame);
+    // A cast at a circle goes to the middle of the circle (FUN_005D3340 copies
+    // it to +0x1AC), not to the land point of the record.
+    if (f.info.gesture != 0) {
+      const float* circle =
+          reinterpret_cast<const float*>(f.face + kFaceCastCircle);
+      ModLog("miracle      : the cast of %s goes to the middle of the circle "
+             "at %.1f %.1f, with the size %.1f units, frame %llu",
+             SeedName(f.info.type), circle[0], circle[2], circle[3], g_frame);
+      MiracleWatchCircle(SeedName(f.info.type), circle[0], circle[2]);
+    }
   }
 }
 
@@ -627,11 +750,17 @@ int __fastcall h_CastAtLand(void* self, void* unused) {
                      f.seed != nullptr;
   const int32_t before =
       watch ? *reinterpret_cast<const int32_t*>(f.face + kFaceDropTurn) : 0;
+  // A THROWN MIRACLE (miracle_throw.cpp): the velocity of the real hand goes
+  // where the cast reads it.
+  const bool thrown = watch && f.info.cast == miracle_math::kCastThrow &&
+                      f.info.gesture == 0;
+  if (thrown) MiracleThrowBeforeCast(f.hand, SeedName(f.info.type));
   const int result = o_CastAtLand(self, unused);
-  if (watch && before == 0 &&
-      *reinterpret_cast<const int32_t*>(f.face + kFaceDropTurn) != 0) {
-    SaidCast(f, false);
-  }
+  const bool sent =
+      watch && before == 0 &&
+      *reinterpret_cast<const int32_t*>(f.face + kFaceDropTurn) != 0;
+  if (thrown) MiracleThrowAfterCast(sent);
+  if (sent) SaidCast(f, false);
   return result;
 }
 
@@ -655,6 +784,63 @@ int __fastcall h_CastOnObject(void* self, void* unused) {
   if (watch && sent) SaidCast(f, true);
   if (other && sent) VillageApplied(f.held, object);
   return result;
+}
+
+float RoomCm(const float* a, const float* b, float units) {
+  const float dx = a[0] - b[0], dy = a[1] - b[1], dz = a[2] - b[2];
+  return units > 0.0f ? sqrtf(dx * dx + dy * dy + dz * dz) / units * 100.0f
+                      : 0.0f;
+}
+
+// THE START OF A POUR, for the log. The game gives the spell of a pour in
+// the Hand (Lightning, Water, Food, Wood) the Hand of its last game turn as
+// the gesture place, and the bolt of Lightning starts there. The hook only
+// reads: one line for each new spell and one line for each 20 updates says
+// how far that place and the copies of the Hand that it comes from are from
+// the Hand's point of the real hand.
+void __fastcall h_UpdateSpellInfo(void* status, void* unused, void* spell,
+                                  void* info) {
+  o_UpdateSpellInfo(status, unused, spell, info);
+  static void* said_spell = nullptr;
+  static uint64_t calls = 0;
+  static int logs = 0;
+  const int kMaxPourLogs = 30;
+  Facts f;
+  if (!g_ready || spell == nullptr || info == nullptr || logs >= kMaxPourLogs ||
+      !Watching(&f) || f.seed == nullptr || f.status != status ||
+      f.info.cast != miracle_math::kCastPour ||
+      IsBadReadPtr(spell, kSpellSeed + 4) ||
+      *reinterpret_cast<void* const*>(static_cast<uint8_t*>(spell) +
+                                      kSpellSeed) != f.seed) {
+    return;
+  }
+  float point[3];
+  if (!HandDirectRealPoint(point)) return;
+  ++calls;
+  const bool first = spell != said_spell;
+  said_spell = spell;
+  if (!first && calls % 20 != 0) return;
+  ++logs;
+  const float* game = reinterpret_cast<const float*>(
+      static_cast<const uint8_t*>(info) + kInfoGesturePlace);
+  const float units = HandDirectRoomUnits();
+  const uint8_t* s = static_cast<const uint8_t*>(status);
+  const float* sent = reinterpret_cast<const float*>(s + kStatusHandSent);
+  const float* turn = reinterpret_cast<const float*>(s + kStatusHandTurn);
+  const float* camera = reinterpret_cast<const float*>(s + kStatusCamera);
+  const float* hand = reinterpret_cast<const float*>(f.hand + kHandPlace);
+  ModLog("miracle      : the spell %p of %s gets its gesture place from the "
+         "game at %.1f %.1f %.1f, %.1f cm of the room from the Hand's point "
+         "%.1f %.1f %.1f and %.1f cm of the room above it. GInterfaceStatus+"
+         "0xC8 is %.1f cm and +0xA4 is %.1f cm from the Hand's point, CHand+"
+         "0x78 is %.1f cm from it, and the camera of the game is %.1f cm from "
+         "the place of the game, call %llu, frame %llu", spell,
+         SeedName(f.info.type), game[0], game[1], game[2],
+         RoomCm(game, point, units), point[0], point[1], point[2],
+         units > 0.0f ? (game[1] - point[1]) / units * 100.0f : 0.0f,
+         RoomCm(turn, point, units), RoomCm(sent, point, units),
+         RoomCm(hand, point, units), RoomCm(camera, game, units), calls,
+         g_frame);
 }
 
 bool HookOne(uintptr_t address, void* replacement, void** original,
@@ -695,6 +881,9 @@ void Init() {
   if (g_settings.tap_ms < 50) g_settings.tap_ms = 50;
   if (g_settings.tap_ms > 2000) g_settings.tap_ms = 2000;
   g_settings.seed_use = IniInt("miracle_seed_use", 1) != 0;
+  g_settings.circle_cast = IniInt("miracle_circle_cast", 1) != 0;
+  g_settings.circle_hand = IniInt("miracle_circle_hand", 1) != 0;
+  g_settings.circle_aim = IniInt("miracle_circle_aim", 1) != 0;
   g_settings.cone_deg = IniFloat("miracle_cone_deg", 6.0f);
   if (!(g_settings.cone_deg >= 0.5f)) g_settings.cone_deg = 0.5f;
   if (g_settings.cone_deg > 30.0f) g_settings.cone_deg = 30.0f;
@@ -710,6 +899,7 @@ void Init() {
   g_settings.max_m = IniFloat("miracle_max_m", 4.0f);
   if (!(g_settings.max_m > 0.0f)) g_settings.max_m = 0.0f;
   if (g_settings.max_m > 100.0f) g_settings.max_m = 100.0f;
+  g_settings.site_pick = IniInt("miracle_site_pick", 1) != 0;
   g_settings.test_keys = IniInt("test_keys", 0) != 0;
   command_math::ShakeReset(&g_shake);
   // The test keys of the desktop runs.
@@ -732,6 +922,21 @@ void Init() {
     g_test_cancels[g_test_cancel_count++] = static_cast<uint64_t>(frame);
     p += used;
   }
+  IniText("miracle_test_orbs", text, sizeof(text));
+  for (const char* p = text; *p != 0 && g_test_orb_count < kMaxTestOrbs;) {
+    while (*p == ' ' || *p == ',') ++p;
+    int frame = 0, used = 0;
+    if (sscanf_s(p, "%d%n", &frame, &used) < 1 || used == 0) break;
+    g_test_orbs[g_test_orb_count++] = static_cast<uint64_t>(frame);
+    p += used;
+  }
+  g_test_save_steps =
+      static_cast<uint64_t>(IniInt("miracle_test_save_steps", 0));
+  if (g_test_orb_count > 0) {
+    ModLog("miracle      : test key miracle_test_orbs: the orbs of all "
+           "miracles go onto the land at %d frames, the first at frame %llu",
+           g_test_orb_count, g_test_orbs[0]);
+  }
   if (g_test_seed_count > 0) {
     ModLog("miracle      : test key miracle_test_seeds: %d one-off seeds, the "
            "first of type %d (%s) at frame %llu", g_test_seed_count,
@@ -746,7 +951,18 @@ void Init() {
   HookOne(kCastOnObject, &h_CastOnObject,
           reinterpret_cast<void**>(&o_CastOnObject),
           "the cast on an object fn_005D30D0");
+  HookOne(kUpdateSpellInfo, &h_UpdateSpellInfo,
+          reinterpret_cast<void**>(&o_UpdateSpellInfo),
+          "the spell info of a player GInterfaceStatus::UpdateSpellInfo");
+  MiracleWatchInstall();
+  MiracleThrowInstall();
   LogKeys("miracle_hand");
+  ModLog("miracle      : miracle_site_pick=%d. %s", g_settings.site_pick ? 1 : 0,
+         g_settings.site_pick
+             ? "A teleport site that the game offers to its pick is a "
+               "candidate of the real hand, so the Hand can take the site and "
+               "put a villager on it"
+             : "The real hand has no teleport site as a candidate");
   ModLog("miracle      : miracle_shake_mps=%.2f (%s). miracle_cancel_button="
          "%d: a press of the second face button of the pointing hand, shorter "
          "than %d ms (miracle_cancel_ms), takes the miracle out of the Hand. "
@@ -763,6 +979,26 @@ void Init() {
          g_settings.button ? 1 : 0, g_settings.tap_ms,
          g_settings.seed_use ? 1 : 0, g_settings.touch_cm,
          g_settings.cone_deg, g_settings.max_m, g_settings.keep_deg);
+  ModLog("miracle      : miracle_circle_cast=%d: %s",
+         g_settings.circle_cast ? 1 : 0,
+         g_settings.circle_cast
+             ? "a miracle that needs a circle casts when the game matches the "
+               "circle, with the grip still closed"
+             : "a miracle that needs a circle casts when the grip opens");
+  ModLog("miracle      : miracle_circle_hand=%d: %s",
+         g_settings.circle_hand ? 1 : 0,
+         g_settings.circle_hand
+             ? "the circle of a Storm or a shield has the place and the width "
+               "of the path of the real hand"
+             : "the circle has the place and the size that the game gives it "
+               "from the pixels of the path");
+  ModLog("miracle      : miracle_circle_aim=%d: %s",
+         g_settings.circle_aim ? 1 : 0,
+         g_settings.circle_aim
+             ? "a Storm or a shield in the Hand shows the ray of the pointing "
+               "hand, and the land point of the ray draws the circle on the "
+               "land"
+             : "the hand draws the circle of a Storm or a shield in the air");
   if (g_settings.test_keys) {
     ModLog("keys         : Ctrl with numpad 8 changes miracle_hand between 1 "
            "and 0 (test_keys=1)");
@@ -782,6 +1018,20 @@ void MiracleHandChange(const char* by) {
 int MiracleHandValue() {
   Init();
   return g_settings.on ? 1 : 0;
+}
+
+// The switch "Circle aim" of the debug page: miracle_circle_aim.
+void MiracleCircleAimChange(const char* by) {
+  Init();
+  g_settings.circle_aim = !g_settings.circle_aim;
+  ControllersGesturePulse(0.5f, g_settings.circle_aim ? 0.24f : 0.08f);
+  ModLog("miracle      : %s: miracle_circle_aim=%d, frame %llu", by,
+         g_settings.circle_aim ? 1 : 0, g_frame);
+}
+
+int MiracleCircleAimValue() {
+  Init();
+  return g_settings.circle_aim ? 1 : 0;
 }
 
 namespace {
@@ -836,6 +1086,220 @@ void TestSeeds() {
            seed, g_test_seeds[i].type, SeedName(g_test_seeds[i].type), at[0],
            at[2], g_frame);
   }
+}
+
+// --- the orbs on the land ---------------------------------------------------
+
+// THE ORBS OF ALL MIRACLES (the debug row "Spawn orbs", or the test key
+// miracle_test_orbs). One one-off seed of each seed type that the game has on
+// (GSpellSeedInfo+0x17C) lies on the land in front of the head, on two arcs
+// within the reach of the hand (miracle_math::OrbPlace). The game makes each
+// one with OneOffSpellSeed::Create, as a script (SCRIPT_OBJECT_TYPE_ONE_SHOT_
+// SPELL) or a spell dispenser makes a seed. So each orb is an object of the
+// running game: the grip carries it, a short press or the trigger makes it
+// active, and the Creature can eat it. A press makes only the orbs that are
+// gone: an orb that the Hand used, or that the game deleted, is marked to be
+// deleted (GameThing+0xA bit 1) or has no vtable of OneOffSpellSeed any more.
+//
+// NO ORB IN A SAVE. The game writes a save of the orb (OneOffSpellSeed::Save),
+// and it saves by itself at the exit and in its auto saves. So before each
+// save (GameOSFile::SaveAllGame, the one writer of each save, mod_main.cpp)
+// the mod deletes each orb of its list that lies on the land, with the
+// game's own delete of a one-off seed: the virtual ToBeDeleted(0) (slot 0xC,
+// OneOffSpellSeed::ToBeDeleted 0x0072A420), as OneOffSpellSeed::InterfaceTap
+// deletes a seed after its tap. That takes the seed off the map and out of
+// the lists of the game (MobileObject::ToBeDeleted), and the next
+// GameThing::ProcessDeadList of the game frees it. An orb that the Hand
+// holds stays. The game clears the map before each load, each new game and
+// each new land (GGame::ClearMap): the list of the mod is then stale, so the
+// mod drops it and deletes nothing.
+const int kInfoOn = 0x17C;
+const int kThingFlags = 0xA;         // GameThing: bit 1, to be deleted
+const int kSlotToBeDeleted = 0xC;    // the vtable slot of ToBeDeleted(int)
+typedef void(__fastcall* ToBeDeletedFn)(void* self, void* unused, int now);
+const uintptr_t kOneOffToBeDeleted = 0x0072A420;
+void* g_orbs[kSeedTypes] = {};
+// The unique id of each orb: the object heap of the game keeps it in the
+// dword before the object (UniqueKeyHeap::GetKeyFromAddress 0x007E19E0), and
+// a new object at the same address gets a new id. The game tests a pointer
+// in the same way (UniqueKeyHeap::IsUniqueIdAtAddressTheSame).
+uint32_t g_orb_ids[kSeedTypes] = {};
+int g_orb_logs = 0;
+
+uint32_t IdOf(const void* object) {
+  const uint8_t* key = static_cast<const uint8_t*>(object) - 4;
+  return IsBadReadPtr(key, 4) ? 0 : *reinterpret_cast<const uint32_t*>(key);
+}
+// The orbs that the last removal deleted, for the check of the test key
+// miracle_test_save_steps some frames later.
+void* g_removed[kSeedTypes] = {};
+int g_removed_count = 0;
+uint64_t g_removed_check = 0;
+
+bool OrbLives(int type) {
+  const uint8_t* orb = static_cast<const uint8_t*>(g_orbs[type]);
+  return orb != nullptr && !IsBadReadPtr(orb, kOneOffType + 4) &&
+         IdOf(orb) == g_orb_ids[type] &&
+         *reinterpret_cast<const uintptr_t*>(orb) == kOneOffTable &&
+         *reinterpret_cast<const int32_t*>(orb + kOneOffType) == type &&
+         (orb[kThingFlags] & 1) == 0;
+}
+
+bool SeedTypeOn(int type) {
+  const uint8_t* info =
+      reinterpret_cast<const uint8_t*>(kSeedInfoTable + type * kSeedInfoSize);
+  return *reinterpret_cast<const int32_t*>(info + kInfoOn) != 0;
+}
+
+void SpawnOrbs(const char* by) {
+  if (!SameBytes(kCreateOneOff, kCreateOneOffBytes,
+                 sizeof(kCreateOneOffBytes))) {
+    ModLog("miracle      : %s: OneOffSpellSeed::Create does not have the "
+           "bytes of the disassembly, so no orb is made, frame %llu", by,
+           g_frame);
+    return;
+  }
+  // The list must go when the game clears the map, so the mod makes orbs
+  // only while the hook of GGame::ClearMap is in (tabletop.cpp).
+  if (!TabletopClearMapWatched() || !ModSaveHooked()) {
+    ModLog("miracle      : %s: the mod does not see %s, so no orb is made, "
+           "frame %llu", by,
+           !ModSaveHooked() ? "each save (GameOSFile::SaveAllGame)"
+                            : "GGame::ClearMap (no God view and no table)",
+           g_frame);
+    return;
+  }
+  float grip[3], turn[4], head[3], view[4];
+  bool left = false;
+  if (!ControllersCardPose(0, grip, turn, head, &left) ||
+      !ControllersHeadTurn(view)) {
+    ModLog("miracle      : %s: the head has no pose, so no orb is made, frame "
+           "%llu", by, g_frame);
+    return;
+  }
+  // The view of the head, flat on the land of the room.
+  const float ahead[3] = {0.0f, 0.0f, -1.0f};
+  float forward[3];
+  controller_math::QuatRotate(view, ahead, forward);
+  int types[kSeedTypes];
+  int count = 0;
+  for (int t = 0; t < kSeedTypes; ++t) {
+    if (SeedTypeOn(t)) types[count++] = t;
+  }
+  int made = 0, kept = 0, sea = 0;
+  float units = 0.0f;
+  for (int i = 0; i < count; ++i) {
+    const int type = types[i];
+    if (OrbLives(type)) {
+      ++kept;
+      continue;
+    }
+    float flat[2];
+    if (!miracle_math::OrbPlace(i, count, head[0], head[2], forward[0],
+                                forward[2], flat)) {
+      continue;
+    }
+    // A point of the room at the height of the waist. The game puts the
+    // seed on the land under it.
+    const float local[3] = {flat[0], head[1] - 0.5f, flat[1]};
+    float world[3];
+    if (!ControllersLocalToWorld(local, world, &units)) break;
+    const MapCoords coords = {static_cast<int32_t>(world[0] * kMapScale),
+                              static_cast<int32_t>(world[2] * kMapScale),
+                              0.0f};
+    if (reinterpret_cast<CoordsFn>(kInBounds)(&coords, nullptr) == 0 ||
+        reinterpret_cast<CoordsFn>(kIsLand)(&coords, nullptr) == 0) {
+      ++sea;
+      continue;
+    }
+    g_orbs[type] = reinterpret_cast<CreateOneOffFn>(kCreateOneOff)(
+        &coords, type, 0, 1.0f);
+    if (g_orbs[type] != nullptr) {
+      g_orb_ids[type] = IdOf(g_orbs[type]);
+      ++made;
+    }
+    if (g_orb_logs < 60) {
+      ++g_orb_logs;
+      ModLog("miracle      : the game made the orb %p (unique id %u) of %s "
+             "(seed type %d) on the land at %.1f %.1f, %.0f cm of the room "
+             "from the head, frame %llu", g_orbs[type], g_orb_ids[type],
+             SeedName(type), type, world[0], world[2],
+             sqrtf((flat[0] - head[0]) * (flat[0] - head[0]) +
+                   (flat[1] - head[2]) * (flat[1] - head[2])) * 100.0f,
+             g_frame);
+    }
+  }
+  ControllersGrabPulse(1, 0.5f, made > 0 ? 0.40f : 0.08f);
+  ModLog("miracle      : %s: the orbs of all miracles: %d seed types are on in "
+         "the game, the game made %d orbs with OneOffSpellSeed::Create, %d "
+         "orbs were still on the land, and %d places were not land. %.1f "
+         "units a meter of the room. Before each save the mod deletes them, "
+         "frame %llu", by, count, made, kept, sea, units, g_frame);
+}
+
+// Before a save: the game deletes each orb of the list that lies on the
+// land. An orb in the Hand stays. The list is empty after it.
+void RemoveOrbs(const char* why) {
+  Facts f;
+  const bool facts = ReadFacts(&f);
+  int removed = 0, held = 0, gone = 0;
+  g_removed_count = 0;
+  for (int t = 0; t < kSeedTypes; ++t) {
+    if (g_orbs[t] == nullptr) continue;
+    if (!OrbLives(t)) {
+      ++gone;
+      g_orbs[t] = nullptr;
+      continue;
+    }
+    if (facts && f.held == g_orbs[t]) {
+      ++held;
+      g_orbs[t] = nullptr;
+      continue;
+    }
+    void* orb = g_orbs[t];
+    if (reinterpret_cast<uintptr_t>(VTable(orb)[kSlotToBeDeleted / 4]) !=
+        kOneOffToBeDeleted) {
+      continue;
+    }
+    reinterpret_cast<ToBeDeletedFn>(VTable(orb)[kSlotToBeDeleted / 4])(
+        orb, nullptr, 0);
+    g_removed[g_removed_count++] = orb;
+    ++removed;
+    g_orbs[t] = nullptr;
+  }
+  int left = 0;
+  for (int t = 0; t < kSeedTypes; ++t) {
+    if (g_orbs[t] != nullptr) ++left;
+  }
+  if (removed + held + gone + left > 0) {
+    ModLog("miracle      : %s: the game deleted %d orbs of all miracles that "
+           "lay on the land (ToBeDeleted), so no save holds them. %d orbs "
+           "were in the Hand and stay, %d were gone already, and %d orbs of "
+           "the list are left, frame %llu", why, removed, held, gone, left,
+           g_frame);
+  }
+}
+
+// The test key miracle_test_save_steps: 30 frames after the removal, each
+// orb that it deleted is marked to be deleted or freed.
+void CheckRemoved() {
+  g_removed_check = 0;
+  int left = 0;
+  for (int i = 0; i < g_removed_count; ++i) {
+    const uint8_t* orb = static_cast<const uint8_t*>(g_removed[i]);
+    if (orb != nullptr && !IsBadReadPtr(orb, kOneOffType + 4) &&
+        *reinterpret_cast<const uintptr_t*>(orb) == kOneOffTable &&
+        (orb[kThingFlags] & 1) == 0) {
+      ++left;
+    }
+  }
+  int listed = 0;
+  for (int t = 0; t < kSeedTypes; ++t) {
+    if (g_orbs[t] != nullptr) ++listed;
+  }
+  ModLog("miracle      : test: 30 frames after the removal, %d of the %d "
+         "deleted orbs are still on the land, and the list has %d orbs, "
+         "frame %llu", left, g_removed_count, listed, g_frame);
 }
 
 // --- the cancel -------------------------------------------------------------
@@ -1026,16 +1490,272 @@ void MiracleInstall() { Init(); }
 
 const char* MiracleSeedName(int type) { return SeedName(type); }
 
+// A TELEPORT SITE IN THE PICK [V, runblack.exe 1.42]. MagicTeleport::Draw
+// (0x005FCCC0) gives the site to the pick of the game as a ball of 3 units
+// (GInterface::SendInvisibleDrawCollision 0x00519960) while its spell has a
+// seed (Spell+0xAC). So in the plain game the pointer can take a site and
+// move it, and a villager in the Hand goes onto it: Villager::
+// ApplyThisToObject (0x00752FF8) calls MagicTeleport::
+// ApplyVillagerDirectlyToTeleport, and the villager comes out at the other
+// site. The pick of the real hand takes its candidates from the meshes that
+// the draw offers, and a site has no mesh, so the mod gives it the ball of
+// the game (HandDirectOffer).
+bool MiracleOfferSite(void* object, const float point[3], float radius) {
+  const uintptr_t kMagicTeleportTable = 0x0092C110;
+  if (!g_ready || !g_settings.site_pick || object == nullptr ||
+      IsBadReadPtr(object, 4) ||
+      *static_cast<const uintptr_t*>(object) != kMagicTeleportTable) {
+    return false;
+  }
+  const char* words = "";
+  const float ball = radius > 0.1f && radius < 50.0f ? radius : 3.0f;
+  const bool offered = HandDirectOffer(object, point, ball, &words);
+  static void* said = nullptr;
+  static int logs = 0;
+  if (offered && object != said && logs < 20) {
+    said = object;
+    ++logs;
+    ModLog("miracle      : the teleport site %p at %.1f %.1f %.1f is a "
+           "candidate of the real hand, a ball of %.1f units (%s), frame %llu",
+           object, point[0], point[1], point[2], ball,
+           words[0] != 0 ? words : "the game names no tap", g_frame);
+  }
+  return offered;
+}
+
 bool MiraclePlacesHand() {
   Init();
   return g_settings.on;
 }
+
+// The debug row "Spawn orbs" (debug_menu.cpp), a toggle: the value is 1
+// while the orb of each seed type that the game has on is on the land, and
+// 0 while one is gone. A press makes the orbs that are gone. The debug
+// window and the ring run in the frame of the controllers, on the thread of
+// the frame of the mod, where the test seeds come too.
+int MiracleOrbsValue() {
+  Init();
+  if (!SameBytes(kCreateOneOff, kCreateOneOffBytes,
+                 sizeof(kCreateOneOffBytes))) {
+    return kDebugCannot;
+  }
+  for (int t = 0; t < kSeedTypes; ++t) {
+    if (SeedTypeOn(t) && !OrbLives(t)) return 0;
+  }
+  return 1;
+}
+
+void MiracleOrbsChange(const char* by) {
+  Init();
+  SpawnOrbs(by);
+}
+
+// spell_book.cpp: a take of the book of all miracles while a miracle is in
+// the Hand. The game's own drop runs before the next interface step, as for
+// the button B: the miracle of a Worship Site gives its chants back, and a
+// one-off miracle is deleted (SpellSeed::ThrowObjectFromHand).
+void MiracleBookCancel() {
+  Init();
+  AskCancel("the spell book, for a different miracle");
+}
+
+void MiracleBeforeSave() {
+  if (!g_ready) return;
+  RemoveOrbs("the game starts a save");
+}
+
+void MiracleMapCleared() {
+  int dropped = 0;
+  for (int t = 0; t < kSeedTypes; ++t) {
+    if (g_orbs[t] != nullptr) ++dropped;
+    g_orbs[t] = nullptr;
+  }
+  g_removed_count = 0;
+  g_removed_check = 0;
+  if (dropped > 0) {
+    ModLog("miracle      : the game cleared the map (a load, a new game or a "
+           "new land), so the mod drops its list of %d orbs and deletes "
+           "nothing, frame %llu", dropped, g_frame);
+  }
+}
+
+namespace {
+
+// The aim of the land up to this far along the ray, in meters of the room,
+// as the aim of a bookmark has it.
+const float kAimLandMostM = 60.0f;
+const float kAimLandStepM = 0.05f;
+const float kMapSize = 5120.0f;
+
+// The influence of the player at a world point: true when it is outside.
+bool OutsideInfluence(const Facts& f, const float at[3]) {
+  const MapCoords coords = {static_cast<int32_t>(at[0] * kMapScale),
+                            static_cast<int32_t>(at[2] * kMapScale), 0.0f};
+  if (reinterpret_cast<CoordsFn>(kInBounds)(&coords, nullptr) == 0) {
+    return true;
+  }
+  void* player = Player(f.face);
+  return player == nullptr ||
+         !(reinterpret_cast<PlayerInfluenceFn>(kPlayerInfluence)(
+               &coords, player, 0, 1, 1) > 0.0f);
+}
+
+// THE AIM OF A CIRCLE (miracle_circle_aim=1). Once a frame, after the facts:
+// while a Storm or a shield is in the Hand, the ray of the pointing hand
+// shows (ControllersMenuRay), and its land point is the point of the draw
+// of the circle (gesture_air.cpp). While the grip draws, the land point of
+// each frame goes into the path of the circle. The game reads the place of
+// the Hand many times a frame, so the mod changes no place of the Hand: the
+// drawn Hand stays at the real hand.
+void AimFrame(const Facts& f, bool have) {
+  const Aim last = g_aim;
+  g_aim = Aim{};
+  const bool circle_seed = have && f.seed != nullptr &&
+                           f.info.cast == miracle_math::kCastThrow &&
+                           f.info.gesture != 0;
+  if (!circle_seed) g_aim_said_shows = false;
+  if (!g_settings.circle_aim || !circle_seed || f.face[kFaceCircle] != 0) {
+    // The path stays after the match, for the circle of the cast
+    // (CircleFromHand). The next draw clears it.
+    return;
+  }
+  float origin[3], direction[3], eye[3], units = 0.0f;
+  if (!ControllersFarRay(origin, direction, &units, eye) || !(units > 0.0f)) {
+    return;
+  }
+  g_aim.shows = true;
+  g_aim.units = units;
+  for (int k = 0; k < 3; ++k) g_aim.direction[k] = direction[k];
+  ++g_aim_shows;
+  // The limits of the radius of the spell, from its magic info, once for
+  // each seed and power level. The cast reads them after the ray is gone.
+  if (f.seed != g_limit_seed || f.power != g_limit_power) {
+    g_limit_seed = f.seed;
+    g_limit_power = f.power;
+    g_limit_least = g_limit_most = 0.0f;
+    g_limit_magic = 0;
+    const uint8_t* magic = static_cast<const uint8_t*>(
+        reinterpret_cast<VirtualPtrFn>(kSeedMagicInfo)(f.seed, nullptr));
+    if (magic != nullptr && !IsBadReadPtr(magic, kMagicMost + 4)) {
+      const float least = *reinterpret_cast<const float*>(magic + kMagicLeast);
+      const float most = *reinterpret_cast<const float*>(magic + kMagicMost);
+      g_limit_magic = *reinterpret_cast<const int32_t*>(magic + kMagicType);
+      if (least >= 0.0f && most >= least && most < 10000.0f) {
+        g_limit_least = least;
+        g_limit_most = most;
+      }
+    }
+  }
+  g_aim.least = g_limit_least;
+  g_aim.most = g_limit_most;
+  g_aim.magic = g_limit_magic;
+  float step = kAimLandStepM * units;
+  if (step < 1.0f) step = 1.0f;
+  const float land = command_math::RayLandDistance(
+      origin, direction, step, kAimLandMostM * units,
+      [](float x, float z) { return TeleportGround(x, z); });
+  if (land > 0.0f) {
+    float point[3];
+    for (int k = 0; k < 3; ++k) point[k] = origin[k] + direction[k] * land;
+    if (point[0] >= 0.0f && point[0] < kMapSize && point[2] >= 0.0f &&
+        point[2] < kMapSize) {
+      g_aim.have_land = true;
+      g_aim.distance = land;
+      for (int k = 0; k < 3; ++k) g_aim.land[k] = point[k];
+    }
+  }
+  g_aim.draws = MiracleDrawsCircle();
+  if (g_aim.draws && !last.draws) {
+    circle_aim_math::Clear(&g_aim_path);
+    ++g_aim_draws;
+  }
+  if (!g_aim.draws && last.draws) circle_aim_math::Clear(&g_aim_path);
+  if (g_aim.draws && g_aim.have_land) {
+    circle_aim_math::Add(&g_aim_path, g_aim.land,
+                         circle_aim_math::kStepShare * g_aim.distance);
+  }
+  // The place of the cast: the middle of the path while the grip draws, and
+  // else the land point of the ray.
+  float middle[3], widest = 0.0f;
+  const bool circle =
+      g_aim.draws && circle_aim_math::CircleOf(g_aim_path, middle, &widest);
+  if (circle) {
+    g_aim.too_large =
+        circle_aim_math::TooLarge(circle_aim_math::SizeOf(widest), g_aim.most);
+    g_aim.outside = OutsideInfluence(f, middle);
+  } else if (g_aim.have_land) {
+    g_aim.outside = OutsideInfluence(f, g_aim.land);
+  }
+  if (!g_aim_said_shows && Log()) {
+    g_aim_said_shows = true;
+    ModLog("miracle      : %s is in the Hand, so the pointing hand shows its "
+           "ray, and the land point of the ray draws the circle "
+           "(miracle_circle_aim=1). The spell takes a radius of %.1f to %.1f "
+           "units (magic type %d), frame %llu", SeedName(f.info.type),
+           g_aim.least, g_aim.most, g_aim.magic, g_frame);
+  }
+  if (g_aim.draws && !last.draws && Log()) {
+    if (g_aim.have_land) {
+      ModLog("miracle      : the grip starts the circle of %s at the land "
+             "point of the ray %.1f %.1f, %.2f m of the room along the ray. "
+             "The land there is %s your influence, frame %llu",
+             SeedName(f.info.type), g_aim.land[0], g_aim.land[2],
+             g_aim.distance / units, g_aim.outside ? "outside" : "inside",
+             g_frame);
+    } else {
+      ModLog("miracle      : the grip starts the circle of %s, but the ray "
+             "meets no land within %.0f m of the room, frame %llu",
+             SeedName(f.info.type), kAimLandMostM, g_frame);
+    }
+  }
+  if (g_aim.too_large && !g_aim_said_large && Log()) {
+    g_aim_said_large = true;
+    ModLog("miracle      : the circle of the ray is %.1f units wide, so the "
+           "game gives it the size %.1f, more than the %.1f units of %s. The "
+           "trail on the land is red, and the spell gets the radius %.1f, "
+           "frame %llu", widest, circle_aim_math::SizeOf(widest), g_aim.most,
+           SeedName(f.info.type),
+           circle_aim_math::SpellRadius(circle_aim_math::SizeOf(widest),
+                                        g_aim.least, g_aim.most),
+           g_frame);
+  }
+  if (!g_aim.draws) g_aim_said_large = false;
+  if (g_aim.have_land != g_aim_said_land) {
+    g_aim_said_land = g_aim.have_land;
+    if (!g_aim.have_land && Log()) {
+      ModLog("miracle      : the ray of %s meets no land now, frame %llu",
+             SeedName(f.info.type), g_frame);
+    }
+  }
+}
+
+}  // namespace
 
 void MiracleFrame() {
   Init();
   g_frame = ControllersFrameCount();
   PollKey();
   TestSeeds();
+  MiracleThrowFrame();
+  // The orbs of all miracles of the test key, as the debug row makes them.
+  for (int i = 0; i < g_test_orb_count; ++i) {
+    if (ControllersTestFrame(g_test_orbs[i], g_frame) == g_test_orbs[i]) {
+      SpawnOrbs("test key miracle_test_orbs");
+    }
+  }
+  // The steps before a save and after it, with no save
+  // (miracle_test_save_steps): the steps after it come 30 frames later.
+  if (g_test_save_steps > 0 &&
+      ControllersTestFrame(g_test_save_steps, g_frame) ==
+          g_test_save_steps) {
+    RemoveOrbs("test key miracle_test_save_steps, as before a save");
+    SpellBookBeforeSave();
+    g_removed_check = g_frame + 30;
+  }
+  if (g_removed_check != 0 && g_frame >= g_removed_check) {
+    CheckRemoved();
+    SpellBookAfterSave();
+  }
   Facts f;
   // The log of each change also with the key off, so a log shows the fault.
   const bool any = ReadFacts(&f);
@@ -1044,6 +1764,7 @@ void MiracleFrame() {
   const bool have = any && Active(&f);
   g_have = have;
   g_now = f;
+  AimFrame(f, have);
   // THE CHARGE (world_haptics, haptics.cpp). The press of a miracle that
   // casts at the release (a throw or a circle) starts the interface action
   // 8, and the miracle charges until the release. The Hand feels a short
@@ -1097,7 +1818,50 @@ void MiracleFrame() {
       for (int i = 0; i < 3; ++i) last_point[i] = point[i];
     }
   }
+  // THE CIRCLE CASTS WHEN IT CLOSES (miracle_circle_cast=1). A match of the
+  // circle sets GInterface+0x17C (ProcessPowerUpSystem, 0x005CF4E0), and the
+  // release of action 8 casts at that circle (FUN_005D48D0, FUN_005D3340).
+  // So when the circle comes while the grip holds action 8, the grip looks
+  // open to the game until the real grip opens. The game's own release then
+  // casts at once, and the opening of the real grip does nothing more. Only a
+  // new match counts: a circle that a refused cast left stays at +0x17C for
+  // 5 s, and the release casts it as the game does.
+  // THE PATH OF THE CIRCLE: the Hand's point on each frame while the grip
+  // draws the circle of a Storm or a shield, until the game matches it.
+  {
+    const bool drawing =
+        have && MiracleDrawsCircle() && f.face[kFaceCircle] == 0;
+    float point[3];
+    if (drawing && !g_circle_drawing) g_circle_points = 0;
+    if (drawing && g_circle_points < kMaxCirclePoints &&
+        HandDirectRealPoint(point)) {
+      for (int i = 0; i < 3; ++i) g_circle_path[g_circle_points][i] = point[i];
+      ++g_circle_points;
+    }
+    g_circle_drawing = drawing;
+    if (!(have && f.face[kFaceCircle] != 0)) g_circle_moved = false;
+  }
+  {
+    static bool circle_was = false;
+    const bool circle = have && f.seed != nullptr &&
+                        f.info.cast == miracle_math::kCastThrow &&
+                        f.info.gesture != 0 && f.face[kFaceCircle] != 0;
+    if (circle && !circle_was && g_settings.circle_cast && f.action == 8 &&
+        GripDown() && !g_mask_grip) {
+      g_mask_grip = true;
+      ++g_circle_casts;
+      if (Log()) {
+        ModLog("miracle      : the game matched the circle of %s while the "
+               "grip holds interface action 8, so the grip looks open to the "
+               "game until the real grip opens, and the game's release casts "
+               "now (miracle_circle_cast=1), frame %llu",
+               SeedName(f.info.type), g_frame);
+      }
+    }
+    circle_was = circle;
+  }
   CancelFrame(f, have);
+  MiracleWatchFrame(g_frame, any ? seen.hand_state : -1);
   // The end of a pour: the interface action is no pour action now (10 pours
   // on the land, 11 on an object).
   if (g_pour_casts > 0 && !(any && (seen.action == 10 || seen.action == 11))) {
@@ -1391,6 +2155,124 @@ void MiracleKeepRecord() {
   }
 }
 
+namespace {
+
+// THE CIRCLE OF THE REAL HAND (miracle_circle_hand=1). The game makes the
+// circle from the land under the pixels of the path, through its own camera
+// (fn_0057A5E0): the middle of the box of those land points, and the width of
+// the box across the view times 1.05. The mod feeds the path as pixels on a
+// plane around the pixel of the controller (gesture_air.cpp), so those land
+// points are far from the hand. So after the match, and before the cast reads
+// the circle, the mod puts the middle under the middle of the path of the
+// Hand's point, and the size at 1.05 times the widest span of that path
+// across the land. That is the rule of the game with the real hand.
+//
+// THE CIRCLE OF THE RAY (miracle_circle_aim=1). The pixels of the path are a
+// view of the land from above (circle_aim_math.h, the plan), and the game
+// puts its circle under the middle of their box through its own camera, so
+// the game's circle is not where the ray drew. The mod puts the middle of
+// the circle at the middle of the widest span of the path of the land point
+// of the ray, and the size at 1.05 times that span.
+void CircleFromAim(const Facts& f, float* place, float* size) {
+  const float units = HandDirectRoomUnits();
+  float middle[3], widest = 0.0f;
+  if (!circle_aim_math::CircleOf(g_aim_path, middle, &widest) ||
+      g_aim_path.count < 8) {
+    if (Log()) {
+      ModLog("miracle      : the game matched the circle of %s, but the path "
+             "of the ray has only %d points, so the circle stays at %.1f "
+             "%.1f with the size %.1f units, frame %llu",
+             SeedName(f.info.type), g_aim_path.count, place[0], place[2],
+             *size, g_frame);
+    }
+    return;
+  }
+  const float game[4] = {place[0], place[1], place[2], *size};
+  const MapCoords coords = {static_cast<int32_t>(middle[0] * kMapScale),
+                            static_cast<int32_t>(middle[2] * kMapScale), 0.0f};
+  float height = middle[1];
+  if (reinterpret_cast<CoordsFn>(kInBounds)(&coords, nullptr) != 0) {
+    height = reinterpret_cast<AltitudeFn>(kAltitude)(&coords, nullptr);
+  }
+  place[0] = middle[0];
+  place[1] = height;
+  place[2] = middle[2];
+  *size = circle_aim_math::SizeOf(widest);
+  ++g_circle_moves;
+  if (Log()) {
+    float hand[3];
+    const bool real = HandDirectRealPoint(hand);
+    const float hx = real ? middle[0] - hand[0] : 0.0f;
+    const float hz = real ? middle[2] - hand[2] : 0.0f;
+    ModLog("miracle      : the game matched the circle of %s. The ray drew it "
+           "on the land around %.1f %.1f, %.1f units wide in %d points, %.2f "
+           "m of the room from the Hand's point. The mod puts the circle "
+           "there with the size %.1f units (the game had %.1f %.1f with the "
+           "size %.1f). The spell gets the radius %.1f (%.1f to %.1f units "
+           "for magic type %d) (miracle_circle_aim=1), frame %llu",
+           SeedName(f.info.type), middle[0], middle[2], widest,
+           g_aim_path.count,
+           units > 0.0f ? sqrtf(hx * hx + hz * hz) / units : 0.0f, *size,
+           game[0], game[2], game[3],
+           circle_aim_math::SpellRadius(*size, g_limit_least, g_limit_most),
+           g_limit_least, g_limit_most, g_limit_magic, g_frame);
+  }
+}
+
+void CircleFromHand(const Facts& f) {
+  if (!(g_settings.circle_hand || g_settings.circle_aim) || f.seed == nullptr ||
+      f.info.gesture == 0 || f.face[kFaceCircle] == 0 || g_circle_moved) {
+    return;
+  }
+  g_circle_moved = true;
+  float* place = reinterpret_cast<float*>(f.face + kFaceCirclePlace);
+  float* size = reinterpret_cast<float*>(f.face + kFaceCircleSize);
+  if (g_settings.circle_aim) {
+    CircleFromAim(f, place, size);
+    return;
+  }
+  const float units = HandDirectRoomUnits();
+  if (g_circle_points < 8) {
+    if (Log()) {
+      ModLog("miracle      : the game matched the circle of %s, but the path "
+             "of the Hand has only %d points, so the circle stays at %.1f "
+             "%.1f with the size %.1f units, frame %llu",
+             SeedName(f.info.type), g_circle_points, place[0], place[2],
+             *size, g_frame);
+    }
+    return;
+  }
+  float middle[3], widest = 0.0f;
+  miracle_math::CircleOfPath(g_circle_path, g_circle_points, middle, &widest);
+  const float game[4] = {place[0], place[1], place[2], *size};
+  const MapCoords coords = {static_cast<int32_t>(middle[0] * kMapScale),
+                            static_cast<int32_t>(middle[2] * kMapScale), 0.0f};
+  float height = middle[1];
+  if (reinterpret_cast<CoordsFn>(kInBounds)(&coords, nullptr) != 0) {
+    height = reinterpret_cast<AltitudeFn>(kAltitude)(&coords, nullptr);
+  }
+  place[0] = middle[0];
+  place[1] = height;
+  place[2] = middle[2];
+  *size = 1.05f * widest;
+  ++g_circle_moves;
+  if (Log()) {
+    const float dx = game[0] - middle[0], dz = game[2] - middle[2];
+    ModLog("miracle      : the game matched the circle of %s at %.1f %.1f with "
+           "the size %.1f units (%.1f cm of the room). The Hand drew it around "
+           "%.1f %.1f, %.1f units from there, %.1f units wide (%.1f cm of the "
+           "room) in %d points. The mod puts the circle under the path with "
+           "the size %.1f units (miracle_circle_hand=1), frame %llu",
+           SeedName(f.info.type), game[0], game[2], game[3],
+           units > 0.0f ? game[3] / units * 100.0f : 0.0f, middle[0],
+           middle[2], sqrtf(dx * dx + dz * dz), widest,
+           units > 0.0f ? widest / units * 100.0f : 0.0f, g_circle_points,
+           *size, g_frame);
+  }
+}
+
+}  // namespace
+
 void MiracleInterfaceStep(void* face) {
   if (!g_ready || face == nullptr) return;
   Facts f;
@@ -1404,6 +2286,7 @@ void MiracleInterfaceStep(void* face) {
     g_cancel = nullptr;
     if (f.seed != nullptr) RunCancel(f, how);
   }
+  CircleFromHand(f);
   if (g_tap_now) {
     g_tap_now = false;
     const bool lives =
@@ -1486,6 +2369,36 @@ bool MiracleDrawsCircle() {
          (g_now.action == 8 || g_now.action == 9);
 }
 
+bool MiracleAimShows() { return g_ready && g_aim.shows; }
+
+bool MiracleAimRay(float* meters) {
+  if (!g_ready || !g_aim.shows) return false;
+  *meters = g_aim.have_land && g_aim.units > 0.0f
+                ? g_aim.distance / g_aim.units
+                : 0.0f;
+  return true;
+}
+
+bool MiracleAimLand(float land[3], float direction[3], float* distance,
+                    float* units) {
+  if (!g_ready || !g_aim.shows || !g_aim.have_land) return false;
+  for (int k = 0; k < 3; ++k) {
+    land[k] = g_aim.land[k];
+    direction[k] = g_aim.direction[k];
+  }
+  *distance = g_aim.distance;
+  *units = g_aim.units;
+  return true;
+}
+
+int MiracleAimPath(const float (**points)[3], bool* warn, float* units) {
+  *points = g_aim_path.point;
+  *warn = g_aim.too_large || g_aim.outside;
+  *units = g_aim.units;
+  if (!g_ready || !g_aim.draws) return 0;
+  return g_aim_path.count;
+}
+
 int MiracleHint(MiracleLine lines[kMiracleLines]) {
   if (!g_ready || !g_settings.on || !g_have) return 0;
   const bool seed_held = g_now.one_off && g_now.held != nullptr;
@@ -1542,11 +2455,17 @@ int MiracleHint(MiracleLine lines[kMiracleLines]) {
       add(kWordGrab, L"Hold, swing, open to throw");
       break;
     case miracle_math::kPromptCircle:
-      add(kWordGrab, L"Hold and draw a circle");
+      add(kWordGrab, g_aim.shows ? L"Point, hold, draw a circle"
+                                 : L"Hold and draw a circle");
       break;
     case miracle_math::kPromptHeld:
-      add(kWordGrab, g_now.info.gesture != 0 ? L"Draw a circle, then open"
-                                             : L"Open to throw");
+      add(kWordGrab,
+          g_now.info.gesture == 0 ? L"Open to throw"
+          : g_aim.shows           ? (g_settings.circle_cast
+                                         ? L"Draw a circle on the land"
+                                         : L"Draw a circle on the land, then open")
+          : g_settings.circle_cast ? L"Draw a circle to cast"
+                                   : L"Draw a circle, then open");
       break;
     case miracle_math::kPromptRuns:
       add(-1, L"The miracle acts now");
@@ -1580,6 +2499,12 @@ int MiracleHint(MiracleLine lines[kMiracleLines]) {
                       : L"Use it inside your influence");
       break;
     default:
+      // THE AIM OF A CIRCLE: what the game will do with the circle now.
+      if (g_aim.shows && g_aim.outside) {
+        add(-1, L"This place is outside your influence");
+      } else if (g_aim.draws && g_aim.too_large) {
+        add(-1, L"The miracle is smaller than this circle");
+      }
       break;
   }
   if (miracle) {
@@ -1594,24 +2519,38 @@ int MiracleHint(MiracleLine lines[kMiracleLines]) {
 
 void MiracleReport() {
   if (!g_ready) return;
+  MiracleWatchReport();
   if (g_frames_miracle == 0 && g_frames_seed == 0 && g_casts == 0 &&
-      g_refusals == 0 && g_cancels == 0 && g_uses == 0) {
+      g_refusals == 0 && g_cancels == 0 && g_uses == 0 &&
+      g_circle_casts == 0) {
     return;
+  }
+  if (g_aim_shows > 0) {
+    ModLog("miracle      : the ray of a circle showed on %llu frames, and the "
+           "grip drew %llu circles with it, this window (miracle_circle_aim=%d)",
+           g_aim_shows, g_aim_draws, g_settings.circle_aim ? 1 : 0);
+    g_aim_shows = 0;
+    g_aim_draws = 0;
   }
   ModLog("miracle      : a miracle was in the Hand on %llu frames and a "
          "one-off seed on %llu. %llu casts sent, %llu casts refused, %llu "
          "cancels, %llu seeds used with the trigger. A target on %llu "
          "frames: the mod put it in the pick record %llu times and took "
-         "another object out %llu times, this window (miracle_hand=%d)",
+         "another object out %llu times. %llu circles cast when they closed, "
+         "this window. The mod put %llu circles under the path of the Hand "
+         "(miracle_hand=%d, miracle_circle_hand=%d)",
          g_frames_miracle, g_frames_seed, g_casts, g_refusals, g_cancels,
          g_uses, g_target_frames, g_record_puts, g_record_clears,
-         g_settings.on ? 1 : 0);
+         g_circle_casts, g_circle_moves, g_settings.on ? 1 : 0,
+         g_settings.circle_hand ? 1 : 0);
   g_frames_miracle = 0;
   g_frames_seed = 0;
   g_casts = 0;
   g_refusals = 0;
   g_cancels = 0;
   g_uses = 0;
+  g_circle_casts = 0;
+  g_circle_moves = 0;
   g_target_frames = 0;
   g_record_puts = 0;
   g_record_clears = 0;

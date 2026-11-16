@@ -71,10 +71,13 @@ $LauncherExe = 'Black & White VR Mod.exe'
 #
 #   dxwrapper 1.8.8600.25, from third_party\backends\dx7.games
 #   OpenXR loader 1.1.43, Apache-2.0, built from third_party\OpenXR-SDK
+#   Alegreya and Alegreya SC, SIL OFL 1.1, from third_party\fonts
 $ThirdPartyHashes = @{
     'dxwrapper\ddraw.dll'     = '7C843006F81983617A37F57D7FB615D23BDA99860B71AB745F2B0CEA6AB00474'
     'dxwrapper\dxwrapper.dll' = 'EC42E51CBB4408518D6348706557B18EF50A87485C8BFA1839C895123FA3295F'
     'openxr_loader.dll'       = '1BCF618E5B37314AF8622AB3EFEABECEEB15A8AD702FCE37B9472A6EC68BBD97'
+    'bwvr-fonts\Alegreya[wght].ttf'  = 'BA5564634B93A8F8BA57B48CD4F1AE7417D2B4656FBAC779028679B00DE3CF12'
+    'bwvr-fonts\AlegreyaSC-Bold.ttf' = '3EF96CBF3BE7B84D9DFF9B1AA1E2AC40EEC0CF323CCD0638395CDEF9C5A91528'
 }
 
 # What ships, and where each file comes from. The path on the left is the
@@ -104,6 +107,15 @@ $Payload = @(
     @{ Dest = 'dxwrapper\ddraw.ini'
        Src  = Join-Path $InstDir 'payload\ddraw.ini'
        What = 'the stub settings' }
+    @{ Dest = 'bwvr-fonts\Alegreya[wght].ttf'
+       Src  = Join-Path $RepoRoot 'third_party\fonts\alegreya\Alegreya[wght].ttf'
+       What = 'the font of the words on the cards' }
+    @{ Dest = 'bwvr-fonts\AlegreyaSC-Bold.ttf'
+       Src  = Join-Path $RepoRoot 'third_party\fonts\alegreyasc\AlegreyaSC-Bold.ttf'
+       What = 'the font of the words on the seals' }
+    @{ Dest = 'bwvr-fonts\OFL.txt'
+       Src  = Join-Path $RepoRoot 'third_party\fonts\alegreya\OFL.txt'
+       What = 'the license of the two fonts' }
     @{ Dest = 'README.txt'
        Src  = Join-Path $InstDir 'README.txt'
        What = 'the player readme' }
@@ -111,6 +123,19 @@ $Payload = @(
        Src  = Join-Path $InstDir 'Notices.txt'
        What = 'the third party notices' }
 )
+
+# The controller models of the hints (MIT, from the WebXR Input Profiles,
+# bwvr\assets\controllers\README.md). Each file of the folder ships, in
+# bwvr-controllers of the game folder, with the same subfolders. The README
+# of the folder is for the repo and does not ship.
+$ModelDir = Join-Path $BwvrRoot 'assets\controllers'
+foreach ($file in (Get-ChildItem -LiteralPath $ModelDir -Recurse -File | Sort-Object FullName)) {
+    $rel = $file.FullName.Substring($ModelDir.Length).TrimStart('\')
+    if ($rel -eq 'README.md') { continue }
+    $Payload += @{ Dest = ('bwvr-controllers\' + $rel)
+                   Src  = $file.FullName
+                   What = 'a controller model of the hints' }
+}
 
 # --------------------------------------------------------------- the helpers
 

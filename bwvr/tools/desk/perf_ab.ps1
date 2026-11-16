@@ -24,7 +24,8 @@
 # -Pictures adds render_thread_test_frame=3000. Then only the windows before
 # frame 3000 count, and the table also has the percent of the pixels that
 # differ between frames 3000 and 3001 (one mode, PicSame) and between frames
-# 3001 and 3002 (the mode of the ini and mode 0, PicModes), left eye.
+# 3001 and 3002 (the mode of the ini and mode 0, PicModes), left eye. The mod
+# writes the pictures of these frames as bwvr-shared-left-03001.bmp to 03004.
 # The table is also in desk-perf-<Name>\summary.txt.
 param(
     [Parameter(Mandatory = $true)][string]$Name,
@@ -114,9 +115,21 @@ for ($r = 1; $r -le $Repeat; ++$r) {
         $row | Add-Member -NotePropertyName Config -NotePropertyValue $c.name
         $row | Add-Member -NotePropertyName Run -NotePropertyValue $r
         $picSame = ''; $picModes = ''
-        if ($Pictures -and (Test-Path -LiteralPath (Join-Path $dir 'bwvr-shared-left-03002.bmp'))) {
-            $picSame = [Math]::Round([PerfBmpDiff]::Diff("$dir\bwvr-shared-left-03000.bmp", "$dir\bwvr-shared-left-03001.bmp"), 4)
-            $picModes = [Math]::Round([PerfBmpDiff]::Diff("$dir\bwvr-shared-left-03001.bmp", "$dir\bwvr-shared-left-03002.bmp"), 4)
+        # The number in the name of a picture is not the frame of the test:
+        # the pictures of frames 3000 to 3003 are 03001 to 03004. So take the
+        # first four left pictures from 03000 on, in their order: two of the
+        # mode of the ini, then two of mode 0.
+        $pics = @()
+        if ($Pictures) {
+            $pics = @(Get-ChildItem -LiteralPath $dir -Filter 'bwvr-shared-left-*.bmp' |
+                Where-Object { $_.BaseName -match '-(\d+)$' -and [int]$matches[1] -ge 3000 } |
+                Sort-Object Name | Select-Object -First 4 | ForEach-Object { $_.FullName })
+        }
+        if ($pics.Count -eq 4) {
+            $picSame = [Math]::Round([PerfBmpDiff]::Diff($pics[0], $pics[1]), 4)
+            $picModes = [Math]::Round([PerfBmpDiff]::Diff($pics[1], $pics[2]), 4)
+        } elseif ($Pictures) {
+            "NO PICTURES: $run has $($pics.Count) of the 4 left pictures from 03000 on"
         }
         $row | Add-Member -NotePropertyName PicSame -NotePropertyValue $picSame
         $row | Add-Member -NotePropertyName PicModes -NotePropertyValue $picModes

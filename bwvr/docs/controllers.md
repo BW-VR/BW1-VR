@@ -268,7 +268,7 @@ serves both hands.
 | `trigger` | float | The left mouse button |
 | `squeeze` | float | The right mouse button (the grip) |
 | `stick` | vector2f | Snap turn, zoom steps, the ring |
-| `stick_click` | boolean | The gesture button (`gesture_button=2`), the ring (`radial_menu_button=2`) |
+| `stick_click` | boolean | The gesture button (`gesture_button=2`), the ring (`radial_menu_button=2`), the recenter hold (`recenter_hold`) |
 | `primary` | boolean | A on the right hand, X on the left |
 | `secondary` | boolean | B on the right hand, Y on the left |
 | `menu` | boolean | The menu button |
@@ -708,10 +708,11 @@ to the object or the land under the Hand.
 
 **The second face button.** B (Y on a left handed player's pointing hand) is
 the gesture draw button (`gesture_button=1`, default). `gesture_button=2`
-uses the stick click, and 0 turns the draw off. See `miracles.md`. While a
-miracle is in the Hand, a short press takes the miracle out of the Hand: at
-most `miracle_cancel_ms` (400 ms) and 5 cm of hand motion. A longer press, or
-a press with motion, draws a gesture. While A holds a teleport, B cancels the
+uses the stick click, and 0 turns the draw off. See `miracles.md`. A short
+press is a tap: at most `miracle_cancel_ms` (400 ms) and 5 cm of hand
+motion. While a miracle is in the Hand, a tap takes the miracle out of the
+Hand. At other times a tap opens or closes the spell book
+(`spell_book_b=1`). A longer press, or a press with motion, draws a gesture. While A holds a teleport, B cancels the
 teleport and not the miracle. While the Hand carries a one-off seed, the
 trigger makes the seed active and does not reach the game. While the grip is
 closed with a miracle that needs a circle, the path of the hand goes to the
@@ -785,6 +786,15 @@ does not go forward, the focus distance and a ray of 2 m stay. The mouse does
 not use any of this. The log line "the menu ray meets the menu at" shows the
 distance and the pixel.
 
+**The menus in the room.** With `menu_room=1` (the default) and a headset,
+the menu is not in the eye pictures. It is on a panel that is fixed in the
+room (`ui-layer.md`, section 20). The aim ray then meets that panel, and the
+pixel under the ray is the pixel of the dialog (`MenuRoomRayPixel`). The
+drawn ray ends on the panel. A ray past the edge of the panel is off the
+view, so a press there does not reach the game. A frame with no scene that
+shows a menu (the front end) also takes the ray this way. The log line is
+"the ray meets the menu panel".
+
 **The wheel.** The stick forward past 0.7 adds 120 to `0x00E85300`, the
 DirectInput wheel sum, and the stick back adds -120. Positive counts zoom in
 (`comfort_camera.cpp`, `SetWheelScale`). The pump repeats this every 250 ms
@@ -840,11 +850,16 @@ The scripts in `bwvr/tools/desk/` use these keys and words.
 | `fake_controller_points` | empty | Hand positions for the word `point`: `right,up,forward` in cm, separated by spaces (16 at most) |
 | `fake_controller_left_points` | empty | The same for the word `lpoint` and the left hand. Not mirrored: -20 is 20 cm to the left of the head |
 | `fake_controller_rots` | empty | Turns for the word `rot`: `yaw,pitch,roll` in degrees, separated by spaces. A test key, read from `bwvr.ini` |
+| `fake_controller_left_rots` | empty | The same for the word `lrot` and the left hand. Not mirrored: `0,0,-90` turns the left palm up, `0,0,90` turns it down. A test key |
 | `fake_controller_turns` | empty | Turns for the word `aimturn`: `yaw,pitch,0` in degrees, yaw to the left and pitch up. A third number that is not 0 makes the two angles the aim itself and not a turn. A test key |
 | `fake_controller_gestures` | empty | Template numbers of `Data\Gestures.jty` for the word `trace`, separated by spaces |
+| `fake_controller_trace_aim_cm` | 0 | Above 0: the word `trace` holds the hand at the middle of the trace and turns its aim, so its ray goes through the template on a level plane this many cm ahead of the middle. In the God view and on the table the template lies on the land itself: its middle is the land under the middle of the plane, and each pose is at its offset across the land. For the circle of the ray (`miracles.md`, "The circle of the pointer ray") |
+| `fake_controller_trace_aim_down_cm` | 60 | That plane is this many cm under the middle of the trace |
+| `fake_controller_trace_aim_pct` | 300 | The template on that plane has this percent of the size of the trace |
 | `fake_controller_gesture_cm` | 30 | The side of the square for `trace`, in front of the head, 5 to 200 |
 | `fake_controller_play_frame` | 0 | See 4.3. A test key |
 | `fake_controller_play_after` | 1000 | See 4.3. A test key |
+| `fake_controller_temple_frame` | 0 | See 4.3. The steps from frame N on wait for the ray of the Temple. A test key |
 | `fake_controller_front` | 0 | 1 lets the fake controller act while the game window is not in front, also with `controller_window_behind=0`. The fake controller already stands for a headset session that has the focus of the runtime (section 9), so the key is rarely needed |
 | `fake_head_right_cm`, `fake_head_up_cm`, `fake_head_forward_cm` | 0 | A still lean of the invented head. The words `lean` and `look` use it |
 
@@ -887,11 +902,13 @@ The words that hold a button (or the stick at full) for `frames` frames:
 | `menu` | The menu button of the right hand |
 | `stick_click` | The stick click of the right hand |
 | `stick_left`, `stick_right`, `stick_up`, `stick_down` | The stick of the right hand at full |
-| `x`, `y` | X, Y of the left hand (needs `fake_controller=2`). With `button_layout=1` Y opens the ring and X has no job. With 0 X opens the ring and Y sends Esc |
+| `x`, `y` | X, Y of the left hand (needs `fake_controller=2`). With `button_layout=1` Y opens the ring and X opens the spell book. With 0 X opens the ring and Y sends Esc |
 | `lmenu` | The menu button of the left hand: Esc |
 | `lgrip`, `ltrigger` | Grip, trigger of the left hand |
 | `gripdip` | While the word `grip` holds, the squeeze of the right grip reads 0.59 and not 1.0 for the frames of this word. One frame is a real hand that jerks away |
 | `lstick_left`, `lstick_right`, `lstick_up`, `lstick_down` | The stick of the left hand at full. Two words at the same time give a diagonal. The stick moves the player in the God view (`move_stick`), or drives the ring with `button_layout=0` |
+| `lstick_half` | The stick of the left hand forward at half of a full push: a push under the threshold of the speed ramp (`move_stick_ramp`, `god-view.md`, section 5.7) |
+| `lstick_click` | The stick click of the left hand. A hold of 1 s recenters the view (`recenter_hold`) |
 | `nofocus` | The headset session has no focus of the runtime. Both fake hands are not active, as `XrScreen` gives them then |
 
 The words that act on the first frame of the word only:
@@ -911,10 +928,12 @@ The words that act on the first frame of the word only:
 | `slap` | The same with 12 cm |
 | `trace` | Steps the right hand through the next template of `fake_controller_gestures`: it holds the first pose for 10 frames, so the script can press the draw button, then takes the next still pose every 2 frames. The template holds the corners of the path on a square of side 1. The word puts it on a square of `fake_controller_gesture_cm` in front of the head and adds a point every 8.5 percent of the side. See `miracles.md` |
 | `aimfar` | Turns the aim of the right hand to the nearest far target. It turns the ray and not the pose: it takes the turn of the preset and of the trim off the pose (section 8). See `grab.md` |
-| `pull` | Steps the right hand 15 cm toward the head center over the frames of the word. The next `pull` steps it back |
+| `pull` | Steps the right hand 15 cm toward the head center over the frames of the word (`fake_controller_pull_cm`, 1 to 60). The next `pull` steps it back |
 | `aimcmd` | Turns the aim to the middle of the body of the nearest object that a Creature command can act on. `command_test_class` names the class. See `creature.md` |
 | `aimturn` | Turns the aim by the next step of `fake_controller_turns`. A turn is a step and not a motion. See `creature.md` |
 | `aimtemple` | Turns the aim to the next target of `temple_test_targets` (11.6) |
+| `aimplaces` | Turns the aim to the middle of the next button of `places_test_buttons` on the panel of places (`ui-layer.md`, 22.5) |
+| `aimdebug` | Turns the aim to the middle of the next part of `debug_test_parts` on the debug window (10.5) |
 | `lean`, `look` | `lean` holds the lean of `fake_head_*_cm` for the frames of the word. `look` turns the invented head 30 degrees left and 20 degrees down for the frames. With no `lean` word in the script, a lean that is set holds for the whole run |
 | `shot` | Saves a picture of both eyes 3 frames later. It moves nothing |
 | `bench` | The frames of the word are one scene of the frame cost measure (`profile=1`, `backend.md`, "The frame cost measure"). It moves nothing. The scene starts with the frame after the first frame of the word |
@@ -926,6 +945,10 @@ The words that act on the first frame of the word only:
 | `promptkey` | The test key of `prompt_moves` acts (`controller-hints.md`, 9.5) |
 | `controlskey` | The test key of `controls` acts (5.7) |
 | `x` | X of the left hand. With `controls=1` and `left_leash=1` it is the button of the leash (5.7) |
+| `anglekey` | The switch of `hand_angle` acts (`hand.md`, "The angle of the hand") |
+| `sideskey` | The switch of `hand_two_sided` acts (`hand-model.md`, "Both sides of each triangle") |
+| `book` | Steps the right hand to the middle of the next item of the open spell book (`miracles.md`, "The spell book") |
+| `lrot` | Turns the left hand to the next of `fake_controller_left_rots`. After the last one the list starts again. The palm that turns up (`miracles.md`, "The gesture row over the palm" and "The book on the palm") |
 
 The placement of the hand is in cm from the head center. Each pose word sets
 the position of the right hand until the next one.
@@ -962,6 +985,15 @@ places the Hand some frames after the Main Menu of the start closes
 than their numbers, and the log says how many frames sooner. With M at 1000
 or more, a script keeps its frames when the Hand comes before frame N.
 
+`fake_controller_temple_frame=T` is a second anchor for the Temple. The guide
+of the first visit of the hall has a length in seconds, so it ends at a
+different frame in each run. The steps from frame T on count from the frame
+at which the ray of the Temple was on for 30 frames in a row (after the
+guide, `TempleRayOn`). That frame is T. The first anchor counts first, and
+its number is the frame of the second anchor. The test keys with a frame of
+their own count the same way. The log has the line `the ray of the Temple is
+on for 30 frames in a row` with the frame of the game.
+
 The clicks of the start dialog turn the pose of the fake hand. So a preset on
 the fake hand must start after the dialog (`aim_test_touch=N`). In a run with
 a test save, N is a frame after the Main Menu closed: the run scripts give
@@ -984,9 +1016,9 @@ The pointing hand is the right hand. When the left controller is the Hand
 | Grip | The right button of the game: take, carry, let go, throw, stroke, tap, cast (3.6, `grab.md`). A grip closed on a far target and pulled fetches it (`grab.md`). A short grip on your Creature from a distance changes its leash, and a grip that stays closed makes it stay (`creature.md`) |
 | Trigger | The left button: click. A drag on the land moves nothing in the God view. With the leash on the Hand, a Creature command (`creature.md`). With a one-off seed in the Hand, it makes the seed active (`miracles.md`). While a text of the game waits for a click, the trigger is that click and nothing more (`controller-hints.md`, section 10) |
 | A | Hold to aim the teleport arc, let go to go there (`god-view.md`). `teleport=0` gives a jump to the object or the land under the Hand |
-| B (Y on the left hand) | Hold and draw: a gesture (`miracles.md`). A short press with a miracle in the Hand takes the miracle out. B while A is down cancels the teleport |
-| Stick left and right | One snap turn (5.4). In the Temple it turns the player in the room (11.4) |
-| Stick forward and back | In the God view, one zoom step of the view, or a zoom while the stick is held (`god_zoom_smooth=1`). In other views, a wheel click |
+| B (Y on the left hand) | Hold and draw: a gesture (`miracles.md`). A tap opens and closes the spell book (`spell_book_b`, `miracles.md`, "The spell book"). A tap with a miracle in the Hand takes the miracle out. B while A is down cancels the teleport |
+| Stick left and right | One snap turn (5.4). In the Temple it turns the player in the room (11.4). No turn while a dialog box is up (`menu_stops_turn`, `god-view.md`, section 5.8) |
+| Stick forward and back | In the God view, one zoom step of the view, or a zoom while the stick is held (`god_zoom_smooth=1`), and no zoom while a dialog box is up (`menu_stops_turn`). In other views, a wheel click. While the ray is on the debug window, it scrolls the list of the window (10.8) |
 | Stick click | The gesture button with `gesture_button=2`. With `trace=1` in the headset app, the click of the right stick held with the left trigger for 300 ms saves the timeline (`android.md`, "The timeline") |
 | Dialog box up | The hand points a ray. The trigger is the left button and the grip the right button (3.6) |
 | In a room of the Temple | The hand points a ray. The trigger and the grip both click (11.3) |
@@ -997,8 +1029,10 @@ The pointing hand is the right hand. When the left controller is the Hand
 | --- | --- |
 | Grip | Grabs the land: pull to move it across, and up or down, one to one. Both grips turn and scale the land (`god-view.md`, section 5). `grab_hand=2` also lets the grip of the pointing hand grab the land when the Hand is empty and over nothing it can hold |
 | Y (B when the left hand points) | Hold: opens the ring, and the hand picks an item (section 10) |
-| X (A when the left hand points) | No job. With `trace=1` in the headset app, X held together with the click of the left stick for 300 ms saves the timeline (`android.md`, "The timeline"). The chord has no other action with `button_layout=1`. Both clicks of the sticks are not free: the app shows its menu for them (`play_menu_sticks`) |
-| Stick | In the God view: push it to move over the land (`move_stick`, `god-view.md`, section 5.7). No job in the other views and in a room of the Temple |
+| X (A when the left hand points) | Opens and closes the spell book, as a tap of B does: the miracles that you can ask for now (`miracles.md`, "The spell book"). The grip of the pointing hand holds one, and a pull takes it out. With `trace=1` in the headset app, X held together with the click of the left stick for 300 ms saves the timeline (`android.md`, "The timeline"). The chord has no other action with `button_layout=1`. Both clicks of the sticks are not free: the app shows its menu for them (`play_menu_sticks`) |
+| Palm up | The sheet of the gestures: how to draw each miracle of your Worship Sites (`gesture_sheet`, `miracles.md`). While you draw a gesture, the row of the game's pictures |
+| Stick | In the God view: push it to walk over the land, or to fly with `move_type=1` (`move_stick`, `god-view.md`, section 5.7). No job in the other views and in a room of the Temple |
+| Stick click | Hold it for 1 s with the stick at rest: the view recenters, as F11 does (`recenter_hold`, `god-view.md`, section 5.8) |
 | Trigger | No job. With `trace=1` in the headset app, the trigger held with the click of the right stick for 300 ms saves the timeline |
 | Menu button of the left controller | Esc: the game menu (3.6) |
 
@@ -1010,14 +1044,14 @@ default. Each control has one job, and one button opens the game menu.
 | --- | --- | --- |
 | The game menu (Esc) | The menu button of the left controller | The second face button of the other hand (Y, or B), and the menu button of the left controller |
 | The ring | Hold the second face button of the other hand (Y, or B) | Hold the first face button (X, or A), or push the stick and pull the trigger (`radial_menu_stick`) |
-| The first face button (X, or A) | No job. A press makes one log line | The ring |
+| The first face button (X, or A) | The spell book (`spell_book=1`). With `spell_book=0` no job, and a press makes one log line | The ring |
 | The stick of the other hand | The walk with the stick (`move_stick`) | The ring, and no walk |
 | The trigger of the other hand | No job | Chooses an item when the stick opened the ring |
 
 - **A left handed player.** The left menu button is then on the controller
   of the pointing hand. It still sends Esc: `LatchEsc` reads the menu button
   of the left controller, whichever hand points. The ring is on B of the
-  right controller, and A of the right controller has no job.
+  right controller, and A of the right controller opens the spell book.
 - **An Index controller** has no menu button that a program gets (2.3). With
   `button_layout=1` the first face button of the other hand (A) sends Esc
   there, and B opens the ring.
@@ -1046,7 +1080,8 @@ default. Each control has one job, and one button opens the game menu.
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `controllers` | 1 | Use tracked controllers when the headset has them |
-| `left_hand` | -1 | Which controller is the Hand (5.6). -1 follows the left handed option of the game, 0 the right controller, 1 the left controller. The launcher row "Hand" |
+| `hand_follow_game` | 1 | 1: the left handed option of the game always chooses the Hand (5.6), and `left_hand` does not act. 0: `left_hand` chooses |
+| `left_hand` | -1 | With `hand_follow_game=0`: which controller is the Hand (5.6). -1 follows the left handed option of the game, 0 the right controller, 1 the left controller. Not in the launcher |
 | `controls` | 0 | The control scheme (5.7). 0: the tables of 5.1. 1: the grips only grab the world, the trigger of the pointing hand is the left and the right button of the game, and the trigger of the other hand makes the walk faster. The launcher row "Controls". The test key Ctrl Shift and the apostrophe key goes between the two (`test_keys=1`) |
 | `move_stick_path` | 1 | With `controls=1`: the flight with the stick keeps its height and stops at the land (`god-view.md`, 5.7). The test key Ctrl Shift and the grave accent key (on a German keyboard the key with the letter O with two dots) goes between 1 and 0 (`test_keys=1`). Not in the launcher |
 | `move_stick_climb` | 1 | With `controls=1`: the tilt of the controller of the stick moves the player up and down in the walk (`god-view.md`, 5.7). The test key Ctrl Shift and the backslash key goes between 1 and 0 (`test_keys=1`). Not in the launcher |
@@ -1066,12 +1101,22 @@ default. Each control has one job, and one button opens the game menu.
 | `catch_at_once` | 1 | 1: a press of the grip on an object that moves (the physics of the game has it) puts the object in the hand at once. The game sends its pick up on the first frame after the press, the body of the object stays where it is, and the mod draws the object in the Hand from the frame of the press (`grab.md`, "A catch at once"). 0: the pick up of the game, which goes out 225 ms after the press, and the object moves on until the game takes it. The test key Ctrl Shift Backspace goes between the two (`test_keys=1`) |
 | `gesture_button` | 1 | The gesture draw button: 0 off, 1 the second face button of the pointing hand, 2 the stick click |
 | `gesture_size_cm` | 30 | This much hand motion is a third of the view height to the game |
+| `gesture_point` | 1 | The point that draws a gesture. 1: the tip of the index finger (at its rest curl, so the trigger does not move it). 0: the grip point (`miracles.md`, "Feeding a 3D path"). The switch "Gesture point" of the debug page. Not in the launcher |
+| `gesture_trail` | 1 | 1: a ribbon follows the point of the draw while the draw button is held. 0: no trail (`miracles.md`, "The trail at the fingertip"). The switch "Gesture trail" of the debug page. Not in the launcher, and a save of the launcher removes it (`launcher.md`, "Retired keys") |
+| `ray_glow` | 1 | 1: the menu ray, the tether of the far grab and the arc of the teleport have a glow with a light that runs along the line from the hand. 0: plain tubes (`hand-model.md`, "The glow ribbons"). The switch "Ray glow" of the debug page. Not in the launcher, and a save of the launcher removes it (`launcher.md`, "Retired keys") |
+| `ray_glow_only` | 1 | With `ray_glow=1`. 1: the glow is the whole line, with no tube, 20 percent narrower and with a solid core. 0: the glow is over the tube (`hand-model.md`, "The glow ribbons"). The switch "Glow only" of the debug page. Not in the launcher |
+| `ray_over_panels` | 1 | 1: while a panel in the room is open, the menu ray is a quad layer over the panels, with the glow of `ray_tip` at its end. 0: the ray stays in the eye pictures, under the panels (`ui-layer.md`, "The ray over the panels"). The switch "Ray on panels" of the debug page. Not in the launcher |
 | `teleport` | 1 | 1: A makes the teleport. 0: A makes a jump |
 | `teleport_switch` | 1 | The switch of the game that the press of A keeps to. 1: the drag of the land, as the walk with the stick. 0: the double click jump (`god-view.md`, section 14.1). Not in the launcher |
-| `button_layout` | 1 | The layout of the buttons of the hand that does not point (5.1). 1: the menu button of the left controller opens the game menu, the second face button opens the ring, the first face button has no job, and the stick does not drive the ring. 0: the second face button opens the game menu, the first face button opens the ring, and the stick can drive the ring. The test key Ctrl and the Menu key goes between the two (`test_keys=1`). Not in the launcher |
-| `move_stick`, `move_stick_speed_cm` | 1, 150 | The walk with the stick of the hand that does not point, in the God view: 0 off, 1 along the direction of the head, 2 along the direction of the controller, and the speed of a full push in cm of the room for each second (`god-view.md`, section 5.7). The launcher row "Move with the other stick" |
-| `move_stick_follow_land` | 1 | In the walk with the stick, 1: the height of the view follows the land under the head through a smooth filter. 0: the view keeps its height (`god-view.md`, section 5.7). The launcher row "Walk follows the land" |
+| `button_layout` | 1 | The layout of the buttons of the hand that does not point (5.1). 1: the menu button of the left controller opens the game menu, the second face button opens the ring, the first face button opens the spell book (`spell_book`), and the stick does not drive the ring. 0: the second face button opens the game menu, the first face button opens the ring, and the stick can drive the ring. The test key Ctrl and the Menu key goes between the two (`test_keys=1`). Not in the launcher |
+| `move_stick`, `move_stick_speed_cm` | 1, 150 | The walk or the fly with the stick of the hand that does not point, in the God view: 1 along the direction of the head, 2 along the direction of the controller, 0 off (bwvr.ini only), and the speed of a full push in cm of the room for each second, before the factor of the scale (`move_stick_scale`, `god-view.md`, section 5.7). The launcher row "Movement direction" |
+| `move_stick_ramp`, `move_stick_ramp_most` | 1, 32 | 1: a push of 90 percent or more of the stick of the hand that does not point gets faster with its time, up to 32 times, in the walk and in the fly. 0: the speed of the push only (`god-view.md`, section 5.7). The switch "Speed ramp" of the debug page. Not in the launcher |
+| `move_type` | 0 | 0: the stick walks over the land. 1: the stick flies along the forward direction of the head or of the controller in 3D, and the view does not follow the land (`god-view.md`, section 5.7). The launcher row "Movement type" |
+| `move_stick_follow_land` | 1 | In the walk with the stick, 1: the height of the view follows the land under the head through a smooth filter. 0: the view keeps its height (`god-view.md`, section 5.7). Not in the launcher: a save of the launcher removes it. The switch "Move kind" of the debug page |
 | `miracle_cancel_ms` | 400 | The longest press of the second face button that takes a miracle out of the Hand |
+| `spell_book` | 1 | 1: the first face button of the hand that does not point opens the spell book (`miracles.md`). 0: that button has no job. The switch "Spell book" of the debug page. Not in the launcher |
+| `debug_all_book` | 0 | 1: the spell book shows all 34 miracles and power levels of the game on 6 pages of 6, with no cost in prayer power and no change to the town (`miracles.md`, "The book of all miracles"). For tests. The switch "All in book" of the debug page, the first row of the group Miracles. Not in the launcher |
+| `debug_all_miracles` | 0 | 1: each town knows every miracle of the game, with no cost in prayer power. For tests. A save, also the save at the exit, keeps the miracles that the towns then know (`miracles.md`, "What a save keeps"). The switch "Unlock all" of the debug page, the second row of the group Miracles. Not in the launcher |
 | `controller_hints` | 1 | 1 shows the controller words in the hints and the help text of the game while a controller owns the pointer. 0 leaves every hint as the game draws it (`controller-hints.md`) |
 | `text_click` | 1 | 1: while a text of the game waits for a click, its prompt shows on the hint card in each view, and a press of the trigger goes to the game as the left button: no Creature command, no seed, and with the Hand off the view too. 0: the prompt has the rule of each other hint of the left button, and the trigger keeps its other jobs (`controller-hints.md`, section 10) |
 | `hint_profile` | (none) | A test key. Forces the words of one profile, for example `valve/index_controller` |
@@ -1081,12 +1126,19 @@ default. Each control has one job, and one button opens the game menu.
 | `aim_pitch_deg`, `aim_yaw_deg` | 0, 0 | Section 8 |
 | `radial_menu` | 1 | Section 10. The other keys of the ring are in 10.5 |
 | `temple_pointer`, `temple_click`, `temple_camera_follow`, `temple_camera_drag`, `temple_camera_flight`, `temple_pointer_depth_cm`, `temple_turn`, `temple_taps` | see 11.6 | Section 11 |
-| `snap_turn` | 2 | 5.4 |
+| `snap_turn` | 2 | 5.4. 4 is the smooth turn of the God view (`god-view.md`, section 4). 0 (no turn) is for a test only: the launcher and the settings window do not offer it |
+| `smooth_turn_speed` | 90 | The degrees a second of the smooth turn at a full push, 10 to 360 (`god-view.md`, section 4). The row "Turn speed" of the settings window. Not in the launcher |
 | `zoom_step` | 2 | 5.4 |
+| `menu_stops_turn` | 1 | 1: while a dialog box is up, the stick does not turn and does not zoom the God view. 0: it does (`god-view.md`, section 5.8). The switch "Menu turn" of the debug page. Not in the launcher |
+| `recenter_hold` | 1 | 1: a hold of 1 s of the stick click of the hand that does not point, with the stick at rest, recenters the view. 2: the stick click of the pointing hand. 0: no hold recenters (`god-view.md`, section 5.8). The switch "Recenter hold" of the debug page. Not in the launcher |
+| `button_map_hand`, `button_map_other` | 1234, 1234 | The map of the buttons (5.7). The page Controls of the VR Settings window writes them. Not in the launcher |
 
 The other keys of the Hand (the reach, the size, the throw, the Creature) are
 in `hand.md`, `throw.md` and `creature.md`. The keys of the grab of the world
-are in `god-view.md`, section 5.6.
+are in `god-view.md`, section 5.6. A grab with one hand has a gain
+(`grab_boost`, `god-view.md`, 5.1): land far below the hand comes up faster
+than the hand, and at a small scale the land moves across faster. Land near
+the hand at a scale of 16 units per meter or more moves 1:1.
 
 ### 5.3 Files and functions
 
@@ -1134,7 +1186,7 @@ this.
 
 | Motion of the game | What the mod does | Key |
 | --- | --- | --- |
-| The middle mouse turns and tilts smoothly | A turn key, a drag with the middle mouse, or a push of the stick turns the heading by one step in one frame. The position stays. The middle mouse does not tilt | `snap_turn`: 0 off, 1 30 degrees, 2 45 degrees (default), 3 90 degrees |
+| The middle mouse turns and tilts smoothly | A turn key, a drag with the middle mouse, or a push of the stick turns the heading by one step in one frame. The position stays. The middle mouse does not tilt | `snap_turn`: 0 off, 1 30 degrees, 2 45 degrees (default), 3 90 degrees, 4 smooth: in the God view the stick and a held turn key turn the view while they are held (`god-view.md`, section 4), and the other turns go in steps of 45 degrees |
 | A double click flies the camera for about 2.25 s | The flight ends in the same frame | `instant_jumps` (1) |
 | After a land drag the camera glides on for about 0.3 s | The camera follows the drag exactly and stops at the release | `camera_glide` (0) |
 | A wheel click zooms by a small step | One click changes the distance by a fixed ratio. The first click acts at once. Clicks in the next 150 ms join the next step, three at most | `zoom_step`: 0 the step of the game, 1 small (1.12 times), 2 medium (1.20 times, default), 3 large (1.30 times) |
@@ -1180,11 +1232,8 @@ Desktop runs use the fake controller with `fake_head=1`. These checks apply:
    script presses and releases the trigger, the game sees one press and one
    release.
 
-In the headset, `xrtest` shows both hands, the profile and every button. In
-the game, the Hand follows the controller, and Ctrl+F12 switches the owner
-live. Open the menu of Virtual Desktop while the trigger is held: the button
-must release. Close the menu with the trigger still down: no press may arrive
-until the trigger goes up and down again.
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ### 5.6 The left hand
 
@@ -1198,10 +1247,12 @@ and `GPlayer::InitReal`) and the packet `0x64` call `CHand::ToggleLeftRight`
 (`0x0046C260`) until `CHand+0x484C` is 0 for a left hand and 1 for a right
 hand. The game does not swap the mouse buttons.
 
-**The key.** `left_hand` chooses which controller is the Hand. With -1 (the
-default) the option of the game chooses, so the player sets it in one place.
-0 makes the right controller the Hand, and 1 the left controller. The
-launcher row "Hand" has the three values.
+**The keys.** With `hand_follow_game=1` (the default) the option of the
+game always chooses the Hand, so the player sets it in one place, and the
+launcher and the VR Settings window have no row for it. With
+`hand_follow_game=0` the key `left_hand` chooses: -1 the option of the game,
+0 the right controller, 1 the left controller. A desktop run of the left
+hand gives `hand_follow_game=0` and `left_hand=1`.
 
 **The change of sides.** `UpdateHandSide` in `controllers.cpp` reads the
 option once a frame, at the start of `ControllersFrame`. When the side
@@ -1238,9 +1289,75 @@ of the right hand points. The base pose of each hand is on the side of its
 controller. So each recipe runs with the left hand as it runs with the right
 hand.
 
-Only a headset shows: the left hand with a real controller, the hand model
-and the game's Hand on the left controller, and the menu button of the left
-controller as the button of the pointing hand.
+`hand_run.ps1 -Kind left` shows the left controller as the Hand and the
+game's Hand as a left hand. The word `menu` (the left controller with
+`left_hand=1`) sends Esc and opens the Main Menu, and `lmenu` sends nothing.
+A second press does not close the Main Menu: the game does not close it with
+Esc.
+
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
+
+### 5.7 The map of the buttons
+
+**The kind of a controller.** `ControllersFrame` reads the interaction
+profile of each controller each frame. At a change, the log names its kind
+(`button_map::KindOfProfile`) and the buttons that the kind gives to the
+jobs:
+
+| Kind | Profile | The buttons for the jobs |
+| --- | --- | --- |
+| Quest Touch | `oculus/touch_controller`, the fake controller, no profile yet, any other profile | A and B, or X and Y, the stick click, and the menu button of the left controller |
+| Index | `valve/index_controller` | A, B, the stick click |
+| Vive wand | `htc/vive_controller` | the pad click, the menu button |
+| Windows Mixed Reality | `microsoft/motion_controller` | the stick click, the menu button |
+| generic | `khr/simple_controller` | the menu button |
+
+**The slots.** Each job of 5.1 reads one of four buttons of a controller:
+the first face button, the second face button, the stick click or the menu
+button. These are the four slots. The map gives each slot a button of the
+same controller. The map of the controller of the Hand and the map of the
+controller of the other hand are apart, so a job stays with its hand when
+the Hand changes sides (5.6).
+
+**The map** is a number of four digits, one for each button in the order
+first face button, second face button, stick click, menu button. Each digit
+is the slot that the button gives, from 1 to 4. 1234 gives each slot its own
+button. 2134 gives the job of B to A and the job of A to B. After the read of
+the hands, `MapButtons` puts each button into its slot of `g_hands`, so each
+reader of the buttons (the teleport, the gesture, the ring, the spell book,
+Esc, the recenter hold, the closes of the windows, the pulses) sees the map
+with no change of its own. The pose, the trigger, the grip and the stick do
+not change.
+
+- A new map waits until each of the four buttons of both controllers is up,
+  so no press goes to the wrong job.
+- A number that is not a map of the four buttons (each digit from 1 to 4 one
+  time) gives 1234, and the log says so.
+- A map that moves a button that the controller does not have, or the pad
+  click of a Vive wand, acts as 1234 on that controller, and the log says so.
+  The pad of a wand turns and zooms only while it is clicked (`StickLive`),
+  so the pad and its click are one control.
+- The trigger, the grip and the sticks stay with their jobs. The trigger and
+  the grip of the Hand are the two buttons of the game, and the grip holds
+  with a closed hand. The grip of the other hand grabs the land. A stick
+  pushes in a direction. The trigger of the other hand chooses an item of
+  the ring with `button_layout=0`. `controller_swap_buttons` swaps the
+  trigger and the grip of the Hand.
+
+The page Controls of the VR Settings window makes the map (`ui-layer.md`,
+24.6): a list for each button gives it a job of the same controller, and
+Reset Defaults gives each button its job as made. The hint words follow it
+(`controller-hints.md`, 8.3). The trigger, the grip and the sticks show on
+the page with their jobs, and they have no list.
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `button_map_hand` | 1234 | The map of the buttons of the controller of the Hand. 1234: each button has its job as made |
+| `button_map_other` | 1234 | The map of the buttons of the controller of the other hand |
+
+The scripted controller presses the buttons before the map: the word `y`
+with `button_map_other=1324` is a hold of the recenter.
 
 ### 5.7 The control schemes
 
@@ -1528,10 +1645,12 @@ Desktop runs [R]:
 - **Latency.** The pointer uses the hand from the previous `BeginFrame`, like
   the head. Fast pointing can feel a little behind. The runtime does not
   reproject the Hand.
-- **Screens with no scene** (menus, loading, videos: `StereoIdle`) have no
-  head camera. The mouse is in charge there, except a dialog box with the
-  input channel of the headset app, where the ray points at the screen quad
-  (section 12).
+- **Screens with no scene** (loading, videos: `StereoIdle`) have no head
+  camera. The mouse is in charge there. A screen with no scene that shows a
+  menu is the exception with `menu_room=1`: the ray points on the menu
+  panel in the room (`ui-layer.md`, section 20). A dialog box with the input
+  channel of the headset app is the other exception: the ray points at the
+  screen quad (section 12).
 - **The Vive trackpad** reports a position whenever it is touched. As the
   stick, a resting thumb could turn or zoom. A fix is to require the trackpad
   click for that profile.
@@ -1551,20 +1670,18 @@ Desktop runs [R]:
 
 ## 7. Open questions
 
-1. What each button does in each state of the Hand, and whether the trigger
-   for the left button and the grip for the right button feel right. The
-   glove table in `input-devices.md` is a guide. Only a test in the headset can
-   decide.
+1. What each button does in each state of the Hand. The glove table in
+   `input-devices.md` is a guide.
 2. Whether Virtual Desktop reports hand tracking as an interaction profile,
    and which one. The mod binds no hand tracking profile now. A hand tracking
    profile would need a pinch for the trigger and the grip and has no stick,
    so the snap turn, the zoom and the ring would need other inputs.
 3. The `LH3DMapCoords` layout, for the exact land march (3.2).
-4. Whether the pointer should work in screens with no scene with a session
-   of the mod on the PC, by a ray against a screen fixed in the room. With
-   the input channel of the headset app it does (section 12).
-5. Whether a laser line or a dot at `T` helps in the pointer mode, or whether
+4. Whether a laser line or a dot at `T` helps in the pointer mode, or whether
    the Hand alone is enough. The mod draws any such mark, not the game.
+
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ## 8. The aim ray
 
@@ -1728,17 +1845,8 @@ grab and the Creature commands. Not run: Numpad 5 through the three presets,
 and a far fetch and a teleport with a preset (`aim_queue.ps1` has the run,
 with `aim_test_touch=700`).
 
-Only a headset shows:
-
-1. The grip to aim line of each hand, which says what Virtual Desktop gives
-   for the Quest 3 controllers.
-2. Which preset matches the ray of the Quest menu. Open the game menu and the
-   Quest menu, compare the two rays, and go through the presets with Numpad 5.
-   If the rays still differ, Numpad 8, 2, 4 and 6 change the trim.
-3. That the same values fit the left hand as the pointing hand
-   (`left_hand=1`).
-4. That the halo, the arc and the green halo show where the hand points, at a
-   far object, at the land with A, and with the leash on at an object.
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ## 9. The game window behind
 
@@ -1915,10 +2023,8 @@ Not proven on the desktop: `XrScreen::InputFocused` itself in a session (the
 fake controller stands for it), a real `WM_ACTIVATEAPP` from Windows, and a
 take of an object in the `deactivate` state.
 
-Needs the headset: start the game, click a different window on the desktop,
-and put the headset on. The hands, the grip, the trigger, the sticks, Y and the
-menu button must act. Open the menu of the headset: nothing may act in the game until it
-closes. The log then names the program that was in front.
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ## 10. The ring
 
@@ -1927,7 +2033,10 @@ the Creature, pause, bookmarks and more. `controls-audit.md` lists them. The
 ring holds those functions on the hand that does not point.
 
 The code is `radial_menu.cpp` (the settings, the game side, the picture, the
-frame) and `radial_menu_math.h` (the items, the pick, the ring step by step).
+frame), `radial_menu_math.h` (the items, the pick, the ring step by step),
+`ring_icon_math.h` (the icons), `ring_sheet_math.h` (the sheets of the places
+and of the leashes), `bookmark_aim.cpp` (the aim of a new bookmark) and
+`bookmark_aim_math.h` (the fit and the hold of the aim).
 `controllers.cpp` has small parts: `ControllersRingHand`, the call of
 `RadialMenuFrame` at the end of `ControllersFrame`, the call of
 `RadialMenuPump` in `ControllersPump`, and one test in `TriggerBlocks`.
@@ -1985,6 +2094,20 @@ choose". A choice that does not act gives the pulse `refused`.
 **While the ring is open,** a grip does not start a grab of the world
 (`TriggerBlocks`), and the hint card of that hand does not show.
 
+**A sheet.** The items `leash` and `places` go to a sheet: a page that is
+not a ring (10.11, 10.12). They are links, as `More` is: after 0.45 s with
+the hand on the item, or at once with the trigger of the stick way. The
+middle of the sheet is the place of the hand at that moment, so the hand
+starts in the middle, where no tile is. Each tile of a sheet is where the
+picture shows it, and the hand picks the tile that it is over
+(`SheetPick`). A tile stays chosen while the hand is 1 cm or less out of
+its box. The release chooses the tile, and a release in the middle chooses
+nothing. With the stick, the stick at its end is 13 cm from the middle.
+
+The ring is the quad layer `kCardRing`. A hand in front of the ring shows in
+front of it, in each eye, and a hand behind it is under it
+(`card_hand_front=1`, `ui-layer.md`, "A hand in front of a card").
+
 ### 10.2 The items
 
 The words are the words of `bwvr.ini`. "How" is what the mod writes into the
@@ -2002,16 +2125,21 @@ key buffer of the game.
 | `mark_set` | Set a bookmark here | Ctrl and the number of the first bookmark that is not set. With all 7 set: the one after the last one that the ring set (`MarkToSet`) |
 | `mark_go` | Go to the next bookmark | Ctrl and Tab |
 | `mark_back` | Go back | Backspace |
+| `leash` | Choose a leash | Goes to the sheet of the leashes (10.12) |
+| `places` | Places and bookmarks | Goes to the sheet of the places (10.11), as the word `places_page` does. With `places_sheet=0` it opens the panel of places (`ui-layer.md`, "The panel of places"). Not in the Temple. An empty slot with `places_panel=0` |
+| `snapshot` | A snapshot for a report | Saves the eye pictures of the next frame and a copy of the log in a folder of its own (10.9). An empty slot with `snapshot_item=0` |
 | `pause` | Pause the game | P |
 | `slower`, `faster` | Make the game slower, faster | Alt and 1, Alt and 2 |
 | `help` | Help of the game | The key of action `0x00` (F1) |
-| `names`, `details` | Villager names, villager details | The key of action `0x1B` (N), `0x1C` (S) |
+| `names`, `details` | Show villager names, villager details | The key of action `0x1B` (N), `0x1C` (S). The card says "Hide villager names" while the names show |
 | `save`, `load` | Quick save, quick load | The key of action `0x1D` (Ctrl S), `0x1E` (Ctrl L) |
 | `playground` | The Gods' Playground | F2 |
 | `hall`, `room_creature`, `room_challenge`, `room_save`, `room_options`, `room_library` | The rooms of the Temple | The key of action `0x14` to `0x19` (F4 to F9) |
 | `leave` | Leave the Temple, or back to the hall | Esc |
+| `recenter` | Recenter the view | No key: the view recenters as F11 does, and both hands get a pulse (`ControllersRecenter`). It acts also where the game takes no key. Slot 2 of page 2 has it with `places_panel=1` |
 | `more` | More | The other page |
-| `debug` | The debug page | The first page of the debug page (10.8). An empty slot with `debug_menu=0` |
+| `settings` | VR Settings | Opens the window of the VR Settings (`ui-layer.md`, 24). An empty slot with `settings_panel=0` |
+| `debug` | The debug page | Opens the debug window, or with `debug_window=0` goes to the first page of the debug page (10.8). An empty slot with `debug_menu=0` |
 | `back` | Back | The page before, on a page of the debug page |
 | `none` | An empty slot | |
 
@@ -2019,13 +2147,28 @@ The rings by default, from the top and clockwise:
 
 | Ring | Items |
 | --- | --- |
-| Page 1 (`radial_menu_items`) | `temple`, `creature`, `town`, `leash_learning`, `more`, `leash_compassion`, `leash_aggression`, `enter` |
-| Page 2 (`radial_menu_items2`) | `mark_set`, `mark_go`, `mark_back`, `pause`, `more`, `help`, `names`, `save` |
+| Page 1 (`radial_menu_items`) | `leash`, `places`, `recenter`, `save`, `more`, `settings`, `names`, `pause` |
+| Page 2 (`radial_menu_items2`) | `snapshot`, `help`, `details`, `faster`, `more`, `slower`, `none`, `none` |
 | In the Temple (`radial_menu_items_temple`) | `hall`, `room_creature`, `room_challenge`, `room_save`, `leave`, `room_options`, `room_library`, `none` |
 
-The order is how often a player needs an item: the Temple at the top, the
-moves of the view on the right, the leashes at the bottom. The ring of the
-Temple shows by itself while the player is in the Temple (`GGame + 0x205A28`).
+Page 1 has what a player needs at a glance. The leashes are at the top and
+the places at the top right, because a player uses them most. The places,
+the bookmarks and the three leashes are on their sheets, so no item of a
+place, of a bookmark or of one leash is on the ring. The recenter is at the
+right. Quick save, the VR Settings, the names of the villagers and the
+pause go round the bottom and the left. Page 2 has the snapshot, the help
+of the game, the villager details and the speed of the game. Its empty
+slot 6 is for the item `debug` (10.8). The ring of the Temple shows by
+itself while the player is in the Temple (`GGame + 0x205A28`).
+
+The old rings (`ring_pages=0`):
+
+| Ring | Items |
+| --- | --- |
+| Page 1 | `temple`, `creature`, `town`, `leash_learning`, `more`, `leash_compassion`, `leash_aggression`, `enter` |
+| Page 2 | `places`, `snapshot`, `recenter`, `pause`, `more`, `help`, `settings`, `save` |
+| Page 2 with `places_panel=0` | `mark_set`, `mark_go`, `mark_back`, `pause`, `more`, `help`, `settings`, `save` |
+| Page 2 with `settings_panel=0` | The same, with `names` in place of `settings` |
 
 **An item that cannot act now is dim,** and the card in the middle says why:
 no Creature, a kind of leash that the Creature does not have, no bookmark set,
@@ -2081,11 +2224,65 @@ One picture of 1024 by 1024 pixels, drawn with GDI as the hint cards are
 `xr_screen.cpp`, over all other cards. 32 pixels are 1 cm at 100 percent: the
 ring is 32 cm across, the items are 11 cm from the middle, and a capital
 letter is about 8 mm high. Each item is a badge with a short word. The chosen
-item is light, and a card in the middle has its name. With no choice, a small
-dot marks the middle. The ring fades in in 0.10 s and out in 0.20 s, in place.
-The picture is drawn again only when it changes, so a frame with a new choice
-costs about 2 ms more. If the runtime refuses the layer of the ring, the ring
-does not show, and its items still act.
+item stands out, and a card in the middle has its name. With no choice, a
+small mark is in the middle. The ring fades in in 0.10 s and out in 0.20 s,
+in place. If the runtime refuses the layer of the ring, the ring does not
+show, and its items still act.
+
+**The round seals** (`ring_icons=1`). Each item is a round seal of red wax,
+96 px (3 cm) across. The wax has the ring of a stamp and the icon of the
+item, pressed in as the letters of a word are. The word of the item is
+under the seal, in light letters with a dark edge of 3 px, so it reads on
+the land, on the sea and on the sky. The thin ring of ink and gold goes
+from seal to seal, and it fades out 14 px before a word. The chosen seal is
+102 px, with the gold wax, the rim and the glow, and its word is gold. The
+icons are shapes that the mod draws in code (`ring_icon_math.h`): no
+picture comes from a file. Each stroke of an icon is 4 px or more at the
+size of a seal. The pause shows the icon of play while the game is paused.
+A switch and a group of the debug pages have their word on a seal, as with
+`ring_icons=0`.
+
+**The look** follows `hint_card_style`, the key of the hint cards (the
+launcher row "Card look", `controller-hints.md`, 9.11). The ring reads the
+key from `bwvr.ini`, and it follows the switch "Card look" of the debug page
+while the hint cards are on.
+
+- 1 (the default): the scroll look of the hint cards (`card_scroll.h`). Each
+  item is a wax seal with its word in Alegreya SC, at the place and the size
+  of the badge. A thin ring of brown ink with a gold line in it goes from
+  seal to seal, so the ring reads as one object, and the world shows between
+  the seals. The card in the middle is a small parchment scroll with two
+  rolls: the name in dark brown ink and the note in red brown. With no
+  choice, a small red seal is in the middle.
+- 0: dark round boxes with white Segoe UI letters. The chosen item is light,
+  and a note is amber.
+
+**The wax of the scroll look.** On a hint card the wax has a meaning: green
+is the trigger, amber is the grip, and red is each other button. An item of
+the ring is not a button, so a plain item has the red wax. The chosen item
+has gold wax with dark letters, a gold rim and a soft glow, and it is 12 px
+wider and 8 px higher. The gold is lighter and more yellow than the amber of
+the grip, and only one item at a time has it. An item that cannot act now
+has a pale brown wax at an alpha of 0.6, and the thin ring does not show
+through it. The value of a switch (10.8) is gold on the red wax and dark red
+on the gold wax. `card_scroll::Seal` gives the red wax. The gold and the pale
+wax come from its shade: each pixel keeps its brightness against the middle
+brightness of the red wax. All the details are 4 px or more, as on the hint
+cards.
+
+**The cost.** The picture is drawn again only when it changes: at each change
+of the choice, of the page or of a value. The plain look draws all of it:
+1.3 to 5 ms in a desktop run. The scroll look keeps each seal and each card
+in a cache for its slot and its state (plain, chosen, faded), and draws again
+only a part that changed. A new picture is a clear, a copy of the parts and
+the thin ring. While the ring is open, each frame with no new picture puts
+one more part into the cache: the chosen seal and the card of a slot
+(`ScrollBake`, at most 1.8 ms in a frame). So some frames after the ring
+opens, a change of the choice is a copy only: 0.6 to 0.9 ms in a desktop
+run. A new page draws its seals, in about 4 ms. The first picture of the
+scroll look starts the fonts (13 ms), and the first page with switches takes
+about 26 ms, because GDI draws each letter of the two small fonts for the
+first time.
 
 ### 10.5 Keys
 
@@ -2100,8 +2297,24 @@ does not show, and its items still act.
 | `radial_menu_reach_cm` | 5 | How far the hand moves to pick an item, 2 to 15 |
 | `radial_menu_size_pct` | 100 | The size of the ring, 50 to 200 |
 | `radial_menu_creature` | 1 | 1 the item `creature` is one teleport in the God view, 0 it is the key of the game |
+| `hint_card_style` | 1 | The key of the hint cards (`controller-hints.md`, 9.5). 1 each item is a wax seal and the card in the middle is a parchment scroll. 0 dark round boxes with white letters (10.4). The launcher row "Card look" |
+| `ring_pages` | 1 | 1 the pages as made of 10.2: the leashes, the places, the recenter, quick save, the VR Settings and the names on page 1. 0 the old pages, with the places and the leashes on page 1 |
+| `ring_icons` | 1 | 1 each item is a round seal with its icon and its word under it (10.4). 0 each item is a seal with its word |
+| `places_sheet` | 1 | 1 the item `places` goes to the sheet of the places (10.11). 0 it opens the panel of places (`ui-layer.md`, section 22) |
+| `bookmark_aim` | 1 | 1 the seal with the plus of the sheet of the places waits for the grip at the aim of the pointing hand (10.11). 0 it sets the bookmark at the Hand, as Ctrl and the number do |
+| `bookmark_aim_hold` | 1 | 1 the aim offers the cone of its ray also with `far_grab=0`, and the place of the mesh of the object keeps the hold when the draw does not offer it (10.11). 0 the cone only with `far_grab=1`, and an object that the draw does not offer keeps the aim for 10 frames |
+| `leash_pictures` | 1 | 1 the tiles of the sheet of the leashes show the picture of the leash that turns, from the files of the game (10.12). 0 the icon of each kind |
+| `bookmark_test_aim` | | A test key: the word `aimmark` of the scripted controller aims at the nearest living thing of the cone with `living` |
+| `places_panel` | 1 | 0 the word `places` is an empty slot. With `ring_pages=0`, page 2 as made then has `mark_set`, `mark_go` and `mark_back` |
+| `snapshot_item` | 1 | 1 the item `snapshot` saves a snapshot for a report (10.9). 0 the word `snapshot` is an empty slot |
+| `settings_panel` | 1 | 1 page 2 as made has the item `settings`, which opens the settings window (10.10). 0 page 2 as made has `names`, and the word `settings` is an empty slot |
+| `welcome_page` | 1 | 1 the welcome page shows at the first start, while `bwvr.ini` has no `welcome_done=1` (10.10). 0 it never shows |
 | `radial_test_save` | 0 | A test key: the mod saves the first N pictures of the ring as `bwvr-ring-NNNNN.bmp` |
+| `snapshot_test_dir` | | A test key: the snapshots go into this folder, and not into `bwvr\captures` of the game folder |
 | `debug_menu` | 0 | 1 puts the item `debug` on the ring (10.8). The launcher row "Debug menu" in the group "Testing" |
+| `debug_window` | 1 | With `debug_menu=1`: 1 the item `debug` opens the debug window (10.8). 0 it goes to the debug pages of the ring |
+| `debug_window_test_save` | 0 | A test key: the mod saves the first N pictures of the debug window with a new group, a new value, a note or a scroll as `bwvr-debugwin-NNNNN.bmp` |
+| `debug_test_parts` | | A test key: the parts of the debug window for the word `aimdebug`, in order: `tab3`, `row5`, `left5`, `right5` (from 0), `thumb`, `trackend` (the end of the track that is farther from the thumb) and `close` |
 
 **The test keys.** With `test_keys=1`, Ctrl and the Menu key change
 `button_layout` (5.1). While the stick can drive the ring (`button_layout=0`),
@@ -2132,7 +2345,30 @@ The lines "the game:" come from a watch of what the ring can change: the Temple
 and its room, the pause, the speed, the names, the details, the kind of the
 leash, each bookmark, and a cut scene. So a log from a headset session says
 what a choice did. The report of a window has the counts, and the longest
-draw of the picture in ms.
+draw of the picture in ms. The scroll look adds the count of the parts that
+went into the cache between the pictures, and the longest of those draws.
+
+A sheet and the aim of a bookmark:
+
+```
+ring         : the ring goes to the sheet of the places, its middle at the hand, 5.0 cm to the right and 5.0 cm up from the middle of the ring. The tiles, in cm from the middle of the sheet: creature at -12.3 8.3, [...], mark3 at -3.9 -6.6, remove3 at -3.9 -10.3, add at 3.9 -6.6, frame 812
+ring         : the choice on the sheet is Bookmark 3 (tile 8), with the hand 0.2 cm to the right and -6.4 cm up from its middle, frame 830
+ring         : the player chose "Bookmark 3": the key 3, frame 845
+ring         : the player chose "Add a bookmark": bookmark 2 waits for the grip at the point of the aim (bookmark_aim=1), frame 901
+bookmark aim : the aim is on the land at 1830.2 2411.7, frame 902
+bookmark aim : the grip sets bookmark 2 on the land at 1830.2 2411.7 (Bookmark::SetBookMark), 1.4 m of the room along the ray, frame 960
+bookmark aim : the grip sets bookmark 4 on the Villager 0x1C2D9F40 at 1822.0 2400.5 (fn_00439F70), 1.2 m of the room along the ray, frame 1210
+bookmark aim : the aim of bookmark 5 stops: the player pressed B, frame 1300
+leash        : leash_pictures=1: the pictures of the leashes come from Data\Misc\leash.l3d (68 points, 64 triangles) and Data\Textures\leash.raw with leasha.raw
+ring         : the sheet of the leashes drew 812 pictures of a leash. The longest took 0.93 ms
+```
+
+Each of the first 40 new pictures of the ring has one line:
+
+```
+ring         : hint_card_style=1: each item is a wax seal, and the card in the middle is a parchment scroll
+ring         : frame 1120, a new picture of the ring in the scroll look took 0.61 ms. It drew 0 parts new, and the others came from the cache
+```
 
 ### 10.7 Tests
 
@@ -2144,6 +2380,15 @@ release, the middle, More with its dwell, a ring that cannot open or stay
 open, an empty slot), the ring with the stick and the trigger (through the
 middle, the rest, More, a trigger that was down before), the kind of the
 leash, the bookmark to set, and the tutorial switches.
+`ring_sheet_checks.h` covers the icons (each one covers a fair part of its
+box and nothing at its edge, and each item has one), the pages as made, the
+layout of the sheets (no two boxes overlap, each box is in the picture,
+the middle is free), the keys of a bookmark, the pick on a sheet with its
+margin, and the ring to a sheet with the button and with the stick.
+
+The offline pictures of the ring come from `radial_menu.cpp` itself, built
+with stubs of the game on a PC with no game: the pages, the chosen seal,
+the dim seal, the sheets and the old look. They show the mod art only.
 
 Desktop runs [R] (the God view, `fake_controller=2`, the start choice "Keep
 your old Creature"): each choice goes into the key buffer of the game, and the
@@ -2160,6 +2405,17 @@ the limit), `names`, `details`, `pause`, `help` (the key went out, what the
 help showed was not read), `playground` (the dialog box of the game is up),
 and the page change with More.
 
+The look [R] (`temple_run.ps1 -NoEnter`, the test save `temple`, dxwrapper,
+`debug_menu=1;radial_test_save=80;hint_card_fonts_test_dir=<folder>` and
+`fake_controller_left_points` with the places of the slots from
+`Get-BwvrRingChoice`): Y holds the ring open, and the left hand steps to
+`creature`, `town`, `leash_learning`, the middle and `enter`. A second hold
+goes through `more`, `debug` and the group Render to two switches. With
+`hint_card_style=1` the saved pictures show the seals, the gold chosen seal,
+the faded seal of `mark_go` (no bookmark), the scroll in the middle, the
+small seal with no choice, and the badges of two lines on the page Render.
+With `hint_card_style=0` the pictures are the dark boxes.
+
 The first visit of the Temple and of each room plays a guide of the game with
 the cinema bars. The game takes no key in the Temple then, and the ring does
 not open.
@@ -2169,8 +2425,8 @@ The layout of the buttons [R] (a run in the test save at the Temple,
 ltrigger@930+6 y@1000+30 lpoint@1006+1 lpoint@1036+1 lmenu@1150+6
 lstick_up@1260+40 y@1330+30` and the left points `-16,-24,42 -20,-30,35`):
 
-- With `button_layout=1`: X makes the log line "the first face button of the
-  left hand is down. It has no job". The left stick moves the player and
+- With `button_layout=1` and `spell_book=0`: X makes the log line "the first
+  face button of the left hand is down. It has no job". The left stick moves the player and
   does not open the ring, and the left trigger does nothing. Y opens the
   ring, the step of the hand picks `creature`, and the release chooses it. Y
   sends no Esc. The left menu button sends Esc, and the game menu is up.
@@ -2188,7 +2444,7 @@ lstick_up@1260+40 y@1330+30` and the left points `-16,-24,42 -20,-30,35`):
 - In the Temple (`temple_run.ps1 -Rooms "room_challenge@3500" -Steps
   "x@3360+20 lstick_up@3400+40 lmenu@5300+6"`): Y with a step of the hand
   chooses `enter` on the land and `room_challenge` in the hall. In the hall X
-  has no job, and the stick does not move the player ("the God view does not
+  opens no spell book, and the stick does not move the player ("the God view does not
   own the view now"). The menu button sends Esc, and the player is in the
   hall again.
 - The word `layoutkey` changes the layout in a run: after it the stick opens
@@ -2200,70 +2456,96 @@ action key. Also not run: `room_options` (the same call with a different
 room), the two test keys with a real key, an Index controller, a controller
 with no face buttons, and a real controller.
 
-Needs the headset:
-
-1. That Virtual Desktop shows the quad layer of the ring, and that it is sharp.
-2. Whether Y is easy to hold while the hand moves to an item
-   (`button_layout=1`). Ctrl and the Menu key change to the layout with X and
-   the stick, and Ctrl and Numpad 1 then leave only one of its two ways on.
-3. Whether 5 cm is the right reach, and whether 32 cm is the right size
-   (`radial_menu_reach_cm`, `radial_menu_size_pct`).
-4. Whether the card in the middle is in the way of the hand.
-5. The order of the items.
-6. In the Temple: the view of each room, and the Hand at a door (section 11).
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ### 10.8 The debug page
 
 The test keys (`test_keys=1`, `backend.md`, "Keys for v1.0") change one
 rule each while the game runs, for a live A/B. A player in the headset has
 no keyboard. With `debug_menu=1` (the launcher row "Debug menu") the ring
-has the item `debug`, and its pages hold the same switches. The page does
-not need `test_keys=1`, and the keys of the keyboard still need it.
+has the item `debug`, and it gives the same switches to the hand. The page
+does not need `test_keys=1`, and the keys of the keyboard still need it.
 
-The code is `debug_menu.cpp` (the table of the switches), `debug_menu_math.h`
-(the pages and their links) and the ring (`radial_menu.cpp`).
+With `debug_window=1` (the default) the item opens the debug window: a
+window of parchment in the room with the switches of a group as a list,
+which the ray and the trigger of the pointing hand change
+(`ui-layer.md`, "The debug window"). With `debug_window=0` the item goes to
+the debug pages of the ring (below).
+
+The code is `debug_menu.cpp` (the table of the switches and their notes),
+`debug_window.cpp` with `debug_window_math.h` (the window), and
+`debug_menu_math.h` with the ring (`radial_menu.cpp`) for the pages.
 
 **The place of the item.** A page of the ini that has the word `debug`
 holds it. Else the last page of the ring gets it: its first empty slot, or
 on a full page slot 5 (from 0 at the top and clockwise: the slot left of the
-bottom, `DebugSlot`). Page 2 as made is full, so `debug` takes the place of
-`help` there. The ring of the Temple has it in its empty slot 7. The log
-names the item that gives its slot.
+bottom, `DebugSlot`). Page 2 is full, with `places_panel=1` and with
+`places_panel=0`, so `debug` takes the place of `help` there. The ring of the Temple has it in its empty slot 7. The log names the
+item that gives its slot. With `debug_window=1` the item is no link: the
+release of the button on it chooses it, as on `places`.
 
-**The pages.** A link item goes to its page after 0.45 s with the hand on
-it, or at once with the trigger, as `More` does. A release on a link chooses
-nothing.
+**The debug window.**
+
+| Part | What it does |
+| --- | --- |
+| The tabs at the left | One for each group: View, Picture, Render, Interface, Hand, Throw, Creature, Miracles, Sound, Temple. A press shows the switches of the group. The tab of the group that shows is bright gold |
+| A row with a toggle | A switch with two values. The word of the value, and a slot with a knob of wax: green at the right for the value 1, red at the left for 0. A press anywhere on the row changes it |
+| A row with two arrows | A switch with more values, or with a number. The right arrow makes the step of the test key. The left arrow makes a step back for "Throw speed", "Land speed" and "Video height". For each other switch the left arrow makes the same step as the right arrow, because the change function of a test key steps one way only, and many of them go between the value of the ini and one other value |
+| A dim row | A switch that cannot change now (its part is off, its hook is not in, or it is for the other renderer). It says "not now", and a press gives the pulse `refused` |
+| The scroll bar | When the group has more than 10 rows. The ray drags the thumb, and a press on the track goes one view up or down. While the ray is on the window, the stick of the pointing hand forward and back scrolls the list, and it does not zoom then (5.1) |
+| The note | When the ray rests on a row for 0.35 s, a small note of paper shows the name of the switch, what it does, and its ini key |
+| The bottom row | The value after a press, for 2.5 s, or why a dim row cannot change. Close is at the right |
+
+Close, B of the pointing hand and the menu button close the window. Then B
+draws no gesture, and the menu button sends no Esc. The ring, the spell
+book, a dialog box and a cut scene also close it. While the window is open
+the trigger belongs to it, as for the panel of places (`ui-layer.md`,
+22.3). The next time, the window opens on the same group at the same row.
+
+"Throw slower" and "Throw faster" are two switches of the ring with one ini
+key, and so are "Land slower" and "Land faster", and "Video higher" and
+"Video lower". The window has one row for each pair, "Throw speed", "Land
+speed" and "Video height", with the slower step (or the higher area) on the
+left arrow. The table marks that line as a line of the ring only.
+
+**The debug pages of the ring** (`debug_window=0`). A link item goes to its
+page after 0.45 s with the hand on it, or at once with the trigger, as
+`More` does. A release on a link chooses nothing. The recipe in the header
+of `temple_run.ps1` goes from page 2 to the groups, to Render and to "One
+walk", and each link changes the page 27 frames (0.45 s) after the hand comes
+to it.
 
 | Page | Items |
 | --- | --- |
-| The groups | View, Picture, Render, Interface, Hand, Throw, Creature, Sound, Temple: each group that has a switch now |
-| A group | Its switches. A badge has the word of the switch, and its value under it in amber, for example "One walk" and "on". The card in the middle has the name of the switch and its ini key with the value, for example `one_walk=1 (on)` |
+| The groups | View, Picture, Render, Interface, Hand, Throw, Creature, Miracles, Sound, Temple: each group that has a switch now |
+| A group | Its switches. A badge has the word of the switch, and its value under it in a second color (10.4), for example "One walk" and "on". The card in the middle has the name of the switch and its ini key with the value, for example `one_walk=1 (on)` |
 
 Each page has `back` in the bottom slot: from a group to the page of the
 groups, and from the groups to the page with `debug`. A list of 7 items or
 fewer has one page. A longer list has 6 items on each page, and `more` in
-slot 3 goes to its next page, and from its last page to its first.
+slot 3 goes to its next page, and from its last page to its first. A switch
+that cannot change now is not on a page. The ring makes its debug pages
+again on each frame that it is closed. For 30 s after a choice of a switch
+the ring opens on the same page again, so a second choice for an A/B needs
+no walk through the pages.
 
-**A choice of a switch** calls the change function of its test key: the same
-step of the value, the same pulse and the same log line, at once. The ring
-gives no pulse of its own for a switch, so the pulse of the test key is
-clear. The log has one more line with the new value. For 30 s after the
-choice the ring opens on the same page again, so a second choice for an A/B
-needs no walk through the pages.
-
-**A switch that cannot change now is not on the page**: its part is off,
-its hook is not in, or it is for the other renderer (the switches of
-Direct3D 9 with `vulkan_only=1`). The ring makes its debug pages again on
-each frame that it is closed.
+**A choice of a switch**, in the window and on the ring, calls the change
+function of its test key: the same step of the value, the same pulse and
+the same log line, at once. The window and the ring give no pulse of their
+own for a switch, so the pulse of the test key is clear. The log has one
+more line with the new value.
 
 **The table.** `kSwitches` in `debug_menu.cpp` has one line for each switch:
 the group, the word on the badge, the name on the card, the ini key, the
-value function, the change function and the words of the values. The file of
-the area has the two functions, and its test key calls the same change
-function. So a new test key is one more line. A switch that needs a start
-of the game (for example `backend`) is not in the table. The keys of the
-intro, the trims of the aim ray, F11 and F12 are not switches. The hotkey
-table of `backend.md` names the item of each key.
+value function, the change function and the words of the values. A line can
+also have a step back for the left arrow of the window. `kTips` beside it
+has the note of each switch, in the same order. The file of the area has the
+two functions, and its test key calls the same change function. So a new
+test key is one more line in each table. A switch that needs a start of the
+game (for example `backend`) is not in the table. The keys of the intro, the
+trims of the aim ray, F11 and F12 are not switches. The hotkey table of
+`backend.md` names the item of each key.
 
 A part that a switch needs, and that the mod puts in only for a test, is in
 with `test_keys=1` or `debug_menu=1` (`TestSwitchesOn`): the hook of the
@@ -2273,31 +2555,216 @@ spirits, and the second thread of the bridge.
 The log:
 
 ```
-debug page   : debug_menu=1. The ring has the item "debug" with 107 switches in 9 groups, 92 of them can change now. test_keys=0
-ring         : debug_menu=1: the item "debug" takes slot 5 (0 is the top) of page 2, in place of "help"
+debug page   : debug_menu=1. The ring has the item "debug" with 117 switches in 9 groups, 102 of them can change now. test_keys=1
+debug page   : debug_window=1. The item "debug" opens the debug window, and the ray and the trigger of the pointing hand change its switches
+ring         : the player chose "debug": the debug window opens, frame 371
+debug window : the window opens, 0.56 by 0.56 m, its middle at 0.00 -0.21 -0.98 m, the group View with 14 switches, frame 371
+debug window : the trigger presses the right arrow of Zoom point (row 4), frame 531
+debug page   : the player chose "Zoom point": god_zoom_about is 2 now (Hand), it was 0, frame 531
+debug page   : the player chose "Throw faster" (a step back): throw_slow_x10 is 23 now (23), it was 20, frame 651
+debug window : the stick scrolls the list from offset 0 to 933 of 1064, frame 811
+debug window : the window closes: the player pressed B, frame 1271
+```
+
+With `debug_window=0`:
+
+```
 ring         : The debug page of the groups (page 3): View, Picture, Render, more, back, Interface, Hand, Throw, frame 248
 ring         : The debug page Render (page 9): one_walk, foveation, fovea_res, more, back, frame_send, frame_time_real, fast_transform, frame 299
-one walk     : off. The scene is walked one time for each eye (one_walk=0)
 debug page   : the player chose "One walk": one_walk is 0 now (off), it was 1, frame 371
 ```
 
 **Tests.** The math test (`debug_menu_checks.h`) covers the lists and their
 slots, the slot of `debug`, the pages with their links (`debug`, the groups,
 `back`, `more`), a switch that cannot change, pages that do not fit, the
-words of a value, and the ring with the links: the hand through `More`,
-`debug` and a group to a switch, and the stick with the trigger on `back`.
+words of a value, and the ring with the links. `debug_window_checks.h`
+covers the window: the list that scrolls and its thumb, the stick, the kinds
+of a row, the layout, the part under the ray at each offset, the drag and
+the track, the place of the note, and the test key.
 
-Desktop runs [R] (the test save `temple`, `debug_menu=1` and `test_keys=0`,
+Desktop runs [R] (the test save `temple`, `debug_menu=1`, Vulkan with
+`test_frame_rate=60`): Y and the left hand through `More` to `debug` open
+the window. The word `aimdebug` aims the ray at the parts of
+`debug_test_parts`, and the trigger presses them. In one run the note of a
+row shows after 0.35 s, a toggle changes `god_spawn`, both arrows of "Zoom
+point" step it, the left arrow of "Throw speed" steps it back and the right
+arrow steps it again, the stick scrolls the group Render, the ray drags the
+thumb to the top, a press on the track goes one view down, and Close, B and
+the menu button each close the window. `debug_window_test_save` saves the
+pictures. With `debug_window=0` the item goes to the page of the groups of
+the ring.
+
+With `debug_window=0`: (the test save `temple`, `debug_menu=1` and `test_keys=0`,
 with Vulkan): Y and four steps of the left hand go through `More`, `debug`
 and the group Render to "One walk", and the release turns one walk off. The
 next press of Y opens the ring on the page Render again, and "Foveation"
 goes on. `radial_test_save` saves each picture of the ring. With
-`debug_menu=0` page 2 has `help` in slot 5, and no page has `debug`.
+`debug_menu=0` page 2 has `help` in slot 5, and no page has `debug`. These
+runs had the page 2 of `places_panel=0`.
 
-Needs the headset:
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
-1. Whether the badges of two lines are easy to read at 32 cm.
-2. Whether 0.45 s on each link is too slow for a walk through three pages.
+### 10.9 The snapshot
+
+A player in the headset who sees a fault has no keyboard for F12, and does
+not know where the log is. The item `snapshot` of the ring saves what a
+report needs in one folder. The code is `snapshot.cpp`.
+
+- **The pictures.** The choice asks the eye capture (`eye_capture.cpp`,
+  `EyeCaptureArmNext`) for the next stereo frame, as F12 does. That frame
+  writes its pictures beside `runblack.exe`: the eyes of the frame, the
+  images of the renderer Vulkan, and in a session the images of the eye
+  swapchains (`backend.md`, the key F12).
+- **The folder.** 1 s later a thread of its own moves each picture of that
+  frame into `bwvr\captures\snapshot-YYYYMMDD-HHMMSS` of the game folder.
+  It writes each one as a PNG of 24 bits with the Windows Imaging Component,
+  and it deletes the BMP. The PNG has no alpha, because the alpha of some
+  eye pictures is 0. A picture that WIC cannot write goes into the folder as
+  a BMP. The picture `before` (the target before the eye passes) is not the
+  view, so it stays where it is. The name of a file is the kind of the
+  picture, for example `vk-left.png` or `xr-right.png`.
+- **The log.** Then the thread copies `bwvr.log` into the folder. Its last
+  line names the pictures. The game thread does no file work, so no frame
+  waits for the disk.
+- **The card.** The ring stays after the choice, and its card says "It
+  saves the pictures". When the folder is ready, the hand of the ring gets
+  the pulse `activate`, and the card says "Saved in bwvr\captures" for
+  1.8 s. A save that failed gives the pulse `refused` and the note "The save
+  failed". While a snapshot saves, the item is dim.
+
+The log has the tag `snapshot`:
+
+```
+snapshot     : the player asked for a snapshot, frame N. The next frame saves the eye pictures
+snapshot     : 2 pictures as PNG and 0 as BMP in <folder> (0 could not move). The copy of the log ends with this line
+snapshot     : saved, asked at frame N: the pictures of stereo frame M (2 as PNG, 0 as BMP) and the log in <folder>, in T ms on a thread of its own
+```
+
+A desktop run (the test save `temple`, dxwrapper, `snapshot_test_dir`) chose
+the item on page 2. The next stereo frame saved its eye pictures, and 0.85 s
+after the thread started the folder had `shared-left.png` and
+`shared-right.png` (6 MB each from 31 MB BMP files at a render of 3600 by
+2880) and `bwvr.log`. With `backend=vulkan` the folder had `vk-left.png`
+and `vk-right.png` and the pictures of the hint cards. Only a headset shows
+the files of a session (`eye` and `xr`) and the note on the card.
+
+### 10.10 The settings window and the welcome page
+
+The item `settings` of page 2 opens the VR Settings window: the debug
+window of 10.8 with the settings that a player changes, in the words of the
+launcher, in two tabs (Moving, Hands), and the tab Controls: the models of
+the controllers of the player, and a list of jobs for each button (5.7). A
+change writes its key into `bwvr.ini` at once, and most settings act at
+once. A change that acts at the next start puts the line "Restart the game
+to use the changes." at the bottom left of the window. The welcome page shows
+one time, at the first start: two lines about the mod, three controls, and
+the buttons VR Settings and Play. The ray and the trigger of the pointing hand, B
+and the menu button work as on the debug window, and the word `aimdebug` of
+the scripted controller aims at the parts of the window that is open
+(`debug_test_parts`), or at the buttons of the welcome page
+(`welcome_test_parts`). See `ui-layer.md`, section 24.
+
+### 10.11 The sheet of the places
+
+The item `places` goes to a sheet with the places of the game and the
+bookmarks (`places_sheet=1`). It has the look of the ring: round seals with
+icons, and the card in the middle.
+
+![The sheet of the places](images/ring-sheet-places.png)
+
+| Row | Tiles | What a choice does |
+| --- | --- | --- |
+| Places | Back, apart at the left, then Creature, Town, Temple, Inside, Land | The items `mark_back`, `creature`, `town`, `temple`, `enter` and `land` of the ring (10.2). Back goes to the place before the last move to a bookmark |
+| Bookmarks | A seal with the number of each bookmark that is set, then a seal with a plus | A number goes to its bookmark: the key of the number (`fn_0043A070`). The plus adds a bookmark (below). It is dim when all 7 are set |
+| Bins | A small seal with a bin under each bookmark | It removes that bookmark: Ctrl, Shift and the number (`fn_00439D40`) |
+
+The rows have the headers "Places" and "Bookmarks". The places are 5 to 11
+cm above the middle, and the bookmarks with their bins 4 to 10 cm below it,
+so the hand starts on no tile. A seal is dim for the reason of its item on
+the ring,
+and each tile of a bookmark is dim while the game takes no bookmark key: in
+the Temple, in a cut scene, and while the tutorial has the bookmarks off.
+The card says why. The follow of the game (Shift and the number) is not on
+the sheet: it moves the view by itself.
+
+**The plus** (`bookmark_aim=1`). The ring closes, and the pointing hand
+shows its ray. Its card says "Set a bookmark" for the grip and "Stop" for B.
+An object in the ray gets the gold halo: the object must be in 0.9 of its
+own size and 1.5 degrees round the ray, and in front of the land of the
+ray. Else the land point of the ray gets a gold ring of 10 cm.
+
+**The hold** (`bookmark_aim_hold=1`). The object with the halo keeps it
+while the ray stays in 1.6 of its size and 4 degrees round it, so a
+villager or a sheep that walks keeps the halo until the ray goes off it.
+The objects come from the first eye pass of the draw: the objects near the
+Hand, and the objects in a cone of 12 degrees round the aim ray. The far
+grab offers that cone, and with `far_grab=0` the aim offers it alone (the
+far grab selects nothing then). When the draw does not offer the object of
+the halo in a frame, the mod reads its place from its mesh while it lives.
+The rules are in `bookmark_aim_math.h`. A press of the grip
+sets the first bookmark that is not set at that target, and the controller
+gives the pulse `activate`. A press with no target gives the pulse
+`refused`, and the aim stays. B of the pointing hand, the menu button and
+the ring stop the aim. While the aim is on, the grip belongs to it: no
+grab of the world, no far grab and no press of the game. The far grab
+selects nothing then.
+
+**How the mod sets it** (`bookmark_aim.cpp`). The game's own functions, on
+the game thread at the pump, behind the gates of the bookmark keys:
+
+- An object: `fn_00439F70` (cdecl: the bookmark, the object). This is
+  what Ctrl and the number do when the pick record of the game has an
+  object under the pointer. The bookmark holds the object.
+  `Bookmark::ProcessAll` `0x00439DD0` copies the map point of the object
+  into the bookmark in each frame. So the seal of the bookmark goes to the
+  place where the object is at that time, and nothing follows it after
+  that.
+- A land point: `Bookmark::SetBookMark` `0x00439E50` (cdecl: the
+  bookmark, a `MapCoords`). The game sets the bookmark on the object of its
+  pick record (`GInterface+0x400`) when it has one, and that object is
+  under the Hand, not under the ray. So the mod clears that field for the
+  call and puts it back.
+
+Both functions keep the offset of the game camera from the point, as the
+key Ctrl and the number does. 2, 120 and 300 frames after a grip, the log
+gives the record of the bookmark: "bookmark 2 holds the Sheep ...: its map
+point is ..., and the object is at ...", or "holds no object" for a land
+point. With `bookmark_aim=0` the plus sends Ctrl
+and the number, and the game sets the bookmark at the Hand.
+
+### 10.12 The sheet of the leashes
+
+The item `leash` goes to a sheet with the three leashes: Compassion,
+Learning and Aggression, from the left, as from good to evil. Each tile is
+a page of parchment with a picture of its leash and its name. The chosen
+tile has the gold rim and the glow. The leash of now has a small red seal
+with a tick. A leash that the Creature does not have is dim. A choice is
+the item `leash_compassion`, `leash_learning` or `leash_aggression` of the
+ring (10.2). The tiles are 3 to 12 cm above the middle, and the card is
+under them.
+
+![The sheet of the leashes](images/ring-sheet-leash.png)
+
+**The picture of a leash** (`leash_model.cpp`, `leash_pictures=1`). The
+mod reads the mesh and the texture of the leash from the files of the game
+on the player's PC, one time, at the first open of the sheet: the leash
+posts of the Temple load `Data\Misc\leash.l3d` (a band of 68 points and 64
+triangles round its axis) and `Data\Textures\leash.raw` with its alpha in
+`leasha.raw`. The three kinds use one mesh, with a different strip of the
+texture: a V offset of 0.375 for Aggression, 0.125 for Learning and 0.25
+for Compassion (`TempleLeash` `0x00464650`, `fn_007F9B70`). The band stands
+on its axis and turns once in 9 s, as on a turntable, seen from 36 degrees
+above, over a soft shadow on the paper. `panel_raster.h` draws it in a box
+of 176 px, one sample to a pixel, from the far triangle to the near one, so
+the soft edges of the alpha show the far side of the band. A new picture of
+the turn comes at most 30 times a second, and only while the sheet shows:
+it copies the box of each leash from a kept picture of the sheet and draws
+the three leashes again (about 0.6 ms each in the offline harness). No mesh
+and no picture of the game is in the mod or in the repo: the picture in
+this section has the icons. When a file is not there, or with
+`leash_pictures=0`, each tile shows the icon of its kind (a heart, a book,
+the marks of a claw).
 
 ## 11. The Temple
 
@@ -2506,8 +2973,14 @@ action, pixel, drag).
 **The Hand** [V]. The Hand has the state of the Temple (`HandStateCitadel`,
 state 10, `Update` `0x005B0D00`). It is at the pixel of the pointer, 5 units
 nearer to the camera than the point at `0x00E360C8`, and from 4 to 300 units
-away. With the hands of the overlay on, the Hand of the game does not show in
-a room: the two real hands and the ray show.
+away. While the ray is on, the mod does not draw the mesh of that Hand
+(`temple_hide_hand=1`): the two real hands, the ray and its cross show. The
+state of the Hand, its place and the pick of the game stay as the game makes
+them. Only the draw of the mesh stops, in the same hook that hides the game's
+Hand on the land (`hand_hide_game`, `hand.md`). So with `hand_hide_game=0` the
+Hand shows in a room too. With `test_keys=1` the minus key of the number pad
+shows and hides the mesh, also in a room. While a guide plays, and with
+`temple_pointer=0`, the ray is off and the game draws its Hand.
 
 **The keys** [V]. Esc in a room goes to the hall, and in the hall it leaves
 the Temple (`fn_00794830`). F4 to F9 go to a room (`fn_00794900`). Each other
@@ -2549,11 +3022,14 @@ is a point in the room.
   rule.
 
 **The mark at the end.** The Hand of the game does not show in a room, so the
-end of the line is the cursor. The overlay draws a small cross there, across
-the ray (`BuildMenuRay` in `overlay.cpp`). From its middle to an end the cross
-is 0.4 percent of the length of the ray, and 6 mm at the least. So it has the
-same size in the view on a wall 2 m away and on a wall 10 m away. The ray of
-a dialog box has the same cross.
+end of the line is the cursor. With `ray_tip=1` (the default) the overlay
+draws a round soft glow there, which faces each eye (`hand-model.md`, "The
+glow at the end of the menu ray"). Its radius is 1.3 percent of its distance
+from the eye, so it has the same size in the view on a wall 2 m away and on
+a wall 6 m away. With `ray_tip=0` the mark is a small cross across the ray
+(`AddRayLine` in `overlay.cpp`). From its middle to an end the cross is 0.4
+percent of the length of the ray, and 6 mm at the least. The ray of a dialog
+box has the same mark.
 
 ### 11.3 The buttons
 
@@ -2616,18 +3092,28 @@ A frame in the Temple with no update of the room camera has no main camera
 call. The mod then gives the camera of the room to the engine before the
 scene walk (`TempleBeforeScene`), so each frame has its head pose.
 
+With one walk (`one_walk=1`, the default, `backend.md`, "One walk for both
+eyes") only the pass of the left eye walks the scene, so the game builds the
+camera of the room one time in a frame. That pass draws the right eye too:
+each vertex moves by the disparity of its depth, which is the camera of the
+left eye moved by the separation along its right axis, with its roll. So the
+room has stereo with one walk and with two walks.
+
 With `temple_view=0` the call in the pass stays as the game makes it. Each eye
 pass then draws the room from the middle of the head, with the newest head
-pose and with no roll. The two eye pictures are then one picture, so the room
-has no depth. The headset gets a level picture with a pose that has the roll
+pose and with no roll. With two walks (`one_walk=0`) the two eye pictures are
+then one picture, so the room has no depth. With one walk the left eye is at
+the middle of the head, and the right eye is one separation to the right of
+it. The headset gets a level picture with a pose that has the roll
 of the head, so the room tilts with the head. The picture is also one frame
 of head motion away from the pose that the frame declares, so the room moves
 with each move of the head. The hands and the ray of the overlay have the
 camera of the eye with each value.
 
 The log has one check line for each window (11.7): how far the view of an
-eye pass was from the head pose of its frame, in degrees, and how far apart
-the cameras of the two eyes were. With `temple_view=1` the first number is 0.
+eye pass was from the head pose of its frame, in degrees, how far apart the
+cameras of the two eyes were, and how far the camera of a pass was from the
+middle of the head. With `temple_view=1` the first number is 0.
 
 **The camera does not follow the pointer** (`temple_camera_follow=0`). A hook
 on `InnerCamera::Update` gives the camera the middle of the view as the
@@ -2665,6 +3151,28 @@ and the drag flag. So the camera gets the pointer for such a press. The same
 hook gives it the pixel of the press, and that pixel stays until the button
 goes up. The door acts at the press. The camera sees a pointer that does not
 move, so it does not turn.
+
+**The pixel of a press is a pixel of the camera code** (`temple_press_pixel=1`).
+The camera finds the door with its own ray from the pixel of the press
+(`InnerCamera::RayCast`, 11.1). That ray starts at the stored camera of the
+engine, which is the camera of the game with no lean. It goes along the pixel
+as the rotation of the engine has it (`LH3DTech::Get3DPointFromScreen` at the
+near plane). That rotation has the turn and the pitch of the head, but no
+roll: the per eye matrix adds the roll in the eye passes. The pixel of the
+pointer is a pixel of the view of the head, with its roll and its lean. So
+with a tilted head the ray of the camera goes to a different place than the
+ray that the player sees. At a roll of 15 degrees a click on the door of the
+Save Game Room at the right of the view missed the door.
+
+At the first update of a press the mod gives the camera of the room to the
+engine (`InnerCamera::PreDraw`), as the update of the game does first. It then
+reads the rotation and the stored camera of the engine, and it finds the pixel
+that puts the ray of the camera through the end of the ray of the hand
+(`temple_math::PressPixel`). The camera gets that pixel for the whole press.
+So a door opens at each roll and each lean of the head. With no roll and no
+lean the two pixels are one pixel. A press with no ray (the mouse, or
+`temple_pointer=0`) keeps the pixel of the pointer.
+`temple_press_pixel=0` gives the camera the pixel of the view of the head.
 
 **The camera does not fly to its rest pose** (`temple_camera_flight=0`). When
 the player comes into the Temple, the camera of the hall flies along a path:
@@ -2706,7 +3214,10 @@ gets the same fade as the first eye. The frame time of the game goes back
 after the call. With `temple_fade_eyes=0` the second eye pass skips the whole
 function, and only the left eye has the fade: at each entry of the Temple, at
 each change of the room and when the player leaves the Temple, the left eye
-is dark (or white) for about one second and the right eye is not.
+is dark (or white) for about one second and the right eye is not. This
+key acts only with two walks (`one_walk=0`). With one walk no second eye pass
+walks the scene, and the right eye gets the fade of the left eye with each
+value.
 
 A room from the ring, and Esc in a room, go through `Temple::GoToRoom`. The
 game ends the flight itself there, with the Temple black and with two updates
@@ -2759,7 +3270,9 @@ button. A dialog box in the Temple keeps the card of a dialog box.
 | `temple_camera_flight` | 0 | 0 the camera of a room is at its rest pose at once when the player comes into the room. 1 the camera flies there, as in the plain game |
 | `temple_view` | 1 | 1 each eye pass draws a room from the head pose of the frame, with its roll and the place of its eye. 0 each eye pass draws from the camera that the game builds in the pass: the newest head pose, no roll, and one place for both eyes |
 | `temple_camera_screen` | 1 | 1 the camera code of a room reads a neutral pointer in the screen of the game camera, so the head does not turn the camera. 0 it reads it in the view of the head |
-| `temple_fade_eyes` | 1 | 1 the fade of the Temple shows in both eyes. 0 it shows in the left eye only |
+| `temple_press_pixel` | 1 | 1 the camera code of a room gets a press as the pixel that puts its own ray through the end of the ray of the hand, so a door opens at each roll and lean of the head. 0 it gets the pixel of the view of the head |
+| `temple_hide_hand` | 1 | 1 the mesh of the game's Hand is not drawn in a room while the ray is on. 0 the game draws its Hand at the pointer, in front of the thing under it |
+| `temple_fade_eyes` | 1 | 1 the fade of the Temple shows in both eyes. 0 it shows in the left eye only, with two walks (`one_walk=0`) |
 | `temple_pointer_depth_cm` | 300 | The depth of the ray before the game gives a point, 50 to 2000 |
 | `temple_turn` | 1 | 1 the stick of the pointing hand turns the player in a room by one step. 0 the stick does what it does on the land |
 | `temple_taps` | 1 | On the land: 1 the leash posts at the Temple are targets of the grip (`village.md`) |
@@ -2813,12 +3326,16 @@ temple       : in the Creature Room a guide of the game plays, so the ray is off
 temple       : the pointer is on a check box that is on (sub mesh 2) at the pixel 423 2531, at 9.60 0.00 9.21 in the world, frame 3547
 temple       : the game gets the mouse message 3 at the pixel 503 2520 in the hall, with the pointer on a check box that is on (sub mesh 2). The mouse object holds the Action button. The thing under the pointer is 0.1 cm from the ray, frame 3581
 temple       : the room starts the drag of a control, frame 3582
+temple       : a press in the hall at the pixel 1956 812 of the view of the head. The camera code of the room gets the pixel <x> <y> (temple_press_pixel=1): its ray goes 0.0 cm of the room from the end of the ray of the hand, and the ray of the pixel of the head goes <d> cm from it. The head has a roll of 15.0 degrees, frame <f>
+hand exact   : in a room of the Temple the mesh of the game's Hand is not drawn (temple_hide_hand=1). The ray and its cross are the pointer, frame <f>
+hand exact   : in the state of the Temple 900 draws of the mesh of the game's Hand were hidden and 0 were drawn this window (temple_hide_hand=1)
+temple       : after the update of the press at the pixel <x> <y> the camera of the hall has the state 3 (it had 1). The state 3 is the way through a door, frame <f>
 temple       : the camera of the hall moved from frame 1950 to frame 5312: it turned 37.0 degrees to the side and 16.2 degrees up, and it went 17.68 units. Along its path it turned 312.0 degrees in all and went 122.88 units. At the start the mouse object held no button, and the drag of the room was 0
 temple       : the camera of the hall does not fly to its rest pose (temple_camera_flight=0). The mod ends the flight of the game in one cut: the clock of the flight was at 0.00 s of 5.50 s. The camera is at 0.00 9.92 18.32 with a heading of 180.0 degrees and a pitch of -5.1 degrees, which is 5.3 degrees and 56.00 units from its pose before the cut. The path ends at 0.00 9.92 18.32, and 10 updates of 1 s brought the camera 0.00 units from there to its rest pose. It has the state 1, and the fade of the Temple is 1.15, frame 121
 temple       : the game changed the room to the Save Game Room and ended the flight of its camera itself. The mod brings the camera to its rest pose in the same update (temple_camera_flight=0): 10 updates of 1 s moved it 5.66 units and 43.3 degrees. It is at -95.39 4.80 -87.32 with a heading of 87.8 degrees and a pitch of 32.2 degrees, and the fade of the Temple is 1.20, frame 4400
 temple       : the Save Game Room has 5 saved games (the number and the name of each one): [...]
 temple       : the stick turns the player 45 degrees to the right in the hall, 45 degrees to the right in all in this visit, frame 2800
-temple       : in 900 eye passes the game built the camera of a room. The view of the pass was 0.00 degrees at the most from the head pose of its frame, and the roll of that pose was 20.0 degrees at the most. The cameras of the two eyes were 6.68 to 6.68 cm of the room apart in 450 frames (temple_view=1). 0 passes had no head pose of the frame. 450 camera calls of a room went through with no head, for the camera code of the room
+temple       : in 450 eye passes the game built the camera of a room. The view of the pass was 0.00 degrees at the most from the head pose of its frame, and the roll of that pose was 20.0 degrees at the most. The cameras of the two eyes were 6.68 to 6.68 cm of the room apart in 450 frames, 450 of them in one walk, where the right eye is the left eye moved by the separation of one walk. The camera of a pass was 3.34 to 3.34 cm of the room from the middle of the head (temple_view=1). 0 passes had no head pose of the frame. 450 camera calls of a room went through with no head, for the camera code of the room
 temple       : 450 updates of a room camera read the screen of the game camera this window (temple_camera_screen=1), and the mod made the main camera call of 0 frames that had none
 pass guard   : the fade of the Temple went to the second eye with no time step in 450 passes (temple_fade_eyes=1)
 ```
@@ -2827,9 +3344,27 @@ The line `in ... eye passes the game built the camera of a room` is the check
 of the view, one time for each window of 450 frames. `head_camera.cpp` reads
 the matrix of the engine after the build of each eye pass. The first number is
 the angle between that view and the view of the head pose of the frame. With
-`temple_view=1` it is 0, and the two eye cameras are the distance of the eyes
-apart. With `temple_view=0` it is the roll of the head and the turn of the
-head since the main camera call, and the two cameras are 0 cm apart.
+`temple_view=1` it is 0, the two eye cameras are the distance of the eyes
+apart, and the camera of a pass is half of that distance from the middle of
+the head. With `temple_view=0` the angle is the roll of the head and the turn
+of the head since the main camera call, and the camera of a pass is at the
+middle of the head (0 cm). The two cameras are then 0 cm apart with two walks,
+and one separation apart with one walk.
+
+With two walks (`one_walk=0`) the game builds the camera of the room in each
+eye pass, and a pair is the cameras of the two passes of a frame. With one
+walk only the pass of the left eye walks the scene. Its pair is the camera of
+that pass and the same camera moved by the separation of one walk along its
+right axis, because that is the view that one walk gives the right eye
+(`backend.md`, "One walk for both eyes"). The distance from the middle of the
+head is a read of the matrix of the engine before and after the mod gave the
+pass the camera of its eye, so it shows the place of the eye with each walk.
+
+Each press with the ray has a line with the pixel of the view of the head,
+the pixel that the camera code gets, and how far the ray of the camera code
+goes from the end of the ray of the hand with each pixel. The line after it
+has the state of the camera after the update of the press: 3 is the way
+through a door.
 
 Each press in a room has a line with the message, the pixel, the control under
 the pointer and the distance from that thing to the ray. So a log from a
@@ -2856,7 +3391,10 @@ a camera, and the sums along the path of a move. For the view of a room it
 covers the rule of `temple_view`, the angle between two views, the roll of a
 view, the view of the head from the level view of the engine and the roll of
 the per eye matrix, the places of the two eye cameras, the rule of
-`temple_camera_screen`, and the fade of the Temple with a frame time of 0:
+`temple_camera_screen`, the pixel of a press for the camera code (with a roll
+of 15 degrees and a lean of 2 units the ray of that pixel goes through the end
+of the ray, and the ray of the pixel of the head misses it by more than 5
+units), and the fade of the Temple with a frame time of 0:
 the second eye gets the same fade, and the fade does not move. The checks of
 the brightness test are in `eye_luma_checks.h` (`backend.md`, "Testing
 without a headset").
@@ -2925,20 +3463,27 @@ always starts in a new game.
 ### 11.9 Not done, not proven, and what needs the headset
 
 - **The view of a room, the screen of the camera code and the fade in both
-  eyes have no desktop run.** The math checks cover the rules. The recipes
-  that show them, each one with the default values and with
+  eyes.** The math checks cover the rules. The recipes that show them, each
+  one with the default values and with
   `temple_view=0;temple_camera_screen=0;temple_fade_eyes=0`:
   - `temple_run.ps1 -Set "eye_test_luma=1;temple_test_camera_trace=1;fake_head_pitch=-40;fake_head_roll=20" -Seconds 150 -Rooms "room_save@3400 leave@5600 leave@6100" -Steps "shot@3300+1 shot@5100+1 look@5200+200 shot@5260+1"`.
     The head looks 40 degrees down with a roll of 20 degrees, and the word
     `look` turns it in one step. The ring goes to the Save Game Room and back,
     and then out of the Temple. The line of the cut of the hall has the place
     of the camera: `0.00 9.92 18.32` is the rest pose, and `0.00 14.39 14.41`
-    is the view of the pool. The check line of the view (11.7) has the angle
-    and the distance of the eyes. The lines `eye test` name each run of
-    frames with one dark eye.
-  - The same with `fake_head_roll=15;fake_controller_turns=-36,7,1` and no
-    pitch, and `-Steps "aimturn@3600+1 trigger@3660+6 shot@4400+1"`: the way
-    through the door of the Save Game Room.
+    is the view of the pool. The check line of the view (11.7) has the angle,
+    the distance of the eyes and the place of the eye of a pass. With one walk
+    (the default) `eye_test_luma` reads no picture, and `temple_fade_eyes`
+    does not act. With `one_walk=0` in `-Set` each eye pass walks the scene:
+    the check line has the pairs of two walks, and the lines `eye test` name
+    each run of frames with one dark eye.
+  - The same with
+    `fake_head_roll=15;fake_controller_turns=-36,7,1;fake_controller_temple_frame=3600`
+    and no pitch, and `-Steps "aimturn@3600+1 trigger@3660+6 shot@4400+1"`:
+    the way through the door of the Save Game Room. The steps wait for the
+    end of the guide of the hall (4.3). The line of the press has the
+    pixel that the camera code gets, and the line after it has the state 3.
+    With `temple_press_pixel=0` the camera keeps the state 1.
 - **Black frames in the guide of the hall.** A headset session had single
   black frames at random times in the guide of the first visit. In that
   session the camera of the hall was at its view of the pool for the whole
@@ -2956,13 +3501,16 @@ always starts in a new game.
   the game with no lean and no eye. So the point under the pointer
   (`0x00E360C8`) is off by the lean of the head: in a headset session it was
   17 to 61 cm from the ray, and the depth of the ray then kept its value of
-  before on many frames. The pick of a control does not use that ray.
-- **The thing under the pointer is found with the right eye.** The game finds
-  the sub mesh under its pointer when it draws the room, so with
-  `temple_view=1` it finds it with the camera of the second eye pass. The
-  pixel of the pointer is the end of the ray as the middle of the head sees
-  it. So the thing that the game finds is half of the distance between the
-  eyes to the right of the end of the ray, at each depth.
+  before on many frames. The pick of a control does not use that ray. A press
+  gets its own pixel for that ray (`temple_press_pixel`, 11.4), so a door
+  opens.
+- **The thing under the pointer is found with one eye.** The game finds the
+  sub mesh under its pointer when it draws the room, so with `temple_view=1`
+  it finds it with the camera of the last eye pass that walks the scene: the
+  left eye with one walk, and the right eye with two walks. The pixel of the
+  pointer is the end of the ray as the middle of the head sees it. So the
+  thing that the game finds is half of the distance between the eyes to the
+  side of the end of the ray, at each depth.
 - **The hall draws at 50 to 56 frames a second in a headset while the pool is
   in the view**, and at 89 with the scroll wall in the view (a render of 2880
   by 2880).
@@ -2991,36 +3539,8 @@ always starts in a new game.
   state 4, and in a run it did not turn while the box was up [R]. A box that
   comes up with the camera in the state 1 is not known.
 
-Needs the headset:
-
-1. The ray in a room: that the line ends on the thing in both eyes.
-2. The size of a room, and the height of the floor. The camera of the hall is
-   about 1.3 m above the floor, so the floor is at that distance below the
-   head of the recenter pose.
-3. Whether a room that does not turn to the pointer is right, and the turn
-   with the stick: its angle, and that the room stays level.
-4. The trigger and the grip as the click (Ctrl and Numpad 6 gives the other
-   ways).
-5. The guide of a first visit in the cut scene window.
-6. The cross at the end of the ray: its size on a far wall.
-7. The entry of the Temple and the end of the way through a door: that the
-   room comes out of black at the rest pose, with no turn and no move after
-   it (Ctrl and the star key of the number pad gives the flight of the plain
-   game).
-8. The view of a room (`temple_view`): that the room stays still and level
-   when the head turns, tilts and leans, and that it has depth. That the left
-   eye is not dark when the player comes into the Temple, changes the room or
-   leaves the Temple (`temple_fade_eyes`). That a look down at the pool of
-   the hall does not move the player (`temple_camera_screen`). Shift and the
-   slash key of the number pad, and Ctrl, Shift and the plus key, give the other
-   ways for a comparison. The check line of the view (11.7) is in the log of
-   the session.
-9. Whether the guide of the hall still has black frames, with the camera at
-   its rest pose.
-10. The pace of the way through a door (5 s) and of the look at a picture
-   (1.4 s), in a game from a saved game. Ctrl, Shift and the star key of the
-   number pad give the frame time from before the two eye passes for a
-   comparison (`backend.md`, "The delta time after the passes").
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ## 12. The screens with no scene
 

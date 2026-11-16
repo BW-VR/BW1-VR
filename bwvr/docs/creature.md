@@ -33,6 +33,14 @@ Other docs:
   that is not in the capsule touches nothing.
 - The hand of a stroke is open: the index finger when the Creature is small
   in the player's view, the flat hand when it is large.
+- An open hand at the body of the player's Creature (8 cm or nearer for 0.1
+  s) strokes it and slaps it with no grip (`creature_stroke_open=1`,
+  `creature_open_slap=1`). The real speed of the hand decides, as the speed
+  of the mouse decides in the plain game: a slow motion on the body strokes,
+  and a fast hit slaps. The grip on the Creature does the same.
+- The first stroke of a touch comes with the first motion on the body
+  (`creature_stroke_wait=0`), and a fast slap through the body counts at the
+  height of the hit (`creature_slap_height=1`).
 - An object in the Hand that the player lets go at the Creature is a gift:
   the Creature takes it from the Hand. The gift goes on while the hand is
   at the Creature (`creature_gift=1`), with the leash and with no leash.
@@ -80,7 +88,7 @@ from `0x00E85058`. Then a slap needs all of these:
 
 | Test | Value |
 | --- | --- |
-| height | `0 < h < 1.1`. Low below 0.4, middle below 0.7, high above |
+| height | `0 < h < 1.1`, from the Hand as it is at the start of the Update (`+0x78` to `+0x80`, `0x005B1C15`). Low below 0.4, middle below 0.7, high above |
 | time in the state (`+0xDC`) | more than 1000 ms. `Update` only adds the frame time to it, and a stroke sets it to 0 (`0x005B226C`) |
 | speed | more than `5 * S` per second |
 
@@ -93,15 +101,25 @@ action, starts Immersion effect 1 or 2, sends packet `0x27`, and subtracts
 
 **Stroke.** Otherwise, while the ray hits, it finds the nearest of nine body
 bones to the hit point. It adds the frame time to `+0xD4`. A stroke plays
-when all of these are true (`0x005B2154` to `0x005B2193`):
+when all of these are true (`0x005B2068` to `0x005B21DF`):
 
-- `+0xD4` is above 1000 ms.
+- `+0xD4` is above 1000 ms (the time of contact). A slap sets it to 0
+  (`0x005B1F1F`).
 - The screen point moved this frame (`+0x4858`).
-- `+0xD0` is above 2000 ms (the time since the last stroke animation).
-- `+0xCC` is above `(1 - total) * 1250` ms.
+- `+0xCC` is `(1 - total) * 1250` ms or more.
+- The bone is not the bone of the last stroke (`+0x108`). A frame with no
+  hit of the ray sets `+0x108` to 9 (`0x005B227B`).
+- `+0xD0` is 2000 ms or more.
+- No body action of the Creature runs, or it is past a fixed part of its
+  time (`LH3DCreature::GetBodyActionFraction`, the limit at `0x00900AC8` was
+  not read).
 
-It then plays the stroke of that bone, sends packet `0x27`, and adds 0.1 to
-`+0xD8`. Immersion effect 0 plays while the ray touches.
+`Update` adds the frame time to `+0xCC` and `+0xD0` on each call
+(`0x005B187A`). A stroke plays the stroke of that bone, sends packet `0x27`,
+adds 0.1 to `+0xD8`, and sets `+0xCC` to 0, `+0xD0` to 1000 and `+0xDC` to
+0. `Enter` sets the timers to 0, so the first stroke of a state comes 2 s
+after its start at the earliest, and a stroke comes each second at most.
+Immersion effect 0 plays while the ray touches.
 
 **Size and place of the Hand.** The state calls `CHand::SetDistanceFromView`
 twice (`0x005B196C` and `0x005B2044`) with a distance from a Zoomer in the
@@ -736,8 +754,9 @@ k * v * dt`.
 - `u` is level, at right angles to the line from the eye to the target, and to
   the right as the eye sees it (`SlapAcross`).
 - `s` is the sign of the hand's velocity along `u`.
-- `v` is the real speed of the part that hits, in m/s over the last 50 ms, in
-  three dimensions, so a slap down or forward counts too (see below).
+- `v` is the speed of the part that hits, in m/s over the last 100 ms, in
+  three dimensions, so a slap down or forward counts too (see below), after
+  the hysteresis of a swing (`creature_swing`, below).
 - `dt` is the game's step.
 - `k = 5 S / creature_slap_mps` (`SlapUnitsPerMps`).
 
@@ -749,7 +768,7 @@ itself, and speed zero. The second Update of a frame gets the target too, so
 it reads zero, as with the mouse.
 
 **The part that hits** (`near_math::SlapSpeed`): the larger of the speed of
-the grip and the speed of the Hand's point, each over 50 ms. A slap with the
+the grip and the speed of the Hand's point, each over 100 ms. A slap with the
 arm moves the grip. A slap with the wrist, as a backhand is, turns the hand
 about the wrist, so the tip moves fast and the grip moves slowly (a backhand
 of 420 degrees a second gives 1.25 m/s at the tip and 0.5 m/s at the grip).
@@ -761,6 +780,51 @@ pointer at the Creature's depth, which a small move of the mouse gives.
 goes up to 1000, so the first slap counts at once. With `creature_slap_wait=1`
 the game's wait of 1 s stays. After a stroke the game waits 1 s again before a
 slap.
+
+**The first stroke (`creature_stroke_wait`).** The stroke test of the game
+needs 1 s of contact and 2 s since the start of the state (section 1.1). At
+the first Update of a state the mod gives the timers the values that pass
+that test (`creature_touch_math::FirstStrokeTimers`): `+0xCC` 2500, `+0xD0`
+2000, `+0xD4` 1000, and the bone `+0x108` 9, the value of the game for no
+bone. A timer that is larger keeps its value. So the first stroke comes with
+the first motion of the hand on the body. After each stroke the game's own
+waits stay: 1 s to the next stroke, and a different bone or a break of the
+contact. With `creature_stroke_wait=1` the game's wait of 2 s stays.
+
+**The height of a slap (`creature_slap_height`).** The slap test reads the
+height of the Hand as it is at the start of the Update (section 1.1). A slap
+that the swept test found went through the body between two frames, so the
+Hand can be over the head (a slap down from above) or at the land, and the
+game refuses the height. In such an Update the mod gives the Hand
+(`+0x7C`) the height of the hit for the Update: the point of the path from
+the last frame to this frame that is nearest to the axis of the body, 0.05
+to 1.0 S over the land under the Hand (`controller_math::SlapPathHeight`).
+The game takes the land under the same point, so it reads that value
+exactly, and a slap at the head has a margin of 0.1 S to the limit of 1.1 S.
+The state puts the Hand at its place at the end of the Update, and the mod
+puts the old height back when the state did not. The height of the hit also
+chooses the low, the middle or the high slap of the game. With
+`creature_slap_height=0` the game reads the height of the Hand as it is.
+
+**The speed of a stroke and of a slap (`creature_swing`).** The step of one
+frame is no good measure of the speed of a real hand: it changes with the
+frame time (60, 77 or 120 Hz), and the jitter of the tracking is a large
+part of a short step. With `creature_swing=1` the speed is the distance of
+the hand over 100 ms of real time (from the oldest pose in the window to the
+newest), for the grip and for the Hand's point. A hysteresis decides
+(`creature_touch_math::SwingSpeed`):
+
+- A swing starts when that speed is `creature_slap_mps` or more, and ends
+  when it is under 0.6 times `creature_slap_mps`.
+- In a swing the game reads the speed, and `creature_slap_mps` at least, so a
+  hand that slows down at the hit still slaps.
+- Out of a swing the game reads 0.8 times `creature_slap_mps` at most, so a
+  stroke stays a stroke.
+
+A stroke of a real hand is under about 0.5 m/s, and a slap is over about 1.5
+m/s at the hit. `creature_swing=0` gives the speed over 50 ms with no
+hysteresis. The log lines of a stroke and of a slap give the speed of the
+hand and the speed that the game read.
 
 ### 2.5 The open hand
 
@@ -854,6 +918,14 @@ Value 3 of `creature_stroke_hand` gives the fist stroke:
 | `creature_open_wait` | 1 | The hand opens when a press on the Creature is 450 ms old. 0 gives a fist until the state starts |
 | `creature_palm_point` | 1 | With the flat hand of a stroke the Hand's point is the palm. 0 gives the tip of the index finger |
 | `creature_panel` | 2 | The Creature panel with `ui_panel=1`: 0 off, 1 fixed in the room, 2 near the Creature. See `ui-layer.md` |
+| `creature_panel_linger` | 1 | 1: the Creature panel shows while the Hand is at the player's Creature with no press, and for 3 s after the Hand left. 0: only while a press holds the Creature. See `ui-layer.md`, section 13 |
+| `creature_panel_over` | 1 | 1: the Creature panel shows over the head of the Creature, turned to the eyes. 0: on the subtitle card with `ui_panel=0`, and beside the Creature with `ui_panel=1`. See `ui-layer.md`, section 13 |
+| `creature_stroke_open` | 1 | 1: an open hand at the body strokes the Creature (section 2.10). 0: only the grip strokes the Creature |
+| `creature_open_slap` | 1 | 1: a fast hit of the open hand slaps the Creature too. 0: the open hand never slaps, and a slap needs the grip |
+| `creature_touch_easy` | 1 | 1: the press of the open hand starts 8 cm from the body after 0.1 s, and ends 15 cm from the body after 0.3 s. 0: in the body after 0.2 s, and past `creature_touch_cm` at once |
+| `creature_stroke_wait` | 0 | 1 keeps the game's wait of 2 s before the first stroke of a state |
+| `creature_swing` | 1 | 1: the speed of a stroke or a slap is the distance of the hand over 100 ms, with a hysteresis (section 2.4). 0: the speed over 50 ms, as it is |
+| `creature_slap_height` | 1 | 1: a slap that went through the body between two frames counts at the height of the hit. 0: the game reads the height of the Hand as it is |
 
 **Test keys** (with `test_keys=1`):
 
@@ -878,11 +950,11 @@ Tag `hand creature`. Examples of the format:
 
 ```
 hand creature: a press on the Creature 0F3A2C10. The camera does not move (creature_camera=2), frame 5120
-hand creature: the Creature state starts, frame 5121. A slap can count at once.
+hand creature: the Creature state starts, frame 5121. A slap can count at once. A stroke can count at once (creature_stroke_wait=0).
 hand creature: 30 frames in the state. The body is 3.63 units high and 2.81 across (2D radius 1.22 and 5 cm of the room). The Hand's point is 0.40 units inside it. hand+0x78 is 0.0004 units from the target, and the size +0x4834 is 0.4750 for the real hand's 0.4750. Creature size 0.220, k 11.00 units/s for 1 m/s
 hand creature: the hand of the stroke is the index finger, and its tip touches. The body is 3.6 cm of the room high, 0.19 of the hand's length ...
 hand creature: a slap with the index finger, to the left as the eye sees it. The hand moved at 1.31 m/s (the grip 0.52, the Hand's point 1.31), which the game read as 21.6 units/s. A slap needs 1.00 m/s ...
-hand creature: the hand went into the body at 0.74 m/s (the grip 0.31, the Hand's point 0.74), and that was no slap. A slap needs 1.00 m/s. The hand was too slow. The motion in the room: -0.93 right, 0.10 up, 0.35 forward ...
+hand creature: the hand went into the body at 0.74 m/s (the grip 0.31, the Hand's point 0.74), and that was no slap. A slap needs 1.00 m/s. The hand was too slow. The game read the height of the Hand as 0.62 S, and a slap needs 0 to 1.1 S (creature_slap_height=1). The motion in the room: -0.93 right, 0.10 up, 0.35 forward ...
 hand creature: the press ends after 2480 ms (hand mode now 0x12). Not a short press, so no leash click, frame 5344
 ```
 
@@ -896,16 +968,19 @@ Other lines:
   open now".
 - The line of a slap has the contact flag (`+0x110`), the animation
   (`+0x114`), the ms since a stroke, and the Update of the frame (the first
-  or a later one).
+  or a later one). A slap of the swept test also has the height that the
+  game read.
 
 Each slap goes to the log (200 lines), each stroke step (80 lines), and each
 hand that went into the body and did not slap, with the reason: too slow, the
-game's wait of 1 s after a stroke, or the game's own test (60 lines).
+game's wait of 1 s after a stroke, the height, or the game's own test of the
+hit (60 lines).
 
 The report window adds the counts: presses with no camera move, leash clicks,
-states with no wait, hits refused at a distance, slap branches forced by the
-swept test, frames the pick kept the Creature, and frames with the point at
-the palm.
+states with no wait, states with no wait for the first stroke, hits refused
+at a distance, slap branches forced by the swept test and how many of them
+had the height of the hit, frames the pick kept the Creature, and frames
+with the point at the palm.
 
 ### 2.9 The gift of an object (`creature_gift`)
 
@@ -977,6 +1052,15 @@ the leash ends 80 to 110 ms after its start in desktop runs.
 
 The keys are not in the launcher.
 
+**The gift needs the opening of the grip.** The game starts a gift only at a
+press of the Action button with the object in the Hand and the Creature in
+the pick record (packet `0x1F`, section 1.8). Packet `0x1F` has one sender
+(`fn_005D3080`), and the forced take of action `0x8E` (`fn_0047A1D0`) has one
+caller, the handler of that packet. So with the mouse, an object held at the
+Creature with no click is no gift. The mod keeps the opening of the grip as
+that press, and an object held at the Creature with the grip closed stays in
+the Hand.
+
 **The log.** The tag `village` has one line for each change of a gift:
 
 - "a gift starts": the Creature, the object, the Hand's point from the body,
@@ -994,6 +1078,83 @@ The report window has the counts of the gifts that started, that the
 Creature took and that the game ended, and the count of the packets that the
 mod held back. It also has the frames in which a Creature stayed the target
 past its body.
+
+### 2.10 The stroke and the slap with the open hand (`creature_stroke_open`)
+
+The game strokes and slaps the Creature only in the Creature state of the
+Hand, and only a press of its Action button on the Creature starts that
+state (section 1.2). The state starts only when the Creature has ended its
+body action, 0.1 to 2 s after the press (section 1.6). So while the open
+hand is at the body of the player's Creature, the mod holds that button down
+for the player, and the press must be on before the hand hits. The code is
+`OpenStrokeStep` in `controllers.cpp`, with the pure rule in
+`creature_touch_math.h`.
+
+**The start.** All of these must be true for 0.1 s (`creature_touch_easy=1`):
+
+- The controller places the Hand, and the Hand is empty.
+- The grip and the trigger are open.
+- The target at the Hand's point is the player's own Creature
+  (`HandDirectCreatureAtHand`), and the Hand's point is 8 cm of the room or
+  nearer to the capsule of the choice (section 3).
+- No grip from a distance, no grab of the world, no gesture, no teleport aim,
+  no dialog box, no ray of the Temple, no stay and no fight.
+
+The Creature is the target only when no object is nearer to the Hand's
+point (`hand_wide_pick_cm`, `grab.md`). A hand that goes past the Creature
+to an object near it is near the body for less than 0.1 s, so it does not
+touch the Creature. The Creature learns from each stroke, so this wait is a
+guard. With the press the game starts its locked select, and the Creature
+stops and turns to the player, as for a press of the grip.
+
+**The end.** The press ends when the Hand's point is more than 15 cm of the
+room from the body for 0.3 s without a break, and not before the press is
+0.5 s old. So the wind up of a slap and a stroke along a thin back keep the
+press. A `creature_touch_cm` over 15 cm counts in place of the 15 cm. The
+least time of 0.5 s is there because the game must never read the press as
+a click: a short press on the Creature is the leash click, and with the
+leash on the Hand a release before 225 ms is a click on the object (section
+1.7). The press also ends at once when the trigger closes, when a menu
+opens, or when the controller does not place the Hand. When the grip closes
+in the press, the button stays down, and the press goes on as a press of the
+grip.
+
+`creature_touch_easy=0` keeps the old zone: the start with the Hand's point
+in the body for 0.2 s, and the end with the point past `creature_touch_cm`
+(5 cm) at once.
+
+**The slap with the open hand** (`creature_open_slap=1`). In a press of the
+open hand the game reads the real speed of the hand, and the swept test
+forces the slap branch, as for a press of the grip (sections 2.3 and 2.4).
+So the speed decides, as the speed of the mouse decides in the plain game: a
+slow motion on the body strokes, and a fast hit slaps. A stroke of a real
+hand is 0.1 to 0.7 m/s, and a slap needs `creature_slap_mps` (1.0 m/s). With
+`creature_open_slap=0`, `TouchFrame` gives the game 0.8 times the speed of a
+slap at most (`creature_touch_math::OpenSpeed`), and the swept test forces
+no slap branch. Then a slap needs the grip. The press sends no leash click
+(`h_InteractCamera`), also when it is short.
+
+**The card.** While the mod holds the press for the open hand, the card of
+the pointing hand says "Move slowly to stroke" and "Hit fast to slap", with
+no button. With `creature_open_slap=0` it says "Move the hand to stroke" and
+Grip "Close and swing to slap". A press of the grip on the Creature keeps
+Grip "Stroke or slap".
+
+`creature_stroke_open=0` keeps the old way: only the grip strokes the
+Creature. The launcher row is "Stroke with the open hand". The debug page has
+the switches "Open stroke", "Open slap" and "Touch zone" (group Creature).
+
+**The log.** The tag `controllers`. Examples of the format:
+
+```
+controllers  : the open hand is at the body of your Creature 2925A6F0 for 100 ms: the mod holds the Action button of the game for a stroke or a slap. The Hand's point is 3.1 cm from the body (creature_stroke_open=1, creature_touch_easy=1), frame 931
+controllers  : the press of the open hand ends after 1840 ms: the Hand's point is 22.6 cm out of the body, past 15 cm for 300 ms (creature_touch_easy=1), frame 1080
+```
+
+The tag `hand creature` says "A press of the open hand, so no leash click" at
+the end of such a press. The report window has the count of the presses of
+the open hand and of their frames, and the frames in which the game read the
+open hand slower than a slap.
 
 ## 3. The body of the Creature before a press
 
@@ -1060,7 +1221,7 @@ pick in `hand_direct.cpp` (`g_cmd_offer`).
 
 | The trigger, with the leash on the Hand | What it does |
 | --- | --- |
-| The aim is on an object | The halo of the object shows, green |
+| The aim is on an object | A green ring on the land around the base of the object (`command_look=1`). With `command_look=0`, a green halo. In this section "the halo of the object" is that mark |
 | The aim is on no object | The arc and the ring show the land, in the same frame |
 | A press that began on the land (no object in the cone at the press), `creature_command_rule=3` and 4 | It is a walk command for as long as the trigger is held. The aim moves the land point, the arc and the ring follow it, and no object takes the halo or the command, also when the aim is on a tree, a rock or a villager. The far target of the grip has no halo in this time either (`CreatureCommandWalkHeld`), unless the grip holds it. The prompt is "Trigger Release to send". The aim must be on the object before the press to command the Creature to it |
 | A press that began on an object, with the aim on it, `creature_command_rule=4` | The halo of that object shows for as long as the aim stays on it. While the press is held, only that object is a target: no other object takes the halo |
@@ -1218,16 +1379,42 @@ of the leash, and a forest has many.
 sends nothing when the game deleted the object in that time
 (`HandDirectObjectLives`).
 
-**The two halos.** The target of the grab from a distance is the target of a
-command too, when it is in the cone of the command. One case is different: a
-living thing has the target of the command by its rank or by the stay rule,
-and the far target is not a living thing. Then the living thing keeps the
-command. So a tree that the grip can fetch does not take the command from a
-villager that is out of the range of the grip. When the two targets are
-different objects, each has its halo: gold for the grip and green for the
-trigger (`DrawHalo` in `hand_glow.cpp`). A red far target that is the target
-of a command has the green halo. A gold far target and a locked one keep their
-halo.
+**The two targets.** The target of the grab from a distance is the target
+of a command too, when it is in the cone of the command. One case is
+different: a living thing has the target of the command by its rank or by
+the stay rule, and the far target is not a living thing. Then the living
+thing keeps the command. So a tree that the grip can fetch does not take the
+command from a villager that is out of the range of the grip.
+
+**The look of a target** (`command_look=1`, the default). A glow or a halo
+shows only a target of the grip: gold when the grip acts on it, red when
+the influence stops it (`hand_glow.cpp`, `target_glow.cpp`). The target of a
+command has a green ring on the land around its base, with no glow
+(`CreatureCommandRing`, `BuildCommandRing` in `overlay.cpp`). It is the
+ring of a command to the land, without the disc in its middle. Its outer
+radius is 1.35 times the 2D radius of the object plus 3 cm of the room, and
+at least `teleport_ring_cm` (`command_math::TargetRingCm`). So at a glance:
+
+| The look | The grip | The trigger |
+| --- | --- | --- |
+| A gold glow and a green ring | Acts on it | Sends the Creature to it |
+| A green ring only | Takes nothing from it | Sends the Creature to it |
+| A gold glow only | Acts on it | Sends the Creature to a different object, or to the land |
+| A red glow and a green ring | Cannot take it: it is outside the influence | Sends the Creature to it |
+
+A target of the command past the range of the grip (`far_grab_max_m`, 2 m)
+and in the range of the command (`creature_command_max_m`, 10 m) has the
+ring only. So has an object that the Hand cannot hold, for example a house,
+and the object that holds a tied leash (section 5.2). The object at the
+Hand that a press acts on has its gold halo, and when it is the target of
+a command, the ring too.
+
+With `command_look=0` the target of a command has a green halo, and the
+glow on its mesh is green. When the two targets are different objects, each
+has its halo: gold for the grip and green for the trigger. A red far target
+that is the target of a command has the green halo. A gold far target and a
+locked one keep their halo. The switch "Command look" of the debug page
+changes the key while the game runs.
 
 **The land command and the sea.** The mod does not send a point in the sea.
 The ring is red there. A sailor in the sea is a target as an object.
@@ -1275,6 +1462,12 @@ leash) and does what the game does on a match: `fn_005CE420(0)` and packet
 controller gives a pulse of 0.6 for 80 ms when the game turns the leash off.
 With the mouse, the game's own test acts.
 
+A desktop run (`creature_recipe.ps1 -Kind shake`) has 4 strokes of 15 cm in
+767 ms, the slowest at 0.75 m/s: the leash is off 34 ms after the shake. Pulls
+at about 0.4 m/s give no shake. With `leash_shake_mps=0.9` the same strokes
+give no shake. The scripted strokes are 15 cm long, so 4 strokes at 0.60 to
+0.67 m/s take more than 0.9 s, and no run shows a stroke at those speeds.
+
 ### 4.5 Keys
 
 | Key | Default | What it does |
@@ -1290,6 +1483,7 @@ With the mouse, the game's own test acts.
 | `creature_command_behind_cm` | 30 | The land in front wins past this many cm of the room, plus 20 percent of the distance. -1 turns the rule off |
 | `creature_command_double_ms` | 500 | The time of a double press (section 5.2). 0 turns the double press off |
 | `leash_miracle_tap` | 1 | 1: with the leash on the Hand, a press with the Hand on a miracle on the land taps it, and a miracle on the land is no target of a command (section 4.1). 0: the trigger sends the Creature to the miracle, as in the plain game |
+| `command_look` | 1 | 1: the target of a command has a green ring on the land and no halo, a glow shows only a target of the grip, and the card says what the grip does at the target of a command ("The look of a target" in section 4.3, and section 4.6). 0: the green halo, and the card has the lines of the trigger only. The switch "Command look" of the debug page |
 | `teleport_reach_m`, `teleport_ring_cm` | 10, 11 | The arc and the ring of the land aim. See `god-view.md` |
 
 **The A/B key.** With `test_keys=1`, Ctrl with the 5 key of the number pad
@@ -1327,6 +1521,22 @@ pulse for 1 and a short pulse for 0, and the log has a line. With
 | The leash is tied, and the aim is on the object that holds it | "Trigger x2 Take the leash back" |
 | The leash is tied, and the aim is on the player's own Creature | "Trigger Take the leash back" |
 
+**The line of the grip** (`command_look=1`). When the grip has no far
+target, the card of a target of a command, and of the object that holds a
+tied leash, also says what the grip does (`AddCommandGripPrompt` in
+`hint_card.cpp`):
+
+| When | The line of the grip |
+| --- | --- |
+| An object at the Hand that a press acts on | What the press does there: "Grip Take", "Grip Hold to collect" or "Grip Activate" |
+| The target of the command is farther from the head than `far_grab_max_m`, along the floor | "Grip Too far to take" |
+| Each other target: a house, the object that holds the tied leash, a target outside the influence | "Grip Cannot take" |
+
+The line that says the grip does nothing has the color of the other
+buttons, not the gold of the grip. While the grip has a far target, the
+card has the line of the far target (section 5.1). With `command_look=0` the
+card has the lines of the trigger only.
+
 ### 4.7 The log
 
 The tag `creature cmd`: the keys at the start, each new target, each press
@@ -1349,6 +1559,15 @@ creature cmd : the trigger opens after 2518 ms, a hold, so the target that shows
 creature cmd : a shake of the hand: 4 strokes in 510 ms, the slowest at 0.88 m/s, the last one 12 cm long. A stroke needs 0.60 m/s (leash_shake_mps). The leash click (packet 0x5F), frame 6010
 creature cmd : the leash is off, 70 ms after the shake, frame 6016
 creature cmd : creature_command_rule=4. While the trigger was held, what shows changed 1 times, and 1 presses on an object became a walk. The range left out 54490 objects, and the land in front left out 125 objects of the cone. 0 double presses tied the leash, and 0 took it back
+```
+
+With `command_look=1` each new target with a ring gives one line (20 at
+most), and the far grab gives one line for each object that holds the tied
+leash in its cone (10 at most). The format:
+
+```
+creature cmd : the target 2AA30804 has the ring of a command, with an outer radius of 30 cm of the room, at 1999.8 52.4 2497.6 (command_look=1). The grip does not have it as its far target, frame 953
+far grab    : the Tree 2A67A804 in the cone holds the tied leash, so it is no far target (grip_skips_tied=1). The trigger takes the leash back from it, frame 1030
 ```
 
 ## 5. The grip from a distance: the leash and the stay
@@ -1427,6 +1646,7 @@ that is not the player's, with each state of the leash. The test key
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `far_leash` | 1 | Your Creature in the aim is a target of the leash and of the stay. 0 takes the Creature out of the far targets |
+| `grip_skips_tied` | 1 | The object that holds a tied leash is no target of the grip, at the Hand and from a distance (section 5.2). 0: the grip can aim at it as at each other object |
 | `far_grab_creature` | 1 | 1: the aim measures your Creature by its body and takes it from the game. 0: by the point of its mesh, at its feet, and only when the draw offered it |
 | `creature_hold_stay` | 1 | See section 5.3. 0: the leash click goes out at the close of the grip, and no grip makes the Creature stay |
 | `far_test_creature` | 0 | A test key. 1: only your Creature is a far target, and the word `aimfar` aims at it |
@@ -1466,9 +1686,18 @@ tie the leash to it, as the game's double click does not.
 
 The card (`AddPromptTwice` in `hint_card.cpp`) has two lines for an object
 that can take the leash: "Trigger Send the Creature" and "Trigger x2 Tie the
-leash". While the leash is tied, the object that holds it has the green halo
-and the line "Trigger x2 Take the leash back", and your Creature has "Trigger
-Take the leash back".
+leash". While the leash is tied, the object that holds it has the green ring
+(or the green halo with `command_look=0`) and the line "Trigger x2 Take the
+leash back", and your Creature has "Trigger Take the leash back".
+
+**The grip does not take the object that holds the leash.** The game does
+not let the Hand take it: a press on it is a press for the leash, and it
+takes nothing. So with `grip_skips_tied=1` (the default) that object is no
+target of the grip. The choice at the Hand leaves it out (`PressKind` in
+`hand_direct.cpp`), and the grab from a distance leaves it out of its cone,
+with a log line. It has no gold halo, and the card says "Grip Cannot take".
+The trigger keeps it as its target. With `grip_skips_tied=0` the grip can
+aim at it as at each other object.
 
 What the Creature does on a tied leash is the game's own.
 
@@ -1762,8 +1991,10 @@ pictures of the desktop runs its head is about 20 pixels high. In the
 pictures at frame 1473 with the key at 1 and at 0 the head looks almost the
 same, although the angles of the game differ by 46 degrees of yaw and 34
 degrees of pitch. How much the look animations turn the head on the screen
-was not measured. Only a headset can show the eye contact, with a larger
-Creature near the player.
+was not measured.
+
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ### 5.6 One hook of Creature::LookAtCamera
 
@@ -1918,14 +2149,16 @@ The numbers in these lines are an example: no run had a fight.
 
 - No desktop run reaches a fight. A test save starts at the Creature pens or
   at the door of the Temple, and the scripted controller cannot start a
-  fight. The math checks have the ray and the place of a mark. Only a
-  headset session shows the attack, the block and the marks.
+  fight. The math checks have the ray and the place of a mark.
 - Whether one size of the mark in front of the body is enough at each place
   of the body: a part of the body that is nearer to the eye than the place of
   the mark can still cut it.
 - Why a press of the trigger with the grip did act in a headset session
   without the ray of the Hand was not traced. Both buttons go to the same
   ray of the game.
+
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ## 7. Tests
 
@@ -1939,7 +2172,11 @@ The math tests are in `bwvr/test/controller_math/` and run with
   out, over the top, a graze), the across axis, the speed as the game reads it
   (1.4 m/s is no slap, 1.6 m/s a slap, 2.75 m/s a hard slap at `creature_slap_mps` 1.5,
   at size 0.22 and at size 1.8 with the eye 72 units away), the room to the
-  world and back, the face of the panel and the place near the Creature.
+  world and back, the face of the panel, the place near the Creature, the
+  place over the Creature (right over its top, 2 degrees of gap, 10 cm
+  nearer, 0.6 and 1.5 m, a top over eye level), and the height of a slap (a
+  level slap, a slap down to the land, a slap from over the head, a slap at
+  the land).
 - The stroke (`StrokeChecks` in `near_checks.h`): the hand of a stroke at 3.6
   cm and at 48 cm, the band, the same wave for a hand that is still, the
   limit of the wave, a backhand that is a slap by the tip and none by the
@@ -1977,6 +2214,28 @@ The math tests are in `bwvr/test/controller_math/` and run with
   God view (a Creature ahead turns the same way, a Creature 100 units to the
   side turns 68.7 degrees from the head, the camera is 306 units above the
   base, and a point within 2 units on x and z gives no turn).
+- The Creature with no press (`creature_touch_checks.h`): the press of the
+  open hand starts after 0.2 s in the body, not for a hand that goes through
+  the body in 0.15 s or goes in and out each 0.1 s, not with the grip closed.
+  It stays 4 cm out of the body and ends 6 cm out, it lasts 0.5 s at the
+  least, a grip takes it, a hand that cannot go on ends it at once, and a
+  hand that stays presses again after a grip. The easy zone: a press 6 cm
+  from the skin after 0.1 s, none at 9 cm or for a hand that goes past in
+  0.06 s, the wind up of a slap to 14 cm and a lift of 0.2 s keep the press,
+  and a hand 25 cm away ends it after 0.3 s. With
+  `creature_open_slap=0` the open hand is under the speed of a slap at each
+  limit, and a slow stroke keeps its speed. The first stroke: 2 s with the
+  timers of the game, none on the same bone with no break, and at once on
+  each bone and at each total with the timers of the mod. The panel that
+  stays: it shows at the Hand, it stays 2.9 s and goes at 3 s, not for a
+  different Creature, and not after a frame with no Creature. The panel over
+  the Creature: it takes its place at the show, a Creature that breathes
+  moves no panel, a place 20 degrees away moves it after 0.5 s, a place that
+  comes and goes moves nothing, and a Creature that walks far off moves it.
+  The swing, at 60, 77 and 120 Hz with a frame time that changes by 40
+  percent and 2 mm of jitter: a stroke of 0.47 m/s and a step of 2 cm in one
+  frame never read as a slap, a slap of 3 m/s and of 1.6 m/s read as a slap,
+  and the hysteresis (a swing that slows to 0.7 m/s, the end under 0.6 m/s).
 - The near target is in `far_checks.h` (see `grab.md`).
 - A fight (`fight_checks.h`): the ray of a press from a Hand at the side of
   the body, at the legs, over the head, in the body and on the axis, a body
@@ -2017,7 +2276,36 @@ creature_recipe.ps1 -Name <run> -Dll <dll> -Kind click
 creature_recipe.ps1 -Name <run> -Dll <dll> -Kind walk
 creature_recipe.ps1 -Name <run> -Dll <dll> -Kind gift
 creature_recipe.ps1 -Name <run> -Dll <dll> -Kind giftfree
+creature_recipe.ps1 -Name <run> -Dll <dll> -Kind open -NewGame
+creature_recipe.ps1 -Name <run> -Dll <dll> -Kind wide
+creature_recipe.ps1 -Name <run> -Dll <dll> -Kind walkstay
+creature_recipe.ps1 -Name <run> -Dll <dll> -Kind shake
+creature_recipe.ps1 -Name <run> -Dll <dll> -Kind touch -Set "subtitle_card_test=1"
 ```
+
+The kind `touch` is the stroke and the slap with the open hand (section
+2.10), and the Creature panel over the Creature (`ui-layer.md`, section 13):
+
+1. Two zoom steps in, and the Hand's point on the body with the grip open.
+   The mod holds the press of the open hand.
+2. 17 steps of 2 cm (`nudge`), 15 frames apart: strokes. The first stroke
+   comes with the first step in the Creature state.
+3. Four steps to 12 cm on the other side (`slap`), 40 frames apart. The
+   first one goes from the body out (the wind up). The next three go through
+   the body: three slaps of the open hand. Between them the hand waits about
+   9 cm out of the body, and the press stays.
+4. The Hand's point onto the body from 12 cm out (a slap), 12 cm up, and 12
+   cm down in one frame
+   (`seek_plan=up,down`, `seek_step_cm=12`): a slap from over the head, at
+   the height of the hit.
+5. The hand goes away at frame 1650. The panel stays for 3 s over the
+   Creature: a picture at frame 1700 has it (and `bwvr-creature-card-N.bmp`
+   with `subtitle_card_test=1`), and a picture at frame 1950 does not.
+
+With `-Set "creature_stroke_wait=1"` the first stroke waits 2 s. With
+`-Set "creature_open_slap=0;creature_touch_easy=0;creature_stroke_wait=1;
+creature_slap_height=0;creature_panel_over=0;creature_swing=0"` the same steps
+give the old way, with no stroke of the game (section 8).
 
 The kind `state` (the default) does these steps:
 
@@ -2164,67 +2452,43 @@ now"), and the Creature state ends.
 
 ### 7.3 What the desktop cannot show
 
-- Whether a real hand gives an object to the Creature at the first opening of
-  the grip, with the leash on and with no leash. Whether 20 cm of the room
-  (`creature_gift_cm`) is a good reach: the gift must go on while the hand
-  rests, and a move of the hand away must keep the object. How it reads when
-  the object goes from the real hand to the hand of the Creature at the take
-  frame.
-- A stroke or a slap at the right feel at `creature_slap_mps` 1.0 and 5 cm of
-  reach, and a backhand and a forehand, with the arm and with the wrist.
-- That the camera stays still at a press on the Creature.
-- That the size of the capsule fits the Creature's body.
-- That the Creature tutorial goes on with no camera mode (it likely waits on
-  the packets `0x27` and `0x59`, not on the camera [G]). Fallback:
-  `creature_camera=1`.
-- That the hand opens flat or as a finger at the right zoom, that 0.75 is a
-  good change point, that the fingers of the tickle read as a stroke, that the
-  glow at the palm reads well, and that a slow stroke with the flat hand is
-  never a slap.
-- That the halo of the Creature does not show when the player does not want
-  it, and that a short grip from a distance puts the leash on without the
-  Creature turning to the hand.
-- Whether a tap sends the Creature to the place that the player pointed at,
-  whether a trigger that closes by accident sends it too often, and whether
-  the Creature does what the player expects on each kind of object.
-- Whether 0.6 m/s and 4 strokes fit a real shake, and whether a normal move
-  of the hand never takes the leash off.
-- Whether 3 degrees and 10 m are the right numbers for a real hand, whether
-  the wait of 100 ms is right, and whether the halo on almost each object in
-  the cone is too much while the leash is on.
-- Whether 500 ms is the right time for a real finger, and whether it feels
-  right that the first tap sends the Creature before the second press ties
-  the leash.
-- That each press on the land has its land point in the headset: the log line
-  of the press must say "The arc of the press meets", not "has no land point:
-  the arc meets no land".
-- Whether 350 ms is the right hold time for a real grip: a short grip must
-  not start a stay, and a hold must not feel late.
-- Whether the Creature that turns to the head and looks at it reads well in
-  the God view (section 5.4), after a cut scene, and in the quests in which
-  the Creature does what the player shows, for example the Creche of Land 2.
-- Whether the head of the Creature follows the real hand well when the hand
-  is far from it.
-- Whether the animation of what the Creature thinks of, and the line of the
-  Creature help, read well with no stroke after them.
-- Whether the halo and the pulse are enough to show that the stay is on.
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ## 8. Not built, open
 
-- **The touch with no press** (`creature_touch`). The
-  Hand within 25 cm of the body would press the trigger for the player, and
-  the release past 35 cm. The mod must then hold the game's right button for
-  the player (`controllers.cpp`, `PumpButtons`). The hand passes the Creature
-  each time the player reaches for an object near it, and the Creature learns
-  from each stroke and slap. So the touch needs a guard: an open hand (no
-  finger on the trigger and the grip, which the Touch controllers report) and
-  0.2 s in the body. A slap comes from outside the body in one or two frames,
-  so it cannot wait 0.2 s, and it keeps the grip. It waits for a headset test
-  of the touch above.
+- **No Creature recipe reaches the Creature on the owner's PC.** The Creature
+  runs go to the test laptop: its test save `temple` has a Creature with its
+  mesh (`make_test_save.ps1` on the profile of the laptop). On the owner's PC
+  the cause is the profile and the test save, not the render size, the zoom
+  or the points of the recipe:
+  - The test save `temple` was made with the profile of the old install. In
+    a run of it now, the game draws the shadow of the Creature at the door
+    of the Temple and no mesh (the eye pictures of a run with Direct3D 9).
+    Its body bone is there, but the draw never offers the Creature and the
+    game's own pick does not hit it, also with the Hand's pixel on the land
+    under it. So `-Kind state` presses the grip with no target.
+  - A new game with "Keep your old Creature" does not keep a Creature with
+    this profile: the game starts the first view of the land and a story,
+    and the player has no Creature. The click on that row works (a run
+    with a picture after each click on the rows of the start dialog).
+  - The zoom of the recipe (44.4 units a meter), the land under the
+    pointer and the points of the hand are the same as in the runs at 2208
+    by 2208 that had the Creature as the target.
+
+  So a run of the Creature on that PC needs a profile with a Creature that
+  the game keeps, and then a new test save `temple` (`make_test_save.ps1
+  -Name temple`). The tools never change a profile, so this needs the owner.
+
 - **A `OneOffSpellSeed`** gets a tap and no leash, as in the game.
-- **A stroke at 44 units a meter** with the fake hand gives the `stroke` ticks
-  of the mod in some runs and no stroke of the game. The speed of a step
-  depends on the time of its frame. The headset decides.
+- **A stroke at 44 units a meter** with the fake hand and the timers of the
+  game (`creature_stroke_wait=1`) gives the `stroke` ticks of the mod and no
+  stroke of the game. In such a state the line of 30 frames has the Hand
+  0.89 units from the target, and with the timers of the mod 0.0005 units.
+  Why the Hand is off the target with the timers of the game was not traced.
+  With the timers of the mod the first stroke comes 1 to 2 s after the start
+  of the state: the game also waits while the body action of the Creature
+  runs (section 1.1).
 - **The size of the Creature** in the capsule changes in the game over a
   session (radius 1.02 to 1.44 for the same object). The mod reads the size
   of the game on each frame. Why the game changes it was not looked at.

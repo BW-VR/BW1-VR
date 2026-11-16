@@ -127,6 +127,7 @@
 #include "d3d7_thread.h"
 #include "mesh_store_math.h"
 #include "debug_menu.h"
+#include "head_lag_math.h"
 #include "ui_panel.h"
 #include "one_walk.h"
 #include "one_walk_math.h"
@@ -138,6 +139,7 @@
 #include "vk_window.h"
 #endif
 #include "vk_fallback.h"
+#include "video_view.h"
 #include "../common/bw_addresses.h"
 #include "eye_copy_math.h"
 #include "fovea_res_math.h"
@@ -170,6 +172,7 @@ bool EqualDepthNow();
 // scene_host.cpp: VkSceneRoomDraws of the game, with the record of the draw.
 bool RoomDrawsHere();
 #endif
+void IntroPassShift(float* x, float* y);
 
 namespace {
 
@@ -185,6 +188,9 @@ bool g_direct = false;
 // small copy of it that the CPU reads.
 int g_present_index = 0;
 bool g_present_ready = false;
+// The picture of the window is the left eye of an eye pass (the view for
+// videos takes a part of it, video_view.h).
+bool g_present_from_eye = false;
 bool g_failed = false;
 bool g_ready = false;
 // THE WALKS WITH NO DEVICE: vk_device, the walk now, the size of its target,
@@ -236,6 +242,7 @@ struct Seed {
   void* target;  // the target of the eyes, or null when it is not known
   int eye;       // the eye pass of the walk (StereoPassEye), -1 for none
   int intro_eye;  // the eye pass of the intro in stereo, -1 for none
+  float intro_shift[2];  // the move of its kept picture (IntroPassShift)
   // FOVEATED RENDERING: the fovea of the walk (inner_deg 0: none), and the
   // centre of the fovea as tangents of the eye.
   foveation_math::Params fovea;
@@ -490,6 +497,10 @@ struct Texture {
   void* surface;
   vk::Image image;
   bool dirty;
+  // vk_texture_forget=1: the surface went away (VkSceneSurfaceGone). The
+  // next walk frees the image and its sets after the GPU is done with them,
+  // and takes the entry out of the table.
+  bool gone;
   uint64_t used_walk;  // g_walk_number of the last walk that drew with it
   uint64_t uploads;    // one more for each read of its pixels
   struct SetSlot {
@@ -503,6 +514,39 @@ const int kMaxTextures = 4096;
 Texture* g_textures = nullptr;
 int g_texture_count = 0;
 SRWLOCK g_texture_lock = SRWLOCK_INIT;  // the dirty marks of the frame thread
+// vk_texture_forget of bwvr.ini: 1 (the default) the table forgets the
+// texture of a surface that the game releases, so a new surface at the same
+// address gets a new texture. 0: the entry stays with its image.
+bool g_texture_forget = true;
+// vk_upload_keep of bwvr.ini: 1 (the default) a texture that the game wrote
+// keeps its old image until the new image has its pixels. 0: the old image
+// goes first, and a failed upload gives the white texel.
+bool g_upload_keep = true;
+volatile LONG g_gone_pending = 0;  // entries marked gone, not swept yet
+uint64_t g_forgotten = 0;          // for the report
+// THE DRAWS WITH NO TEXTURE OF THEIR OWN: the reasons why a surface gave no
+// image. A draw then has the white texel, or the image of the read before.
+enum WhiteReason {
+  kWhiteLock,     // the Lock of the surface failed
+  kWhiteFormat,   // a format that ReadSurface does not read
+  kWhiteMemory,   // no memory of the CPU for the pixels
+  kWhiteUpload,   // no image or no staging memory of Vulkan
+  kWhiteFull,     // the table of the textures is full
+  kWhiteReasons
+};
+const char* const kWhiteNames[kWhiteReasons] = {
+    "the Lock of the surface failed",
+    "the renderer does not read the format of the surface",
+    "there is no memory of the CPU for the pixels",
+    "Vulkan gave no image or no staging memory",
+    "the table of the textures is full"};
+uint64_t g_white_reads[kWhiteReasons] = {};  // for the report
+uint64_t g_white_kept = 0;  // of them with the image of the read before
+int g_white_said = 0;       // the lines of the log, the first 12
+// The most bytes that one walk put into the ring of the vertices and into
+// the ring of the staging, in the report window.
+VkDeviceSize g_ring_most = 0;
+VkDeviceSize g_stage_most = 0;
 // FOVEATED RESOLUTION: the layers of the outer and the centre image as
 // textures for the eye picture, [set][image][eye].
 Texture g_mres_texture[vk_compose_math::kMostSets][2][2] = {};
@@ -514,6 +558,11 @@ Texture g_mres_texture[vk_compose_math::kMostSets][2][2] = {};
 // submit, so the queue copies each texture before a draw reads it. The
 // staging buffers stay until the fence of the slot says the GPU is done.
 const int kSlotStaging = 64;
+// The images and the descriptor sets that a walk retires wait in the slot for
+// its fence. A slot has room for each texture and each set of the pool, so
+// the renderer never frees an image or a set that the GPU can still read.
+const int kSlotGarbage = kMaxTextures;
+const int kSlotDeadSets = kMaxTextures * 8;
 struct Slot {
   VkCommandPool pool;
   VkCommandBuffer cb;
@@ -535,7 +584,7 @@ struct Slot {
   VkDeviceSize groups_used;
   VkDescriptorSet groups_set;
   bool pending;
-  vk::Image garbage[64];
+  vk::Image garbage[kSlotGarbage];
   int garbage_count;
   vk::Buffer staging[kSlotStaging];
   int staging_count;
@@ -545,7 +594,7 @@ struct Slot {
   VkDeviceSize stage_used;
   // The descriptor sets of the textures that the walk read again. They go
   // back to the pool when the fence of the slot says the GPU is done.
-  VkDescriptorSet dead_sets[1024];
+  VkDescriptorSet dead_sets[kSlotDeadSets];
   int dead_count;
   uint32_t dead_slots[1024];  // places of the one set, free after the GPU is done
   int dead_slot_count;
@@ -636,10 +685,14 @@ bool g_mesh_compare_request = false;
 uint32_t g_mesh_compare_label = 0;
 
 Slot g_slots[2];
+uint64_t g_garbage_lost = 0;  // images not freed, for the report
 int g_slot = 0;
 bool g_recording = false;
 bool g_picture = false;  // this walk writes its image to a file
 uint64_t g_picture_frame = 0;
+// THE VIEW FOR VIDEOS: the frame of a picture that the next present of the
+// window writes, 0 for none. The walk of the left eye sets it.
+volatile LONG64 g_video_picture = 0;
 
 // For the report.
 uint64_t g_walks = 0;
@@ -720,6 +773,11 @@ uint64_t g_cleared_walks = 0;      // walks that cleared the whole target
 // target of its eye (target 0 the left eye, target 1 the right eye).
 bool g_walk_own = false;
 uint64_t g_own_walks = 0;          // for the report
+// THE KEPT PICTURE MOVES WITH A TURN OF THE HEAD (intro_keep_turn,
+// intro_vr.cpp). A copy of the target of the eye, and the walks of the intro
+// that moved their kept picture.
+vk::Image g_keep_scratch = {};
+uint64_t g_moved_walks = 0;
 uint64_t g_gpu_walks = 0;   // for the report: the walks with a time of the GPU
 uint64_t g_gpu_ticks = 0;
 uint64_t g_gpu_odd = 0;  // the times that are not times of a walk
@@ -1395,28 +1453,57 @@ const uint8_t* ReadRow(const uint8_t* src, uint32_t bytes) {
 #endif
 }
 
-// Reads a surface of the game into RGBA8. False when it cannot.
+// Why ReadSurface gave no pixels, for the log.
+struct ReadFail {
+  WhiteReason reason;
+  HRESULT result;  // of the Lock
+  DWORD flags, fourcc, bits, width, height;
+};
+
+// Reads a surface of the game into RGBA8. False with the reason when it
+// cannot.
 bool ReadSurface(IDirectDrawSurface7* s, uint32_t* width, uint32_t* height,
-                 uint8_t** pixels) {
+                 uint8_t** pixels, ReadFail* fail) {
+  memset(fail, 0, sizeof(*fail));
 #ifndef _WIN32
   // In the headset app the stream of the game gives the pixels as RGBA8.
   return s->ReadRgba(width, height, pixels);
 #else
   DDSURFACEDESC2 desc = {};
   desc.dwSize = sizeof(desc);
-  if (FAILED(s->Lock(nullptr, &desc, DDLOCK_READONLY | DDLOCK_WAIT, nullptr))) {
+  const HRESULT locked =
+      s->Lock(nullptr, &desc, DDLOCK_READONLY | DDLOCK_WAIT, nullptr);
+  if (FAILED(locked)) {
+    fail->reason = kWhiteLock;
+    fail->result = locked;
+    DDSURFACEDESC2 d = {};
+    d.dwSize = sizeof(d);
+    if (SUCCEEDED(s->GetSurfaceDesc(&d))) {
+      fail->flags = d.ddpfPixelFormat.dwFlags;
+      fail->fourcc = d.ddpfPixelFormat.dwFourCC;
+      fail->bits = d.ddpfPixelFormat.dwRGBBitCount;
+      fail->width = d.dwWidth;
+      fail->height = d.dwHeight;
+    }
     return false;
   }
   const DDPIXELFORMAT& pf = desc.ddpfPixelFormat;
   const uint32_t bpp = pf.dwRGBBitCount;
+  fail->flags = pf.dwFlags;
+  fail->fourcc = pf.dwFourCC;
+  fail->bits = bpp;
+  fail->width = desc.dwWidth;
+  fail->height = desc.dwHeight;
   bool ok = (pf.dwFlags & DDPF_RGB) != 0 && (bpp == 16 || bpp == 32 ||
                                              bpp == 24) &&
             desc.dwWidth > 0 && desc.dwHeight > 0;
+  fail->reason = kWhiteFormat;
   if (ok) {
     *width = desc.dwWidth;
     *height = desc.dwHeight;
     *pixels = static_cast<uint8_t*>(malloc(desc.dwWidth * desc.dwHeight * 4));
     ok = *pixels != nullptr;
+    fail->reason = kWhiteMemory;
   }
   if (ok) {
     // The masks of the format, and its table (16 bits) or its channels (24
@@ -1474,9 +1561,10 @@ bool ReadSurface(IDirectDrawSurface7* s, uint32_t* width, uint32_t* height,
 // vk_stream.h: the pixels of the record are the pixels of this read.
 bool VkSceneReadSurfaceRgba(void* surface, uint32_t* width, uint32_t* height,
                             uint8_t** pixels) {
+  ReadFail fail;
   return surface != nullptr &&
          ReadSurface(static_cast<IDirectDrawSurface7*>(surface), width, height,
-                     pixels);
+                     pixels, &fail);
 }
 #endif
 
@@ -1704,7 +1792,9 @@ bool UploadQueued(uint32_t width, uint32_t height, uint8_t* pixels,
 
 Texture* FindTexture(void* surface, bool make) {
   for (int i = 0; i < g_texture_count; ++i) {
-    if (g_textures[i].surface == surface) return &g_textures[i];
+    if (g_textures[i].surface == surface && !g_textures[i].gone) {
+      return &g_textures[i];
+    }
   }
   if (!make || g_texture_count >= kMaxTextures) return nullptr;
   Texture* t = &g_textures[g_texture_count++];
@@ -1716,12 +1806,85 @@ Texture* FindTexture(void* surface, bool make) {
 
 void Retire(vk::Image* image) {
   Slot& s = g_slots[g_slot];
-  if (s.garbage_count < 64) {
+  if (s.garbage_count < kSlotGarbage) {
     s.garbage[s.garbage_count++] = *image;
   } else {
-    vk::FreeImage(image);
+    // Not freed: the GPU can still read it. A lost image is better than a
+    // fault of the driver.
+    ++g_garbage_lost;
   }
   memset(image, 0, sizeof(*image));
+}
+
+// vk_texture_forget=1, at the start of a walk on the thread of the walks:
+// the image and the sets of each entry that is gone go to the slot of the
+// walk, which frees them after its fence, and the last entry of the table
+// takes the place of the entry. An entry stays for the next walk when the
+// slot has no room for its image or its sets.
+void SweepGone(Slot& s) {
+  if (InterlockedCompareExchange(&g_gone_pending, 0, 0) == 0) return;
+  AcquireSRWLockExclusive(&g_texture_lock);
+  for (int i = g_texture_count - 1; i >= 0; --i) {
+    Texture& t = g_textures[i];
+    if (!t.gone) continue;
+    if (s.garbage_count >= kSlotGarbage ||
+        s.dead_count + t.set_count > kSlotDeadSets) {
+      continue;
+    }
+    if (t.image.image != VK_NULL_HANDLE) Retire(&t.image);
+    for (int k = 0; k < t.set_count; ++k) {
+      s.dead_sets[s.dead_count++] = t.sets[k].set;
+      if (t.sets[k].slot != kNoSlot && s.dead_slot_count < 1024) {
+        s.dead_slots[s.dead_slot_count++] = t.sets[k].slot;
+      }
+    }
+    --g_texture_count;
+    if (i != g_texture_count) t = g_textures[g_texture_count];
+    memset(&g_textures[g_texture_count], 0, sizeof(Texture));
+    InterlockedDecrement(&g_gone_pending);
+    ++g_forgotten;
+  }
+  ReleaseSRWLockExclusive(&g_texture_lock);
+}
+
+// A read of a texture that gave no image: the count of its reason, and a
+// line for each of the first 12. kept: the draw has the image of the read
+// before, else the white texel.
+void NoteWhite(const void* surface, const ReadFail& fail, bool kept) {
+  ++g_white_reads[fail.reason];
+  if (kept) ++g_white_kept;
+  if (g_white_said >= 12) return;
+  ++g_white_said;
+  const char c[4] = {static_cast<char>(fail.fourcc & 0xFF),
+                     static_cast<char>((fail.fourcc >> 8) & 0xFF),
+                     static_cast<char>((fail.fourcc >> 16) & 0xFF),
+                     static_cast<char>((fail.fourcc >> 24) & 0xFF)};
+  const bool fourcc = (fail.flags & DDPF_FOURCC) != 0;
+  ModLog("vk scene     : a texture with no new image (%d of 12): %s "
+         "(0x%08lX). The surface %p, %lu by %lu, pixel format flags 0x%lX, "
+         "%lu bits%s%c%c%c%c. The draw has %s",
+         g_white_said, kWhiteNames[fail.reason], fail.result, surface,
+         fail.width, fail.height, fail.flags, fail.bits,
+         fourcc ? ", FourCC " : "", fourcc ? c[0] : ' ',
+         fourcc ? c[1] : ' ', fourcc ? c[2] : ' ', fourcc ? c[3] : ' ',
+         kept ? "the image of the read before" : "the white texel");
+}
+
+// The image of a texture and its sets go to the slot of the walk, which
+// frees them after its fence.
+void RetireImageAndSets(Texture* t) {
+  if (t->image.image != VK_NULL_HANDLE) Retire(&t->image);
+  Slot& s = g_slots[g_slot];
+  for (int i = 0; i < t->set_count; ++i) {
+    if (s.dead_count < kSlotDeadSets) {
+      s.dead_sets[s.dead_count++] = t->sets[i].set;
+    }
+    // The place of the set in the one set (vk_bindless) goes back too.
+    if (t->sets[i].slot != kNoSlot && s.dead_slot_count < 1024) {
+      s.dead_slots[s.dead_slot_count++] = t->sets[i].slot;
+    }
+  }
+  t->set_count = 0;
 }
 
 // The texture of a surface, read now when it is new or marked.
@@ -1732,13 +1895,21 @@ Texture* TextureOf(void* surface) {
   const bool dirty = t != nullptr && t->dirty;
   if (t != nullptr) t->dirty = false;
   ReleaseSRWLockExclusive(&g_texture_lock);
-  if (t == nullptr) return g_white;
+  if (t == nullptr) {
+    ReadFail fail = {};
+    fail.reason = kWhiteFull;
+    NoteWhite(surface, fail, false);
+    return g_white;
+  }
   if (!dirty && t->image.image != VK_NULL_HANDLE) return t;
   uint32_t width = 0, height = 0;
   uint8_t* pixels = nullptr;
+  ReadFail fail;
   if (!ReadSurface(static_cast<IDirectDrawSurface7*>(surface), &width, &height,
-                   &pixels)) {
-    return t->image.image != VK_NULL_HANDLE ? t : g_white;
+                   &pixels, &fail)) {
+    const bool kept = t->image.image != VK_NULL_HANDLE;
+    NoteWhite(surface, fail, kept);
+    return kept ? t : g_white;
   }
   ++t->uploads;
   // The image it has, when it has the size and no draw of this walk drew
@@ -1750,20 +1921,36 @@ Texture* TextureOf(void* surface) {
     free(pixels);
     return t;
   }
-  if (t->image.image != VK_NULL_HANDLE) Retire(&t->image);
-  // The sets of the old image go back to the pool after the GPU is done.
-  Slot& s = g_slots[g_slot];
-  for (int i = 0; i < t->set_count; ++i) {
-    if (s.dead_count < 1024) s.dead_sets[s.dead_count++] = t->sets[i].set;
-    if (t->sets[i].slot != kNoSlot && s.dead_slot_count < 1024) {
-      s.dead_slots[s.dead_slot_count++] = t->sets[i].slot;
+  // vk_upload_keep=1: the new image first. The old image and its sets stay
+  // until the new image has its pixels, so a failed upload (no memory) keeps
+  // the old picture of the texture and does not give the white texel.
+  if (g_upload_keep && t->image.image != VK_NULL_HANDLE) {
+    vk::Image fresh = {};
+    const bool made = g_recording && g_walk_upload_queue
+                          ? UploadQueued(width, height, pixels, &fresh)
+                          : Upload(width, height, pixels, &fresh);
+    if (!made) {
+      fail.reason = kWhiteUpload;
+      NoteWhite(surface, fail, true);
+      // The next use tries again.
+      AcquireSRWLockExclusive(&g_texture_lock);
+      t->dirty = true;
+      ReleaseSRWLockExclusive(&g_texture_lock);
+      return t;
     }
+    RetireImageAndSets(t);
+    t->image = fresh;
+    return t;
   }
-  t->set_count = 0;
+  RetireImageAndSets(t);
   const bool ok = g_recording && g_walk_upload_queue
                       ? UploadQueued(width, height, pixels, &t->image)
                       : Upload(width, height, pixels, &t->image);
-  if (!ok) return g_white;
+  if (!ok) {
+    fail.reason = kWhiteUpload;
+    NoteWhite(surface, fail, false);
+    return g_white;
+  }
   return t;
 }
 
@@ -1918,7 +2105,7 @@ VkDescriptorSet SetOf(Texture* t, VkSampler sampler) {
     // No room in the texture: the set goes back to the pool after the GPU
     // is done with this walk.
     Slot& s = g_slots[g_slot];
-    if (s.dead_count < 1024) s.dead_sets[s.dead_count++] = set;
+    if (s.dead_count < kSlotDeadSets) s.dead_sets[s.dead_count++] = set;
   }
   return set;
 }
@@ -1935,6 +2122,7 @@ bool MakeTarget(uint32_t width, uint32_t height) {
   vk_compose::Forget(g_colors[1].image);
   vk::FreeImage(&g_colors[0]);
   vk::FreeImage(&g_colors[1]);
+  vk::FreeImage(&g_keep_scratch);
   vk::FreeImage(&g_depth);
   vk::FreeImage(&g_panels[0]);
   vk::FreeImage(&g_panels[1]);
@@ -1951,9 +2139,11 @@ bool MakeTarget(uint32_t width, uint32_t height) {
                            VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
                            VK_IMAGE_USAGE_TRANSFER_DST_BIT,
                        VK_IMAGE_ASPECT_COLOR_BIT, &g_colors[i], 2) ||
+        // The view for videos samples the panel (vk_video.cpp).
         !vk::MakeImage(width, height, 1, vk::Get().color_format,
                        VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
-                           VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+                           VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                           VK_IMAGE_USAGE_SAMPLED_BIT,
                        VK_IMAGE_ASPECT_COLOR_BIT, &g_panels[i])) {
       return false;
     }
@@ -1964,6 +2154,73 @@ bool MakeTarget(uint32_t width, uint32_t height) {
          vk::MakeImage(width, height, 1, kDepthFormat,
                        VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
                        VK_IMAGE_ASPECT_DEPTH_BIT, &g_panel_depth);
+}
+
+// The copy of the target for the move of a kept intro picture, at the size
+// of the target. MakeTarget frees it when the size changes.
+bool MakeKeepScratch() {
+  if (g_keep_scratch.image != VK_NULL_HANDLE) return true;
+  return vk::MakeImage(g_colors[0].width, g_colors[0].height, 1,
+                       vk::Get().color_format,
+                       VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                           VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+                       VK_IMAGE_ASPECT_COLOR_BIT, &g_keep_scratch, 2);
+}
+
+// Moves the picture in the target of the eye (both layers): the pixel (u, v)
+// takes the pixel that is x half widths to the right and y half heights up
+// from it (IntroPassShift). The whole picture goes to the copy first, so the
+// strip that the move leaves keeps the picture as it was. The target is in
+// the layout of a color attachment before and after.
+void MoveKeptPicture(VkCommandBuffer cb, float x, float y) {
+  vk::Image& t = Target();
+  int px = 0, py = 0;
+  head_lag_math::ShiftPixels(x, y, t.width, t.height, &px, &py);
+  head_lag_math::CopyRect r;
+  if ((px == 0 && py == 0) ||
+      !head_lag_math::ShiftCopy(px, py, t.width, t.height, &r) ||
+      g_keep_scratch.image == VK_NULL_HANDLE ||
+      g_keep_scratch.width != t.width || g_keep_scratch.height != t.height) {
+    return;
+  }
+  vk::Barrier(cb, t.image, VK_IMAGE_ASPECT_COLOR_BIT,
+              VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+              VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, 1, 2);
+  vk::Barrier(cb, g_keep_scratch.image, VK_IMAGE_ASPECT_COLOR_BIT,
+              VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+              1, 2);
+  VkImageBlit whole = {};
+  whole.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 2};
+  whole.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 2};
+  whole.srcOffsets[1] = {static_cast<int32_t>(t.width),
+                         static_cast<int32_t>(t.height), 1};
+  whole.dstOffsets[1] = whole.srcOffsets[1];
+  f.vkCmdBlitImage(cb, t.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                   g_keep_scratch.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                   1, &whole, VK_FILTER_NEAREST);
+  vk::Barrier(cb, t.image, VK_IMAGE_ASPECT_COLOR_BIT,
+              VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+              VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, 2);
+  vk::Barrier(cb, g_keep_scratch.image, VK_IMAGE_ASPECT_COLOR_BIT,
+              VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+              VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, 1, 2);
+  VkImageBlit moved = {};
+  moved.srcSubresource = whole.srcSubresource;
+  moved.dstSubresource = whole.dstSubresource;
+  moved.srcOffsets[0] = {r.src_x, r.src_y, 0};
+  moved.srcOffsets[1] = {r.src_x + static_cast<int32_t>(r.width),
+                         r.src_y + static_cast<int32_t>(r.height), 1};
+  moved.dstOffsets[0] = {r.dst_x, r.dst_y, 0};
+  moved.dstOffsets[1] = {r.dst_x + static_cast<int32_t>(r.width),
+                         r.dst_y + static_cast<int32_t>(r.height), 1};
+  f.vkCmdBlitImage(cb, g_keep_scratch.image,
+                   VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, t.image,
+                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &moved,
+                   VK_FILTER_NEAREST);
+  vk::Barrier(cb, t.image, VK_IMAGE_ASPECT_COLOR_BIT,
+              VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+              VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, 1, 2);
+  ++g_moved_walks;
 }
 
 bool Ready() {
@@ -2092,10 +2349,15 @@ bool Ready() {
 
 // Writes one layer of an image (an eye or the panel) to a file of 24 bits,
 // bottom up. `what` is the word in the name of the file.
+// rx, ry, rw and rh: a part of the image, or rw 0 for all of it.
 void WritePicture(const vk::Image& image, uint32_t layer, const char* what,
                   uint64_t frame,
-                  VkImageLayout layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL) {
-  const uint32_t w = image.width, h = image.height;
+                  VkImageLayout layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                  int32_t rx = 0, int32_t ry = 0, uint32_t rw = 0,
+                  uint32_t rh = 0) {
+  const bool part = rw > 0 && rh > 0;
+  const uint32_t w = part ? rw : image.width;
+  const uint32_t h = part ? rh : image.height;
   vk::Buffer read;
   if (!vk::MakeBuffer(static_cast<VkDeviceSize>(w) * h * 4,
                       VK_BUFFER_USAGE_TRANSFER_DST_BIT, true, &read)) {
@@ -2106,6 +2368,7 @@ void WritePicture(const vk::Image& image, uint32_t layer, const char* what,
               VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, 1, image.layers);
   VkBufferImageCopy copy = {};
   copy.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, layer, 1};
+  if (part) copy.imageOffset = {rx, ry, 0};
   copy.imageExtent = {w, h, 1};
   f.vkCmdCopyImageToBuffer(cb, image.image,
                            VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, read.buffer,
@@ -4521,6 +4784,10 @@ void BeginOnWorker(const void* data) {
   }
   // THE ONE PASS: from here Target() is the swapchain image of the app.
   g_walk_density = DensityEligible(seed);
+  const bool move_keep = seed->intro_eye >= 0 && g_keep_picture &&
+                         (seed->intro_shift[0] != 0.0f ||
+                          seed->intro_shift[1] != 0.0f) &&
+                         MakeKeepScratch();
   g_slot ^= 1;
   g_walk_both = seed->both;
   g_walk_right = !seed->both && seed->eye == 1 &&
@@ -4547,6 +4814,7 @@ void BeginOnWorker(const void* data) {
   // has nothing to compose.
   vk_compose::Drop((uint64_t)Target().image);
   f.vkResetFences(device, 1, &s.fence);
+  if (s.stage_used > g_stage_most) g_stage_most = s.stage_used;
   s.stage_used = 0;
   ReadSlotTime(s);
   for (int i = 0; i < s.garbage_count; ++i) vk::FreeImage(&s.garbage[i]);
@@ -4562,6 +4830,7 @@ void BeginOnWorker(const void* data) {
   for (int i = 0; i < s.dead_slot_count; ++i) g_slot_free.push_back(s.dead_slots[i]);
   s.dead_slot_count = 0;
   s.upload_open = false;
+  SweepGone(s);
   // The stress test: the next N textures, in turn, are read again at their
   // next use.
   if (seed->reread > 0 && g_texture_count > 0) {
@@ -4573,6 +4842,7 @@ void BeginOnWorker(const void* data) {
     ReleaseSRWLockExclusive(&g_texture_lock);
   }
   g_walk_upload_queue = seed->upload_queue;
+  if (s.used > g_ring_most) g_ring_most = s.used;
   s.used = 0;
   s.groups_used = 0;
   f.vkResetCommandPool(device, s.pool, 0);
@@ -4651,8 +4921,12 @@ void BeginOnWorker(const void* data) {
     BeginRendering(s.cb, 3u, true, g_walk_follow);
     ++g_pair_walks;
   } else if (g_walk_own) {
-    // The colors of the target stay. The depth starts at the far plane: its
-    // image has no pixels of the walk before (the barrier above).
+    // The colors of the target stay, moved with a turn of the head. The
+    // depth starts at the far plane: its image has no pixels of the walk
+    // before (the barrier above).
+    if (move_keep) {
+      MoveKeptPicture(s.cb, seed->intro_shift[0], seed->intro_shift[1]);
+    }
     BeginRendering(s.cb, 3u, true, true);
     VkClearAttachment depth = {};
     depth.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
@@ -4952,6 +5226,7 @@ void FinishWalk() {
   if (StereoPassEye() <= 0) {
     g_present_index = g_target;
     g_present_ready = true;
+    g_present_from_eye = StereoPassEye() == 0;
   }
   if (g_panel_drawn) {
     g_panel_hash = g_panel_hash_now;
@@ -4963,6 +5238,11 @@ void FinishWalk() {
     f.vkWaitForFences(vk::Get().device, 1, &s.fence, VK_TRUE, UINT64_MAX);
     WritePicture(Target(), 0, "left", g_picture_frame);
     WritePicture(Target(), 1, "right", g_picture_frame);
+    // THE VIEW FOR VIDEOS: the next present of the window writes the
+    // picture of the video, with its quad layers (VkScenePresentWindow).
+    if (StereoPassEye() == 0) {
+      InterlockedExchange64(&g_video_picture, static_cast<LONG64>(g_picture_frame));
+    }
     if (g_panel_drawn) {
       WritePicture(g_panels[g_target], 0, "panel", g_picture_frame);
     }
@@ -5118,6 +5398,10 @@ void VkSceneWalkBegin(void* device7) {
   seed.target = g_follow ? OneWalkBoundTarget() : nullptr;
   seed.eye = StereoPassEye();
   seed.intro_eye = g_direct ? IntroPassEye() : -1;
+  seed.intro_shift[0] = seed.intro_shift[1] = 0.0f;
+  if (seed.intro_eye >= 0) {
+    IntroPassShift(&seed.intro_shift[0], &seed.intro_shift[1]);
+  }
   // FOVEATED RENDERING: the angles of the picture from the camera of the
   // game, and the centre of the fovea: the gaze, or straight ahead.
   // FOVEATED RESOLUTION needs the angles and the gaze too.
@@ -6853,9 +7137,40 @@ void VkSceneKeepPictureToggle(const char* keys) {
          g_keep_picture ? 1 : 0);
 }
 
+VkImageView VkScenePanelView(uint64_t image) {
+  for (int i = 0; i < 2; ++i) {
+    if (image != 0 && (uint64_t)g_panels[i].image == image) {
+      return g_panels[i].view;
+    }
+  }
+  return VK_NULL_HANDLE;
+}
+
+void VkSceneWriteImage(const vk::Image& image, const char* what,
+                       uint64_t frame, VkImageLayout layout) {
+  WritePicture(image, 0, what, frame, layout);
+}
+
 bool VkScenePresentWindow(void* window, uint32_t width, uint32_t height) {
   if (!g_device || !g_ready || !g_present_ready) return false;
 #ifdef _WIN32
+  // THE VIEW FOR VIDEOS (video_view.h): a part of the picture in a 16:9
+  // rect of the window, with the quad layers of the headset over it.
+  float part[4];
+  float shape = 0.0f;
+  if (VideoViewWindow(g_present_from_eye, part, &shape)) {
+    static VideoDraw draws[kVideoDraws];
+    const int count = VideoViewDraws(part, draws);
+    const uint64_t picture = static_cast<uint64_t>(
+        InterlockedExchange64(&g_video_picture, 0));
+    if (picture != 0 && g_present_from_eye) {
+      VkWindowPicture(g_colors[g_present_index], part, draws, count,
+                      picture);
+    }
+    return VkWindowPresent(static_cast<HWND>(window),
+                           g_colors[g_present_index], width, height, part,
+                           shape, draws, count);
+  }
   return VkWindowPresent(static_cast<HWND>(window), g_colors[g_present_index],
                          width, height);
 #else
@@ -6976,6 +7291,59 @@ const uint8_t* VkScenePresentPixels(uint32_t width, uint32_t height,
   }
   *pitch = static_cast<int>(width) * 4;
   return pixels;
+}
+
+bool VkScenePictureSize(uint32_t* width, uint32_t* height) {
+  if (!g_ready || !g_present_ready) return false;
+  const vk::Image& source = g_colors[g_present_index];
+  if (source.image == VK_NULL_HANDLE) return false;
+  *width = source.width;
+  *height = source.height;
+  return true;
+}
+
+bool VkSceneReadPicture(int32_t x, int32_t y, uint32_t w, uint32_t h,
+                        VkScenePictureFn take, void* context) {
+  if (!g_ready || !g_present_ready || take == nullptr || w == 0 || h == 0 ||
+      x < 0 || y < 0) {
+    return false;
+  }
+  const vk::Image& source = g_colors[g_present_index];
+  if (source.image == VK_NULL_HANDLE ||
+      static_cast<uint32_t>(x) + w > source.width ||
+      static_cast<uint32_t>(y) + h > source.height) {
+    return false;
+  }
+  vk::Buffer read;
+  if (!vk::MakeBuffer(static_cast<VkDeviceSize>(w) * h * 4,
+                      VK_BUFFER_USAGE_TRANSFER_DST_BIT, true, &read)) {
+    return false;
+  }
+  VkCommandBuffer cb = vk::BeginOnce();
+  if (cb == VK_NULL_HANDLE) {
+    vk::FreeBuffer(&read);
+    return false;
+  }
+  vk::Barrier(cb, source.image, VK_IMAGE_ASPECT_COLOR_BIT,
+              VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+              VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, 1, source.layers);
+  VkBufferImageCopy copy = {};
+  copy.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+  copy.imageOffset = {x, y, 0};
+  copy.imageExtent = {w, h, 1};
+  f.vkCmdCopyImageToBuffer(cb, source.image,
+                           VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, read.buffer,
+                           1, &copy);
+  vk::Barrier(cb, source.image, VK_IMAGE_ASPECT_COLOR_BIT,
+              VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+              VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, 1, source.layers);
+  const bool ok = vk::EndOnce(cb);
+  if (ok) {
+    take(static_cast<const uint8_t*>(read.mapped), static_cast<int>(w) * 4,
+         w, h, source.format != VK_FORMAT_B8G8R8A8_UNORM, context);
+  }
+  vk::FreeBuffer(&read);
+  return ok;
 }
 
 void VkSceneSetOnly(int on, int test) {
@@ -7438,6 +7806,23 @@ void VkSceneDrawCounts(VkSceneDrawCount* out) {
   *out = g_dc_shown;
   ReleaseSRWLockExclusive(&g_dc_lock);
 }
+void VkSceneSurfaceGone(void* surface) {
+  if (!g_texture_forget || !VkSceneOn() || g_textures == nullptr ||
+      surface == nullptr) {
+    return;
+  }
+  AcquireSRWLockExclusive(&g_texture_lock);
+  Texture* t = FindTexture(surface, false);
+  if (t != nullptr) {
+    t->gone = true;
+    t->surface = nullptr;
+    InterlockedIncrement(&g_gone_pending);
+  }
+  ReleaseSRWLockExclusive(&g_texture_lock);
+}
+
+void VkSceneSetTextureForget(int on) { g_texture_forget = on != 0; }
+void VkSceneSetUploadKeep(int on) { g_upload_keep = on != 0; }
 
 void VkSceneReport(uint64_t frames) {
   if (g_mode == 0 || frames == 0) return;
@@ -7517,12 +7902,14 @@ void VkSceneReport(uint64_t frames) {
     ModLog("vk scene     : vk_upload_queue=%d. %llu reads went in the submit "
            "of their walk, %llu waited for the GPU (%.3f ms each). %lld "
            "descriptor sets in use, %llu made since the start, room for %d, "
-           "%llu that the pool did not give",
+           "%llu that the pool did not give. %llu images not freed since the "
+           "start, because a slot had no room for them",
            g_upload_queue ? 1 : 0, g_uploads_queued, waited,
            waited > 0 ? g_upload_wait_ticks * 1000.0 /
                             static_cast<double>(hz.QuadPart) / waited
                       : 0.0,
-           g_sets_live, g_sets_made, kMaxTextures * 8, g_set_failures);
+           g_sets_live, g_sets_made, kMaxTextures * 8, g_set_failures,
+           g_garbage_lost);
     g_uploads_queued = g_upload_wait_ticks = 0;
     g_set_failures = 0;
   }
@@ -7554,6 +7941,36 @@ void VkSceneReport(uint64_t frames) {
            g_fence_wait_ticks * 1000.0 / static_cast<double>(hz.QuadPart));
     g_reused = g_ring_stages = g_fence_waits = g_fence_wait_ticks = 0;
   }
+  {
+    // The textures that a surface gave no image, and the memory of Vulkan.
+    ModLog("vk scene     : vk_texture_forget=%d, vk_upload_keep=%d. %llu "
+           "textures forgotten after "
+           "the game released their surface. Reads of a texture with no new "
+           "image: %llu with a failed Lock, %llu in a format that the "
+           "renderer does not read, %llu with no memory of the CPU, %llu with "
+           "no memory of Vulkan, %llu with a full table. %llu of them drew "
+           "with the image of the read before",
+           g_texture_forget ? 1 : 0, g_upload_keep ? 1 : 0, g_forgotten,
+           g_white_reads[kWhiteLock],
+           g_white_reads[kWhiteFormat], g_white_reads[kWhiteMemory],
+           g_white_reads[kWhiteUpload], g_white_reads[kWhiteFull],
+           g_white_kept);
+    g_forgotten = g_white_kept = 0;
+    for (int i = 0; i < kWhiteReasons; ++i) g_white_reads[i] = 0;
+    vk::MemoryUse use;
+    vk::GetMemoryUse(&use);
+    ModLog("vk scene     : the memory of Vulkan: %u images and buffers in "
+           "device memory, %.1f MB. %u buffers in host memory, %.1f MB, "
+           "mapped in the address space of the process. %u allocations or "
+           "maps failed since the start. The most of one walk: %.1f MB of "
+           "the %llu MB of the ring of the vertices, %.1f MB of the %llu MB "
+           "of the ring of the staging",
+           use.device_count, use.device_bytes / 1048576.0, use.host_count,
+           use.host_bytes / 1048576.0, use.failures,
+           g_ring_most / 1048576.0, kRingBytes >> 20,
+           g_stage_most / 1048576.0, kStageRingBytes >> 20);
+    g_ring_most = g_stage_most = 0;
+  }
   if (g_direct) {
     LARGE_INTEGER hz;
     QueryPerformanceFrequency(&hz);
@@ -7567,7 +7984,13 @@ void VkSceneReport(uint64_t frames) {
            "target first. %llu walks of the intro drew over the picture of "
            "their eye",
            g_keep_picture ? 1 : 0, g_kept_walks, g_cleared_walks, g_own_walks);
+    if (g_moved_walks > 0) {
+      ModLog("vk scene     : %llu walks of the intro moved the picture of "
+             "their eye with a turn of the head (intro_keep_turn)",
+             g_moved_walks);
+    }
     g_kept_walks = g_cleared_walks = g_own_walks = 0;
+    g_moved_walks = 0;
     if (g_black_check) {
       ModLog("vk scene     : vk_black_check=1. %llu of %llu checked eye "
              "pictures were black", g_black_walks, g_probed_walks);

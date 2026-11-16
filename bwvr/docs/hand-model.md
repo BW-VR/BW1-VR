@@ -11,6 +11,7 @@ This doc is about how the hands look and feel. It has these parts:
   controller"), and fingers that follow the real fingers ("Finger
   tracking").
 - Fingers that react to the world ("Hands that react to the world").
+- The hand that stays on the land ("The Hand stops at the land").
 - The glow at the Hand's point ("The glow at the Hand's point").
 - The renderer that draws the mod's own meshes in the game's frame ("Overlay
   renderer").
@@ -26,6 +27,7 @@ about Half-Life: Alyx that this doc uses.
 | Subject | Source files in `bwvr/src/mod` |
 | --- | --- |
 | The mod's hands | `hand_model.cpp`, `hand_model_math.h`, `hand_model_file.cpp` |
+| The stop at the land | `hand_land.cpp`, `hand_land_math.h` |
 | Poses, curls, the overlay | `overlay.cpp`, `overlay_math.h` |
 | The fit on the controller | `hand_fit_math.h`, `controllers.cpp` |
 | Finger tracking | `../vr/finger_curl_math.h`, `../vr/xr_screen.cpp`, `overlay.cpp` |
@@ -35,11 +37,12 @@ about Half-Life: Alyx that this doc uses.
 | Pulses | `haptics.cpp`, `haptics_math.h` |
 | The export tool | `bwvr/tools/hand_export/` |
 
-The rule for all of it: the Hand is the real hand, 1:1 in size and place. The
-mod changes only how the fingers bend. It never moves or turns a hand by
-itself, and it makes no motion that the player did not make. The fit on the
-controller is a still offset that the player sets, so that the hand covers
-the real hand.
+The rule for all of it: the Hand is the real hand, 1:1 in size and place,
+over the land. A real hand in the land is drawn on the land, straight over
+the real hand ("The Hand stops at the land"). Over the land the mod changes
+only how the fingers bend. It never turns a hand by itself, and it makes no
+motion that the player did not make. The fit on the controller is a still
+offset that the player sets, so that the hand covers the real hand.
 
 ## The model of the Hand
 
@@ -409,8 +412,10 @@ hand.
 
 **The place.** The mesh has the turn of the exact root (the rest turn of
 `hand_mesh_yaw_deg`, `hand_mesh_pitch_deg` and `hand_mesh_roll_deg`, then
-the fingers along the finger axis of the grip and the palm away from the
-back of the hand) and the size of the real hand: 623.6 mesh units are one
+the fingers along the finger axis of the hand frame and the palm away from
+the back of the hand). The hand frame is the grip with the angle of the
+hand (hand.md, "The angle of the hand"). The mesh has the size of the real
+hand: 623.6 mesh units are one
 hand length. It is then moved until the tip of its own index finger, at the
 rest curl of 0.12, is the point of the Hand (`MakePlacement`). So the glow,
 the pick, the touch of the land and each other interaction are at the tip of
@@ -455,15 +460,70 @@ back after it. The differences:
   texture by the alpha of the color. The blend is the plain alpha blend, so
   the wrist fades as in the game. A texel with an alpha below 8 of 255
   writes nothing.
-- A triangle that faces away from the eye is not drawn. The mod finds that
-  on the CPU, with the sign of each mirror on the way to the camera
-  (`FacesCamera`).
+- Both sides of each triangle draw (`hand_two_sided=1`, "Both sides of each
+  triangle" below). With `hand_two_sided=0` a triangle that faces away from
+  the eye is not drawn. The mod finds that on the CPU, with the sign of each
+  mirror on the way to the camera (`FacesCamera`).
 - The hands draw after the arc, the ray and the tether of the overlay,
   because the wrist is not opaque.
+- While the game draws its flow of a miracle on its Hand, the pointing hand
+  draws a second time with the game's texture of the flow, added over it
+  (`hand_flow_glow`, hand.md, "The exact Hand").
 
 **When the low poly hands draw.** With `hand_model=0`. When a hand file of
 the game is not readable. When the device gives no texture. After the test
 key (below). Each case has a log line.
+
+### Both sides of each triangle
+
+When the triangles that face away do not draw, the mesh of the game shows
+holes at its edges at a glancing angle. The cause is that cull, and not the
+near plane, the stop at the land or the cut at a page:
+
+- The mesh is closed except at the wrist (5 open edges), and each triangle
+  has the same turn as its neighbors. A closed mesh of that kind has no hole
+  when the back faces go.
+- But it is a thin shell. At rest, 28 pairs of triangles that share an edge
+  turn more than 120 degrees from each other, along the sides of the fingers
+  and of the palm. The skin has one bone for each vertex, so a curl folds
+  more triangles at the knuckles: 43 such pairs in a fist.
+- Seen along the hand, a triangle of such an edge shows its back to the eye
+  while it is in front. The cull removes it, and the eye sees through the
+  edge.
+- The near plane cuts each triangle at its edge (`ClipNear`), and the stop at
+  the land moves the hand but cuts nothing.
+
+With `hand_two_sided=1` (the default) the mod draws each triangle, also one
+that faces away: those first, then the triangles that face the eye. The
+depth test hides the inside of a hand that writes depth. A faint hand (the
+hand of a hint controller, `hint_hand_opacity_pct`) writes no depth, and the
+order puts its outside over its inside. In the other order the inside of a
+faint hand shows over its outside as dark facets. This is the same in
+both backends: the CPU makes the triangles, and the device has no cull for
+them. The mesh of a file of the player draws the same way. The low poly
+hands have no cull.
+
+The game's own Hand draws both sides too (`hand_exact.cpp`). The draw of a
+skinned mesh of the game removes a triangle that faces away, unless the
+material of its primitive is double sided (`LH3DMaterial::Flags` bit `0x1`,
+read by the clip of `LH3DP3` and by `LH3DRender::SetMaterial`, which sets the
+cull mode of the device). Before each draw of the Hand's mesh the hook of
+`fn_00813BA0` sets that bit by the switch. It finds the material through
+the mesh object (`LH3DMeshedObject` +0x7C, the mesh, +0x10 the submeshes,
+the submesh +0x8 the primitives, the material at +0x0 of the primitive),
+only when the counts are those of the file of the Hand (1 primitive, 22
+bones, 141 vertices). The hook is there only with `hand_hide_game=1`.
+
+The cut at a page (`hand_cut.cpp`, `card_hand_front=1`) makes the hole in the
+page from the triangles that face the eye. A triangle that faces away and is
+in front of the page makes no hole.
+
+The log: `hand model   : drawn in N eye passes, N triangles a pass, N
+triangles that face away (drawn too, hand_two_sided=1)` once a report
+window. `hand exact   : the material of the game's Hand has the flags 0x04
+(double sided: no). hand_two_sided=1: the game draws both sides of each
+triangle of its Hand` once. A change of the switch: `hand model   : <by>:
+hand_two_sided is N now`.
 
 ### The fingers from outside
 
@@ -531,12 +591,15 @@ draw over it.
 | --- | --- | --- |
 | `hand_model` | 1 | 1 draws both hands with the game's own hand mesh. 0 draws the low poly hands |
 | `hand_model_file` | 1 | 1 uses `bwvr-hand.glb` when it is beside the mod ("A hand that the player edited") |
+| `hand_two_sided` | 1 | 1 draws both sides of each triangle of the mod's hands and of the game's Hand ("Both sides of each triangle"). 0 does not draw a triangle that faces away. The switch "Hand sides" of the debug page (group Hand) changes it live, and so does the script word `sideskey` |
 | `hand_model_test_look` | | Test key. Frame numbers. At each one the look steps, as Shift and the minus key do |
 | `hand_model_test_swap` | | Test key. Frame numbers. At each one the hands change, as Ctrl and the minus key do |
 | `hand_model_file_path` | | Test key. The full path of a file to read in place of `bwvr-hand.glb` |
 
 `hand_mesh_yaw_deg`, `hand_mesh_pitch_deg` and `hand_mesh_roll_deg` (hand.md,
-"The exact Hand") turn the mesh of the mod's hands too. `hand_tint` colors
+"The exact Hand") turn the mesh of the mod's hands too, and `hand_angle` and
+`hand_trim_*_deg` (hand.md, "The angle of the hand") turn both kinds of
+hands on the controller. `hand_tint` colors
 only the low poly hands. The keys are read from `bwvr.ini` at the start. They
 are not in the launcher.
 
@@ -616,17 +679,8 @@ of 255. The overlay costs about 0.1 ms a frame on the CPU for both hands.
   outer bend (its last bone) and the turn of the game's open hold pose. It
   has no other turn and no bend back.
 
-**Open: only a headset shows it.**
-
-1. Whether each hand sits right on the controller, with the right size and
-   a wrist that fades. The keys of the fit ("The fit of the hand on the
-   controller") move and turn it for the player.
-2. Whether the fingers follow the trigger and the grip at each point of the
-   way and look right.
-3. Whether a finger goes into a rock, a villager or a tree, or stays far
-   from it.
-4. How the point, the flat hand and the fist of the mesh look at the
-   teleport aim, at a stroke of the Creature and at a drag of the land.
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ## The fit of the hand on the controller
 
@@ -857,7 +911,9 @@ with no clone has no reader, and the log of the mod says so.
 
 A vertex can have up to 4 bones. The game's own mesh has one bone for each
 vertex, so a mesh with more bones at a joint bends more smoothly than the
-game's.
+game's. No test shows a file with more bones: the only hand with the 22
+joints of the game is the hand of the game, and the repo has no file of the
+game.
 
 ### The fit
 
@@ -922,9 +978,11 @@ On the desktop, the test key `hand_model_file_path` reads a file from outside
 the game folder. A mesh with 922 vertices costs 0.22 ms a frame on the CPU
 for both hands, against 0.1 ms for the mesh of the game.
 
-**Open.** A hand that the player edited with his own Blender, a file from
-another 3D editor, and how the joints of a mesh with more bones look in the
-headset.
+**Open.** A hand that the player edited with his own Blender, and a file
+from another 3D editor.
+
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ## Hands that react to the world
 
@@ -948,13 +1006,10 @@ Half-Life: Alyx files. The ones that count here:
 - A hand that hits the world gives a pulse by the force of the hit, at most
   one in 0.2 s.
 
-In Half-Life: Alyx the hand stops at a surface. The mod cannot do that: the
-Hand is the real hand, 1:1, and its place and its turn never change. So in
-the mod only the fingers react. A hand that the player pushes into the land
-goes into the land, and the land hides it. The one exception is the land test
-of the Hand's point, which lifts the pointing hand so that the tip of its
-index finger stays 0.5 cm over the land (hand.md, "5. The touch of the
-land").
+In Half-Life: Alyx the hand stops at a surface. In the mod the hand stops
+only at the land ("The Hand stops at the land"): the fingers bend on the
+land first, and the palm and the knuckles then stay on it. At a body only
+the fingers react, and the hand can go into the body.
 
 **What the game gives cheaply.**
 
@@ -1036,7 +1091,10 @@ patch), and each finger test takes its height from that grid.
   height.
 - A hand with the palm down has fingers that open as it comes to the land,
   until the flat hand lies on it.
-- A hand that is under the land has no free curl. The land hides it.
+- A hand that is under the land has no free curl. With `hand_land_stop=1`
+  the palm and the knuckles stay on the land ("The Hand stops at the
+  land"), so this comes only with `hand_land_stop=0`, and the land then
+  hides the hand.
 - The index finger of the pointing hand bends on the land too. Its tip is
   the Hand's point, and the land test keeps that point 0.5 cm over the
   land, so the glow and the tip of the bent finger are both on the land.
@@ -1049,6 +1107,48 @@ the water, so a finger at the water line still meets the beach. When a finger
 tip first goes under the plane of the sea, the hand gets the pulse `surface`,
 and the log has one line. With `hand_feel_sea=0` the sea is land at the
 height 0, and the fingers rest on the water as on rock.
+
+**What the game draws of the sea** [V]. `GLandscape::Draw` draws the sky,
+the reflection of the land (`fn_007FF4F0`), the sea (`LH3DWater::Draw`
+`0x00879930`, called at `0x005E4E8C`), the land, the rings on the water
+(`fn_005E5100` for each live ring) and then the objects. The God view and
+the table use the plain sea (backend.md, "Roll and the sea"): one quad of
+plus and minus 70000 units at the height 0 (`0x0087A090`), with the depth
+test ALWAYS (`0x0087A26D`) and no depth write (`0x0087A294`). The scanline
+sea of the flat game is the one layer of the water in screen space, and
+the mod does not use it in the God view. It has a swell and a fade with
+the distance, and nothing in it reacts to a thing in the water. So no
+layer that shows a thing in the water is missing in the VR picture. The
+sea writes no depth, and the land draws after it. So a finger under the
+plane of the sea is in front of the sea in the picture, and it shows as in
+the air. With `sea_depth=1` the land of the sea goes on down under the
+plane, to 2.68 units (backend.md, "The sea with depth"), so a finger under
+the plane shows down to that floor. The hands of the mod draw at the end of the frame
+(`LH3DRender::FinishFrame`), with the depth test against the land and the
+objects.
+
+**The hand in the water** (`hand_feel_water_look`). Each point of the mesh
+of a hand under the plane of the sea takes a part of the color of the sea,
+and less alpha, by its depth: none at the water line, and 0.55 of the color
+and 0.45 of the alpha at 4 cm of the room under it (`hand_feel_math.h`,
+`WaterLookAt`). The draw of the hand blends by the alpha, so the sea shows
+through that part of the hand. The look is the same in both eyes and with
+both renderers, because the color is in the vertices of the hand. The land
+hides a point under the land, so the plane of the sea counts everywhere.
+It works while the God view or the table owns the view, with
+`hand_feel_sea=1`.
+
+**The ring on the water** (`hand_feel_ripple`). When a finger tip goes into
+the sea and no tip of that hand was in it for 0.2 s (the rule of the pulse
+of the water line), the mod starts a ring of the game under the tip:
+`water_drop_cb` `0x0054EEA0` [V], stdcall with the point, the growth and
+the color, `ret 0xC`. The rain and an object that falls into the sea start
+their rings with it (`0x008340FF`, `PhysicsObject::AttemptToAddSoundEvent`).
+It takes a free slot of the 1024 rings at `0x00EAB7C8` and only writes
+data. The land draw draws each ring as a flat sprite on the water, in the
+world, so the ring is right in each eye. The growth is 0.6 for a hand of
+19 units, and it goes with the length of the hand (0.2 to 5). A drop of
+rain has 0.5 to 0.8. The color is white, as for an object.
 
 The plain game puts its Hand on the point that the pick of the screen gives
 (`fn_00800C30` calls `LH3DTech::Get3DPointFromScreen`), and its land test is
@@ -1220,6 +1320,29 @@ pass, the mod takes the bodies near each hand from the candidates of the
 pick, and the second step of the frame bends the fingers against them
 (`hand_feel_bodies_now`).
 
+**The objects near each hand** (`hand_feel_offer`). A candidate of the pick
+is an object that the draw offers to `GInterface::SendObjectDrawCollision`.
+The draw offers an object when the screen test of its box
+(`LH3DBoundingBox::CheckRegionOnScreen` `0x00868C80`) finds the pick pixel in
+it, and the mod's post hook of that test also offers an object near the
+Hand (hand.md, "A render pick, one frame late"). That test of the mod takes
+the point of the object, within about 25 units of the Hand's point at 100
+units a meter and 12 units at 13 units a meter. The point of a large
+building is far from its walls, and the hand that does not point has no
+Hand's point. So with `hand_feel_offer=1` the hook also offers an object
+when the ball round the box of the test is near the Hand's point by that
+bound, or near the middle of a hand that takes bodies by the reach of its
+bodies (0.9 hand lengths). The test reads the ball [V]: the middle of the
+box at `+4` and its radius at `+0x1C` of the box, through the rows of the
+matrix of the object at `+0x14`, its place at `+0x38` and its scale at
+`+0x44`. The game asks the mesh whether the pick pixel hits an object that
+the mod offers, so the game's own pick gets no false hit. `Abode::Draw`
+(`0x00515F70`) and `MultiMapFixed::DrawBuilding` (`0x00517F90`) read the
+flag of that test before they offer a building, as
+`Game3DObject::AddForDrawing` does for each other object. With
+`hand_feel_offer=0` only the point of the object near the Hand's point
+counts.
+
 | Object | Body |
 | --- | --- |
 | A tree | The trunk, a cylinder of a quarter of the radius to half the height, and the crown, a spheroid in the upper half |
@@ -1274,6 +1397,9 @@ make, so it is off.
 | `hand_feel_joints` | 1 | A finger that meets the world past its first joint bends at its outer joints first. 0 bends each joint by the same curl |
 | `hand_feel_shape` | 1 | The thumb turns toward the palm round the object in the Hand, and the fingers spread on a surface and round a large object. 0 gives no turn and no spread, and the thumb of a hold from the side stays out |
 | `hand_feel_sea` | 1 | The fingers go into the sea, with a pulse at the water line. 0 makes the sea land at the height 0 |
+| `hand_feel_offer` | 1 | An object goes to the pick when the ball round its box is near the Hand's point or near the middle of a hand, so the walls of a large building and the bodies near the other hand count. 0 offers an object only by its point near the Hand's point |
+| `hand_feel_water_look` | 1 | The part of a hand of the mesh under the plane of the sea takes the color of the sea and less alpha. 0 draws it as in the air |
+| `hand_feel_ripple` | 1 | A finger tip that goes into the sea starts a ring of the game on the water. 0 starts none |
 | `hand_feel_pulse` | 1 | A faint pulse when a finger first meets the land or a body |
 | `hand_hold_trunk` | 1 | A tree in the Hand has its trunk at the palm. 0 puts it at the radius of its crown |
 | `hand_pinch` | 1 | A small object in the Hand is held between the thumb and the index finger. 0 holds it in the fist |
@@ -1300,7 +1426,10 @@ The tag `hand feel`.
 - The same for a body, from the second step: the curls with the land, the
   curls with the bodies of this frame, the paths and the count of bodies.
 - One line when a finger tip goes into the sea or comes out of it (20 at
-  most).
+  most), and one when a ring of the game starts on the water: its place and
+  its growth (20 at most).
+- At the start: whether the offer of the bodies near each hand, the look of
+  the water and the ring are on.
 - One line when the pointing hand starts to take the form of a target: the
   size of the target, the frame of `can_pickup`, the curls of the form, the
   gap and the weight.
@@ -1314,8 +1443,10 @@ The tag `hand feel`.
   frames with no free curl, how often the outer joints took a bend, the hand
   frames with a tip in the sea, the frames of the approach, the hold poses,
   the hands built again in the second step, the pulses of the land, of a
-  body and of the water line, the time on the CPU and the land heights read
-  in a frame.
+  body and of the water line, the rings on the water, the objects that went
+  to the pick only for a body near a hand, the frames with the look of the
+  water on a hand, the time on the CPU and the land heights read in a
+  frame.
 - With the test key `hand_feel_log`: also the outer bend and the spread of
   each finger and the turn of the thumb.
 
@@ -1405,6 +1536,8 @@ these runs (`hand_direct.cpp`):
 - `gofeel`: the God view teleports to 50 cm of the room before the side of
   the body of the nearest object in the view of the class of the next entry
   of `seek_feel`.
+- `gointo`: the same, but the head goes over the middle of the body of that
+  object (the head blinder in a house, `god-view.md`, section 5.9).
 - `feel`: the Hand's point goes to the body of the nearest object of that
   class. An entry of `seek_feel` is `class,height,gap,side`, with entries
   between bars: the height on the body in percent, the gap from its surface
@@ -1413,7 +1546,8 @@ these runs (`hand_direct.cpp`):
   is an `Abode` with a radius of less than 5 units.
 - `gosea` and `sea`: the God view teleports to 60 cm of the room before the
   nearest sea in the view, and the Hand's point goes 2 cm over the nearest
-  sea.
+  sea. `seek_sea_cm` gives another height, and a value under 0 puts the
+  point under the water.
 
 The runs put the Hand's point at the side of the body of a house, a tree, a
 villager and the Creature, at a gap of 0 and 1.5 cm in the body:
@@ -1447,12 +1581,18 @@ villager and the Creature, at a gap of 0 and 1.5 cm in the body:
   plane of the sea.
 - The cost is under 0.04 ms a frame on the CPU at the village, and the worst
   frame is 0.24 ms.
+- The offer (`hand_feel_offer`): with the hand near the land at the Creature
+  pen, the hook gives the pick 824 more objects in 450 frames, and 0 with
+  `hand_feel_offer=0`. Hand feel then takes 0.0071
+  ms a frame on the CPU (0.0066 with 0), and the frame rate stays at 83 fps.
+- The sea with the Vulkan renderer and with dxwrapper: the eye pictures show
+  the sea, the waves at the coast and the hand over the water in both eyes.
 
 ### Limits
 
-- The hand does not stop at the land or at a body. A hand that the player
-  pushes into the land goes into it, with its fingers bent, and the land
-  hides it.
+- A hand stops at a house, a rock and a tree trunk ("The Hand stops at the
+  land"), but not at a villager, an animal or the Creature. A hand that the
+  player pushes into one of these goes into it, with its fingers bent.
 - A body is a cheap form. The box of a house has no roof slope: at a hut
   with a roof down to the land a finger stops in the air before the slope
   of the roof. The crown of a tree is a spheroid, and the box of the Creature is the box of its mesh
@@ -1460,7 +1600,19 @@ villager and the Creature, at a gap of 0 and 1.5 cm in the body:
   its box. A finger can stop a little before the thing that the player sees,
   or go a little into it.
 - A forest, a scroll, the Village Store and the Temple do not bend a finger
-  when the hand is smaller than them.
+  when the hand is smaller than them. A body is the box of the whole mesh:
+  the mod does not know the boxes of the parts of a mesh in memory (the
+  walls, the roof), so a round building and a large building with parts at
+  different heights have no body that is near their walls.
+- A hand with its palm in a body does not bend against that body. At 100
+  units a meter a house is about 10 cm across, so a hand that lies on its
+  roof often has the palm in its box.
+- The look of the water is on the mesh of the hand model only. The low poly
+  hands draw with no blend, and they go into the sea as in the air. The
+  look changes by the points of the mesh, so the water line on the hand is
+  soft over about one triangle of the mesh, and not a sharp line. The hand
+  in the water has the color of the sea and no texture of the sea and no
+  bend of the light.
 - The land patch has a point each 3.3 units for a hand of 19 units. The
   land of the game has a point each 10 units, so the patch is fine enough
   at 100 units a meter. On the table the hand is much longer than a land
@@ -1479,7 +1631,21 @@ villager and the Creature, at a gap of 0 and 1.5 cm in the body:
   trunk of a tree in the Hand the open thumb is in the trunk, so it stays
   open.
 
-**Open: not shown on the desktop.** A rock as a body (no run put a hand at
+With the Hand's point 3 cm under the water (`seek_sea_cm=-3`), a finger tip goes
+into the sea, and with `hand_feel_ripple=1` a ring of the game starts on the
+water under it in the same frame. With 0 no ring starts. The log says that the
+look of the water is on or off (`hand_feel_water_look`), but the captures do
+not show the part of the hand under the water.
+
+In the test save `temple` (`village_run.ps1 -Kind wall`, 13.2 units a meter)
+the fingers of the right hand are in the body of the Village Store in 213 of
+217 frames. With `hand_feel_offer=0` the pick gets no more objects, and the
+fingers act the same.
+
+**Open: not shown on the desktop.** A finger at the wall of a house: at 44.4
+units a meter the Hand's point goes 1.5 cm into the body of a house and no
+finger does, and at 13.2 units a meter no house is within 2 m of the room.
+The look of the water in a picture. A rock as a body (no run put a hand at
 a rock), a finger at the crown of a tree, a villager or an animal that walks
 into a still hand, the Creature that comes to the hand, the spread of a flat
 hand in a picture, a real press of the test key, the approach at weights
@@ -1487,41 +1653,190 @@ between 0 and 1 at a small target (a villager walks away), and what the
 pulses feel like. The camera of the God view looks down on the hand, so a
 picture shows a contact from above.
 
-**Open: only a headset shows it.**
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
-1. Put a hand down on the land with the fingers first, slowly. The fingers
-   must bend as they meet the land, the longer ones first, with no jump. A
-   finger must not shake when the hand is still.
-2. Lay a flat hand on the land, palm down, on a slope and across a ridge.
-   The fingers must open and lie on it.
-3. Press the trigger and the grip with the hand on the land. The player's
-   own fingers must still show.
-4. Is the pulse at the first touch too weak, too strong or too often
-   (`hand_feel_pulse=0` turns it off, and `haptics_pct` scales it)?
-5. Bring the tip of the index finger to a rock, a villager and a tree. Does
-   the form look right, and does it come too late or too early
-   (`hand_feel_approach=0` turns it off)?
-6. Take a rock, a villager and a tree. Does a finger go into the object or
-   stay far from it, and does the thumb that stays out for a villager and a
-   tree look right (`hand_feel_hold=0`)?
-7. Take a tree with the palm to the side, as a pole. The trunk must lie in
-   the hand (`hand_hold_trunk=0`).
-8. Put a hand at the wall of a house, at a trunk, at a villager and at the
-   Creature, and let a villager walk into the hand. Does a finger bend in
-   the air beside the thing, or go into it (`hand_feel_bodies=0` turns it
-   off)? Does the tip bend at its outer joints (`hand_feel_joints=0`)?
-9. Lay a flat hand on the land and on a wall. Does the spread of the fingers
-   look right? Take a villager and a boulder. Does the thumb go round it
-   (`hand_feel_shape=0`)?
-10. Put a hand into the sea. Do the fingers go into the water, and is the
-    pulse at the water line right (`hand_feel_sea=0`)?
-11. With `hand_feel_idle=1`: is the slow wave of the fingers wanted? It is
-    motion that the player did not make.
-12. Take a small rock or mushroom, and zoom out and in with the object in the
-    Hand (`hand_pinch=0` and Ctrl, Shift and End give the fist). Is the
-    pinch a pinch, and not a claw? The tips meet near the base of the palm
-    with the index finger curled 0.55 to 0.75. Does the object glide at the
-    change, and is the limit of 0.16 to 0.20 hand lengths right?
+## The Hand stops at the land
+
+The drawn hands do not go through the land, a house, a rock or a tree
+trunk. The code is in `src/mod/hand_land.cpp`, and the pure math is in
+`src/mod/hand_land_math.h` (the land) and `src/mod/solid_math.h` (the
+solids).
+
+### What the mod does
+
+- **Over the land** the drawn hand is the real hand, 1:1.
+- **In the land.** When the real hand goes into the land, the drawn hand goes
+  straight up until no point of it is in the land. So it stays on the land at
+  the point where it went in, and it slides along the land when the real
+  hand moves sideways. When the real hand comes up, the drawn hand is the
+  real hand again, in the same frame. The lift has no filter, so the drawn
+  hand moves only when the real hand moves.
+- **The points that stop the hand.** The 8 corners of the palm and the
+  knuckle of each finger. The fingers bend on the land by hand feel ("Hands
+  that react to the world"), as before. With `hand_feel=0` or
+  `hand_feel_land=0` the fingers cannot bend, so each joint of each finger,
+  the middle of each segment and the Hand's point stop the hand too. A joint
+  keeps the radius of its finger over the land, and a corner of the skin (a
+  finger tip, a corner of the palm) keeps 5 mm of the room.
+- **The land.** The height is `LH3DIsland::GetAltitude` `0x00803090` at each
+  point, with the sea and the places off the map at 0, as hand feel has it.
+- **The solids** (`hand_object_stop`). A house, a rock and a tree trunk stop
+  the drawn hand too. When the real hand goes into one, the drawn hand goes
+  out of it along one direction until no point of it is in the solid. So it
+  stays on the surface and slides along it with the real hand. Each point of
+  the hand stops at a solid, also with fingers that bend on the land: hand
+  feel bends a finger only when it is in a body, and the stop keeps the
+  fingers out of the solid. The push comes first, and then the lift over the
+  land of the pushed hand.
+  - A house is the box of the mesh of an `Abode`, a `Creche`, a `Windmill`
+    or a `Workshop`, with the turn of the object, as hand feel has it. A
+    rock is the box of the mesh of a `Rock`. The box holds each part of the
+    mesh and the air between them, so only a closed building is a solid.
+    The Village Store (`StoragePit`) is an open pit with no roof: its box
+    (radius 15.45 units) holds its inside and the air over it. The hand
+    goes out by the face of the box with the least push at the first touch, and that face
+    holds while the touch holds. So the drawn hand does not jump to the far
+    face when the real hand goes past the middle of the house. A face that
+    points down does not count.
+  - A touch starts only with a push of 10 cm of the room or less. A real
+    hand that a teleport or a zoom puts deeper into a solid is drawn as the
+    real hand until it comes out. A touch that holds can grow past 10 cm.
+  - A tree is its trunk only: an upright cylinder of a quarter of the
+    radius of the tree, from the land to half its height. The leaves do not
+    stop the hand. The hand goes out along the level line from the axis of
+    the trunk to the palm of the real hand, so it goes round the trunk with
+    the real hand. It keeps its side when the palm goes past the axis.
+  - These are not solids: the Village Store, a `Graveyard`, a `TownCentre`,
+    a `Wonder`, a field, a villager, an animal, the Creature, a
+    forest, a scroll, the object in the Hand, a box with no half size of 2
+    cm of the room or more, and a trunk with a radius of less than 1 cm of
+    the room. On the table (a hand of more than 60 world units) no solid
+    counts.
+  - The solids are those of the first eye pass of the frame before
+    (`LatchSolids` in `hand_direct.cpp`, after the world of that pass). The
+    hook of the screen test of the draw also offers an object to the pick
+    when the ball round its box is within one hand length and 10 cm of the
+    room of the middle of the palm of a real hand. So a wall near the hand
+    that does not point is in the list.
+- **What follows the drawn hand.** The mesh of each hand, the low poly hands,
+  and hand feel. The Hand's point of the pointing hand goes up by the same
+  lift (`HandLandPointLift`), so the glow, the pick, a take and a click act
+  at the hand that the player sees. The Hand's point still stops 5 mm over
+  the land by itself (hand.md, "5. The touch of the land"). The solids do not
+  move the Hand's point: it goes into a body to choose it, so the glow and a
+  take of a rock act at the real hand.
+- **What keeps the real hand.** The grab of the land, the grab with two
+  hands, the far grab, the teleport aim and the speed of a throw. A grip that
+  holds the land with the hand in it moves the land as before.
+- **No copy under the land.** Nothing of the real hand shows in the land.
+- **The pulse.** One faint pulse (`surface`) when a hand first touches the
+  land, and none while it rests on the land or slides along it. With
+  `hand_feel=1` hand feel sends it, by its rule for a finger that meets the
+  land, so a finger and the palm that touch at one time give one pulse. With
+  `hand_feel=0` the stop sends it by the same rule. A solid has its own
+  pulse by the same rule, from the stop.
+- **When.** Only while the God view or the table owns the view and the
+  controller owns the pointer, as hand feel. In a menu, in a room of the
+  Temple, in a cut scene and in the intro the hands are the real hands.
+
+**Once a frame.** The first call of a frame makes the offset of both hands
+from the grip poses of the frame and the shape of the fingers of the last
+frame (`OverlayLastShape`). That call comes from `HandDirectFrame`, before
+the overlay builds the hands. Each later call in the frame gets the same
+numbers, so the game's point and the drawn hand agree.
+
+### Keys
+
+| Key | Default | What it does |
+| --- | --- | --- |
+| `hand_land_stop` | 1 | 1: a hand in the land is drawn on the land, and the Hand's point goes with it. 0: the drawn hands are the real hands also in the land, the land hides them, and only the Hand's point stops 5 mm over the land |
+| `hand_object_stop` | 1 | 1: a hand in a house, a rock or a tree trunk is drawn on its surface. 0: the drawn hands go into them |
+| `solid_house_inset_pct` | 20 | Below the life size scale the box of a house is this percent smaller across, so it is nearer to the walls under the eaves (`god-view.md`, section 2, "Houses at a small scale"). 0: the whole box at each scale |
+
+The debug page has the switches "Land stop" and "Object stop" in the group
+of the Hand.
+
+### The log
+
+The tag `hand land`. At the start, the two keys. For each hand, each touch
+of the land (80 lines at most): the lift in cm of the room, and the kind of
+the point that is lowest. Each end of a touch: the frames of the touch and
+the largest lift. Each touch of a solid (80 lines at most): its class and
+address, the face of its box (in the axes of the box) or its trunk, the push
+in cm of the room, the direction of the push in the world, the palm of the
+real hand, the middle of the solid and the count of the solids near. Each end of the
+touch of the solids: the frames and the largest push. Each change of the push by 1 cm of the room or more while the touch holds. Once, the first frame
+in which the Hand's point goes up with the drawn hand. Once a report window:
+the hand frames on the land, the frames of the point, the pulses with
+`hand_feel=0` and the count of the land heights. A second line has the hand
+frames that a solid held, their pulses, the first eye passes that kept the
+solids, the solids that they kept, the solids near the hands and the objects
+that went to the pick only for a hand or the head.
+
+### Tests
+
+The math test (`hand_land_checks.h`) has the low poly hand, 19 units long at
+100 units a meter, on a flat land and on a slope:
+
+- The points: 44 for a hand, and 13 (the palm and the knuckles) with fingers
+  that bend.
+- Over the land there is no lift. A hand with the palm down that goes 0.5, 10
+  and 60 units into the land goes up by that depth, rests on the land with
+  its gap, and does not move sideways. A hand that points down stops on its
+  tip, and the Hand's point stays 5 mm over the land.
+- A hand 10 units under a slope stays on the slope in each step of a slide,
+  and slides with the real hand. A hand that comes up has no lift as soon as
+  it is over the land. A still hand has the same lift in each frame.
+- With fingers that bend, finger tips in the land give no lift, and the hand
+  goes up when the knuckles go into the land.
+- The Hand's point is on the hand within 2 cm of the room. The pulse comes
+  once at the first touch, not after a gap of 0.1 s, and again after 0.2 s.
+
+The math test of the solids (`solid_checks.h`) has a house of 20 by 10 by
+20 units and a trunk of radius 2:
+
+- Out of the house there is no push. A point 1 unit into a wall goes out to
+  the wall and its gap, along that face only. A point that goes past the
+  middle of the house stays on the same face. A point that slides along the
+  wall slides with the real point. A point out of the wall or past the
+  corner is free at once.
+- A point in the roof rests on the roof. A point at the floor goes out by
+  the nearest wall, never down. The push of a turned house follows its turn.
+- A point in a trunk goes out to its radius, goes round it with the palm,
+  and keeps its side past the axis. A point in the leaves has no push. A
+  point between two houses goes out of both.
+- The low poly hand with its fingers 2 units into a wall goes out along the
+  face, with no point in the box, and a still hand has the same push in each
+  frame. A stone of 2 cm of the room does not count, and the same stone at
+  13.2 units a meter does. The distance of the head to a box and to a trunk.
+
+The desktop run is `village_run.ps1 -Kind land` (`bwvr/tools/desk`). It
+puts the Hand's point 3 cm over open land near the Village Store, in the
+middle of the view (the seek word `open`), pushes the real hand 12 cm into
+the land, moves it sideways in
+the land and takes it up again, with an eye picture at each place. A run
+with the hand at a pile of the store had the touch at 7.3 cm of the room and
+the end of the touch after 239 frames, with 14.0 cm of lift at the most, and
+one pulse. With `hand_feel=0` a finger tip stopped the hand at 11.7 cm, with
+20.1 cm at the most. With `hand_land_stop=0` the log had no touch.
+
+The desktop run of the solids is `village_run.ps1 -Kind housestop`. At
+29.6 units a meter the Hand's point goes to the side of a house across the
+view: 3 cm out of the wall, 2 cm and 5 cm in its box, and 3 cm out again,
+with an eye picture at each place. No desktop run has shown the stop at a
+house yet.
+
+**Limits of the solids.** A solid is the box of the whole mesh, so an open
+building is no solid, and a building with parts at different heights stops
+the hand in the air over its low parts. The box of a house has no roof
+slope. A trunk is a
+quarter of the radius of the crown of the tree. The Hand's point keeps the
+real hand, so the glow is in the solid while the drawn index finger is on
+its surface. An object in the Hand stays at the real hand, as it does in the
+land.
+
+The checks in a headset are in `headset-checks.md`.
 
 ## The glow at the Hand's point
 
@@ -1532,7 +1847,9 @@ around the point, so the player cannot see where it is. A glow sits on it. It sa
 the grip does there now.
 
 By default the disc shows only while a press of the grip at the point acts on
-something (`hand_glow_idle=0`). The disc over nothing and the disc while the
+something (`hand_glow_idle=0`). While the spell book is open the disc does
+not show (`spell_book_point=1`): a grip on the page takes from the book, and
+the page shows the point of its pick (`miracles.md`, "The pick"). The disc over nothing and the disc while the
 Hand holds an object show only with `hand_glow_idle=1`.
 
 **What it shows.** The look comes from the game's interface hand mode
@@ -1564,8 +1881,8 @@ does not pick up there.
 
 **The halos.** Other discs use the same draw: the halo around the target of
 the grip at the Hand's point, a far target, the target of a Creature command
-(green), the target of a miracle and the thing that takes the object in the
-Hand. The halo is gold, or red when the influence stops the press. The halo
+(green, only with `command_look=0`), the target of a miracle and the thing
+that takes the object in the Hand. The halo is gold, or red when the influence stops the press. The halo
 is as large as the body of its target. For a tall body it is an ellipse along
 the image of the upright axis. grab.md ("One target" and "The grab from a
 distance"), creature.md and miracles.md say when each halo shows. The halo
@@ -1671,6 +1988,10 @@ turned camera gives the same numbers, and two eyes 6.68 units apart put the
 two discs `fx * e / d * hx` pixels apart, level, each on its own eye's line to
 the point. On the desktop both eyes put the disc on the tip of the index
 finger, and a villager under the point turns the disc gold and larger.
+`hand_run.ps1 -Kind glow` has the glow at the finger tip in both eyes, 58.0
+px apart as its depth asks, and the finger does not hide it. With the hand
+17 cm in the land (`hand_land_stop=0`) the hill hides the hand and the glow
+in both eyes.
 
 In one walk, a desktop run with `hand_glow=1`, `hand_glow_idle=1`,
 `one_walk_check=1` and four poses of the hand (`fake_controller_rots`) has
@@ -1683,14 +2004,11 @@ eye (`one_walk_checks.h`). A halo of a far target, 446 units deep, is at the
 same pixels with `one_walk_marks` 1 and 0. The run with a halo of the target
 at the Hand has the Hand in front of most of the halo.
 
-**Open: only a headset shows it.** The sizes and the colors. Whether the glow
-is easy to see on bright land, on the sea and on the Hand. Whether the depth
-pull of half a Hand is right: the disc must not vanish into the finger tip,
-and a hill in front must still hide it. Whether a one frame change of the look
-(9, `0x12`, 3 when the Hand leaves an object) shows as a flicker. Which
-objects give the touch look: scrolls, signposts and buildings. On the
-desktop, a press at the edge of the view can start off the render while one
-eye shows gold.
+**Open.** On the desktop, a press at the edge of the view can start off the
+render while one eye shows gold.
+
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ## The glow on the mesh of a target
 
@@ -1708,7 +2026,11 @@ is a rule of the glow: which object, and gold, red or green.
 | --- | --- |
 | The target of the grip at the Hand's point, a far target, the target of a miracle, the thing that takes the object in the Hand | gold (255, 190, 40) |
 | The same targets when the influence or the game stops the press | red (255, 70, 50) |
-| The target of a Creature command | green (70, 255, 150) |
+| The target of a Creature command, with `command_look=0` | green (70, 255, 150) |
+
+With `command_look=1` (the default) the target of a Creature command has no
+glow and no halo. It has a green ring on the land (`creature.md`, "The look
+of a target"). So each glow is a target of the grip.
 
 **The look.** The mesh gets a share of that color on top of its texture. The
 share is the product of five numbers (`target_glow_math.h`):
@@ -1847,21 +2169,26 @@ cost measure (`bench_run.ps1`, a target in each scene) shows no difference
 between `target_glow=1` and `target_glow=0` that is larger than the spread
 of two runs.
 
+`village_run.ps1 -Kind tglow` (`target_glow_log=30`) shows the glow in both
+eyes on the Village Store (393 vertices) and a pile, and the log has it on a
+tree and a villager. Each batch is in the call of the object.
+
 **Open.** No run has shown a mesh of the sorted list as a target, a mesh
-that comes through the clip of the engine, or a target by day: the test
-saves are at dusk. Only a headset shows these: whether 45 percent is right by
-day and by night, on a villager and on a house. Whether the pulse and the
-wave are calm enough at the size of the God view. Whether the Creature and a
-building in work, which keep the halo, look wrong beside a target that
-glows.
+that comes through the clip of the engine, or a target by day: each run had
+the sky of the evening or the night, because the game takes the time of day
+from the clock of the PC. `sky_test_hour=13` sets the day.
+
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ## Overlay renderer
 
 The overlay renderer draws the mod's own meshes inside the game's frame, at
 the right depth in both eyes: the hands, the arc and the ring of the
-teleport, the ray and the tether. Later users can be the controller models
-of the hints and the rim of the table. The code is in `src/mod/overlay.cpp`
-and `src/mod/overlay_math.h`.
+teleport, the ray and the tether, and the glow ribbons. Later users can be
+the controller models of the hints and the rim of the table. The code is in
+`src/mod/overlay.cpp` and `src/mod/overlay_math.h`. The glow ribbons have
+`glow_math.h`, `ray_glow_math.h` and `gesture_trail_math.h`.
 
 **The low poly hand** (`overlay_math.h`, `BuildHand`). A palm, four fingers
 of three segments and a thumb of three segments, 330 triangles. Each segment
@@ -1923,6 +2250,10 @@ default) the mesh of the game stands for the low poly hand
    stage 1 is off. The texture stays bound. The hand writes depth, so its
    fingers hide its palm, and land in front hides the hand. (The mesh of the
    game uses the alpha blend, see above.)
+7. After the meshes, a second `DrawPrimitive` draws the glow ribbons (see
+   "The glow ribbons"). It changes the same states, and `ALPHABLENDENABLE`
+   on, `SRCBLEND` one, `DESTBLEND` one and `ZWRITEENABLE` off. The draw
+   reads each of these states before it changes it, and puts the value back.
 
 The overlay draws only while the controller owns the pointer, and each hand
 only while its pose is tracked. The skin takes the color of the player's
@@ -1931,7 +2262,91 @@ arc and ring (`teleport.cpp`) are a second source with their own switch: they
 draw while the player aims, with `overlay=0` too. They are a tube of 6 sides,
 6 mm of the room across, and a ring on the land. Cyan means a valid target
 and red means a target that is not valid. They are opaque, with the depth test
-and the depth write on.
+and the depth write on. With `ray_glow=1` each line also has a glow ribbon,
+and with `ray_glow_only=1` (the default) the ribbon is the whole line, with
+no tube.
+
+**The glow ribbons** (`glow_math.h`, `ray_glow_math.h`,
+`gesture_trail_math.h`). A ribbon is a flat strip along a line of points.
+It turns to the eye, so it has the same width from every side. It has 5
+corners across. The light is none at the two edges, the rim light half way
+from the middle to each edge, and the core light on the middle line. The
+light between two corners is a straight line, so the strip is a soft glow
+with no edge. The draw adds this light to the picture, tests the depth and
+writes no depth. A ribbon can also hide a share of the picture behind it:
+the blend is source one and destination one less the source alpha, and the
+alpha of a corner is a share of its light (0 for the trail and for a ray over
+a tube, so these only add light). So land in front of a ribbon hides it. The
+ribbons draw after the meshes: a hand in front of a ribbon hides it, and a
+ribbon in front of a hand adds its light to the hand. A
+ribbon is built again in each eye pass, because it turns to the eye of that
+pass (`glow_math::BuildRibbon`, with the place of the eye from the world to
+camera matrix). The cut at the near plane, the projection and the vertex
+format are those of the meshes. Two sources use it:
+
+- **The glow of a ray** (`ray_glow=1`, the default). The menu ray, the
+  tether of the far grab, the arc of the teleport and the arc of a Creature
+  command each get a ribbon along the line, in the color of the line. Its
+  light is a bright band that runs along the line from the hand outward: one
+  band each 0.30 m, at 0.9 m/s. The light is none at the hand and full from
+  6 cm. The line is cut in samples, 6 for each band and 64 at most, so a line
+  longer than 10 m has wider bands. Only the look of the line moves. The ray,
+  the arc and the world stay where they are, and the clock is read once a
+  frame, so both eyes show the same light. With `ray_glow=0` the lines are
+  plain tubes.
+- **The glow alone** (`ray_glow_only=1`, the default, `ray_glow_math.h`).
+  The ribbon is the whole line: no tube is under it. The ribbon is 0.96 cm
+  (menu ray), 0.8 cm (tether) or 2 cm (arc) of the room from the middle to
+  the edge. Its core keeps 70 percent of its light between two bands, its
+  rim is dark, and the core hides 55 percent of the picture behind it, so
+  the core reads as a solid line on a bright picture. With
+  `ray_glow_only=0` the tube stays, and the ribbon over it is 1.2 cm, 1 cm
+  or 2.5 cm, with a light that only adds. The two profiles, from the middle
+  line to the edge, with "band" the light of the band (0.40 to 1):
+
+  | | Middle | Rim, at 0.5 | Edge | Alpha | Half light at a band |
+  | --- | --- | --- | --- | --- | --- |
+  | Over a tube | 1.00 x band | 0.65 x band | 0 | 0 | 0.62 half widths, 0.74 cm for the menu ray |
+  | Glow alone | 0.70 to 1.00 | 0.55 x band | 0 | 0.55 x the light | 0.55 half widths, 0.52 cm for the menu ray |
+
+  While a panel in the room is open, the menu ray goes over the panel as a
+  quad layer of its own with the same look (`ui-layer.md`, "The ray over
+  the panels").
+- **The trail of a gesture** (`gesture_trail=1`, see `miracles.md`, "The
+  trail at the fingertip").
+
+**The glow at the end of the menu ray** (`ray_tip=1`, the default,
+`ray_tip_math.h`). The end of the menu ray, in a dialog box and in a room of
+the Temple, is a round soft glow. It has no outline. Its light is full at the
+middle and falls smoothly to none at the edge, with no step. The middle has
+the warm white of the ray, and the outer part turns to a warm gold, so the
+glow also shows on the bright paper of a panel. The middle hides 55 percent
+of the picture behind it, as the core of the glow alone does. The glow is
+steady: the bands of the ray show that the ray is live, and a steady end is
+easier to hold on a small button.
+
+- The size: the radius from the middle to the edge is 1.3 percent of the
+  distance from the eye, 6 mm at the least and 8 cm at the most. So the glow
+  has the same size in the view near and far: 2.6 cm across at 1 m, and
+  5.2 cm across at 2 m. The light is half of the light of the middle at
+  0.54 of the radius.
+- The eye pictures: each eye pass builds the glow again as a disc of 180
+  triangles square to the line to its own eye, so each eye sees a circle.
+  The disc goes into the list of the glow ribbons after the ribbons, with
+  their blend. Its middle moves toward the eye by its radius on the line to
+  the eye. So each eye sees it at the end of the ray, and a wall or the land
+  at the end does not cut it.
+- Over the panels the glow is a quad layer of its own (`ui-layer.md`, "The
+  ray over the panels").
+- The ray of the cut scene window keeps its small cross, because that window
+  draws no glow.
+
+With `ray_tip=0` the end of the ray is a small cross in the eye pictures
+(`controllers.md`, "The mark at the end"), and a disc in a ring of dark ink
+over the panels.
+
+The cost is in the log: after each report window with a glow, one line gives
+the frames, the triangles in each eye and the CPU time of the two draws.
 
 **Keys.** `overlay` (the code default is 1): 1 draws the hands of the
 overlay. With 0 the overlay draws nothing for the hands and changes no state.
@@ -1939,6 +2354,16 @@ With `hand_exact=1` and `overlay=0` the overlay draws only the hand that the
 game's Hand does not cover (hand.md, "The exact Hand"). With
 `hand_hide_game=1` (the default) the overlay draws both hands with `overlay=0`
 too (hand.md, "8. The two real hands and which one is the Hand"). There is no launcher row.
+
+`ray_glow` (1): the glow ribbons of the rays (see "The glow ribbons"). 0 gives
+plain tubes. The switch "Ray glow" of the debug page (the group Picture). The
+launcher has no row for it. `ray_glow_only` (1): with `ray_glow=1`
+the glow is the whole ray. 0 keeps the tube under the wider glow. The switch
+"Glow only" of the debug page. `ray_tip` (1): the end of the menu ray is the
+round glow (see "The glow at the end of the menu ray"). 0 gives the cross in
+the eye pictures and the disc with ink over the panels. The switch "Ray tip"
+of the debug page (the group Picture). The launcher has no row for it.
+`gesture_trail` (1) is the trail of a gesture (`miracles.md`).
 
 **The log.** The tag is `overlay`. One line at the first draw, and one at
 each change of the owner of the pointer. Then, on the first draw, on a
@@ -1951,6 +2376,14 @@ a draw in both eyes, one line gives the triangles a frame and the time on the
 CPU, with the build and the draws apart. Each report window counts the draws,
 the triangles, the triangles that crossed the near plane and the triangles
 off the screen.
+
+The glow has its own lines: the values of `ray_glow`, `ray_glow_only`,
+`ray_tip` and `gesture_trail` at the start, each change of `ray_tip` by the
+debug page, the first glow of a ray (with the look), the first glow at the
+end of a ray in the eye pictures (its triangles, its size and its distance
+from the eye), and
+each start and end of a trail (30 at the most). After each report window with a glow, one line gives the frames, the
+triangles in each eye and the CPU time of the two glow draws.
 
 **Tests.** The math test (`OverlayChecks`):
 
@@ -1971,16 +2404,44 @@ off the screen.
 - Two eyes put a corner `fx * e / d * hx` pixels apart, level, at the same
   depth.
 
+The checks of the glow (`glow_checks.h`): the ribbon of a straight line and of
+a curve (the width, the light of each corner, the plane square to the way to
+the eye, a line that points at the eye, a side that does not flip), the room
+of the build, the place of the eye from the camera matrix, the trail (the
+light, the points, the keep time, the release, a new draw, a full buffer, the
+same count at 72, 90 and 120 Hz) and the glow of a ray (the period, the
+samples, the bands that move outward, the fade at the hand, the point along
+a polyline). The checks of the glow alone (`ray_card_checks.h`): the light
+across the ribbon, the core and the rim between two bands, and the half
+light of the two profiles. The checks of the glow at the end
+(`ray_tip_checks.h`): the size near and far and its limits, a light that
+falls from the middle to none at the edge with no step, the gold of the
+outer part, the alpha, a disc that is round and square to the line of each of
+two eyes, the move toward the eye and its limit, the quad layer that faces
+the head and is seen nearly face on from each eye, the picture, and a strip
+of the ray with no mark.
+
+Desktop runs with dxwrapper, `test_frame_rate=60` and `ray_glow=1` against
+`ray_glow=0` (`aim_run.ps1` with the recipe `ring1`, and `village_run.ps1
+-Kind fartotem`): the eye pictures show a soft glow round the cyan arc of the
+teleport, and a gold glow round the tether of the far grab, brightest near
+the object. With `ray_glow=0` the same pictures show a plain tube. In these
+pictures the arc leaves the hand and goes down, and its glow is a pale band
+beside the tube. The ribbons cost 0.02 to 0.03 ms a frame on the CPU
+for the two eyes. The Main Menu of a desktop run shows no menu ray, with
+`ray_glow=0` too, so no picture shows the glow of the menu ray. The log
+shows that the ray and its ribbon were built.
+
 An offline check sent the fake controller's pose for both hands through the
 real `head_pose.cpp` and the overlay math. Both hands showed in both eyes,
 and the left hand was the mirror image of the right.
 
-**Open: only a headset shows it.** Whether the hand sits on the real hand:
-each runtime and controller puts the grip pose at its own place on the
-handle. The size and the color. The near plane: in play mode 0 it is 3.5
-units, 47 cm of the room, so a hand nearer to the eye than that is cut away.
-The God view brings it in to 5 cm. The frame cost at the headset's render
-size.
+**Limit.** The near plane: in play mode 0 it is 3.5 units, 47 cm of the room,
+so a hand nearer to the eye than that is cut away. The God view brings it in
+to 5 cm.
+
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ## Haptics
 
@@ -2072,8 +2533,8 @@ The desktop shows only that a pulse goes out at the right frame: `target`,
 `command` and `leash off`. The call sites of `teleport`, `refused`,
 `gesture`, `power` and `world` have no desktop proof.
 
-**Open: only a headset shows it.** How each pulse feels. Set `haptics_pct=50`
-or `200` and say which kinds are too faint or too strong.
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ## Haptics from the world
 
@@ -2177,7 +2638,5 @@ throw`). With `world_haptics=0` the same runs give the lines with no pulse.
 No run has shown `purr`: in the runs of the Creature state the game counted
 no stroke.
 
-**Open: only a headset shows it.** How each pattern feels: whether the purr
-reads as a purr, the beat as a heartbeat, and the texture of the land as
-land, whether the thump of a landing far from the hand feels right, and
-whether the 80 ms keep a target and a lock clear.
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.

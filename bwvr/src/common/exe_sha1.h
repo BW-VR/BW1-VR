@@ -15,6 +15,8 @@ namespace bwvr {
 // One source for the value: bw_addresses.h. The installer has a copy.
 constexpr uint64_t kGameExeSize = bw::kExpectedSize;
 constexpr const char* kGameExeSha1 = bw::kExpectedSha1;
+// The same file with the flag LARGE_ADDRESS_AWARE (large_address.h).
+constexpr const char* kGameExeSha1LargeAddress = bw::kExpectedSha1LargeAddress;
 
 // Builds that are known and not supported, so that a message can name them.
 struct KnownBuild {

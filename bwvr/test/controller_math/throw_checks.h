@@ -676,6 +676,125 @@ inline void ThrowChecks() {
           steps * kSubstep, 10.0);
   }
 
+  // THE TURN OF A THROWN OBJECT (throw_turn).
+  {
+    const float axes[9] = {1, 0, 0, 0, 1, 0, 0, 0, 1};
+    const float inverse[9] = {0.5f, 0, 0, 0, 0.25f, 0, 0, 0, 0.125f};
+    const float momentum[3] = {2.0f, 4.0f, 8.0f};
+    Near("the turn of the game is M^T (A L)",
+         TurnSpeedOf(axes, inverse, momentum), sqrt(3.0), 1e-5);
+    // Axes turned 90 degrees about the vertical: a momentum along x of the
+    // world is along z of the body.
+    const float turned[9] = {0, 0, -1, 0, 1, 0, 1, 0, 0};
+    const float along_x[3] = {8.0f, 0.0f, 0.0f};
+    Near("the axes take the momentum into the body",
+         TurnSpeedOf(turned, inverse, along_x), 1.0, 1e-5);
+    const float none[3] = {0.0f, 0.0f, 0.0f};
+    Near("no momentum gives no turn", TurnSpeedOf(axes, inverse, none), 0.0,
+         1e-9);
+    Near("the release momentum is divided by the rate of the flight",
+         TurnStartFactor(5.0f), 0.2, 1e-6);
+    Near("at the game's own rate the release momentum stays",
+         TurnStartFactor(1.0f), 1.0, 1e-6);
+    Near("a rate below 1 does not make the momentum larger",
+         TurnStartFactor(0.5f), 1.0, 1e-6);
+    Near("a turn that the picture shows below the cap stays",
+         TurnCutFactor(1.0f, 5.0f, kTurnCap), 1.0, 1e-6);
+    Near("a turn of 1 turn a second at 5 steps a substep is cut to the cap",
+         TurnCutFactor(6.2831853f, 5.0f, kTurnCap),
+         kTurnCap / (6.2831853 * 5.0), 1e-5);
+    Near("no rate gives no cut", TurnCutFactor(100.0f, 0.0f, kTurnCap), 1.0,
+         1e-6);
+    // The turn of the picture for a throw that the game turns at 1 turn a
+    // second (2 pi radians a second), at 5 steps of the game in a substep.
+    // The picture turns rate x min(game turn, cap).
+    const double rate = 5.0, given = 6.2831853;
+    const double plain = rate * (given < kTurnCap ? given : kTurnCap);
+    double game = given * TurnStartFactor(static_cast<float>(rate));
+    game *= TurnCutFactor(static_cast<float>(game), static_cast<float>(rate),
+                          kTurnCap);
+    const double picture = rate * (game < kTurnCap ? game : kTurnCap);
+    printf("  (a throw that the game turns at 1 turn a second, at 5 steps a "
+           "substep: the picture turns %.2f times a second with throw_turn=0 "
+           "and %.2f with throw_turn=1)\n", plain / 6.2831853,
+           picture / 6.2831853);
+    Near("the picture turns as fast as the game turns the throw", picture,
+         given, 1e-4);
+    Check(plain > 4.0 * given, "with no change the picture turns 5 times as "
+          "fast", plain, 4.0 * given);
+    // A contact on one corner gives 30 times the cap. At 1 step a substep
+    // and the land factor of the turn, the object turns at the cap until
+    // the factor has worn the momentum down to the cap. With the cut of each
+    // substep it turns at the cap only in that substep.
+    const double land = pow(static_cast<double>(kLandTurnKeep), kSubstep);
+    double kept = 30.0 * kTurnCap, cut = 30.0 * kTurnCap;
+    double kept_at_cap = 0.0, cut_at_cap = 0.0;
+    for (int i = 0; i < 2000; ++i) {
+      cut *= TurnCutFactor(static_cast<float>(cut), 1.0f, kTurnCap);
+      kept *= land;
+      cut *= land;
+      if (kept >= kTurnCap * 0.999) kept_at_cap += kSubstep;
+      if (cut >= kTurnCap * 0.999) cut_at_cap += kSubstep;
+    }
+    printf("  (30 times the cap after a contact: the object turns at the cap "
+           "for %.2f s with the momentum of the game and %.3f s with the "
+           "cut)\n", kept_at_cap, cut_at_cap);
+    Check(kept_at_cap > 2.0, "the momentum of the game keeps the turn at the "
+          "cap for more than 2 s", kept_at_cap, 2.0);
+    Check(cut_at_cap < 0.01, "with the cut the turn falls from the cap at "
+          "once", cut_at_cap, 0.01);
+    // The constant torque of a game turn (packet 0x40). The game gives it
+    // for 20 steps. The flight runs 20 x rate steps with the factor, and the
+    // picture shows the turn of the game rate times as fast.
+    Near("the torque of a game turn is divided by the square of the rate",
+         TurnTorqueFactor(5.0f), 0.04, 1e-6);
+    Near("at the game's own rate the torque stays", TurnTorqueFactor(1.0f),
+         1.0, 1e-6);
+    Near("a rate below 1 does not make the torque larger",
+         TurnTorqueFactor(0.5f), 1.0, 1e-6);
+    {
+      const double torque = 2.0;  // momentum a second, one axis, inertia 1
+      const double game_steps = kSubstepsInTurn;
+      const double plain_turn = torque * game_steps * kSubstep;
+      const double flight_turn = torque * TurnTorqueFactor(5.0f) *
+                                 game_steps * 5.0 * kSubstep;
+      Near("the picture turns as fast as the game turns that torque",
+           flight_turn * 5.0, plain_turn, 1e-6);
+      Check(game_steps * 5.0 * kSubstep * torque * 5.0 > 20.0 * plain_turn,
+            "with no change the picture turns 25 times as fast",
+            game_steps * 5.0 * kSubstep * torque * 5.0, 20.0 * plain_turn);
+    }
+    // The cap in each step of a substep with a torque: the momentum of the
+    // step (L + torque dt) keep turns the picture at the cap at most, and a
+    // momentum below it does not change.
+    {
+      const float keep = 0.999f, rate = 3.33f;
+      const float torque[3] = {0.0f, 0.0f, 400.0f};
+      float momentum[3] = {0.0f, 0.0f, 0.4f * kTurnCap / rate * 8.0f};
+      // inverse z is 0.125: the turn is momentum z / 8.
+      int steps_over = 0;
+      for (int j = 0; j < 100; ++j) {
+        TurnCutBeforeStep(momentum, torque, keep, kSubstep, axes, inverse,
+                          rate, kTurnCap);
+        for (int i = 0; i < 3; ++i) {
+          momentum[i] = (momentum[i] + torque[i] * kSubstep) * keep;
+        }
+        if (TurnSpeedOf(axes, inverse, momentum) * rate > kTurnCap * 1.0001f) {
+          ++steps_over;
+        }
+      }
+      Check(steps_over == 0, "with the cap in each step no step turns the "
+            "picture past the cap", steps_over, 0);
+      Near("the momentum of the steps ends at the cap",
+           TurnSpeedOf(axes, inverse, momentum) * rate, kTurnCap, 1e-3);
+      float low[3] = {0.0f, 0.0f, 1.0f};
+      const float none[3] = {0.0f, 0.0f, 0.0f};
+      Check(!TurnCutBeforeStep(low, none, keep, kSubstep, axes, inverse, rate,
+                               kTurnCap) && low[2] == 1.0f,
+            "a momentum below the cap does not change", low[2], 1.0);
+    }
+  }
+
   // THE REST AFTER A LANDING (throw_land_rest).
   {
     Check(RestSpin(kRestAll) && RestSteep(kRestAll) && RestStill(kRestAll),
@@ -1077,6 +1196,85 @@ inline void ThrowChecks() {
          CatchUpLeft(0.5 * kCatchUp, kCatchUp), 0.125, 1e-6);
     Near("after the time the picture is on the flight",
          CatchUpLeft(kCatchUp, kCatchUp), 0.0, 1e-6);
+  }
+
+  // THE OBJECTS ON THE ARC (throw_arc_objects). A house of 10 by 6 by 10
+  // units with its middle at 0 3 0, turned 30 degrees about up.
+  {
+    const float c = cosf(0.5235988f), s = sinf(0.5235988f);
+    const Box house = {{0.0f, 3.0f, 0.0f},
+                       {c, 0.0f, -s, 0.0f, 1.0f, 0.0f, s, 0.0f, c},
+                       {5.0f, 3.0f, 5.0f}};
+    const float over[3] = {0.0f, 10.0f, 0.0f};
+    const float under[3] = {0.0f, -2.0f, 0.0f};
+    float u = -1.0f;
+    Check(SegmentEntersBox(house, over, under, &u),
+          "a fall from over the roof goes into the house", u >= 0.0f, 1);
+    Near("it goes in at the roof, 6 units over the land", 10.0f - 12.0f * u,
+         6.0, 1e-4);
+    const float in_room[3] = {1.0f, 2.0f, 1.0f};
+    Check(InBox(house, in_room), "a point in the room is in the house", 1, 1);
+    Check(!SegmentEntersBox(house, in_room, under, &u),
+          "a release inside the house is the game's own case", 0, 0);
+    const float beside[3] = {9.0f, 10.0f, 0.0f};
+    const float beside_low[3] = {9.0f, -2.0f, 0.0f};
+    Check(!SegmentEntersBox(house, beside, beside_low, &u),
+          "a fall beside the house does not go into it", 0, 0);
+    // The corner of the turned house is 5 / cos 30 = 5.77 units from the
+    // middle along x at z 0: a fall at x 5.5 meets it.
+    const float corner[3] = {5.5f, 10.0f, 0.0f};
+    const float corner_low[3] = {5.5f, -2.0f, 0.0f};
+    Check(SegmentEntersBox(house, corner, corner_low, &u),
+          "a fall at the turned corner goes into the house", 1, 1);
+    // The bounds of a throw down from 10 units at the life size scale.
+    const float p0[3] = {0.0f, 10.0f, 0.0f};
+    const float v0[3] = {2.0f, -20.0f, 0.0f};
+    float low[3], high[3];
+    ArcBounds(p0, v0, 67.0f, 0.2, 0.5f, low, high);
+    Check(BoxNear(house, low, high), "the house is near the arc", 1, 1);
+    const Box far_house = {{40.0f, 3.0f, 0.0f},
+                           {1, 0, 0, 0, 1, 0, 0, 0, 1},
+                           {5.0f, 3.0f, 5.0f}};
+    Check(!BoxNear(far_house, low, high),
+          "a house 40 units away is not near the arc", 0, 0);
+    float p[3], v[3];
+    RealArc(p0, v0, 67.0f, 0.2, p, v);
+    Check(p[1] >= low[1] && p[1] <= high[1] && p[0] <= high[0],
+          "the end of the arc is in its bounds", 1, 1);
+  }
+
+  // THE BALL OF A PHYSICAL SHIELD (throw_shield). A ball of 10 units with its
+  // middle at 0 5 0.
+  {
+    const float m[3] = {0.0f, 5.0f, 0.0f};
+    const float high[3] = {0.0f, 30.0f, 0.0f};
+    const float low[3] = {0.0f, 0.0f, 0.0f};
+    float u = -1.0f;
+    Check(SegmentEntersBall(m, 10.0f, high, low, &u),
+          "a fall onto the ball goes into it", 1, 1);
+    Near("it goes in at the top of the ball, 15 units high",
+         30.0f - 30.0f * u, 15.0, 1e-4);
+    const float side[3] = {-30.0f, 5.0f, 0.0f};
+    const float past[3] = {30.0f, 5.0f, 0.0f};
+    Check(SegmentEntersBall(m, 10.0f, side, past, &u),
+          "a throw across the ball goes into it", 1, 1);
+    Near("it goes in at the side, 10 units from the middle",
+         -30.0f + 60.0f * u, -10.0, 1e-4);
+    const float in[3] = {1.0f, 6.0f, 0.0f};
+    Check(!SegmentEntersBall(m, 10.0f, in, past, &u),
+          "a release inside the ball is the game's own case", 0, 0);
+    const float beside[3] = {-30.0f, 5.0f, 12.0f};
+    const float beside_end[3] = {30.0f, 5.0f, 12.0f};
+    Check(!SegmentEntersBall(m, 10.0f, beside, beside_end, &u),
+          "a throw beside the ball does not go into it", 0, 0);
+    const float short_end[3] = {-20.0f, 5.0f, 0.0f};
+    Check(!SegmentEntersBall(m, 10.0f, side, short_end, &u),
+          "a segment that stops before the ball does not go into it", 0, 0);
+    const float pig[3] = {13.0f, 5.0f, 0.0f};
+    Check(BallsNear(pig, 1.0f, m, 10.0f, 3.0f),
+          "a pig 2 units from the ball is near it", 1, 1);
+    Check(!BallsNear(pig, 1.0f, m, 10.0f, 1.0f),
+          "with a margin of 1 unit it is not near", 0, 0);
   }
 }
 

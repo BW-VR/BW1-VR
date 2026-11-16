@@ -71,6 +71,17 @@ inline void WindowChecks() {
           "the scroll of the Creche: the God view holds until the window is "
           "flat", held_all && !held_flat ? 1 : 0, 1);
   }
+  // A VIDEO WITH THE WINDOW OFF.
+  Check(VideoWanted(false, true, 6, 6),
+        "around the player, a video of 6 frames starts the window", 1, 1);
+  Check(!VideoWanted(false, true, 1, 6),
+        "a video of one frame does not start the window", 0, 0);
+  Check(!VideoWanted(false, true, 0, 6),
+        "no video: the window stays off", 0, 0);
+  Check(!VideoWanted(false, false, 100, 6),
+        "cutscene_video_window=0: the video fills the eye pictures", 0, 0);
+  Check(!VideoWanted(true, true, 100, 6),
+        "with the window on, the rule of the bars starts it", 0, 0);
 
   // THE STATE, at 90 frames a second and a change of half a second.
   {

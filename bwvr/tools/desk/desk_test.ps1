@@ -95,8 +95,15 @@ try {
     # file bwvr-hint-counts.ini of the game folder, which is the player's.
     # The file of the run before goes first, so each run starts with no
     # counts.
+    # welcome_done=1: the welcome page of the first start (settings_panel.cpp)
+    # does not show, so it does not take the trigger of a recipe. A run of
+    # the welcome page gives welcome_done=0 in -Extra.
+    # hint_model_test_dir: the controller models of the hints
+    # (hint_style=2) come from bwvr\assets\controllers of this worktree, so
+    # a run needs no install of the models in the game folder.
     $counts = Join-Path $out 'bwvr-hint-counts.ini'
     Remove-Item -LiteralPath $counts, "$counts.new" -Force -ErrorAction SilentlyContinue
+    $models = Join-Path (Split-Path -Parent (Split-Path -Parent $sp)) 'assets\controllers'
     $keys = [ordered]@{
         vr = 0; stereo = 1; stereo_headless = 1; fake_head = 1;
         fake_head_yaw = 0; fake_head_pitch = 0; fov_absolute_deg = 110
@@ -107,6 +114,8 @@ try {
         god_zoom_forward_in = 1
         god_zoom_smooth = 0
         hint_counts_test_file = $counts
+        welcome_done = 1
+        hint_model_test_dir = $models
     }
     foreach ($k in $Extra.Keys) { $keys[$k] = $Extra[$k] }
 
@@ -131,6 +140,17 @@ try {
         foreach ($k in $keys.Keys) { $written += "$k=$($keys[$k])" }
     }
     Set-Content -Path $ini -Value $written -Encoding ascii
+
+    # The flag LARGE_ADDRESS_AWARE of runblack.exe, as the launcher sets it
+    # before a start: large_address of the test, else of the player's ini,
+    # else 1. The flag of before the run goes back at the end.
+    $largeBefore = Get-BwvrLargeAddress $game
+    $largeWant = 1
+    $m = Select-String -LiteralPath $backup -Pattern '^\s*large_address\s*=\s*(\d+)' | Select-Object -First 1
+    if ($m) { $largeWant = [int]$m.Matches[0].Groups[1].Value }
+    if ($keys.Contains('large_address')) { $largeWant = [int]$keys['large_address'] }
+    $largeNow = Set-BwvrLargeAddress ($largeWant -ne 0) $game
+    "large address: runblack.exe had the flag $largeBefore, the run asks for large_address=$largeWant, and the flag is $largeNow now"
 
     $startArgs = @{ FilePath = (Join-Path $game 'runblack.exe'); WorkingDirectory = $game; PassThru = $true }
     if ($Args -and $Args.Trim().Length -gt 0) { $startArgs['ArgumentList'] = $Args }
@@ -165,6 +185,8 @@ try {
     Start-Sleep -Milliseconds 800
     Watch-Desk 'after the end of the game'
     Copy-Item $log (Join-Path $out 'bwvr.log') -Force
+    # The ini as the run left it: the settings window writes its keys there.
+    Copy-Item $ini (Join-Path $out 'bwvr.ini.run') -Force
     "game exited on its own: $exited"
     Get-ChildItem $game -Filter 'bwvr-*.bmp' -ErrorAction SilentlyContinue |
         Move-Item -Destination $out -Force
@@ -182,4 +204,7 @@ finally {
     Start-Sleep -Milliseconds 500
     Copy-Item $backup $ini -Force
     "ini restored: " + ((Get-FileHash $ini).Hash -eq (Get-FileHash $backup).Hash)
+    if ($largeBefore -eq 'on' -or $largeBefore -eq 'off') {
+        "large address: the flag is $(Set-BwvrLargeAddress ($largeBefore -eq 'on') $game) again"
+    }
 }

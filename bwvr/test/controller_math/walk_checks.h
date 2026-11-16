@@ -5,6 +5,7 @@
 // main.cpp includes this file after Check and Near, just before main.
 #pragma once
 
+#include "../../src/mod/blinder_math.h"
 #include "../../src/mod/table_math.h"
 #include "../../src/mod/walk_math.h"
 #include "../../src/mod/zoom_math.h"
@@ -28,6 +29,312 @@ inline void Head(float yaw_right, float pitch_down, float roll_right,
     out[i * 3 + 0] = cr * right0[i] - sr * up0[i];
     out[i * 3 + 1] = sr * right0[i] + cr * up0[i];
     out[i * 3 + 2] = forward[i];
+  }
+}
+
+// THE FLY (move_type=1): the key, the kinds of the test switch, the level
+// right, the speed in 3D, the step of a frame, the view after a step, and
+// the ground limits of the grab on a fly down and up.
+inline void FlyChecks() {
+  using namespace table_math;
+  using namespace walk_math;
+  printf("\nThe fly with the stick\n");
+
+  Check(Type(0) == kTypeWalk && Type(1) == kTypeFly && Type(5) == kTypeWalk &&
+            Type(-1) == kTypeWalk,
+        "move_type 1 is the fly, and each other value is the walk", Type(5),
+        kTypeWalk);
+  Check(Kind(0, 1) == kKindWalk && Kind(0, 0) == kKindWalkLevel &&
+            Kind(1, 1) == kKindFly && Kind(1, 0) == kKindFly,
+        "the kinds: the walk, the level walk, and the fly with each "
+        "move_stick_follow_land", Kind(0, 0), kKindWalkLevel);
+  Check(NextKind(kKindWalk) == kKindWalkLevel &&
+            NextKind(kKindWalkLevel) == kKindFly &&
+            NextKind(kKindFly) == kKindWalk,
+        "the test switch goes from the walk to the level walk, to the fly and "
+        "back", NextKind(kKindFly), kKindWalk);
+
+  // A head that looks 45 degrees down: forward goes down and ahead.
+  const float top = 1.5f;
+  float head[9], forward[3], flat[2], right[2], speed[3];
+  walk_checks::Head(0.0f, 45.0f, 0.0f, head);
+  Check(zoom_math::HeadForward(head, forward) && HeadForward(head, flat),
+        "a head 45 degrees down has a direction in 3D and on the land", 1, 1);
+  Near("it points down 45 degrees", DegreesDown(forward), 45.0, 1e-3);
+  const float fallback[2] = {flat[1], -flat[0]};
+  FlyRight(forward, fallback, kAimLeast, right);
+  Near("its level right is the right of the room, x", right[0], 1.0, 1e-5);
+  Near("its level right is the right of the room, z", right[1], 0.0, 1e-5);
+  const float ahead[2] = {0.0f, 1.0f};
+  FlySpeed(forward, right, ahead, top, speed);
+  Near("a full push forward goes down", speed[1], -top * 0.70711, 1e-4);
+  Near("and ahead by the same speed", speed[2], top * 0.70711, 1e-4);
+  Near("and not to the side", speed[0], 0.0, 1e-5);
+  Near("the speed of a full push is the top speed",
+       sqrtf(speed[0] * speed[0] + speed[1] * speed[1] + speed[2] * speed[2]),
+       top, 1e-4);
+  const float side[2] = {1.0f, 0.0f};
+  FlySpeed(forward, right, side, top, speed);
+  Near("a full push to the right moves level", speed[1], 0.0, 1e-6);
+  Near("and to the right at the top speed", speed[0], top, 1e-5);
+  const float back[2] = {0.0f, -1.0f};
+  FlySpeed(forward, right, back, top, speed);
+  Near("a full push back goes up and back", speed[1], top * 0.70711, 1e-4);
+
+  // A head that looks straight down, turned 40 degrees to the right: the
+  // flat part of forward is too short, so the level right of the head counts.
+  walk_checks::Head(40.0f, 90.0f, 0.0f, head);
+  zoom_math::HeadForward(head, forward);
+  HeadForward(head, flat);
+  const float down_right[2] = {flat[1], -flat[0]};
+  FlyRight(forward, down_right, kAimLeast, right);
+  Near("a look straight down strafes along the right of the head, x",
+       right[0], cosf(40.0f * 3.14159265f / 180.0f), 1e-4);
+  Near("a look straight down strafes along the right of the head, z",
+       right[1], -sinf(40.0f * 3.14159265f / 180.0f), 1e-4);
+  FlySpeed(forward, right, ahead, top, speed);
+  Near("a full push forward with a look straight down goes straight down",
+       speed[1], -top, 1e-4);
+
+  // A controller that points 60 degrees up.
+  const float k = 3.14159265f / 180.0f;
+  const float up_aim[3] = {0.0f, sinf(60.0f * k) * 2.0f, cosf(60.0f * k) * 2.0f};
+  float aim[3];
+  Check(Unit(up_aim, aim), "a direction of length 2 gives a unit vector", 1,
+        1);
+  Near("the unit vector has length 1",
+       sqrtf(aim[0] * aim[0] + aim[1] * aim[1] + aim[2] * aim[2]), 1.0, 1e-5);
+  const float zero[3] = {0.0f, 0.0f, 0.0f};
+  Check(!Unit(zero, aim), "a direction with no length has no unit "
+        "vector", 0, 0);
+  Unit(up_aim, aim);
+  Near("a controller 60 degrees up points up", DegreesDown(aim), -60.0, 1e-3);
+  FlyRight(aim, fallback, kAimLeast, right);
+  FlySpeed(aim, right, ahead, top, speed);
+  Near("a full push forward goes up", speed[1], top * sinf(60.0f * k), 1e-4);
+
+  // THE STEP OF A FRAME.
+  float step[3];
+  const float fast[3] = {0.0f, -1.5f, 1.5f};
+  FlyStep(fast, 0.0f, step);
+  Near("a frame with no time gives no step",
+       fabsf(step[0]) + fabsf(step[1]) + fabsf(step[2]), 0.0, 1e-9);
+  FlyStep(fast, 0.01f, step);
+  Near("a frame of 10 ms goes 1.5 cm down", step[1], -0.015, 1e-6);
+  const float still[2] = {0.0f, 0.0f};
+  FlySpeed(forward, right, still, top, speed);
+  Near("a stick at rest gives no speed",
+       fabsf(speed[0]) + fabsf(speed[1]) + fabsf(speed[2]), 0.0, 1e-9);
+
+  // THE VIEW AFTER A STEP. At 100 units per meter, a step of 10 cm down and
+  // 20 cm ahead puts the waist point 10 units lower and 20 units ahead.
+  TablePose pose;
+  pose.center[0] = 100.0f;
+  pose.center[1] = 50.0f;
+  pose.center[2] = 200.0f;
+  pose.heading = 0.0f;
+  pose.scale = 100.0f;
+  const float move[3] = {0.0f, -0.1f, 0.2f};
+  TablePose next;
+  Fly(pose, move, &next);
+  Near("a step down lowers the waist point", next.center[1], 40.0, 1e-4);
+  Near("a step ahead moves it ahead", next.center[2], 220.0, 1e-4);
+  Near("and not to the side", next.center[0], 100.0, 1e-4);
+  Near("the scale stays", next.scale, 100.0, 1e-6);
+  // With the heading 90 degrees to the right, ahead in the room is +x.
+  pose.heading = 90.0f * k;
+  Fly(pose, move, &next);
+  Near("with a heading of 90 degrees a step ahead goes along x",
+       next.center[0], 120.0, 1e-3);
+  Near("and the height goes down the same", next.center[1], 40.0, 1e-4);
+
+  // THE CEILING. The land is at 0, the room and the head at 0. At 100 units
+  // for each meter steps up go past 2.5 m, the limit of the grab, and stop
+  // with the head 10000 units over the land (C.y 10000).
+  const float ceiling = kFlyCeilingUnits;
+  float y = 10.0f;
+  for (int i = 0; i < 80; ++i) {
+    y = FlyCeiling(y + 5.0f, y, 0.0f, 0.0f, 100.0f, 0.0f, ceiling);
+  }
+  Near("a fly up goes past 2.5 m below the head", y, 410.0, 1e-3);
+  for (int i = 0; i < 400; ++i) {
+    y = FlyCeiling(y + 50.0f, y, 0.0f, 0.0f, 100.0f, 0.0f, ceiling);
+  }
+  Near("and it stops with the head 10000 units over the land", y, 10000.0,
+       1e-2);
+  // At the villager scale (1 unit for each meter) the ceiling is the same
+  // height in units: 10000 m of the room.
+  y = 2.0f;
+  for (int i = 0; i < 300; ++i) {
+    y = FlyCeiling(y + 50.0f, y, 0.0f, 0.0f, 1.0f, 0.0f, ceiling);
+  }
+  Near("at 1 unit for each meter a fly up also stops at 10000 units", y,
+       10000.0, 1e-2);
+  Near("a view over the ceiling does not go down by itself",
+       FlyCeiling(12000.0f, 12000.0f, 0.0f, 0.0f, 1.0f, 0.0f, ceiling),
+       12000.0, 1e-3);
+  Near("and it cannot go up",
+       FlyCeiling(12100.0f, 12000.0f, 0.0f, 0.0f, 1.0f, 0.0f, ceiling),
+       12000.0, 1e-3);
+  Near("but it can go down",
+       FlyCeiling(11900.0f, 12000.0f, 0.0f, 0.0f, 1.0f, 0.0f, ceiling),
+       11900.0, 1e-3);
+
+  // THE FLOOR, with the clearance of the head blinder.
+  const float least = kFlyClearMeters;
+  Check(least > blinder_math::kStartMeters,
+        "the floor of the fly is above the start of the head blinder", 1, 1);
+  Near("a step to 8 cm over the land goes up 2 cm",
+       FlyFloor(50.0f, 0.08f, 0.12f, least, 100.0f), 52.0, 1e-4);
+  Near("a step to 50 cm over the land stays",
+       FlyFloor(50.0f, 0.50f, 0.12f, least, 100.0f), 50.0, 1e-6);
+  Near("a head bent down to 4 cm is held at 4 cm on a step to 2 cm",
+       FlyFloor(50.0f, 0.02f, 0.04f, least, 100.0f), 52.0, 1e-4);
+  Near("and it is not lifted out on a step to 6 cm",
+       FlyFloor(50.0f, 0.06f, 0.04f, least, 100.0f), 50.0, 1e-6);
+  Near("a clearance that is no number changes nothing",
+       FlyFloor(50.0f, sqrtf(-1.0f), 0.04f, least, 100.0f), 50.0, 1e-6);
+  // A fly level across the land into a slope of 45 degrees, at 100 units
+  // for each meter, steps of 2.5 cm of the room, with the head 20 cm over
+  // the land at the start. The land rises from x = 100. The clearance is the
+  // one of the head blinder: the highest land at the head and 6 cm around
+  // it. The head never comes nearer than the floor, and it slides up along
+  // the slope.
+  {
+    const auto land = [](float x) { return x > 100.0f ? x - 100.0f : 0.0f; };
+    const auto clearance = [&](float x, float cy) {
+      float points[blinder_math::kPoints][2];
+      blinder_math::AroundPoints(x, 0.0f, 100.0f, points);
+      float ground[blinder_math::kPoints];
+      for (int i = 0; i < blinder_math::kPoints; ++i) {
+        ground[i] = land(points[i][0]);
+      }
+      return blinder_math::Clearance(cy, ground, blinder_math::kPoints,
+                                     100.0f);
+    };
+    float x = 0.0f, cy = 20.0f, worst = 1000.0f;
+    for (int i = 0; i < 200; ++i) {
+      const float before = clearance(x, cy);
+      x += 2.5f;
+      cy = FlyFloor(cy, clearance(x, cy), before, least, 100.0f);
+      const float now = clearance(x, cy);
+      if (now < worst) worst = now;
+    }
+    Near("a fly into a slope keeps the head at the floor or over it", worst,
+         least, 1e-4);
+    Near("and the view goes up along the slope", cy, land(x + 6.0f) + 10.0f,
+         1e-2);
+  }
+
+  // THE SLIDE PAST A SOLID. A trunk of radius 1 on the axis x 0, z 0, and a
+  // box of half size 1 at the middle (0, 0, 5). The shell is 0.3.
+  {
+    const auto trunk = [](const float q[3]) {
+      return sqrtf(q[0] * q[0] + q[2] * q[2]) - 1.0f;
+    };
+    const auto box = [](const float q[3]) {
+      const float c[3] = {q[0], q[1], q[2] - 5.0f};
+      float out = 0.0f, in = -1e30f;
+      for (int i = 0; i < 3; ++i) {
+        const float d = fabsf(c[i]) - 1.0f;
+        if (d > 0.0f) out += d * d;
+        if (d > in) in = d;
+      }
+      return sqrtf(out) + (in < 0.0f ? in : 0.0f);
+    };
+    const float need = 0.3f, h = 0.001f;
+    float out[3];
+    const float p0[3] = {0.0f, 0.0f, -2.0f};
+    const float far_step[3] = {0.0f, 0.0f, 0.1f};
+    Check(FlySlide(trunk, p0, far_step, need, h, true, out) == kSlideFree &&
+              out[2] == 0.1f,
+          "a step that stays out of the shell goes as it is", 1, 1);
+    const float rest[3] = {0.0f, 0.0f, 0.0f};
+    const float at_shell[3] = {0.0f, 0.0f, -1.3f};
+    FlySlide(trunk, at_shell, rest, need, h, true, out);
+    Near("a step of 0 stays 0",
+         fabsf(out[0]) + fabsf(out[1]) + fabsf(out[2]), 0.0, 1e-9);
+    const float straight[3] = {0.0f, 0.0f, 0.05f};
+    Check(FlySlide(trunk, at_shell, straight, need, h, true, out) ==
+              kSlideStop,
+          "a push straight at the middle of a trunk stops", 1, 1);
+    Near("and it does not go into the shell", trunk(at_shell) - 0.3f +
+         out[2], 0.0, 1e-3);
+    const float slant[3] = {0.07f, 0.0f, 0.07f};
+    Check(FlySlide(trunk, at_shell, slant, need, h, true, out) == kSlideAlong,
+          "a push at a slant slides", 1, 1);
+    Near("it keeps the part along the trunk", out[0], 0.07, 1e-3);
+    Near("and loses the part into it, with no part away from it", out[2],
+         0.0, 1e-3);
+    // Many steps at 45 degrees past the trunk: the head goes round it and on,
+    // and it never comes into the shell.
+    float q[3] = {-1.0f, 0.0f, -2.0f};
+    float worst = 1000.0f;
+    int stops = 0;
+    for (int i = 0; i < 200; ++i) {
+      const float s45[3] = {0.02f, 0.0f, 0.02f};
+      if (FlySlide(trunk, q, s45, need, h, true, out) == kSlideStop) ++stops;
+      for (int j = 0; j < 3; ++j) q[j] += out[j];
+      const float d = trunk(q);
+      if (d < worst) worst = d;
+    }
+    Check(q[2] > 1.0f && stops == 0,
+          "a fly at a slant goes round the trunk and past it", q[2], 1.0f);
+    Near("and the head stays out of the shell", worst < 0.3f ? worst : 0.3f,
+         0.3, 1e-3);
+    // A fly forward and up at a wall of the box goes up the wall and over it.
+    float w[3] = {0.0f, 0.0f, 3.5f};
+    worst = 1000.0f;
+    for (int i = 0; i < 120; ++i) {
+      const float up[3] = {0.0f, 0.05f, 0.05f};
+      FlySlide(box, w, up, need, h, true, out);
+      for (int j = 0; j < 3; ++j) w[j] += out[j];
+      const float d = box(w);
+      if (d < worst) worst = d;
+    }
+    Check(w[2] > 6.3f && w[1] > 1.3f,
+          "a fly forward and up at a wall goes up and over the house", w[2],
+          6.3f);
+    Near("and the head stays out of the shell of the house",
+         worst < 0.3f ? worst : 0.3f, 0.3, 1e-3);
+    const float wall[3] = {0.0f, 0.0f, 3.7f};
+    Check(FlySlide(box, wall, straight, need, h, true, out) == kSlideStop,
+          "a push straight at a wall stops", 1, 1);
+    // fly_solid_slide=0: the step stops short along its own direction.
+    Check(FlySlide(trunk, at_shell, slant, need, h, false, out) ==
+              kSlideStop &&
+              fabsf(out[0] - out[2]) < 1e-6f && out[0] < 0.07f,
+          "with the slide off a push at a slant stops short", out[0], 0.07f);
+  }
+
+  // THE SPEED RAMP.
+  Near("a full push counts its time", RampSeconds(0.5f, 1.0f, 0.25f), 0.75,
+       1e-6);
+  Near("a push of 90 percent counts", RampSeconds(0.5f, 0.9f, 0.25f), 0.75,
+       1e-6);
+  Near("a push of 85 percent sets the time to 0",
+       RampSeconds(5.0f, 0.85f, 0.25f), 0.0, 1e-9);
+  Near("a frame with no time keeps the time", RampSeconds(5.0f, 1.0f, 0.0f),
+       5.0, 1e-6);
+  Near("in the first second the speed stays", RampFactor(1.0f, 32.0f), 1.0,
+       1e-6);
+  Near("after 3 s it is 2 times", RampFactor(3.0f, 32.0f), 2.0, 1e-4);
+  Near("after 5 s it is 4 times", RampFactor(5.0f, 32.0f), 4.0, 1e-4);
+  Near("after 11 s it is 32 times", RampFactor(11.0f, 32.0f), 32.0, 1e-3);
+  Near("and it stops at 32 times", RampFactor(30.0f, 32.0f), 32.0, 1e-6);
+  Near("a most of 1 is no ramp", RampFactor(30.0f, 1.0f), 1.0, 1e-6);
+  // At the villager scale a full push is 1.5 units each second. 1000 units
+  // take about 29 s at 60 frames a second.
+  {
+    float held = 0.0f, went = 0.0f;
+    int frames = 0;
+    while (went < 1000.0f && frames < 60 * 120) {
+      held = RampSeconds(held, 1.0f, 1.0f / 60.0f);
+      went += 1.5f * RampFactor(held, 32.0f) / 60.0f;
+      ++frames;
+    }
+    Near("at 1 unit for each meter, 1000 units take about 29 s",
+         frames / 60.0f, 29.0, 0.5);
   }
 }
 
@@ -459,6 +766,87 @@ inline void WalkChecks() {
         "hands moves the land only across", 0, 0);
   Check(!GrabVertical(false, false, false), "outside the God view one hand "
         "never moves the height", 0, 0);
+
+  // THE SPEED BY THE SCALE (ScaleFactor, move_stick_scale), with the
+  // defaults: ref 16 units per meter, power 0.5, low 0.6, high 4.
+  Near("at the villager scale (1) the stick is 4 times faster",
+       ScaleFactor(1.0f, 16.0f, 0.5f, 0.6f, 4.0f), 4.0, 1e-5);
+  Near("at the life size scale (7.5) 1.46 times",
+       ScaleFactor(7.5f, 16.0f, 0.5f, 0.6f, 4.0f), 1.46059, 1e-4);
+  Near("at 16 the speed of the key",
+       ScaleFactor(16.0f, 16.0f, 0.5f, 0.6f, 4.0f), 1.0, 1e-6);
+  Near("at 30 0.73 times", ScaleFactor(30.0f, 16.0f, 0.5f, 0.6f, 4.0f),
+       0.73030, 1e-4);
+  Near("at 100 the least factor, 0.6",
+       ScaleFactor(100.0f, 16.0f, 0.5f, 0.6f, 4.0f), 0.6, 1e-6);
+  Near("at 4000 the least factor too",
+       ScaleFactor(4000.0f, 16.0f, 0.5f, 0.6f, 4.0f), 0.6, 1e-6);
+  Near("a largest factor of 2 holds the villager scale at 2",
+       ScaleFactor(1.0f, 16.0f, 0.5f, 0.6f, 2.0f), 2.0, 1e-6);
+  Near("a scale of 0 gives 1", ScaleFactor(0.0f, 16.0f, 0.5f, 0.6f, 4.0f),
+       1.0, 1e-6);
+  Near("a power of 0 gives 1 at each scale",
+       ScaleFactor(3.0f, 16.0f, 0.0f, 0.6f, 4.0f), 1.0, 1e-6);
+  {
+    // Smooth and with no steps: the factor never grows with the scale, and
+    // a step of the scale of 1 percent changes it by at most 0.5 percent.
+    bool falls = true, smooth = true;
+    float before = ScaleFactor(1.0f, 16.0f, 0.5f, 0.6f, 4.0f);
+    for (float scale = 1.01f; scale < 4000.0f; scale *= 1.01f) {
+      const float now = ScaleFactor(scale, 16.0f, 0.5f, 0.6f, 4.0f);
+      if (now > before + 1e-6f) falls = false;
+      if (fabsf(now - before) > 0.0051f * before) smooth = false;
+      before = now;
+    }
+    Check(falls, "the factor goes down as the scale goes up, 1 to 4000",
+          falls, 1);
+    Check(smooth, "and it has no step", smooth, 1);
+  }
+
+  // WHEN THE FILTER STARTS AGAIN (FollowRestart, move_stick_follow_place).
+  // The arguments: the rule, have, the version changed, the view moved, a
+  // place at a camera of the game, a recenter.
+  const int each = kFollowPlaceEach, version = kFollowPlaceVersion;
+  Check(FollowRestart(each, false, false, false, false, false) &&
+            FollowRestart(version, false, false, false, false, false),
+        "the first walk starts the filter with each rule", 1, 1);
+  Check(FollowRestart(each, true, true, false, true, false),
+        "rule 1: a place at a camera of the game starts the filter again",
+        1, 1);
+  Check(!FollowRestart(version, true, false, false, true, false),
+        "rule 0: a place at a camera of the game does not", 1, 1);
+  Check(FollowRestart(each, true, false, false, false, true) &&
+            !FollowRestart(version, true, false, false, false, true),
+        "a recenter starts it again with rule 1 only", 1, 1);
+  Check(!FollowRestart(each, true, true, false, false, false),
+        "rule 1: a turn about the head keeps the filter", 1, 1);
+  Check(FollowRestart(version, true, true, false, false, false),
+        "rule 0: a turn starts it again", 1, 1);
+  Check(FollowRestart(each, true, true, true, false, false) &&
+            FollowRestart(version, true, true, true, false, false),
+        "a move of the view starts it again with each rule", 1, 1);
+  Check(!FollowRestart(each, true, false, false, false, false) &&
+            !FollowRestart(version, true, false, false, false, false),
+        "the next frame of a walk keeps it with each rule", 1, 1);
+  // His session: the last walk stopped on land at 18.0, and a camera of the
+  // game put the view over land at 31.2, at 4.41 units per meter. A filter
+  // that goes on lifts the view by the difference over the next walks. A
+  // filter that starts again lifts nothing over flat land.
+  LandFollow stale;
+  FollowStart(18.0f, &stale);
+  float lifted = 0.0f;
+  for (int i = 0; i < 400; ++i) lifted += FollowStep(&stale, 31.2f, 0.01f,
+                                                    length);
+  Near("a filter that goes on after a place lifts the view 2.99 m",
+       lifted / 4.41f, 2.993, 0.01);
+  LandFollow fresh;
+  FollowStart(31.2f, &fresh);
+  float none = 0.0f;
+  for (int i = 0; i < 400; ++i) none += FollowStep(&fresh, 31.2f, 0.01f,
+                                                  length);
+  Near("a filter that starts again at the place lifts nothing", none, 0.0,
+       1e-5);
+  FlyChecks();
 }
 
 }  // namespace walk_checks

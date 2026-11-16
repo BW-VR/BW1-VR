@@ -901,6 +901,8 @@ void OneWalkEndPass() {
 
 bool OneWalkActive() { return g_active; }
 
+float OneWalkSeparation() { return g_active ? g_separation : 0.0f; }
+
 int OneWalkModeNow() { return Mode(); }
 
 float OneWalkShiftPerRhw() { return g_active ? PerRhwNow() : g_per_rhw; }

@@ -27,6 +27,34 @@ Related docs: `grab.md` (the grip), `throw.md` (the throw), `creature.md`
   A shake of the real hand or a short press of the second face button
   cancels. The trigger makes a carried seed active. The mod gives a target
   with a halo to a Creature miracle.
+- A Storm or a shield in the Hand shows the ray of the pointing hand. With
+  the grip closed, the point of the ray on the land draws the circle, and a
+  gold trail lies on the land along it. The miracle goes where the ray drew
+  (`miracle_circle_aim=1`).
+- The first face button of the hand that does not point opens the spell
+  book. It shows the miracles that the player can ask for now, with the
+  pictures of their gestures. The grip of the pointing hand holds one, and a
+  pull of 20 cm takes it out of the book, with the game's own request. A
+  grip that opens before that puts the miracle back. The palm of that hand
+  that turns up and stays up for 0.4 s also opens the book.
+- For tests, the debug switch "All miracles in the book" gives the book each
+  miracle and power level of the game: 34 items on 6 pages of 6, with no
+  cost in prayer power and no change to the town. Each take puts the miracle
+  in the Hand with the game's function for a one-off spell in the Hand. The
+  debug row "Spawn all miracle orbs" puts one one-off seed of each of the 23
+  miracles on the land in front of the player. See "The magic types of the
+  game" for what the game allows.
+- While that palm is up, the gesture pictures of the game show in a row over
+  it: what the player can draw now. While B is down, or while a chain or a
+  power up goes on, the palm shows the row and not the book.
+- The Forest miracle has a camera path of the game that turns the camera
+  around the new forest. With the head on the camera the mod starts no such
+  path, so the camera of the player stays (`miracle_camera_still=1`).
+- Outside the influence of the player the hands fade. A red hologram shows
+  the wall of the edge where each hand comes near it, with a grid on the
+  wall and rings that go out from the hand (`influence_fade`,
+  `influence_wall`, `influence_wall_look`). With `influence_stream_hand=1` the stream of the game
+  ends at the Hand's point in the air.
 
 ## Gestures in the plain game [V unless marked]
 
@@ -107,7 +135,7 @@ gesture types that fit the moment, and it tests each of them with
 
 | Moment | Types | On a match |
 | --- | --- | --- |
-| A Miracle in the Hand is ready to power up (`GInterface+0x39` bit 1) | its own gesture (`SpellSeedInfo+0x10C`) | `fn_0057A5E0` places the power up, then `fn_005CE420(1)` |
+| A Miracle in the Hand with its own gesture, and bit 1 of `GInterface+0x39` | its own gesture (`SpellSeedInfo+0x10C`), the circle | `fn_0057A5E0` places the circle, then `fn_005CE420(1)`. See "The circle of a cast" |
 | A Miracle in the Hand (`fn_005CEF50`) | the scribble (5), and up to three types at `GInterface+0x16C` | the scribble drops the Miracle. The others power it up (`fn_005D0000`) |
 | A chain of a miracle has started (`GInterface+0x364`, `fn_005CF1C0`) | the next gesture of each candidate miracle, and the scribble | `fn_005CFAE0`, see below |
 | The Creature's leash is on (`fn_005CEFB0`) | the leash gestures | `GInterface::DoLeashSelectionSystem` |
@@ -173,8 +201,14 @@ traced.
 
 The mod draws a gesture with the real hand through the game's own ring.
 
-- While the draw button is held, the grip point goes on a plane that faces
-  the head at the start of the stroke, with the head's right and up axes.
+- While the draw button is held, the point of the draw goes on a plane that
+  faces the head at the start of the stroke, with the head's right and up
+  axes. The point of the draw is the tip of the index finger (`gesture_point=1`,
+  the default) or the grip point (0). The tip is the tip of the hand model's
+  index finger at its rest curl, at the real hand's length, turned with the
+  grip pose. The trigger does not move it, so a press does not bend a
+  gesture. A turn of the wrist moves the tip in the plane, as a finger
+  moves when it draws in the air.
 - The plane becomes pixels at `gesture_size_cm` (30) for a third of the
   render height, around the controller's pixel at the start.
 - A pre hook on `ProcessPowerUpSystem` adds a sample when the pixel has
@@ -324,12 +358,63 @@ on a villager: Heal is cast at a place.
   pointer while the button is held. The release (`FUN_005D48D0`) calls
   `FUN_005D3340`, which sends the throw velocity `CHand+0x48C8` in packet
   `0x4D`. A fireball and a flock fly with that velocity. A storm and the two
-  shields need their own gesture, the circle: `ProcessPowerUpSystem` matches
-  it while the button is held (`0x005CF4E0`, `GInterface+0x17C`), and the
-  circle gives the place and the size (`fn_0057A5E0`).
+  shields need their own gesture, the circle. See "The circle of a cast".
 - **2, the press**: the cast is at once, on the object or at the land point.
   A Creature miracle stays in the Hand while its spell runs (`+0x114`), and
   `ProcessInHand` deletes the seed when the spell ends.
+
+### The circle of a cast
+
+Storm and the two shields have their own gesture (`GSpellSeedInfo+0x10C`,
+the circle). `ProcessPowerUpSystem` tests it at `0x005CF4E0` when all of
+these are true:
+
+- Bit 1 of `GInterface+0x39` is set. The press of the right button sets it [I].
+- The Hand holds a miracle (`fn_005D3880`), and the miracle has its own
+  gesture (`fn_00729AC0`).
+- The game holds no circle now (`GInterface+0x17C` is 0).
+
+A match (`fn_005CF220`) of that type closes the circle. `fn_0057A5E0` gives
+the place and the size of the circle from the path. For a template of kind
+2 (`+0x64A`), it makes the box of the pixels of the path (`fn_005789D0`,
+`LHRegionF::CentreCoord`). The place is the land under the middle pixel of
+that box (`fn_005E5620`, through the game camera). The size comes from the
+width of the box at the distance of that land point from the camera, times
+1.05 [V for the pixel box and the land under its middle, I for the steps of
+the size]. So the circle is where the pixels of the path are on the screen,
+not where the land points of the samples are. The game keeps the circle at
+`GInterface+0x180` to `+0x190`, sets `+0x17C` to 1, and clears the ring
+(`fn_005CE420(1)`). The circle stays for 5 s (`+0x194`), and then `+0x17C`
+goes back to 0.
+
+Only three seed types have this gesture: Storm (with its two levels),
+Spiritual Shield and Physical Shield. So 5 of the 34 miracles of the Hand
+need a circle. No other miracle of the game takes a drawn shape.
+
+**The limits of the circle.** The game refuses no circle for its size. The
+spell keeps the size between two values of its magic info
+(`GMagicRadiusSpellInfo`, `+0x58` the least and `+0x5C` the most):
+`SpellStormAndTornado::InitWithPos` (`0x0072DAA0`) and
+`SpellShield::InitWithPos` (`0x0072B5F0`) make a smaller size the least and
+a larger size the most, and the spell takes that value as its radius. The plain Storm
+keeps 20 to 1000 units, and Spiritual Shield 5 to 1000 units (a desktop
+run reads them from the magic info): a circle of the size 3.4 gives a storm of
+radius 20. So in play only the least limit acts. The place must pass the cast rule of the magic info: Storm
+needs the influence (rule 2), and the two shields need land in the
+influence (rule 3). A place that fails gets the refusal of the game, the
+yellow cross and its sound (see "The refusal"). The cost of a shield or a
+storm grows with the square of its size (`CalculateCostToMaintain`).
+
+**What the game shows.** No ring and no trail show while the path is drawn
+[I: no code reads the ring to draw it]. At the match the game draws the
+gesture on the land from the land points of the samples (`PSysGesture`, see
+"On a match"), and plays a sound at the newest land point.
+
+The release of action 8 (`FUN_005D48D0`) calls `FUN_005D3340`. With
+`+0x17C` set, the cast takes the circle as its gesture (`+0x1A4`) and the
+middle of the circle as its land point, and it clears `+0x17C`. With no
+circle, the gesture test (`fn_00729AF0`) fails and the game refuses the
+cast. A refused cast keeps the circle until its 5 s end.
 
 ### Power ups
 
@@ -383,6 +468,132 @@ miracle crackles, 14 a one-off seed pops, 18 to 20 a fireball, 21 lightning,
 23 a miracle is cast, 24 a shield, 25 water, 26 and 27 a flock, 28 a
 Creature miracle. `DoPostCastThings` `0x00729260` starts the effect of the
 magic info (`+0x14`) when the spell starts.
+
+## The magic types of the game [V unless marked]
+
+The facts come from the enums `MAGIC_TYPE` and `SPELL_SEED_TYPE` (`Enum.h`
+of the decompilation), `load_variables` (`Balance.cpp`), the block
+`DETAIL_SPELL_SEEDS` of `Scripts\info.dat`, the tooltips of
+`Scripts\InfoScript2.txt`, the land files and the disassembly.
+
+### Two tables
+
+- **The magic types.** `GMagicInfo::Infos` holds one `GMagicInfo` for each
+  magic type, 1 to 41. `load_variables` fills them from 12 blocks of
+  `info.dat`: the general block (none, the three Fireballs, the three
+  Lightnings and the three Mega-Blasts), Heal (2), Teleport, Forest, Food
+  (2), Storm and Tornado (3), the shields (2), Wood, Water (2), the two
+  flocks and the 16 Creature spells. So each of the 41 magic types has an
+  info, and `GMagicInfo::Cast` can cast each one at a place or on an object.
+- **The seed types.** `GSpellSeedInfo` has 30 seed types (see "The seed
+  info"). A seed type holds up to 3 magic types at `+0x124`: the plain
+  miracle and its two power levels (`POWER_UP_TYPE` 1 and 2). The game's
+  tooltips call the levels "Increase" and "Extreme". The flag at `+0x17C`
+  says if the game has the seed type on. 7 seed types are off.
+  `SpellSeed::GetMagicInfo` (`0x007290F0`) takes the magic type of the
+  power level of the seed (`+0x6C`), so the level of a seed is the miracle
+  that it casts.
+
+The log line of "Unlock all" counts 24 magic types: the first magic type of
+each of the 30 seed types, with no copies.
+
+| Magic type | Name (tooltip of the game) | Seed type, level | The Hand casts it | Note |
+| --- | --- | --- | --- | --- |
+| 1 | Fireball | 2, 0 | Yes | |
+| 2 | Fireball Increase | 2, 1 | Yes, as a power level | |
+| 3 | Fireball Extreme | 2, 2 | Yes, as a power level | A dispenser of Land 5 gives it (`FIRE_PU2`) |
+| 4 | Lightning Bolt | 6, 0 | Yes | |
+| 5 | Lightning Bolt Increase | 6, 1 | Yes, as a power level | |
+| 6 | Lightning Bolt Extreme | 6, 2 | Yes, as a power level | |
+| 7 | Mega-Blast | 29, 0 | Yes | The mod calls it Explosion |
+| 8 | Mega-Blast Increase | 29, 1 | Yes, as a power level | |
+| 9 | Mega-Blast Extreme | 29, 2 | Yes, as a power level | The game has no tooltip for it |
+| 10 | Heal | 7, 0 | Yes | |
+| 11 | Heal Increase | 7, 1 | Yes, as a power level | |
+| 12 | Teleport | 28, 0 | Yes | |
+| 13 | Forest | 1, 0 | Yes | |
+| 14 | Food | 3, 0 | Yes | |
+| 15 | Poisoned Food | 3, 1 | Yes, as a power level | |
+| 16 | Storm | 0, 0 | Yes | |
+| 17 | Storm Increase | 0, 1 | Yes, as a power level | The enum name has lightning in the storm |
+| 18 | Storm Extreme | 0, 2 | Yes, as a power level | The enum name is Tornado |
+| 19 | Spiritual Shield | 4, 0 | Yes | |
+| 20 | Physical Shield | 5, 0 | Yes | |
+| 21 | Wood | 8, 0 | Yes | |
+| 22 | Water | 9, 0 | Yes | |
+| 23 | Water Increase | 9, 1 | Yes, as a power level | |
+| 24 | Winged Creatures | 10, 0 | Yes | |
+| 25 | Wolves | 11, 0 | Yes | A pack of wolves |
+| 26 | Freeze Creature | 12, 0 | Yes, on a Creature | |
+| 27 | Shrink Creature | 13, 0 | Yes, on a Creature | |
+| 28 | Enlarge Creature | 14, 0 | Yes, on a Creature | |
+| 29 | Weakness Creature | 15, 0 | Yes, on a Creature | |
+| 30 | Strength Creature | 16, 0 | Yes, on a Creature | |
+| 31 | Fat | none | No | Seed type 17 is off, and its magic type is 26, not 31 |
+| 32 | Thin | none | No | Seed type 18 is off, with magic type 26 |
+| 33 | Invisibility Creature | 19, 0 | Yes, on a Creature | |
+| 34 | Loving Creature | 20, 0 | Yes, on a Creature | |
+| 35 | Aggressive Creature | 21, 0 | Yes, on a Creature | |
+| 36 | Hungry | 22, 0 | No | Seed type 22 is off: no gesture, no tooltip |
+| 37 | Frightened | none | No | Seed type 23 is off, with magic type 26 |
+| 38 | Tired | none | No | Seed type 24 is off, with magic type 26 |
+| 39 | Ill | none | No | Seed type 25 is off, with magic type 26 |
+| 40 | Thirsty | none | No | Seed type 26 is off, with magic type 26 |
+| 41 | Holy Flies Creature | 27, 0 | Yes, on a Creature | The enum name is Itchy |
+
+The names of the Creature miracles are the tooltips that fit them by their
+meaning [I]. The book of the mod uses its own short names (the column Seed
+of "The seed info").
+
+So the Hand casts 34 miracles: 23 seed types and 11 power levels. The 7
+Creature spells with no seed (31, 32 and 36 to 40) never worked as a miracle
+of the Hand in the shipped game. The tooltips of the game also name magic
+types that the enum of the shipped game does not have: fireworks, a priest,
+"Food Miracle Extreme", a storm of wind only and a larger Spiritual Shield.
+
+**A script and the Creature.** A script casts each magic type, 1 to 41, with
+no seed: `GScript::SpellAtPos` and `GScript::SpellOnThing` call
+`GMagicInfo::Cast`. The Creature learns magic types (the learn list of its
+mind goes over each magic type, `Creature::CheatLearnEverything`) and casts
+them itself [I: which ones a Creature casts in play was not traced].
+
+### The ways that the game gives the Hand a miracle
+
+| Way | Functions | Packet | What the game tests |
+| --- | --- | --- | --- |
+| A chain of gestures, or a tap on a miracle icon of a Worship Site | `fn_005CFAE0`, the tap of the icon (`village.md`), then `fn_005DABA0` | `0x25` with the seed type | `GPlayer::ValidForRequestSpell` (`0x0064BEC0`): a Worship Site of the player has an icon of that seed type, the icon works, and `WorshipSpellIcon::ValidForRequestSpell` passes (a free Hand, prayer power). Then `GPlayer::RequestSpell` (`0x0064BDB0`) charges the icon of the site with the most chants. A seed type with no icon gets nothing |
+| A power level of a seed from a Worship Site | `fn_005D0000`, `SpellSeed::SetPowerUp` (`0x00729B30`) | `0x6A` | The gesture of the level, and the chants of the site (`fn_0077FBF0`) |
+| A one-off seed on the land (a reward, a script, a dispenser) | `OneOffSpellSeed::Create` (`0x0072A2F0`), then a tap: `fn_005D38A0`, `OneOffSpellSeed::InterfaceTap` (`0x0072A640`) | `0x20` with the object | `InterfaceValidToTap`, and the land point of the pick record inside the influence. `Create` takes a seed type and a power level |
+| A spell dispenser | `SpellDispenser::CreateOneOffSpellSeed` (`0x00722B80`), which makes a one-off seed | As a one-off seed | As a one-off seed |
+| The script command for a one-off spell in the Hand (`SCRIPT_OBJECT_TYPE_ONE_SHOT_SPELL_IN_HAND`) | `OneOffSpellSeed::CreateSpellIntoHand` (`0x0072A730`), the same function that the tap calls | None | Only `IsHandReadyForObject`. No prayer power, no influence and no icon |
+
+The icons of a Worship Site come from the Village Centre of its town, which
+has 6 slots (`TownCentre::AddSpell` `0x00744050`, see "The limit of 6
+icons"). The town gets its magic types from the setup of a land and from
+rewards (`Town::AddMagicTypesHeld` `0x0073D380`).
+
+`CreateSpellIntoHand` (cdecl: the `GInterfaceStatus`, the seed type, the
+power level and a float of 1, the caller cleans `0x10` bytes) needs a free
+Hand. It looks for the best icon of that seed type
+(`GPlayer::FindBestSpellIconForSpellSeed` `0x0064BF40`). With an icon it
+makes a seed that belongs to that icon (`fn_007282A0`), and with no icon a
+plain seed (`fn_00728300`). Then it fills the store of chants of the seed
+(`SpellSeed::AddToChantStore`), puts the seed in the Hand
+(`GInterfaceStatus::PlaceObjectInMagicHand`) and makes it ready. It takes no
+chants from a site.
+
+### What the mod can call for each type
+
+- Packet `0x25`: only for a seed type with an icon at a Worship Site of the
+  player. With 6 slots, at most 6 seed types.
+- `OneOffSpellSeed::CreateSpellIntoHand`: each of the 23 seed types that the
+  game has on, at each of its power levels, with a free Hand. A seed type
+  that the game has off makes a seed that casts the magic type of its info
+  (26, Freeze, for the most of them), so the mod does not offer them.
+- `OneOffSpellSeed::Create`: one object of each of the 23 seed types on the
+  land. The game's own tap makes it active. A save of the game writes each
+  one-off seed (`OneOffSpellSeed::Save`, `GAME_THING_TYPE_ONE_OFF_SPELL_SEED`),
+  so the mod deletes its own seeds before each save.
 
 ## What the mod does (`miracle_hand=1`)
 
@@ -451,17 +662,194 @@ Hand (see `grab.md`, "The grip holds").
 | A Creature miracle | Close the grip with the halo on a Creature | `fn_005D30D0`: the cast on the object |
 | Heal, Forest, Teleport, Explosion | Close the grip with the Hand over the place | `FUN_005D3340`: the cast at the land under the Hand |
 | Food, Wood, Water, Lightning | Keep the grip closed over the place | Action 10: a cast each game turn. The opening ends the pour |
-| Fireball, the flocks | Close the grip, swing the hand, open the grip | Action 8: the release sends the speed of the Hand |
-| Storm, the two shields | Close the grip, draw a circle with the hand, open the grip | The game matches the circle, and the release casts at its place |
+| Fireball, the flocks | Close the grip, swing the hand, open the grip | Action 8: the release sends the throw velocity, which the mod makes the speed of the real hand |
+| Storm, the two shields | Point the ray at the land, close the grip and draw a circle on the land with the ray | The game matches the circle, and the cast comes at once, at its place. The grip that opens then does nothing more |
 
-**The throw** uses the game's own speed of the Hand: the Grain state filters
-the motion of the Hand, which is the motion of the real hand. The mod does
-not change it.
+**The throw** has the velocity of the throw of an object: the top speed of
+the grip of the real hand in the 120 ms before the opening of the grip
+(`miracle_throw=1`), and no turn. The game's own speed of the Hand is a
+filter of 62 ms of the motion of the Hand's point, and it gives a direction
+of the past. The game also sends the turn of the path of the Hand, and a
+Fireball turns in its flight by it. See `throw.md`, "A thrown miracle".
 
 **The circle.** The mod feeds the ring of the gestures while the grip is
 closed with a miracle that needs a circle, and the interface action is 8 or
-9. The path of the hand goes to the ring as it does for the draw button
+9. With `miracle_circle_aim=1` the land point of the ray goes to the ring
+(see "The circle of the pointer ray" below). With `miracle_circle_aim=0` the
+path of the hand goes to the ring as it does for the draw button
 (`MiracleDrawsCircle`, `ControllersGestureInput`, "Feeding a 3D path").
+
+**The circle of the pointer ray** (`miracle_circle_aim=1`). The Hand cannot
+reach a far place, and a circle in the air has no clear place on the land.
+So while a Storm or a shield is in the Hand, the pointing hand shows its
+ray, as the aim of a bookmark does. The ray goes from the aim pose to its
+land point, with the glow at its end. The code is `AimFrame` in
+`miracle.cpp`, with the pure math in `circle_aim_math.h`.
+
+- **The ray and its land point** are latched once a frame
+  (`MiracleFrame`): the ray of the far grab (`ControllersFarRay`), and the
+  land along it up to 60 m of the room (`command_math::RayLandDistance`).
+  The ray does not show after the game matched the circle.
+- **The draw.** While the grip draws the circle (action 8 or 9), each
+  sample of the ring has the land point of the ray of that frame. Its pixel
+  is that land point in a view from above (`circle_aim_math::PlanFrom`):
+  the forward direction of the ray at the start of the draw is up on the
+  screen. A circle across 35 percent of the distance of the ray is a third
+  of the render height. So the game matches the shape on the land, and the
+  angle of the view does not flatten it. The samples go into the ring with
+  the game's own add of a sample (`fn_0057BBC0`), after the same tests of
+  the pause and of the wait after a match as the sampler of the game. A frame
+  in which the ray meets no land adds nothing.
+- **The place and the size.** The game puts its circle under the middle of
+  the pixel box through its camera, and the pixels of the plan are not on
+  the screen. So after the match `CircleFromAim` puts the middle of the circle
+  at the middle of the widest span of the path of the land point, and the
+  size at 1.05 times that span. The middle of the widest span does not move
+  to the side where the ray moved slowly, as a mean of the points does.
+- **The Hand stays at the real hand.** The mod changes no place of the Hand
+  for the circle. The game's own picture of the match (`PSysGesture`) comes
+  from the land points of the samples, so it lies where the ray drew.
+- **The trail on the land** (`overlay.cpp`, `BuildAimTrail`): a glow ribbon
+  2 cm of the room over the land along the path, gold while the circle is
+  good. It is red when the game will make the spell smaller than the circle
+  (the size is over the most of the magic info), or when the middle of the
+  path is outside the influence. The card then says why (see "The card").
+  When the draw ends the trail goes out in 0.3 s. The trail at the
+  fingertip does not show for this draw.
+
+The log lines: `... is in the Hand, so the pointing hand shows its ray`
+(with the least and the most radius of the spell), `the grip starts the
+circle of ... at the land point of the ray`, `gesture      : the ray draws
+the circle on the land from ...` (the plan), `the game matched the circle
+of ... The ray drew it on the land around ...` (the middle, the width, the
+count of points, the distance from the Hand's point, the size, the circle of
+the game and the radius that the spell gets), and `the circle of the ray is
+... wide, so the game gives it the size ...` when it is too large. Each
+report window has `the ray of a circle showed on N frames, and the grip drew
+N circles with it`. The overlay has `the trail of the circle of the ray
+starts`, `is red` or `is gold`, and `ends`.
+
+A desktop run (`miracle_run.ps1 -Kind aim`) draws the circle template with
+the ray on the land, 1.2 m of the room from the Hand's point. The game
+matches the circle of a Spiritual Shield and of a Storm. The mod puts each
+circle at the middle of the path of the ray, 40 units wide, with the size
+42 units. The circle of the game from the pixels of the plan was 250 units
+away. The shield and the storm start at that middle with the radius 42
+units. A ray that only grazes the land jumps over hills, and then the path
+does not match: the eye pictures show the ray and the gold trail on the
+land.
+
+**The circle is under the path of the real hand** (`miracle_circle_hand=1`,
+with `miracle_circle_aim=0`).
+The game makes the circle from the land under the pixels of the path,
+through its own camera (`fn_0057A5E0`). The mod feeds the path as pixels on
+a plane around the pixel of the controller, so the land under those pixels
+is far from the hand: the middle of the circle can be 4 m of the room away,
+and the size more than 2 m. The mod keeps the Hand's point of each frame
+while the grip draws the circle. After the match, and before the cast reads
+the circle, `CircleFromHand` puts the middle of the circle (`GInterface+0x180`)
+on the land under the middle of that path, and the size (`+0x18C`) at 1.05
+times the widest span of the path across the land. That is the rule of the
+game with the real hand. The cast copies the circle to `+0x1AC`, and the log
+line `the cast of ... goes to the middle of the circle` gives that place and
+size. The line `the game matched the circle of ...` gives the circle of the
+game, the path of the Hand and the new circle. A shield or a storm costs
+prayer power for each second in the square of its size
+(`SpellShield::CalculateCostToMaintain` `0x0072B7F0`). A one-off miracle has
+no Worship Site that pays (`GPlayer::MaintainSpell` `0x0064C430` gives 0 to
+a player), so the life of its spell is the life at the cast.
+
+**The circle casts when it closes** (`miracle_circle_cast=1`). When
+`GInterface+0x17C` goes from 0 to 1 while the grip holds action 8, the grip
+looks open to the game until the real grip opens (`MiracleFrame`, the same
+mask as the use of a seed). The game's own release then casts at the circle
+in the next step, with the grip still closed. The opening of the real grip
+then sends no second release, so it gives no second cast, no throw and no
+drop. Only a new match counts: a circle that a refused cast left at
+`+0x17C` does not cast at the next press, and the release casts it as the
+game does. With `miracle_circle_cast=0` the cast comes when the grip opens.
+
+**The bolt of Lightning starts at the Hand's point.** A fork of lightning
+in the Hand starts at the gesture place of its particle manager
+(`UR_Lightning::ActualModify` `0x006914C0`, the manager `+0x30`, with the
+property `CastingFromHand` of `SF_LightningBolt`). The game gives the
+gesture place to the spell on each game turn
+(`GInterfaceStatus::UpdateSpellInfo` `0x005DC8F0`, called by
+`Spell::ProcessMaintainRequest`): a copy of `GInterfaceStatus+0xC8`, the
+Hand (`CHand+0x78`) that packet `0x15` or `0x16` sent and that the last game
+turn took over. The spell then puts its cast place (`Spell+0xCC`) under that
+place. The mod puts `CHand+0x78` at the Hand's point, the tip of the index
+finger at the rest curl (`hand-model.md`), so the bolt starts there with no
+other change. The fork ends on objects and on the land within 60 units
+(`SearchRadius`) of the Hand's point, in a cone around the direction in
+which the camera of the game looks, not the head. Near the Temple the fork
+goes to the Temple, so the bolt runs between the spire and the Hand's point.
+
+The log line `the spell ... gets its gesture place from the game at ...`
+comes for each new spell of a pour and for each 20 updates. It gives the
+place of the game, its distance from the Hand's point and its height over
+it, and the distance of `GInterfaceStatus+0xC8`, `+0xA4` and `CHand+0x78`
+from the Hand's point. A desktop run shows 0.0 cm for each one.
+
+Open: the eye pictures of a desktop run show a red beam from the sky to the
+spire of the Temple at the cast. `SF_LightningBolt` has the fork, a glow and
+a light map, and no beam from the sky. The game draws two streams of light
+in the color of the player, the red of the influence ring for player 0.
+Each is a `SpellPointInf` (`0x0069AC10`) from one point to another:
+
+- The stream of the influence (`GVirtualInfluence::Draw`,
+  `PSysGlobal::AddManaPathSprite`, `influence_edge.cpp`), from the edge of
+  the influence to the land under the Hand.
+- The prayer of a Worship Site for a spell (`Spell::CreateSpellPoint`
+  `0x007213D0`, `WorshipSite::CreateManaPathSprite` `0x0077B2C0`), between the
+  place of the spell (`Spell+0x14` or `Spell+0xCC`) and the thing at
+  `Spell+0xA0`. It comes for each 100 of the power of a spell that has a
+  Worship Site (`Spell::GetWorshipSite`).
+
+The mod does not change these streams by default. With the test key
+`influence_stream_test_log=1` the log has a line for each stream, 24 times
+and then each 200th time: the caller, the two ends, the height of each end
+over the land, the color and the Hand's point. Each report window also has
+the count of the streams, also when it is 0. A desktop run of a Lightning
+from a one-off seed with the key logged no stream. A one-off seed has no
+Worship Site, and the Hand stayed in the influence [I]. Its eye picture after the
+pour shows a column in the sky in the red of the influence ring (255 70 70),
+and not at the spire.
+
+The mod draws one thing in that red: the glow at the edge of the influence
+(`influence_wall`, "The glow at the edge"), on the edge nearest to each hand.
+Its lines `influence    : the hologram at the edge` (or `the glow at the
+edge` for the round patch) say when it shows and where. The game draws its influence ring in the
+same red. A run with `influence_wall=0` tells the two apart.
+
+### A teleport site in the pick (`miracle_site_pick=1`)
+
+`MagicTeleport::Draw` (`0x005FCCC0`) gives the site to the pick of the game
+as a ball of 3 units (`GInterface::SendInvisibleDrawCollision`
+`0x00519960`) while its spell has a seed (`Spell+0xAC`) [V]. So in the plain
+game the pointer can take a site and move it, and a villager in the Hand
+goes onto a site: `Villager::ApplyThisToObject` calls
+`MagicTeleport::ApplyVillagerDirectlyToTeleport` (`0x005FC4F0`), and
+`MagicTeleport::DoTeleport` sends him to the other site that is nearest his
+destination. With one site, `DoTeleport` has no other site and gives 0.
+
+The pick of the real hand takes its candidates from the meshes that the
+draw offers, and a site has no mesh. So the hook on
+`SendInvisibleDrawCollision` (`temple.cpp`, which also offers the leash
+posts) gives a site the ball of the game as a candidate of the real hand
+(`MiracleOfferSite`, `HandDirectOffer`). The game's own tests then say what
+the grip does to it, and a villager in the Hand goes onto a site as onto a
+house ("An object in the Hand that goes onto a thing", `grab.md`). The log
+line `the teleport site ... is a candidate of the real hand` comes for each
+new site. With `miracle_site_pick=0` the real hand has no site as a
+candidate.
+
+A desktop run (`miracle_run.ps1 -Kind teleport`) makes two sites about 35
+units apart before the door of the Temple. The villager that the Hand puts
+on site A goes into it and comes out at site B: 0.5 s to 5 s after the
+teleport he is 1.4 to 5.1 units from site B. With `miracle_site_pick=0`
+the site is no candidate, the game sets the villager down, and no teleport
+comes.
 
 ### The way out
 
@@ -515,7 +903,8 @@ go, and one line of its text stays (the name of the miracle).
 | A miracle for a place | "[Grip] Cast here" |
 | A miracle to pour | "[Grip] Hold to pour", and "[Grip] Open to stop" while it pours |
 | A miracle to throw | "[Grip] Hold, swing, open to throw", and "[Grip] Open to throw" while the grip is closed |
-| A miracle that needs a circle | "[Grip] Hold and draw a circle", and "[Grip] Draw a circle, then open" |
+| A miracle that needs a circle | "[Grip] Point, hold, draw a circle", and "[Grip] Draw a circle on the land" while the grip is closed ("Draw a circle on the land, then open" with `miracle_circle_cast=0`). With `miracle_circle_aim=0`: "[Grip] Hold and draw a circle", and "[Grip] Draw a circle to cast" ("Draw a circle, then open") |
+| The ray of a circle with no refusal | "This place is outside your influence" while the land point of the ray, or the middle of the path, is outside the influence. "The miracle is smaller than this circle" while the circle is larger than the spell can be |
 | The spell of a Creature miracle runs | "The miracle acts now" |
 | Each state of a miracle | "[B] Tap to cancel, or shake" |
 
@@ -551,25 +940,1047 @@ classes. `audio_sources.cpp` and `audio_trace.cpp` call slot `0x10` only for
 a class that is `Base` or derives from it. On the exe 553 of the 949 classes
 with RTTI derive from `Base`.
 
+### The spell book (`spell_book=1`)
+
+The code is in `src/mod/spell_book.cpp`, with the pure math in
+`spell_book_math.h`. The book shows the miracles that the player can ask for
+now, and the pointing hand pulls one out with the grip. No gesture is
+necessary. The gestures stay as they are.
+
+**The buttons.** A tap of B (the second face button of the pointing hand,
+Y when the left hand points) opens the book over the other hand
+(`spell_book_b=1`). A tap is a press of at most `miracle_cancel_ms` (400 ms)
+with 5 cm of hand motion or less. A second tap closes the book. A longer
+press, or a press with motion, draws a gesture as before. A tap with a
+miracle in the Hand takes the miracle out ("The way out"), and does not
+open the book. A press of B that closed a window (the debug window, the
+panel of places, the welcome page, the aim of a bookmark) or that stopped a
+teleport is no tap. A tap where the book cannot open does nothing, with no
+pulse, because B has other jobs there. The log line `a tap of B (... ms,
+the hand moved ... cm) opens the book` has each tap.
+
+With `button_layout=1` the first face button of the hand that does not
+point (X, or A when the left hand points) also opens and closes the book.
+On an Index controller that button sends Esc, and with `button_layout=0` it
+opens the ring, so it does not open the book there. The tap of B works with
+each layout.
+
+The book also closes when the pointing hand takes a miracle, when the ring
+opens, and when a dialog box or the game menu is up. The book does not open
+in the Temple, in a cut scene, while the ring shows, or while the
+controllers cannot act. Then a press of X gives the pulse `refused`.
+
+**The place.** The center of the book is 12 cm from the grip point along the
+normal of the open palm, and 2 cm up (`BookCenter`). With the palm up, the
+book is over the palm. With the palm to the side, it is between the two
+hands. The book moves with the hand, one to one. The picture faces the head
+with no roll, as the ring does. It has no motion of its own.
+
+**The list is the game's own.** An item is a miracle with an icon at a Worship
+Site of the player (`GPlayer+0xA48`, the Citadel, and its 6 sites at `+0x34`)
+whose magic type is on (slot `0xD4` of the icon). The game's test of a
+request (`fn_0064BEC0`, thiscall on the `GPlayer` with the
+`GInterfaceStatus` and the seed type) says if the player can ask for it now.
+An item that fails the test is dim, with the reason: "The Hand must be
+empty", "The miracle charges now", "No prayer power. Villagers must
+worship" or "The game refuses it now". The last miracle
+(`GInterfaceStatus+0x34`, the miracle of the gesture "again") is the first
+item. When the hand is on it, the title of the book has "(again)" after its
+name.
+
+**The picture.** Each item is a bubble with the orb of the game in it: the
+glass ball with the miracle in it, as on the land and in the Hand (see "The
+orbs in the cells" below, `spell_book_orbs=1`). The name is under the
+bubble. With `spell_book_ring=1` a book of 1 to 6 items has them on a
+ring, as the ring menu has its items: cells of 6.5 cm on a ring of 7.8 cm
+radius with a flat top and bottom, the first item at the upper left and the
+next ones clockwise, spread evenly (2 items at the left and the right, 3 as
+a triangle, 4 as a rectangle). The item under the hand has a round light,
+as the ring menu has. The book of 6 is 22.1 by 23.0 cm. More than 6 items, and each book
+with `spell_book_ring=0`, are rows and columns: cells of 6.5 cm for up to 9
+items, 5 cm for up to 16 and 4 cm for more. A bubble is 0.66 of a cell
+across. The book uses the quad
+layer of the ring (`kCardRing`), so it is sharp and never double. The bubble
+that the hand pulls out is the bubble of the game too (see "The pull"). A
+book with no item is 20 by 6 cm. It says "No miracle to ask for now" and the
+reason: "You have no Worship Site" or "Your Worship Site has no miracle".
+
+With `spell_book_orbs=0` each bubble is a flat picture of the mod with the
+pictures of the two gestures of the miracle: the start of the chain (the
+spiral or the inverse spiral) small at the left, and the gesture of the
+miracle at the right. A dot marks where each gesture starts. The pictures
+come from the first template of each gesture type in `Data\Gestures.jty`, as
+the game holds them (`GGame+0x250064`). A miracle of the god has a blue
+bubble, and a Creature miracle an amber one. When a check of the game's code
+of the bubble fails, the book shows these pictures too.
+
+**The words fit.** The title, the note and each name fit their box
+(`text_fit.h`, `ui-layer.md`, "Words that fit"). A text that is too wide gets
+a smaller font, down to 70 percent of its size. Then the title and the note
+of a book with no item go on two lines. No text of the book ends in an
+ellipsis.
+
+With `hint_card_style=1` (the default, the launcher row "Card look") the
+book is a page of the parchment of the hint cards (`controller-hints.md`,
+9.11): opaque, with a torn and burnt edge 4 px inside the picture, so each
+cell keeps its place. The words are in dark brown Alegreya at the capital
+letter height of Segoe UI, a dim item is light brown, and the reason of a
+refusal is red brown. The flat pictures (`spell_book_orbs=0`) keep their blue and amber fill
+with white gestures. The cell under the hand is tan with a deep gold halo, and the
+other bubbles have a brown ring. The halo stays inside the tan cell: its
+outer edge is 4 px below the top of the cell or 0.16 of a cell out from the
+bubble, and it is 0.10 of a cell wide or more, so the fill of that bubble
+is a little smaller (`spell_book_math::BubbleRing`). With `hint_card_style=0` the book is the
+dark panel with an alpha of 0.86 and white Segoe UI letters.
+
+**The pick.** The grip point of the pointing hand within 45 percent of a cell
+of the middle of an item, and 6 cm in front of or behind the book, picks it
+(`Pick`). A hand in front of the page shows in front of it, in each eye, and
+a hand behind it is under the page (`card_hand_front=1`, `ui-layer.md`, "A
+hand in front of a card"). With `spell_book_point=1` the page shows a small
+ring with a dot at the foot of the grip point while that point is 9 cm or
+less from the page: it fades with the distance. While the book is open the
+glow at the Hand's point does not show, because a grip on the page takes
+from the book and not from the world. The item stays until the hand is 65 percent of a cell away, or 9
+cm in front or behind. The item under the hand gets a gold halo and a light
+cell. The title of the book and the card of the pointing hand name it:
+"[Grip] Hold and pull out Fireball". Each new item gives the pulse `tick` on
+the pointing hand and the cue "ring move".
+
+**The pull** (`spell_book_pull_cm=20`). The grip on a picked item that the
+game lets the player ask for does not take the miracle at once:
+
+1. The bubble of the item comes out of the book on an elastic band. It is
+   the game's own bubble of that miracle (`spell_book_bubble=1`, see "The
+   game's bubble" below): a glass ball 6 cm across in the room, with the
+   icon mesh or the particles of the miracle in it. It stays half way from
+   its cell to the grip point of the pointing hand (`PullBubble`). Its cell
+   in the book shows an empty socket. The pick stays on the item.
+2. Each frame of the pull sends a buzz of 20 ms to both hands: the pointing
+   hand at 0.03 to 0.45, and the hand of the book at half of that. The
+   buzz goes up with the pull, faster near the end (`PullBuzz`), times
+   `haptics_pct`. The grip at the start gives the pulse `take`.
+3. When the gap from the cell to the hand is 20 cm more than at the grip
+   (`PullShare`), the bubble snaps into the hand: the take below, a pulse of
+   0.65 for 35 ms on the pointing hand and 0.26 on the other hand. The
+   bubble stays at the hand until the Miracle is in the Hand, at most 20
+   frames. Then the Miracle of the game is in the Hand.
+4. A grip that opens before the snap puts the miracle back, with no cost.
+   The pointing hand gets the pulse `let go`. The bubble springs back to its
+   cell in 0.4 s: it goes through the cell one time and comes back
+   (`BackScale`). When it first comes to the cell, the hand of the book gets
+   the pulse `tick`.
+
+**The game's bubble** (`book_bubble.cpp`). A bubble on the land has two
+parts [V]: a glass ball (the mesh `O_Bibble_up.l3d` with a texture of 4 by
+4 frames) and a `SpellSeedGraphic` in it, with the icon mesh of the miracle
+(`GSpellSeedInfo+0x140`) and its particles (`+0x174`). Storm, Fire,
+Lightning, Water and Teleport have particles only. The gesture help picture
+of the game draws both parts at a free place, at once, with no object in
+the world (`fn_0068B7E0`). The mod does the same:
+
+- One glass ball (`LH3DObject::Create`, `GJUtils::GetSharedMesh`), and one
+  graphic for each seed type and power up (`SpellSeedGraphic::Create`
+  `0x00726F60` with auto update off). They are made at the first use and kept, as the
+  gesture help keeps its own. The graphic is not on the map and no save
+  writes it. Its particles use the local random of the game.
+- In each eye pass, after the overlay's meshes at `0x0082F4C9`:
+  `DrawUpdateAtPos` and `DrawSpellGraphic` (draw now) for the miracle, then
+  the virtual function `+0x104` of the ball (draw now). The camera of the
+  eye is put in place for the draw and put back after it. The depth test
+  is on, so land in front hides the bubble.
+- The icon turns about the up axis at 2 radians a second, and the texture of
+  the ball steps at 18 frames a second, as on the land.
+- The place is the point of the room in the world, with the map of the aim
+  of this frame (`ControllersLocalToWorld`).
+
+The book is a layer over the picture of the game, so it would hide the
+bubble. When a part of the ball is in front of the page, the page has a
+hole for each eye: the disc of the ball as that eye sees it
+(`card_ball_cut=1`, `hand_cut_math::BallOnPage`, `ui-layer.md`, "A hand in
+front of a card"). The page goes out as one quad for each eye, as for a
+hand in front of it. So the ball covers its own hole in each eye, and the
+page has no hole beside the ball. A ball behind the page makes no hole, so
+the book hides it. With `card_ball_cut=0` the book has one round hole for
+both eyes where the head sees the ball (`BubbleHole`), larger by 3.2 mm for
+each cm that the ball is off the page, with an edge soft over 3 pixels.
+
+With `spell_book_bubble=0`, or when a check of the game's code fails, the
+bubble is a flat picture on a quad of its own (`kCardBubble`): the gold halo,
+the fill and the two gestures, facing the head.
+
+**The orbs in the cells** (`spell_book_orbs=1`). Each item of the open book
+has the orb of the game in its bubble, made and drawn as the bubble of the
+pull (`BookBubbleShowOrb`). The orb has the radius of the bubble of the cell
+(2.1 cm in a cell of 6.5 cm, 1.3 cm in a cell of 4 cm), and its middle is
+the middle of the bubble on the plane of the book (`OrbCenter`). The mesh of
+the ball has its dome along its y, so in each eye pass the ball turns to the
+eye of that pass, as `OneOffSpellSeed::FaceCamera` turns it on the land
+[V]: y to the eye, z to the up of the world across the line of view. So the
+ball is round from each eye, and the middle of its mesh is at the middle of
+the bubble, with the icon of the miracle. The icon turns and the particles
+play as on the land: that is the game's own animation of the orb. The orb moves with the book, so with the hand, one to
+one. The page has a round hole for each orb, in the base picture of the
+book, with a soft edge over 1 pixel. The orb is on the plane of the page, so
+the hole is the same for both eyes. The ring round the bubble and the gold
+halo of the item under the hand stay on the page. An item that the game
+refuses now keeps 45 percent of the page over its orb, so it is dim. The
+item whose bubble the hand pulls out has its empty socket and no orb. Each
+orb is one draw of the graphic and one of the ball in each eye pass: 6 orbs
+are 12 draws of the game in a pass. The land in front of the book hides an
+orb, as it hides the bubble of the pull. With `spell_book_orbs=0` the
+bubbles are the flat pictures of the mod.
+
+The two hands both make the pull: a move of the hand of the book away from
+the pointing hand also pulls. The card has "Pull farther to take it" and
+"[Grip] Open to put it back" while the bubble is out. A close of the book
+stops the pull, and the miracle stays in the book. With
+`spell_book_pull_cm=0` the grip takes the miracle at once.
+
+**The take.** The book holds the press of the grip on an item: the game and
+the grab of the world do not get it, until the grip opens (`GripStep`). So
+the closed grip after a snap does not cast the miracle. The take is the
+snap of the pull, or the grip itself with `spell_book_pull_cm=0`. Before the
+next interface step of the game, the mod
+makes the tests of the end of a chain of gestures again: the Hand is free
+(`IsHandReadyForObject`), and `fn_0064BEC0` says yes. Then it sends the same
+request: packet `0x25` with the seed type (`fn_00550C20` on the `GGame`).
+The handler of the game (`fn_005DABA0`) makes its test again and lets the
+best icon charge (`fn_0064BDB0`). So the game takes the prayer power and puts
+the Miracle in the Hand, as for the gestures. The take gives the pulse
+`activate` and the cue "ring choose". The miracle "again" goes with packet
+`0x25` too, with its seed type, and not with packet `0x26` of the gesture
+"again".
+
+**A refusal.** A grip on a dim item takes nothing, and no bubble comes out.
+When the game refuses a miracle at the snap, the bubble springs back. The
+book stays open, the
+pointing hand gets the pulse `refused`, and the card and the title of the
+book give the reason for 4 s, or until the book closes. A close by a take
+keeps the reason, because the game refuses a take after the book closed. The game itself shows nothing for a request
+that it refuses.
+
+**The cards of the hands.** On the land with an empty Hand the card of the
+pointing hand has "[B] Tap for spells" while a tap can open the book, and
+the card of the hand that does not point has "[X] Spells" (or "[A] Spells"
+when the left hand points) while a press of that button can open it. While
+the book is open, these lines do not show.
+
+### The book on the palm (`spell_book_palm=0`)
+
+With `spell_book_palm=1` the book also opens when the palm of the hand that
+does not point turns up and stays up for 0.4 s. By default the palm shows
+the sheet of the gestures (see "The sheet of the gestures"), and B opens the
+book. The normal
+of the palm is the axis of `BookCenter` (+x of the grip of the left hand,
+-x of the right hand). The code is in `spell_book.cpp`, and the math
+(`PalmBookStep`) in `gesture_panel_math.h`.
+
+- The palm is up when its normal is 40 degrees or less from the up of the
+  room. It stays up until the normal is more than 60 degrees from up.
+- The palm opens the book only when a press of the button could open it, and
+  only while the hand is free: no grip on the land or on the world
+  (`GrabHeld`), the grip and the trigger of that hand are open, the ring
+  button is up, and the ring does not show. A palm that is not free starts
+  the 0.4 s again. So the release of a grip on the land with the palm up
+  opens the book only 0.4 s later, while the palm stays up.
+- The palm opens the book only one time. The palm must turn away from up
+  (past 60 degrees) before it can open the book again. This is also true
+  after the button or a take closed the book.
+- A book that the palm opened closes when the palm is more than 70 degrees
+  from up. A pull of a bubble out of the book holds it open until the pull
+  ends. The button also closes it. The palm does not close a book that the
+  button opened.
+- The palm is also the place of the row of the gestures (see "The gesture
+  row over the palm"). While the draw button is down, or while the game
+  shows a gesture that goes on from a gesture that the player drew, the
+  palm gives the row and does not open the book.
+
+With `spell_book_palm=0` (the default) the palm does not open the book.
+
+### The debug switch "Unlock all" (`debug_all_miracles=1`)
+
+A switch for tests, default 0. It is the second row of the group Miracles of
+the debug page and of the debug window: the item "debug" of the ring
+(`debug_menu=1`), then the tab Miracles, then "Unlock all miracles". The
+trigger of the pointing hand changes it, so it needs no keyboard. With 1,
+once a second:
+
+- Each town of the player knows the magic types of the 30 miracles of the
+  game, 24 magic types in all (`Town::AddMagicTypesHeld` `0x0073D380`, the
+  function of the setup of a land and of a reward). This turns the magic type
+  on for the player and gives the Village Centre the icon, if it has a free
+  slot.
+- The Worship Site of each town gets the icons of the Village Centre
+  (`WorshipSite::AddTownSpells` `0x0077C910`, which adds only an icon that it
+  does not have).
+- Each Worship Site of the player has no limit of prayer power: the flag at
+  `+0x108`, which `WorshipSite::GetTotalChantsAvailable` reads as 1,000,000
+  chants.
+
+**The limit of 6 icons.** The Village Centre has 6 slots for miracle icons
+(`TownCentre::AddSpell` `0x00744050` at `+0xD0`, which gives a seventh miracle
+no icon). The Worship Site copies the icons of the Village Centre. So the
+switch gives each town all the magic types, but a site has icons only for
+the miracles that got a slot first. In the test save `temple`, with the
+switch on from the first frame, a new Worship Site gets Storm, Forest,
+Fireball, Food, Spiritual Shield and Physical Shield.
+
+A take of a miracle with an icon costs no prayer power: with 0 chants in
+the pool, the game puts the Miracle in the Hand. The take does not take
+chants from the pool, but a cancel gives the chants of the miracle back to
+it (13000 chants for Forest). So the pool gets larger with each cancel
+while the switch is on. The switch at 0 puts the flags of the sites back.
+The miracles that the towns know stay. **A save of the game made while the
+switch is on, or after it was on, keeps the miracles of the towns and the
+icons of the sites**, also the save at the exit. The flags of the sites do
+not go into a save (see "What a save keeps"). The note of the row says so.
+
+### The book of all miracles (`debug_all_book=1`)
+
+A switch for tests, default 0. It is the first row of the group Miracles of
+the debug page and of the debug window, "All miracles in the book". It does
+not need "Unlock all", and it changes nothing of the town: no magic type,
+no icon, no flag of a site. The code is in `spell_book.cpp`, with the pure
+math in `spell_book_math.h` (`AllKeys`, `PagesOf`, `PageCells`,
+`TurnPage`).
+
+**The items.** The book shows each miracle that the Hand can cast (see "The
+magic types of the game"): the 23 seed types that the game has on, each one
+followed by its power levels, 34 items in all. The order: the miracles with
+three levels (Storm, Fireball, Lightning, Explosion), then the miracles with
+two (Food, Heal, Water), then the single miracles of the god (Forest,
+Spiritual Shield, Physical Shield, Wood, Flock of birds, Flock of animals,
+Teleport), then the 9 Creature miracles. The name of a level is the word of
+the game's tooltip: "Fireball Increase", "Fireball Extreme", "Poisoned
+Food". Its badge under the orb has a plus for each level ("Fireball++").
+The orb of a level is the game's orb of its seed type at its power up
+(`SpellSeedGraphic::Create` takes the power up).
+
+**The pages.** A page has 6 miracles at most, the count of the icons of a
+Village Centre, on a ring of 6 (a hexagon) with cells of 6.5 cm, as the
+normal book of 6 has them (`spell_book_ring=1`). Cell 0 is at the upper
+left, cell 1 at the upper right, and cells 2 to 5 go on clockwise. A family (a miracle and its levels) stays on one
+page, so the 34 items are 6 pages:
+
+| Page | Cells 0 to 5 |
+| --- | --- |
+| 1 | Storm, Storm Increase, Storm Extreme, Fireball, Fireball Increase, Fireball Extreme |
+| 2 | Lightning, Lightning Increase, Lightning Extreme, Explosion, Explosion Increase, Explosion Extreme |
+| 3 | Food, Poisoned Food, Heal, Heal Increase, Water, Water Increase |
+| 4 | Forest, Spiritual Shield, Physical Shield, Wood, Flock of birds, Flock of animals |
+| 5 | Teleport, Creature Freeze, Creature Small, Creature Big, Creature Weak, Creature Strong |
+| 6 | Creature Invisible, Creature Compassion, Creature Angry, Creature Itchy |
+
+The seals "Back" (cell 6, with "<") and "Next" (cell 8, with ">") are side
+by side in the middle of the ring, 2.2 cm to the left and to the right of
+its middle, with a bubble of 3.1 cm. So the pointing hand reaches both
+without a move past the hand that holds the book. With
+`spell_book_ring=0` the page is 3 columns of 6.5 cm in 2 rows, and a third
+row has "Back" at the left and "Next" at the right. The pointing hand picks a seal
+as a miracle, and a grip on it turns the page at once: the book stays open,
+the hand gets the pulse `tick`, and "Next" on the last page goes to the
+first. The title of the book is "Miracles 2 of 6". With the hand on a
+seal, the title and the card say "Next: page 3 of 6". With the hand on a
+miracle, the title and the card name it with the words of its level. The
+book opens at the page of the last turn. The stick of the hand that holds
+the book does not turn the page: in the God view that stick moves the
+player (`move_stick`), also while the book is open.
+
+**The take.** Each take calls `OneOffSpellSeed::CreateSpellIntoHand` with
+the seed type and the power up of the game, also for a miracle that has an
+icon. The power up is the level less 1: `POWER_UP_TYPE_NONE` (-1) for the
+plain miracle, 0 for "Increase" and 1 for "Extreme"
+(`spell_book_math::PowerUpOfLevel`). The seed casts the magic type at
+`GSpellSeedInfo+0x124` + 4 times (the power up + 1). The call comes before
+the next interface step, where the mod sends packet `0x25` for the normal
+book. That is the function of the script command for a one-off spell in the
+Hand, and of the tap of a one-off seed. It needs only a free Hand: no
+Worship Site, no icon, no prayer power and no influence. So a take works
+the same each time. The miracle is in the Hand in the same step, with a
+full store of chants. When a Worship Site has an icon of that seed type
+that the player can ask for, the seed belongs to that icon
+(`GPlayer::FindBestSpellIconForSpellSeed`), as each one-off seed of the game
+does. Then a cancel gives its chants to that site, and the site can pay the
+upkeep of a shield or a storm [I: the upkeep was not traced].
+
+**A different miracle.** A take while a miracle is in the Hand first takes
+that miracle out with the game's own drop, as the button B does it
+(`MiracleBookCancel`, `fn_005D4350`, see "The way out"). A one-off miracle
+is then deleted, and the miracle of a Worship Site gives its chants back.
+The new take waits for the free Hand, at most 180 frames. While a miracle
+is in the Hand the card of the pointing hand says "Change to Fireball". So
+the player can cast, take the next miracle at once, or change the miracle
+in the Hand with one pull. An object other than a miracle in the Hand makes
+each item dim, with "The Hand must be empty".
+
+**The cast.** The cast is the game's own, as for a one-off miracle (see
+"The grip casts"). No function of a cast tests the prayer power [V]: the
+game takes it when it makes the seed and at a power up. The influence
+counts: a press with the land point of the Hand outside the influence of
+the player does nothing, with no cross and no sound (`FUN_005D1560`), so
+the tally has no cast and no refusal for it. The cast rule of the magic info of each type
+(`GMagicInfo+0x34`: 0 anywhere, 1 on land, 2 inside the influence, 3 on
+land inside the influence) is in the log line of each take. A Creature
+miracle needs a Creature inside the influence. A one-off shield or storm
+lives for the time of its cast, with no site that pays.
+
+**The log.** Each take has the line `all miracles: the pointing hand takes
+Water (seed type 9, power level 0, page 3 of 6)`, then `Water (seed type
+9, power level 0, power up -1, magic type 22, cast rule ...) goes into the Hand with
+OneOffSpellSeed::CreateSpellIntoHand: the seed ...`. Each cast or refusal
+of the cast of the last take has `all miracles: Water from the book was cast
+by the game` (or `was refused by the game: the reason`). Each open and each
+turn of the page has `all miracles (debug_all_book=1): the book has 34
+miracles and power levels on 6 pages. Page 3: ... The town is as before:
+the town ... knows N magic types, and its Worship Site ... has M icons`.
+Each report window, when it changed, has `all miracles this session: cast N
+of 34: ... Refused N: ... Taken and not cast N: ... Never taken: N`.
+
+With `debug_all_book=0`, or when `CreateSpellIntoHand` does not have the
+bytes of v1.42, the book shows the icons of the sites.
+
+How the mod casts each miracle of the book (see "The grip casts"):
+
+| Miracles | The cast of the mod | Known to work |
+| --- | --- | --- |
+| Fireball and its levels, Flock of birds, Flock of animals | The throw: close the grip, swing, open | The plain Fireball and the two flocks in desktop runs. The levels are not run |
+| Lightning and its levels, Food, Poisoned Food, Wood, Water, Water Increase | The pour: keep the grip closed over the land | The plain ones in desktop runs. The levels are not run |
+| Storm and its levels, Spiritual Shield, Physical Shield | The grip and a circle that the ray draws on the land | Storm and Spiritual Shield in desktop runs. The levels of Storm are not run |
+| Heal, Heal Increase, Forest, Teleport, Explosion (the Mega-Blast of the game) and its levels | A press of the grip over the place | Heal, Forest, Teleport and Explosion in desktop runs. The levels are not run |
+| The 9 Creature miracles | A press of the grip with the halo on a Creature | Strong, Freeze, Shrink, Enlarge and Invisibility in desktop runs. Weak, Compassion, Angry and Itchy are not run |
+
+### The orbs of all miracles (the debug row "Spawn orbs")
+
+The debug row "Spawn all miracle orbs" (the group Miracles, the third row)
+puts one one-off seed of each of the 23 seed types that the game has on on
+the land in front of the head. The game makes each one with
+`OneOffSpellSeed::Create`, as a script or a spell dispenser makes a seed.
+The code is `SpawnOrbs` in `miracle.cpp`, with the places in
+`miracle_math::OrbPlace`:
+
+- The orbs lie on two arcs around the head, in the view of the head with
+  no pitch: 11 at 35 cm of the room, 12 at 55 cm, each arc from 80 degrees
+  left to 80 degrees right. Two orbs are 8.9 cm of the room apart or more.
+  The game puts each orb on the land under its point. A point over the sea
+  or off the map gets no orb.
+- The orbs are in the order of the seed types: the near arc from the left
+  has Storm, Forest, Fireball and so on.
+- Each orb is an object of the running game. The grip carries it, a short
+  press or the trigger makes it active ("A seed that the Hand carries"), and
+  the Creature can eat it. No save holds an orb that lies on the land (see
+  "What a save keeps").
+- A press makes only the orbs that are gone. An orb that the Hand used, or
+  that the game deleted, is marked to be deleted (`GameThing+0xA` bit 1), or
+  its unique id changed (the dword before the object, which the object heap
+  of the game gives each new object), or it has no vtable of
+  `OneOffSpellSeed` any more. The row is a toggle: "all out" while each orb
+  of the mod is on the land, and "not all" while one is gone. A press
+  anywhere on the row makes the orbs.
+- The row makes orbs only while the mod sees each save
+  (`GameOSFile::SaveAllGame`) and each clear of the map (`GGame::ClearMap`,
+  the God view and the table). Else the log says why, and no orb comes.
+- The debug window and the ring run in the frame of the controllers, on the
+  thread of the frame of the mod, where the test seeds come too. The log line `the orbs of
+  all miracles` gives the count that the game made, the orbs that were still
+  there and the points that were not land. One line for each orb gives its
+  place and its distance from the head.
+
+The row needs no switch "Unlock all", no Worship Site and no influence. A
+one-off seed makes its miracle active only inside the influence of the
+player (the tap of the game).
+
+### What a save keeps
+
+The game saves by itself: at the exit (slot 20, "Auto Save On Exit",
+`backend.md`, "The start of the game"), in its auto saves, in the Save Game
+Room and with the quick save. Each of these goes through
+`GameOSFile::SaveAllGame` (`0x00558160`): `SaveGameRoom::InstantSaveGame`
+calls it, and so do `0x00792ED3` and `0x00636105` [V]. The mod hooks it
+(`h_SaveAllGame` in `mod_main.cpp`, with the card "Saving..."). What the
+debug mode leaves in the game, and what a save keeps:
+
+| What | Does a save keep it | What the mod does |
+| --- | --- | --- |
+| The switch "All miracles in the book" | No | It changes nothing of the town, the icons or the sites |
+| The orbs of "Spawn orbs" on the land | No | Before each save the game deletes each orb of the list of the mod that lies on the land, with the delete of a one-off seed (the virtual `ToBeDeleted(0)`, slot `0xC`, `OneOffSpellSeed::ToBeDeleted` `0x0072A420`), as `OneOffSpellSeed::InterfaceTap` deletes a seed after its tap. That takes the seed off the map and out of the lists of the game (`MobileObject::ToBeDeleted`), and the next `GameThing::ProcessDeadList` of the game frees it. The list is then empty, and the row says "not all". A press after the save makes the orbs again. The log line `the game starts a save: the game deleted N orbs of all miracles` gives the count |
+| An orb in the Hand at the save | Yes [I] | The orb stays in the Hand, and the mod drops it from its list. It is a seed as a reward bubble of the game is |
+| The flag of no limit of prayer power of each Worship Site | No | Before each save each site gets back the flag that it had before the switch, and after the save the switch sets it again. The log lines `before the save, N Worship Sites get back the flag` and `after the save, N Worship Sites lose again the flag` |
+| The magic types that the towns know, and the icons of the Worship Sites | **Yes** | Nothing. See below |
+| The chants that a cancel gives back to a site | **Yes** | Nothing. While the switch is on, each cancel of a miracle of a site adds its chants to the pool of the site |
+| A miracle that `CreateSpellIntoHand` put in the Hand | Yes [I] | Nothing. It is the same `SpellSeed` that the tap of a reward bubble makes, with a full store of chants |
+
+**Why the mod does not take the miracles of the towns back.** The game has
+the inverse function, `Town::RemoveMagicTypesHeld` (`0x0073D450`). It
+clears the flag of the town (`Town+0xDFC`), turns the magic type off for
+the player (`GPlayer::SetMagicTypeEnabled`) and takes the icon off the
+Village Centre. But the icons of a Worship Site are objects with their own
+chants (`WorshipSpellIcon+0x134`) and their charge, and a seed in the Hand
+can belong to one. A removal and a new add around each save would delete
+these icons and their chants, and turn a magic type off for the player that
+another town of the player holds too. That is not safe. So a save that the
+game makes while "Unlock all" is on, or after it was on, keeps the miracles
+of the towns. The note of the row says so.
+
+When the game clears the map (a load, a new game, a new land:
+`GGame::ClearMap`, hooked in `tabletop.cpp`), the list of the orbs is stale.
+The mod drops it and deletes nothing (`MiracleMapCleared`).
+
+The test key `miracle_test_save_steps` runs the steps before a save at its
+frame, with no save, and the steps after a save 30 frames later. The recipe
+`village_run.ps1 -Kind orbsave` uses it.
+
+### The trail at the fingertip (`gesture_trail=1`)
+
+While the draw button is held and the hand may draw, a ribbon follows the
+point of the draw, so the player sees the gesture that he draws. The game
+shows no trail of its own in the headset. The code is `overlay.cpp`
+(`BuildGestureTrail`) with the pure math in `gesture_trail_math.h` and
+`glow_math.h`. The ribbon is a glow ribbon (`hand-model.md`, "The glow
+ribbons"): gold in the middle and amber at the rim, 1.8 cm across at the
+newest end, with a light that adds to the picture.
+
+- The trail draws while `GestureInput.held` is true, the same input that
+  feeds the ring of the game. With `miracle_circle_aim=0` it also draws for
+  the circle of a shield, while the grip is closed with a miracle that needs
+  a circle. With the ray the circle has its trail on the land.
+- The newest end is the point of the draw of this frame, so the ribbon
+  always reaches the finger. A point goes in each 5 mm of the room. The
+  trail keeps 96 points at the most.
+- A point stays 1.5 s. Its light and its width fall to nothing over that
+  time (width to 35 percent), so the old end of the trail goes out. A hand
+  that holds still loses the trail in 1.5 s.
+- When the draw ends, all the light falls to nothing over 0.3 s, and the
+  trail is empty. A new draw starts a new trail.
+- The points are in the room (game units), not in the world. In each frame
+  they go into the world with the map of that frame, so a move of the game
+  camera does not bend the trail. The hand and the trail move together.
+- It draws with `overlay=0` too, and with the hand model, the low poly
+  hand, and `hand_exact`.
+
+### The gesture pictures of the game [V]
+
+In each run of `ProcessPowerUpSystem` the game gives its "looking for" list
+to `fn_0068ABA0`. When the list changes, that function makes one
+`DisplayGesture` for each gesture type that the player can draw now. The
+list of the pictures is at `0x00D4EAC8`, with the count at `0x00D4EAD0`.
+`PSysGlobal::DrawLoop` (`fn_0068AA60`) puts each picture on the sorted list
+of the frame with the draw `fn_0068B480`. A picture has three parts:
+
+- The bubble (`fn_0068B7E0`): an empty glass ball for a chain start, the
+  mesh of a leash, or the `SpellSeedGraphic` of the miracle. The bubble has
+  a camera of its own (`fn_0068B740`, put back by `fn_0068B7D0`) and a move
+  of the middle of the projection to the place of the picture.
+- The card: a sprite with the picture of the gesture
+  (`data\textures\S_Gesture*.raw`, `fn_0057D5D0`).
+- A dot that runs along the path of the gesture.
+
+The card and the dot get their place from `fn_0068B420`: a pixel of the
+square of the picture, 10 units in front of the camera
+(`LH3DTech::Get3DPointFromScreen`). The squares are at the lower right of
+the game screen. Each one is 3.5 percent of the width of the screen, 0.5
+percent apart, in a row from the right (`fn_0068AED0`). The card and the dot
+draw with no depth test. The pictures fade out while the help system shows
+a text (`HelpSystem+0x14`, `+0xB8`).
+
+The list of an empty Hand at rest has the chain starts and "again"
+(`GSpellSystemInfo+0x10` to `+0x18`): the game shows these whenever a
+Worship Site of the player has a miracle. After a chain start the list has
+the next gesture of each miracle and the scribble. With a Miracle in the
+Hand it has the scribble and the gestures of the power ups.
+
+### Where the gesture pictures of the game go
+
+With `gesture_panel=0` the headset does not show the pictures, for three
+reasons. A desktop run with dxwrapper shows each one (`village_run.ps1
+-Kind palm`, the render of 3600 by 2880, the God view at 44.4 units for each
+meter):
+
+- The game draws the pictures: up to 1300 draws in a report window, with the
+  fade at 1. They are at the lower right corner of the render of each eye,
+  in the last 3 percent of its width and height (the middle of the first
+  card at the pixel 3483 2817). The lens of the headset shows little or
+  nothing of the corners of the render.
+- The game puts each card 10 units deep on the ray of its pixel: 19.9 units
+  from the eye, 45 cm of the room. With one walk the right eye sees that
+  point 370 pixels (10 percent of the width) to the left of the place in
+  the left eye. So the two eyes do not see one picture at one place. When
+  one copy is in the part that the lens shows, it is a ghost in one eye.
+- The bubbles have a camera of their own and a move of the middle of the
+  projection. In the eye pictures they are cut at the bottom edge of the
+  left eye, and a stray icon shows at the right edge of the right eye.
+
+While the help system shows a text, the fade is 0, and the game draws no
+picture.
+
+### The gesture row over the palm (`gesture_panel=1`)
+
+The code is in `src/mod/gesture_panel.cpp`, with the pure math in
+`gesture_panel_math.h`. The row shows the gesture pictures of the game over
+the palm of the hand that does not point, while that palm is up. The
+pictures are the game's own, with the game's list, its order, its fade and
+its animation of the dot.
+
+**The place.** The middle of the row is where the middle of the spell book
+is (`BookCenter`): 12 cm from the grip along the normal of the palm, and 2
+cm up. The row faces the head with no roll, as the book does. The mod keeps
+the layout of the game: it puts the row of squares of the game screen, with
+the bubbles over them, on that plane. Three pictures or more are
+`gesture_panel_cm` wide (30 cm). Fewer pictures keep the size of a row of
+three, so one picture is about 9 cm.
+
+**The draw.** The draw of the sorted list draws no picture. In each eye
+pass, after the game's bubble of the spell book, the mod calls the draw of
+the game (`fn_0068B480`) for each picture, with three changes:
+
+- `fn_0068B420` gives a point of the plane over the palm, in place of the
+  point 10 units in front of the camera.
+- `fn_0068B7E0` draws the bubble at its point of the plane with the glass
+  ball and the graphics of `book_bubble.cpp` (`BookBubbleDrawPart`), and not
+  with a camera of its own. The bubble is 0.9 of the side of its card
+  across. The meshes of a leash do not show.
+- The sizes of the card and of the dot (`0x00C02674` and `0x00D4EAFC`) are
+  scaled for the plane while the draw runs, and then put back.
+
+The camera of the eye is put in place for the draw and put back after it.
+
+**When.** The row shows while each of these is true:
+
+- The palm is up: its normal is 40 degrees or less from the up of the
+  room. It stays up until the normal is more than 60 degrees from up. A
+  palm that is not up shows no row, so no picture stays at a place of the
+  view.
+- The game shows a gesture picture.
+- The spell book is closed. One palm cannot hold the book and the row, so
+  the row does not show while the book is open.
+- The controllers can act, no dialog box is up, no ring shows, and the cut
+  scene window is not up.
+
+**The palm, the sheet and the book.** The palm that turns up also shows the
+sheet of the gestures (`gesture_sheet=1`, see below), or opens the book
+with `spell_book_palm=1`. The rule:
+
+- While the draw button (B) is down, the palm shows the row.
+- While the game shows a picture that goes on from a gesture that the
+  player drew (a chain after a spiral, the gestures of a power up, the
+  scribble with a Miracle in the Hand), the palm shows the row. The draw
+  button is up between the pieces of a chain, and the row stays.
+- At other times (an empty Hand at rest) the palm opens the book with
+  `spell_book_palm=1`, or else shows the sheet.
+
+With `gesture_sheet=0` and `spell_book_palm=0` the palm always shows the
+row.
+
+With `gesture_panel=0` the game draws its pictures as before, and the
+headset does not show them.
+
+### The sheet of the gestures (`gesture_sheet=1`)
+
+The code is in `src/mod/gesture_sheet.cpp`, with the pure math in
+`gesture_sheet_math.h`. The sheet shows how to draw each miracle that the
+player can ask for, with the gesture pictures of the game. The flat game
+shows these pictures at the lower right of its screen, and the lens of the
+headset cuts that corner off.
+
+**The place.** The sheet is a card of its own (`kCardSheet`) at the place
+of the book: 12 cm from the grip of the hand that does not point along the
+normal of its palm, and 2 cm up (`BookCenter`). It faces the head with no
+roll. It moves with the hand, one to one.
+
+**When.** The sheet shows while the palm is up (40 degrees or less from the
+up of the room, until more than 60 degrees), the book is closed, the row of
+the game does not want the palm (the rule above), the controllers can act,
+no dialog box, ring or cut scene window is up, and the player is not in the
+Temple. With `spell_book_palm=1` the palm opens the book and the sheet does
+not show.
+
+**What.** A row for each miracle with an icon at a Worship Site of the
+player whose magic type is on, as the book lists them, then a row for the
+gesture "again" (`GSpellSystemInfo+0x10`): "Again: the last miracle". A row
+has the gestures of the chain of the miracle (`GSpellSeedInfo+0x100`): the
+start (the spiral or the inverse spiral) small and light, then the gesture
+of the miracle, and the name. Up to 7 rows are one column, and more rows
+are two columns. The names follow the pictures: a sheet whose
+chains have two gestures is 15.6 cm wide, and 18.6 cm with a chain of
+three. A sheet of 6 miracles and "again" is 25 cm high.
+With no Worship Site the sheet says "No miracle to cast now" and "You have
+no Worship Site".
+
+**The pictures of the game [V].** The game draws a gesture picture from two
+textures of 256 by 256 pixels, `data\textures\S_Gesture0.raw` and
+`S_Gesture1.raw` (RGB), each with an alpha file (`S_Gesture0a.raw`,
+`S_Gesture1a.raw`). Each texture is a grid of 4 by 4 cells of 64 pixels.
+`fn_0057D5D0` takes the gesture type: the texture is the type / 16, and the
+cell is the type % 16, in rows from the top left (`DisplayGesture` at
+`0x0068B380` passes the type of `+0x0C`). The strokes are white, so the mod
+reads the two alpha files of the game folder once, and draws the alpha of
+each cell in the ink of the page. It ships no picture of the game. When a
+file is not there, the log says so and the palm shows the row as before.
+
+**The look.** With `hint_card_style=1` the sheet is a page of the parchment
+of the hint cards, with dark brown ink, and the start of a chain in a
+lighter brown. A thin rule is between two rows. With `hint_card_style=0` it
+is the dark panel with white pictures and letters.
+
+**The log.** `gesture sheet: the sheet of N rows shows over the left palm`,
+`the sheet does not show: the reason`, each new picture with its size and
+time, and once a report window the frames that it showed.
+
+### The camera path of a miracle (`miracle_camera_still=1`)
+
+**What the game does [V].** A particle effect of the game can have a camera
+path (`Particle3DAnimWithCamera`). The Forest miracle has one. At a cast of
+the player, `Particle3DAnimWithCamera::GameUpdate` `0x006C86F0` pushes a
+`CameraModePath` (`0x00460E50`). The camera then turns around the new forest
+while the trees grow, and `StopCamera` `0x006C86C0` takes the path off at the
+end of the effect. The update starts a path only for the interface that casts
+(`PSysManager::NetUnsafeIsMyInterfaceCasting`), and only while the int at
+`0x00C029E0` is not 0. The game has 1 there in its data and never writes it.
+In the God view the path is a camera of a story (`script_camera.cpp`): the
+God view stands aside, and the view turns with no move of the player. A
+desktop run with no change has the line "the camera belongs to
+CameraModePath" at the frame of the cast.
+
+**What the mod does.** With `miracle_camera_still=1` and a play mode in
+which the head carries the camera (2, 3 and 4), `script_camera.cpp` writes 0
+at `0x00C029E0` one time, before the first frame of play. The effect of the
+miracle plays as before, and the camera of the player stays. The God view
+does not stand aside. The write is one time only: a change while a path
+plays clears the mark of the path (`+0x34` of the effect), and then the game
+does not take the path off. With `miracle_camera_still=0` the path plays as
+the game makes it. Play mode 1 (the window) keeps the path.
+
+### The influence at the hand
+
+**What the plain game does at the edge [V].** The Hand of the mouse can go
+past the edge of the player's influence. There it acts on nothing. The hand
+mode of an object is `0x12` (a touch) and not a pick up
+(`Object::InterfaceMustBeInInfluenceForInteraction`), and each game turn of a
+take ends the take (`GInterfaceStatus::Process`, `0x005DC540`). The look of
+the Hand does not change. `GVirtualInfluence` (`GInterfaceStatus + 0x130`)
+keeps the last land point of the Hand inside the influence (`+0x08`). Its
+update (`0x0076CD40`) gives a strength (`+0x30`) of 1 there. Outside, the
+strength goes down with the distance from that point and with the time, to 0
+under 0.1. While the strength is above 0, `GVirtualInfluence::Draw`
+`0x0076D000` finds the edge between that point and the Hand (`+0x14`). Then
+it calls `PSysGlobal::AddManaPathSprite` `0x0068FB20` at `0x0076D1C2`: a
+stream of light from the edge to the land point under the Hand, and a sound.
+A script can turn the stream off (`SET_VIRTUAL_INFLUENCE`,
+`GPlayer::SetVirtualInfluence` `0x0064C3B0`).
+
+**What the mod does** (`influence_edge.cpp`). The real hand is in the air
+over the land, so three things change, each with a key:
+
+- **The fade** (`influence_fade=1`). Outside the influence each hand fades to
+  45 percent in 0.25 s, and inside it comes back in the same time
+  (`HandModelSetOpacity`). The test is the game's own: the call of
+  `Influence::CalculatePlayerInfluence` that `fn_005D1120` makes, at the land
+  point of the grip of that hand. A hand under 90 percent writes no depth.
+  The low poly hand has no alpha, so it does not fade.
+- **The stream at the hand** (`influence_stream_hand`, 0 by default). A hook
+  of `AddManaPathSprite` gives the land point of the Hand the height of the
+  Hand's point over the land. That is the third field of the `MapCoords`,
+  which `MapCoords::GetLHPoint` adds to the height of the land. So the
+  stream of the game ends at the Hand's point in the air. Only the stream of
+  the Hand of the controller changes. No desktop run has had a stream of the
+  game yet, so the key is 0 until a run shows it. `CHand::Draw` calls
+  `GVirtualInfluence::Draw` (`0x0046D2A7`) also while the mod hides the mesh
+  of the game's Hand. But the update keeps the land point of the interface
+  (`GInterfaceStatus + 0x14`), and `Draw` needs a last point inside (`+0x08`
+  not 0). In the God view that land point can be away from the land under
+  the Hand. The report of the log has the state of the stream.
+- **The glow at the edge** (`influence_wall=1`). For each hand, a glow shows
+  the edge of the influence near the tip of the index finger of that hand
+  (`influence_edge_math.h`). `influence_wall_look` gives its look.
+  - **The hologram** (`influence_wall_look=1`). The influence of a player
+    is the union of discs on the land: the disc of the Temple and one disc
+    for each town [V, `Influence::CalculatePlayerRawInfluence` `0x005CD230`].
+    The disc of the Temple has its middle at `Citadel+0x14` and the radius
+    `GGame+0x25007C` times `Citadel+0x6C` (`Citadel::GetInfluence`). The
+    towns are the list at `GPlayer+0xA50` (next at `+0x75C`), each with its
+    middle at `+0x14` and its radius at `+0x5C8`. The game draws the same
+    discs as its influence ring (`InfluenceCircle`). So the wall of the edge
+    is a set of vertical cylinders. The mod reads the discs each frame and
+    finds the point of the edge nearest to the hand with no search
+    (`NearestUnionEdge`): a point straight out from the middle of a disc,
+    or a point where two rims cross. The test of the game checks that point
+    2 cm of the room each side of it. The hologram is a disc on the wall
+    around that point, at the height of the hand: a soft fill, a bright
+    spot at the point, a grid, and rings around the point. The grid has a
+    line each 7.5 cm of the room, at whole steps of the height of the world
+    and at whole steps along the wall. So the grid stays at its place on the
+    wall, and only the disc that shows it moves with the hand. The rings are
+    8 cm apart. With `influence_wall_ripple=1` they go out from the point at
+    5 cm of the room a second, and with 0 they are still. A line is 8 mm
+    wide, with its light in the middle. The hologram starts 45 cm of the
+    room inside the edge and goes 40 cm past it. Its strength rises as
+    `t * t * (3 - 2 t)` from 0 to 1 at the edge, and falls the same way past
+    the edge: 0.42 at 25 cm inside, 0.87 at 10 cm inside, 0.96 at 5 cm past,
+    0.68 at 15 cm past and 0 at 40 cm past. So it shows well before the hand
+    gets to the edge. Its disc grows with the strength, from 14 cm to 30 cm from the
+    middle to the rim. A part of the wall inside another disc of the union
+    is not an edge, and has no light. Where the discs of the two hands overlap
+    on one wall, each point of the wall shows only the disc that is brighter
+    there. So the two hands make one hologram with one grid, and the light
+    does not double. A hologram has at most 900 triangles.
+  - Where the discs and the test of the game do not agree (an influence ring
+    of a script, the influence of a friend), the point comes from the search
+    of 24 rays below, and the hologram is level and faces the hand.
+  - **The round patch** (`influence_wall_look=0`). A soft round patch of
+    light lies on the edge at the point of the edge nearest to the hand, at
+    the height of the hand. 24 rays go out from the land point of the hand,
+    and each finds the first point where the influence changes. The patch is
+    in the vertical plane through that point, facing the hand. It is 12 cm of
+    the room from its middle to its rim. Its light is full in the middle,
+    0.55 of it at half the radius and 0 at the rim. The point is on one of
+    the rays, so it jumps from ray to ray when the hand moves along the edge
+    (up to 2.7 units for a hand 10 units inside a circle of 100 units), and
+    the patch turns up to 7.5 degrees from the wall.
+  - **The game's own field** [V]. `fn_00827820`, from the draw of the land
+    (`0x005E61B5`), tests the place of the 3D object of the Hand
+    (`CHand+0x482C`, `+0x38`) against each disc of `InfluenceCircle`. When
+    the Hand goes through the ring of a player whose ring shows
+    (`0x00EB9A1C`), it makes one burst at the ring (`fn_00827250`: 7
+    sprites of 0 to 12 units that grow for 2 s, in the color of that ring),
+    a sound and a pulse. So the game shows the ring only at the moment of the
+    crossing, at a fixed size in world units. The mod does not change it.
+  - **The color** is the red of the game's own influence ring: the color of
+    the ring of the player in the table at `0x00EA9EFC`. `fn_00826510` fills
+    it, and `InfluenceCircle` (`fn_008265F0`) gives the vertices of the ring
+    the color of the player index of `GetRemapedPlayer` `0x0064D790` [V]. The
+    mod takes the same entry for the player of the interface. Entry 0 is 255
+    70 70.
+  - **The strength of the round patch.** Inside the influence the patch
+    starts 20 cm of the room from the edge. It rises as `t * t * (3 - 2 t)`
+    with `t = 1 - distance / 20 cm`, so the start is faint (0.16 at 15 cm)
+    and the touch is full. Past the edge it falls to 35 percent in 3 cm and
+    to 0 at 30 cm. The most light is 0.6 of full light.
+  - The overlay draws the glow as added light, with the depth test, so the
+    land in front hides it. The triangles are in the world, so each eye sees
+    them at their depth. Each frame builds the glow one time for both eyes.
+    Most frames have no edge near a hand. Then the hologram costs one test
+    of the influence for each hand, and the round patch costs 48.
+
+The fade and the glow act only while the controller places the Hand, in the
+God view and on the table.
+
+## What a cast makes
+
+`miracle_watch.cpp` reads the game after a cast and writes lines with the tag
+`miracle watch`. It changes nothing.
+
+- **A shield or a storm.** Each `SpellShield` (the two shields) is in a list
+  of the game (the first one at `0x00DA07F0`, the next at `+0x100`), and each
+  `SpellStormAndTornado` in another one (`0x00DA07F8`, `+0xF4`). For each new
+  spell a line says where it is, its distance from the land point of the
+  last cast at a circle, its radius (`Spell+0xBC`) in units and in cm of the
+  room, its life (`+0x38`), its strength (`+0x94`), its age and the limit of
+  its age (`+0xB8`, `+0x50`), and its caster (`+0xA0`). A shield line also
+  has the count of its domes (`MapShield`, `+0xF0`). A storm line says if
+  its particle system (`+0xEC`) is there: `SpellStormAndTornado::Process`
+  deletes it when the spell has no caster. A line comes every 2 s for 12 s,
+  then every 10 s to 30 lines, and one line when the spell is gone, with its
+  time.
+- **A Creature after a Creature miracle.** For 25 s after a cast on a
+  Creature, a line comes at each change and every 3 s. It gives the size of
+  the Creature for the game (`fn_004F5E60`), the base size
+  (`[Creature+0x160]+0x6C`), the size of the drawn body (the `LH3DCreature`
+  at `[Creature+0x160]+0x58`, `+0x90`), the height of the base of the body
+  over the land, the state of the Hand, the flag of invisibility
+  (`Creature+0x106C`), the fizz (`+0x12B0`, its target at `+0x12B4`), the
+  fizz that the draw of the body gets (`[LH3DCreature+0x482C]+0xA0` and the
+  material at `+0x9C`), the switch `0x00D00DE4`, and each active entry of
+  the table of the spells on the Creature (`CreatureReceiveSpell`,
+  `Creature+0x370`, 16 entries of `0x18` bytes from `+4`, active while `+4`
+  is not 0). A Creature miracle puts its entry there
+  (`SpellCreature::InitWithObject` `0x007222D0`).
+- **The drops of Water.** A hook on `Spell::ApplyDefaultSpellEffect`
+  (`0x00720C30`) reads each drop of a Water spell (see "Water on a fire"
+  below). For the first 12 drops of a spell and each 10th drop after them, a
+  line gives the drop, its distance from the place of the spell and from the
+  Hand's point, the burning object nearest to it with the terms of the test
+  of the game (the distance from the middle of its fire, its fire radius, the
+  height of the land under the drop over the base of the object, and the
+  height of the object), its temperature before and after the drop, the
+  temperature at which it burns, and its heat capacity. A line at the end of
+  a pour gives the count of drops and of the drops that cooled a fire. Then
+  for 30 s a line each second gives each burning object that was near a
+  drop: its place, its temperature, its fire fraction (`GetFireFraction`
+  `0x007303E0`) and whether it has a graphic of flames (`FireEffect+0x2C`,
+  which `FireEffect::Draw` draws), or says that its fire is out.
+- **A Physical Shield in the physics.** A line gives the body of each new
+  shield: its middle, the radius of its ball, its points (their height and
+  their farthest distance from the middle), its faces, and its rest byte,
+  with the scale of the object and the radius of its spell. While a body
+  that moves is within 3 times that radius plus 20 units of the middle, a
+  line each 6 frames gives its distance from the middle, the sum of the two
+  radii (the game tests the pair only when the distance is less), the count
+  of its points in the ball of the shield, its speed, and the tests of
+  `PhysOb::CheckVFaces` (`0x007FDA60`, hooked) between it and the shield,
+  with their contacts. The line "first contact" of a throw names the class
+  of the object that the thrown object touched (`throw.md`).
+- **A teleport.** A line gives the teleport sites of the player when their
+  list changes (`GPlayer+0xA58`, the next one at `+0x88`), each with its place,
+  its spell and the seed of the spell. A hook on `MagicTeleport::DoTeleport`
+  (`0x005FC790`) gives the Living that goes in, the site, its place before and
+  after the call and the site nearest to it after the call. Lines 0.5 s, 2 s
+  and 5 s later give its place and its distance from each site.
+
+What the game does to the Creature [V]:
+
+- Shrink (entry 1) and Enlarge (entry 2) move the base size of the Creature
+  (`[Creature+0x160]+0x6C`) to the size of the spell and back
+  (`0x004F5520` to `0x004F5672`). On each game turn `Creature::ProcessState`
+  calls `fn_004EFCE0`, which gives a size to the body
+  (`LH3DCreature::SetSize`, vtable 8, which writes `+0x90`). Away from the
+  Temple that size is the base size. Near the pen of the Temple it is
+  smaller: at 16 m of the game or less from the point of the Creature at
+  the pen (`Creature+0x1200`), in a cone in front of the pen (the Citadel
+  `GPlayer+0xA48`, its pen at `+0x30`), the size goes from the base size at
+  16 m to 0.22 at 14 m and nearer. So at the door of the Temple the body
+  keeps the size 0.22 with each spell, also in the plain game. A desktop
+  run in the test save `temple` shows the base size at 0.200 with Shrink
+  and 2.400 with Enlarge, and the drawn body at 0.220. Away from the pen
+  (61 m of the game from its point, `miracle_run.ps1 -Kind away`) the drawn
+  body goes to 2.000 with Enlarge and to 0.200 with Shrink. The watch line gives
+  the metres from the point at the pen, and the size that the body gets in
+  front of the pen. The walk also reads the base size
+  (`LH3DCreature::GetNavRadius` `0x00480A60`).
+- Invisibility (entry 7, `0x004F58B0` and `0x004F5960`) sets the flag at
+  `Creature+0x106C` and starts the fizz (`Creature::SetFizz` `0x0047AB90`)
+  to 0.75. `Creature::ProcessState` (`0x004737F9`) gives the fizz and the
+  fizz material (`GlobalTextures::GetFizzMaterial`) to the draw of the body
+  while the switch `0x00D00DE4` is set. A desktop run shows the fizz at
+  0.75 in the draw, and only sparkles and a shadow in the eye pictures.
+
+**Water on a fire** [V]. `SpellWater::Process` (`0x00724ED0`) makes one
+drop each game turn: a point 0.3 to 0.3 + 0.7 R units from the place of the
+spell (`Spell+0xCC`), in a random direction, with R from the info of Water
+(`fn_005FACE0`). The place of the spell is the land under the gesture place
+that the game gives the spell (see "The bolt of Lightning starts at the
+Hand's point"), so in the mod it is the land under the Hand's point.
+`Spell::ApplyDefaultSpellEffect` puts the place of the effect at the drop
+with a height of 0, and `EffectValues::ApplyEffectToMapPos` (`0x00525100`)
+gives the effect to each object when two tests pass: the drop is less than
+the fire radius of the object (`GetDefaultFireRadius`, the 2D radius) plus
+the radius of the effect from the middle of its fire (the place of the
+object), and the land under the drop is less than the height of the object
+plus that radius from its base. `FireEffect::ApplyEffectToFireEffectIfNecessary`
+(`0x00730670`) then moves the temperature of the fire toward the temperature
+of the land plus the burn of the effect, by 10 divided by the heat capacity
+of the object (`GetHeatCapacity`, `[Object+0x28]+0xB0`) of the gap, at most
+the full gap. The object burns while its temperature is at least its
+combustion temperature (`[Object+0x28]+0xB4`, at least 40). So the number
+of drops that a fire needs goes up with the heat capacity of the object.
+The fire also heats itself in each game turn (`FireEffect::ProcessList`
+`0x00730760`, `fn_0072EFB0`). A pour on a burning house in a desktop run
+had its Hand's point 4 units from the middle of the house (inside its
+radius), so the drops fall on the house. A house has a heat capacity of
+2000 and burns at 150 or more. In a desktop run the first drop was 2.72
+units from the middle of the house (its fire radius is 4.30), and the drops
+took its temperature from 213.3 to 37.5 in 6 drops. A second run took it
+from 196.7 to 19.1, under 150 from the fourth drop. So the house goes out
+in the game's own way. The lines each second after the pour follow each
+burning object that was near a drop, with its fire fraction and whether it
+has a graphic of flames. In two runs the house was out after the pour,
+with no flames on it. The flames that stay are on a pile of wood beside the
+store (it burns at 90, and it stays at 190 to 247) and on trees near it
+(they burn at 110, and they stay at 220). The pour did not fall on them, so
+they burn on, as in the plain game.
+
+**The cloud of a Storm.** The particle system of the cast
+(`SF_StormCast`) ends at 6 s: its pieces die at the age of 6 s
+(`RemoveRuleOldAgeOnly`, `DieAge`). The storm spell stands on, and it
+drifts. Its cloud is an `LH3DMist`, as the clouds of the sky. The weather
+of the game also makes mists (`GWeather::DrawClouds` `0x0083FC90`), and a
+particle can make one (`ParticleMistCreator::CreateLH3DMist`
+`0x006AA5A0`). The mod turns each mist to the point that it faces and limits
+its pole to `cloud_pole_pct` percent of its distance (`backend.md`,
+"Clouds"), so a storm cloud near the head is flat. The test keys
+`sky_test_mist_log` and `sky_test_mist_hide` give a line for each mist that
+is not a sky cloud and take those mists out of the picture from a frame
+(`backend.md`, "Clouds"). `miracle_run.ps1 -Kind storm` uses them. In a
+desktop run the storm had 17 such mists, for example a dome of 47 units 534
+units away, and none of them was drawn after the frame of the hide, but the
+band stayed. With `sky_test_mist_hide_all` the band goes and the red sky of
+the storm shows. So the band is made of sky clouds of the storm. The engine
+flattens a sky cloud near the horizon of the eye, and in the God view the
+eye is low and near the clouds of the storm. `cloud_round_near` keeps a near
+sky cloud round. A desktop run showed the band gone, but the clouds of the
+storm hang 6 to 20 units from the eye, and a round one is a dark mass at the
+face. So a sky cloud fades by its gap from the eye in the room
+(`cloud_fade_near_cm`, `cloud_fade_far_cm`, `backend.md`, "Clouds").
+
+Open (B43 in the roadmap): in the full view the cloud of a Storm is a flat
+grey band with straight edges, also with `cloud_pole_pct=0`. The cast of
+the game also starts many particles (type 106, `PARTICLE_TYPE_STORM_CAST`),
+so the plain game has no flat band.
+
 ## Keys
 
 | Key | Default | What it does |
 | --- | --- | --- |
+| `miracle_camera_still` | 1 | 1: a miracle with a camera path of the game (the Forest) starts no path while the head carries the camera, and the camera of the player stays. 0: the path turns the camera as the game makes it |
+| `influence_fade` | 1 | 1: outside the influence of the player each hand fades to 45 percent. 0: the hands do not fade |
+| `influence_stream_hand` | 0 | 1: the stream of the influence of the game ends at the Hand's point in the air. 0: it ends on the land under the Hand, as the game draws it. 0 until a desktop run shows the stream |
+| `influence_wall` | 1 | 1: a red glow shows the edge of the influence at each hand (see "The glow at the edge"). 0: no glow |
+| `influence_wall_look` | 1 | 1: the glow is a hologram on the wall of the edge, from 45 cm of the room before the edge. 0: a round patch that faces the hand, from 20 cm before the edge |
+| `influence_wall_ripple` | 1 | 1: the rings of the hologram go out from the hand at 5 cm of the room a second. 0: the rings are still |
 | `miracle_hand` | 1 | 0: the game places the Hand with a miracle, and the mod gives no target, no cancel, no use of a seed and no lines |
 | `miracle_shake_mps` | 0.6 | The mean speed of each stroke of a shake, in m/s. 0 turns the shake off. 0.2 to 5 |
 | `miracle_cancel_button` | 1 | 0: the second face button does not cancel |
 | `miracle_cancel_ms` | 400 | The longest press of that button that is a cancel. 50 to 2000 |
 | `miracle_seed_use` | 1 | 0: the trigger does not make a carried seed active. Then only a short press of the grip does |
+| `miracle_circle_aim` | 1 | 1: a Storm or a shield in the Hand shows the ray of the pointing hand, and the land point of the ray draws the circle on the land, with a trail on the land (see "The circle of the pointer ray"). 0: the hand draws the circle in the air |
+| `miracle_circle_hand` | 1 | With `miracle_circle_aim=0`. 1: the circle of a Storm or a shield is on the land under the middle of the path of the real hand, with 1.05 times the widest span of that path as its size. 0: the circle that the game makes from the pixels of the path |
+| `miracle_site_pick` | 1 | 1: a teleport site that the game offers to its pick is a candidate of the real hand, so the Hand can take a site and put a villager on it. 0: the real hand has no site as a candidate |
+| `miracle_circle_cast` | 1 | 1: Storm and the two shields cast when the game matches the circle, with the grip still closed. 0: they cast when the grip opens |
+| `miracle_throw` | 1 | 1: a Fireball and a flock leave the Hand with the top speed of the grip of the real hand and fly straight, as a thrown object does. 2: the same, and they turn with the curve of the swing. 0: the game's filter of the speed of the Hand and its turn. See `throw.md`, "A thrown miracle" |
 | `miracle_touch_cm` | 3 | A body this near to the Hand's point is the target at the Hand, in cm of the room |
 | `miracle_cone_deg` | 6 | The cone of the aim for a new target at a distance |
 | `miracle_keep_deg` | the cone and 4 | The target of the last frame stays to this angle |
 | `miracle_max_m` | 4 | The most distance of a target in the aim, in m of the room. 0 is no limit |
+| `spell_book` | 1 | 0: the first face button of the hand that does not point has no job, and no book opens |
+| `spell_book_pull_cm` | 20 | The pull that takes a miracle out of the book, in cm of hand motion, 3 to 30. 0: the grip takes the miracle at once |
+| `spell_book_ring` | 1 | 1: a book of 1 to 6 miracles has them on a ring, and a page of the book of all miracles is a ring of 6 with the seals "Back" and "Next" in its middle. 0: rows and columns, and the seals in a third row |
+| `spell_book_b` | 1 | 1: a tap of B (the second face button of the pointing hand, at most `miracle_cancel_ms` and 5 cm) opens and closes the book while no miracle is in the Hand. 0: B does not open the book |
+| `spell_book_palm` | 0 | 1: the palm that turns up opens the book, and the sheet of the gestures does not show at rest. 0: the palm does not open the book |
+| `gesture_sheet` | 1 | 1: the palm that turns up at rest shows the sheet of the gestures. 0: no sheet, and the palm shows the row of the game's pictures |
+| `gesture_sheet_test_save` | 0 | A test key: N saves the first N pictures of the sheet as `bwvr-sheet-NNNNN.bmp` |
+| `gesture_sheet_test_frame` | 0 | A test key: from this frame of the scripted controller the sheet shows for 300 frames, also with the palm down |
+| `gesture_panel` | 1 | 0: no row over the palm. The game draws its gesture pictures at the corner of its screen, and the headset does not show them |
+| `gesture_panel_cm` | 30 | The width of the row of the gesture pictures over the palm, in cm, for 3 pictures or more, 10 to 80 |
+| `spell_book_bubble` | 1 | 1: the bubble that the hand pulls out is the game's own bubble. 0: it is a flat picture with the two gestures |
+| `spell_book_orbs` | 1 | 1: each cell of the book shows the orb of the game. 0: a flat picture with the two gestures of the miracle |
+| `spell_book_point` | 1 | 1: the page shows the point of the pick, and the glow at the Hand's point does not show while the book is open. 0: no mark, and the glow as always |
+| `card_hand_front` | 1 | 0: the page of the book is over the hands, also where a hand is in front of it (`ui-layer.md`, "A hand in front of a card") |
+| `hint_card_style` | 1 | 1: the book is a page of parchment with dark ink, as the hint cards. 0: the dark panel with white letters. The key of the hint cards (`controller-hints.md`, 9.5) |
+| `debug_all_miracles` | 0 | 1: each town of the player knows every miracle of the game, its Worship Site shows up to 6 of them, and each site has no limit of prayer power. A save keeps the miracles of the towns. For tests |
+| `debug_all_book` | 0 | 1: the book shows the 34 miracles and power levels of the game on 6 pages of 6, and each take puts the miracle in the Hand with `CreateSpellIntoHand`. The town learns nothing. 0: the book shows the icons of the Worship Sites. For tests |
+| `gesture_point` | 1 | 1: the tip of the index finger draws a gesture. 0: the grip point draws it. Not in the launcher |
+| `gesture_trail` | 1 | 1: a ribbon follows the point of the draw (see "The trail at the fingertip"). 0: no trail. Not in the launcher: each player has the trail, and a save of the launcher removes the key (`launcher.md`, "Retired keys") |
 
-The keys are read from `bwvr.ini`. They are not in the launcher.
+The keys are read from `bwvr.ini`. None of them is in the launcher.
 
 **The A/B key**, with `test_keys=1`: Ctrl with the 8 key of the number pad
 changes `miracle_hand`. The pointing controller gives a long pulse for 1 and
 a short pulse for 0.
+
+**The debug page** (`debug_menu=1`, the group Miracles): "All in book"
+changes `debug_all_book`, "Unlock all" changes `debug_all_miracles`,
+"Spawn orbs" puts the orbs of all miracles on
+the land (it has no key, and its value is "all out" while each of these
+orbs is on the land), "Spell book" changes `spell_book`, "Book orbs"
+changes `spell_book_orbs`, "Book point" changes `spell_book_point`, "Book
+pull" changes `spell_book_pull_cm` between
+0 and its value in `bwvr.ini` (10 when that is 0), "Book bubble" changes
+`spell_book_bubble`, "Miracle hand" changes `miracle_hand`, "Gesture point"
+changes `gesture_point` (grip or fingertip), "Gesture trail" changes
+`gesture_trail`, and "Circle aim" changes `miracle_circle_aim` (hand or
+ray). The hand that does not point gives a long pulse for
+1 and a short pulse for 0. These switches have no key of the keyboard. Choose
+"Gesture point" between two draws. In the group Picture, "Edge look" changes
+`influence_wall_look` (patch or hologram).
 
 Test keys for the desktop runs only (the launcher removes them):
 
@@ -578,12 +1989,71 @@ Test keys for the desktop runs only (the launcher removes them):
   Hand (`OneOffSpellSeed::Create`).
 - `miracle_test_cancel`: a list of frames. At each one the mod asks for a
   cancel.
+- `miracle_test_orbs`: up to 4 frames. At each one the orbs of all miracles
+  go onto the land, as the row "Spawn orbs" puts them.
+- `miracle_test_save_steps`: a frame. At that frame the mod makes the steps
+  before a save, with no save, and 30 frames later the steps after a save
+  and a check of the deleted orbs (see "What a save keeps").
+- `spell_book_test_items`: for each word `book` in turn, the item that the
+  word steps the hand to, for example `11 15`.
+- `influence_stream_test_log=1`: a log line for each stream of light of the
+  game (see "The bolt of Lightning").
+- `spell_book_test_save`: the mod saves the first N pictures of the book as
+  `bwvr-book-NNNNN.bmp`.
+- The word `book` of the scripted controller steps the pointing hand to the
+  middle of the next item of the open book.
+- `fake_controller_left_rots` and the word `lrot` turn the left hand, so a
+  run can turn its palm up and down (`controllers.md`, 4.2).
+- `gesture_panel_test_frame`: at this frame of the scripted controller
+  `gesture_panel` changes, so one run shows the corner of the game and the
+  row over the palm.
+- `influence_test_circle_cm` and `influence_test_circle_frame`: from the
+  first frame of the controllers at that frame or later with the Hand of the
+  controller, the influence of the player is a circle of this many cm of the
+  room around the land point of the Hand's point of that frame. The fade, the
+  glow and the stream see it (a test hook of
+  `Influence::IsInPlayerRawInfluence` `0x005CD460`). Before that frame the
+  fade and the glow count each point as inside. The pick of the game keeps
+  the real influence.
+- `influence_wall_test_light_pct`: the light of the glow at the edge times
+  this percent, 100 to 300, for the eye pictures of a desktop run.
 
 ## The log
+
+The tag `script camera` has one line at the start with
+`miracle_camera_still`, the address of the switch and its old value. A
+camera path that plays has the line "the camera belongs to CameraModePath".
+
+The tag `influence` has the keys at the start, and these lines: a hand
+that goes out of the influence or comes back into it, with its land point.
+The glow at the edge that shows or goes for a hand, with the distance of
+the hand from the edge, inside or past it, and the strength. For the round
+patch the line has the rays that found the edge. For the hologram it says
+if the point is on the wall of a disc of the game or from the search, with
+the count of triangles. A line each 60 frames while it shows: for the
+hologram on a disc, the edge point, the disc and the angle of the point on
+it, so the steps of a run show the point move along the wall. Each report
+window has the frames of the hologram on a disc, by the search, and the
+tests where the discs and the test of the game did not agree. The color of the
+glow, with the player and the entry of the table of ring colors. The first stream that the game draws, with its two ends and the
+Hand's point. The first stream that ends at the Hand's point, with its
+height over the land. With the test circle or `influence_stream_hand=1` the
+report has the state of the stream of the game: the last point inside, the
+edge, the strength, the switch of a script, the land point of the interface
+and the Hand's point. The test circle, with its middle and its radius. Each report
+window has the frames with a fade and with the glow, and the calls of the
+stream.
 
 The tag `miracle` has one line for each change:
 
 - The keys at the start, and each press of the A/B key.
+- "the orbs of all miracles: N seed types are on in the game, the game made
+  N orbs ...", and "the game made the orb ... (unique id N) of Storm (seed
+  type 0) on the land at x z, N cm of the room from the head".
+- "the game starts a save: the game deleted N orbs of all miracles that lay
+  on the land (ToBeDeleted), so no save holds them ...", and "the game
+  cleared the map ..., so the mod drops its list of N orbs and deletes
+  nothing".
 - "the Hand holds the one-off seed ... as an object".
 - "... is active in the Hand", with the seed, the power up, where it comes
   from, how it is cast, and the Hand state.
@@ -610,13 +2080,71 @@ The tag `miracle` has one line for each change:
   the casts, the refusals, the cancels, the seeds used, and the writes of
   the pick record.
 
+The tag `spell book` has the book:
+
+- The keys at the start, and each change from the debug page.
+- "the book opens over the left hand", with its place, its size and the
+  miracles (a dim one has "(dim)"), and "the book closes", with the cause.
+- "the book does not open", with the cause.
+- "the pointing hand is at Fireball", and "is at no miracle of the book".
+- "the pointing hand grips Water and pulls it out of the book", with the gap
+  from its cell. "the grip opens at N percent of the pull ..., so Water
+  springs back into the book". "Water snaps into the hand", with the gap.
+  "the book closes while the hand pulls Water".
+- "the pointing hand takes Water from the book", or "... and the game
+  refuses it", with the reason.
+- "the request of Water goes to the game: packet 0x25 ...", and "the Miracle
+  Water is in the Hand, N frames after the request".
+- With `debug_all_miracles=1`: what each town now knows, the icons of its
+  Worship Site, and each site that has no limit of prayer power now.
+- With `debug_all_book=1`: the lines `all miracles` of the take, the cast,
+  each open and each turn of the page, and the tally of the session (see
+  "The book of all miracles").
+- One line each report window: the opens, the closes, the pulls (the snaps
+  and the bubbles that went back), the takes, the
+  requests, the Miracles in the Hand, the refusals and the draws of the
+  picture. One more line has the frames with the game's bubble, its draws,
+  and the parts that the game made.
+
+The tag `gesture panel` has the gesture pictures:
+
+- The keys at the start, and the change of the test key
+  `gesture_panel_test_frame`.
+- Each new list of the game: each picture with its gesture type, display
+  order, seed type, leash and square, whether a picture goes on from a drawn
+  gesture, and the fade.
+- With `gesture_panel=0`, for each new list: the world point of the first
+  card, its distance from the camera in units and in cm of the room, and
+  its pixel in the camera of now.
+- "the row of N gesture pictures shows over the left palm", "the row does
+  not show", with the cause, and the first draw of the row with its size.
+- One line each report window: the draws of the row, the corner draws that
+  the mod skipped, the corner draws of the game, and the fade.
+
+The tag `book bubble` has the game's bubble: the glass ball and each graphic
+that the game makes, the first draw with its place and size, and a check of
+the game's code that fails.
+
 ## Tests
+
+The math test (`scene_checks.h`) covers the influence at the hand: the fade
+in 0.25 s and back, a long frame, the edge of a circle from inside and from
+outside, no edge for a hand far from it, the nearest edge point, and the
+glow: none at the start of the range and farther, faint a quarter into it,
+rising to full at the touch, the faint patch past the edge and none far
+past it, and a round patch in the plane of the edge that faces the hand,
+with its light in the middle and none at its rim.
+
+`scene_run.ps1 -Kind forest` casts Forest from a seed of
+`miracle_test_seeds`, and `-Kind edge` steps the hand across the edge of
+the test circle with an eye picture at each step (`tools/desk/README.md`).
 
 The math test (`miracle_checks.h`) covers the lines of the card for each kind
 of miracle, each reason of a refusal in the order of the game, the target at
 the Hand and in the aim (the gap, the angle, the range, no ray, and the
 order), the target that stays, the cancel button, the steps of the use of a
-seed, and the shake of the desktop runs (5 steps of 15 cm).
+seed, the shake of the desktop runs (5 steps of 15 cm), and the circle of a
+path of the Hand (a circle on the land, an upright circle, and no path).
 
 A desktop run (`bwvr/tools/desk/`) in the God view with the start "Keep your
 old Creature" can test a miracle. `miracle_test_seeds` makes the seeds. A
@@ -629,33 +2157,198 @@ Site (Water and Food) with a power up and the power that goes back at a
 cancel. A Physical Shield with no circle gives the refusal "this miracle
 needs a circle on the land first".
 
+`miracle_run.ps1 -Kind shield` shows the circle that casts when it closes.
+The game matches the circle of Spiritual Shield and of Storm at frames 445
+and 1025, and casts each one 2 frames later, while the grip stays closed for
+80 more frames. The opening of the grip then gives no second cast. With
+`miracle_circle_cast=0` the cast comes at the opening of the grip, 82
+frames after the match, at the same land point.
+
+The math test (`spell_book_checks.h`) covers the layout of the book for 0 to
+32 items, the place of the book from the grip pose, the plane that faces the
+head, the pick with its two limits, the open and the close, the grip that
+the book holds, and the pull: the share of the pull, the place of the
+bubble, the buzz, the spring back, and the hole of the game's bubble in the
+page.
+
+The spell book has a recipe: `village_run.ps1 -Kind book` (the test save
+`temple`, a Worship Site with Water, Food and Heal, 20000 chants). It opens
+the book and steps the right hand to two items. It pulls the second one 9
+cm and opens the grip, then pulls it 15 cm, cancels the miracle, and asks
+for a miracle with no chants (a refusal). It saves each picture of the book
+and of the bubble. What the recipe shows, with Vulkan and with dxwrapper
+(the pull with Vulkan only):
+
+- The card of the left hand has "[X] Spells". X opens the book over the left
+  hand, 44 cm from the head: 20 by 10 cm with 3 items, 20 by 16 cm with 6.
+  The other hand gets the pulse `tick`.
+- Each step of the right hand to a new item gives a gold halo on it, the
+  pulse `tick` on the pointing hand, and the card "[Grip] Hold and pull out
+  Food".
+- The grip on the item gives the bubble picture and the empty socket in the
+  book, and the card "Pull farther to take it". The buzz goes from 0.03 to
+  0.45 on the pointing hand, and half of that on the other hand.
+- The grip that opens at 92 percent of the pull sends no request: the
+  bubble goes back, and the book stays open.
+- The game makes the glass ball and the graphic of Food at the first pull,
+  and draws the bubble in each frame of the pull (one draw for each walk of
+  the scene). In the eye pictures with dxwrapper, the glass ball is at the
+  fingers of the right hand during the pull and at the snap, and the
+  fingers in front of it hide a part of it. When the Miracle is in the
+  Hand, the ball is gone and the game's own glow of Food is in the Hand.
+  With Vulkan (and `test_frame_rate=60`) the log shows the same draws, and
+  the eye pictures show the same bubble in both eyes.
+- The pull of 15 cm: the bubble snaps into the hand at 10.1 cm, in the same
+  frame as the take. With `spell_book_pull_cm=0` the grip is the take, and
+  the card says "[Grip] Take Food".
+- The take sends packet `0x25` with the seed type in the same frame. The
+  Miracle is in the Hand 4 to 6 frames later, and the pool of the site goes
+  from 20000 to 13000 chants.
+- With 0 chants each item is dim with "No prayer power. Villagers must
+  worship". A grip gives the pulse `refused`, and the card gives the reason.
+  The game itself shows nothing.
+- The last miracle is the first item when the book opens again.
+- One picture of the book takes 3 to 6 ms to draw with
+  `hint_card_style=0`. The book draws it only when it changes (2 or 3 times
+  for each open). With `hint_card_style=1` the pictures are the page of
+  parchment. At 624 by 304 px a picture takes 1.8 to 2.3 ms: the text of
+  GDI 0.4 to 0.6 ms, the page 0.55, the cells 0.5 to 0.9 and the ink 0.25.
+  The first picture takes 10 to 12 ms and the first note 7.5 ms, because
+  GDI makes each letter of Alegreya the first time that it draws it at a
+  size. The log has the parts of the first 12 pictures (`spell book : a new
+  picture of the book`).
+- With `spell_book=0`, X makes the log line of no job, and no book opens.
+- With `debug_all_miracles=1` the book has 6 miracles, and a take with 0
+  chants puts the Miracle in the Hand (see "The limit of 6 icons").
+
+The math test (`spell_book_checks.h`) also covers the book of all miracles:
+the 34 keys from the flags and the levels of `info.dat` in their order (3
+levels, 2 levels, the single miracles, the Creature miracles), each miracle
+before its levels, no seed type that the game has off, the key of each item
+back to its seed type and its level, the 6 pages with 1 to 6 miracles, no
+family on two pages, the last page with 4, the cells "Back" and "Next", the
+turn round the pages, and a page of 3 by 3 cells with the cells of the
+normal book of 6. `miracle_checks.h` covers the places of the 23 orbs: in
+front of the head, 35 to 55 cm from it, and 8 cm apart or more.
+
+The book of all miracles has a recipe: `village_run.ps1 -Kind allbook`
+(the test save `temple`, a Worship Site with the icons of Water, Food and
+Heal, and only `debug_all_book=1`). X opens the book at page 1 of 6. The
+word `book` steps the hand to a cell (`spell_book_test_items`), and a short
+grip on "Next" or "Back" turns the page. The hand takes Water (page 3, a
+miracle with an icon) and pours it. It takes Lightning (page 2, no icon):
+the take drops Water first, and the hand pours Lightning. It takes Heal
+Increase (page 3, a power level): the take drops Lightning, and a press
+casts it. Then the God view goes before the door of the Temple, the hand
+takes Strong (page 5) and casts it on the Creature with the word `touchc`.
+What a run must show:
+
+- `all miracles (debug_all_book=1): the book has 34 miracles and power
+  levels on 6 pages. Page 1: Storm, Storm Increase, Storm Extreme, Fireball,
+  Fireball Increase, Fireball Extreme. The town is as before: ...`, and the
+  same counts of magic types and icons at each open.
+- `the grip on "Next" turns the book to page 2 of 6`, and to page 3.
+- For each of Water, Lightning, Heal Increase and Creature Strong: `the
+  pointing hand takes ...`, `... goes into the Hand with
+  OneOffSpellSeed::CreateSpellIntoHand`, and `... from the book was cast by
+  the game`. For Lightning and Heal Increase also `A miracle is in the Hand,
+  so the game's own drop takes it out first`, and the `miracle` line of the
+  cancel.
+- `all miracles this session: cast 4 of 34: ...`.
+- The census lines of `village` at frames 890 and 2150 with the same icons.
+
+No run of the recipe has shown it yet. If the Creature is not near the
+door of the Temple in the save, the cast of Strong does not come, and the
+log says why (`has no target`, or the refusal).
+
+The math test (`glow_checks.h`) covers the trail and the glow ribbons: the
+light by age, the points that go in and out, the keep time, the release, a
+new draw, a full buffer, the same count of points at 72, 90 and 120 Hz, the
+ribbon of a line and of a curve, and the place of the eye from the camera
+matrix.
+
+The trail has a recipe: `village_run.ps1 -Kind miracle -Icon 3` with
+`-Set "backend=dxwrapper\ddraw.dll;test_frame_rate=60"` and the steps of the
+recipe with `shot@1240+1 shot@1300+1 shot@1360+1` added to the first draw (the
+word `trace` and B, 300 frames). What it shows:
+
+- The log has "the trail of a gesture starts" and "ends" for each draw, and
+  "the draw starts ... The point of the draw is the tip of the index finger,
+  8.8 cm of the room from the grip".
+- The eye pictures of both eyes show a gold ribbon that follows the path of
+  the draw and reaches the fingertip of the right hand. Its old end is thin
+  and faint. In the picture 60 frames later the hand has moved on and only
+  the last part of the path shows.
+- The game matched the spiral (template 64) 116 frames after the start of
+  the first draw and 116 frames after the start of the third one, and the W
+  shape 58 frames after the start of the fourth draw. With
+  `gesture_point=0` it matched the same gestures at the same frames, with
+  the same 44 samples, 5 corners and path of 3692 pixels. The scripted hand
+  never turns, so the tip is at a fixed offset from the grip, and the two
+  draws feed the game the same path. The run proves the way of the tip
+  through the plane and the ring. It does not show what a turn of the wrist
+  does to a gesture.
+- The ribbons cost 0.02 to 0.03 ms a frame on the CPU for the two eyes, with
+  80 to 140 triangles in each eye.
+
 A miracle that pours stays in the Hand after the pour, until its chants are
 used or the player takes it out. So a recipe with more than one seed must
 tap B after a pour (`miracle_run.ps1 -Seeds` gives the seed types, and
 `-Steps` the steps).
 
+The math test (`gesture_panel_checks.h`) covers the palm that turns up for
+each hand and the turns of the word `lrot`, the band of 40 and 60 degrees,
+the book on the palm (the hold of 0.4 s, the grip on the land, the close by
+the palm, the pull that holds the book, and the book of the button), and the
+map of the row of the game onto the plane.
+
+The gesture pictures and the palm have a recipe: `village_run.ps1 -Kind
+palm` (the test save `temple`, with `backend=dxwrapper\ddraw.dll` for eye
+pictures). What it shows:
+
+- With `gesture_panel=0` the eye pictures have the pictures of the game at
+  the lower right corner of each eye, 370 pixels apart (see "Where the
+  gesture pictures of the game go").
+- The list of an empty Hand at rest has the spiral, "again" and a leash
+  gesture (the leash of the Creature is on in the save). After the spiral
+  it has the next gestures of Water, Food and Heal. With Water in the Hand
+  it has the power up and the scribble.
+- With `gesture_panel=1` and the palm up, the row is over the left hand in
+  both eyes: three cards 8.7 cm apart with the bubbles of the miracles over
+  them, the empty glass ball over the spiral. The palm to the side hides the
+  row. The corner draws stop.
+- The palm up at rest opens the book 0.4 s later ("because its palm turned
+  up"), and the palm to the side closes it. With the grip of the left hand
+  on the land, the book opens only 0.4 s after the grip ends. With B held,
+  the palm up shows the row and opens no book. When B ends, the palm opens
+  the book.
+
 **Not run on the desktop:**
 
-- Teleport (the cast of Heal), and the Creature miracles other than Strong
-  and Freeze.
+- The spell book: the close when the ring or the game menu opens, an empty
+  book, a Creature miracle in the book, and the switches of the debug page.
+- A draw with a hand that turns: the scripted hand keeps its turn, so no run
+  shows whether the tip or the grip gives a gesture that the game matches
+  more often. The trail with the low poly hand, with `overlay=0` and on the
+  table.
+
+- Two casts of Teleport. Each cast makes one site, and a villager or the
+  Creature that goes into a site comes out at the nearest other site of the
+  player. `miracle_run.ps1 -Kind teleport` makes one cast. The Creature miracles
+  other than Strong, Freeze, Shrink, Enlarge and Invisibility.
 - A Creature outside the influence (the red halo and its line), each reason
   of a refusal other than "needs a Creature" and "needs a circle on the
   land", a Worship Site or a dispenser as the target, and a magic fireball.
 - The line of the card with `miracle_seed_use=0`, and each key at a value
   that is not its default, other than `miracle_hand`.
 - A left handed player, `controller_swap_buttons=1`, and a multiplayer game.
+- Which other particle effects of the game have a camera path. Each one that
+  has one plays no path with `miracle_camera_still=1`.
+- The stream of the influence while a script has the virtual influence off.
+  Then the game draws no stream, with each value of the key.
 
-**Needs the headset:**
-
-- Whether a real shake of 0.6 m/s takes the miracle out and a normal move
-  does not.
-- Whether 400 ms is the right limit of the tap of B.
-- Whether the speed of a real swing throws a fireball as far as the player
-  means. The desktop runs had only a step of the hand.
-- Whether a circle of the real hand over the land fits the circle of the
-  game.
-- Whether 3 cm and 6 degrees find the Creature with no effort.
-- Whether the miracle looks right in the real hand.
+The checks in a headset are in `headset-checks.md`, and the checks that a
+desktop run can prove are in `roadmap.md`, R12.
 
 ## Limits
 

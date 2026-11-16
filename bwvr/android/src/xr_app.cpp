@@ -289,6 +289,7 @@ bool XrApp::MakeInstance(ANativeActivity* activity) {
   }
   xrGetSystemProperties(instance_, system_, &sp);
   runtime_fov_tracked_ = foveation_on_[3] && fov_tracked.supportsFoveationEyeTracked != 0;
+  max_layers_ = sp.graphicsProperties.maxLayerCount > 0 ? sp.graphicsProperties.maxLayerCount : 16;
   AppLog("xr           : system %s, vendor 0x%X", sp.systemName, sp.vendorId);
   // THE SIZE OF THE RUNTIME (docs/android.md, "The size of the eye
   // pictures"): the values that can explain the size that it asks for.
@@ -1993,6 +1994,20 @@ void XrApp::EndFrame(const float menu_center[3], const float menu_size[2],
     int panels = 0;
     bool walls = false;
     for (int i = 0; i < n && used < kQuads - 2; ++i) {
+      // The runtime takes at most max_layers_ layers (maxLayerCount of the
+      // system). The keyboard, the menu and the cursor come after the layers
+      // of the mod and keep their room, so a layer of the mod that does not
+      // fit goes, the last ones of the order first.
+      if (count + 1 + 3 > max_layers_) {
+        layers_dropped_ += static_cast<uint64_t>(n - i);
+        if (!said_layers_) {
+          said_layers_ = true;
+          AppLog("xr           : a frame of the game has more layers than the runtime "
+                 "takes (at most %u). The last %d layers of the order of the frame do "
+                 "not show", max_layers_, n - i);
+        }
+        break;
+      }
       const ql::LayerRef& r = order[i];
       ql::QuadSpec s;
       if (!ql::Spec(f, r, EyeLayer(0).width, EyeLayer(0).height, &s)) continue;

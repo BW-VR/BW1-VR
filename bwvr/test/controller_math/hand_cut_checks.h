@@ -21,10 +21,12 @@ inline void FillEachPixel(const float (*pt)[2], int n, uint8_t* mask, int w,
   int y0 = static_cast<int>(floorf(lo_y)), y1 = static_cast<int>(ceilf(hi_y));
   if (y0 < 0) y0 = 0;
   if (y1 > h) y1 = h;
+  Edges edges;
+  EdgesOf(pt, n, &edges);
   for (int y = y0; y < y1; ++y) {
     float a0 = 0.0f, a1 = 0.0f, b0 = 0.0f, b1 = 0.0f;
-    const bool top = SpanAt(pt, n, y + 0.25f, &a0, &a1);
-    const bool low = SpanAt(pt, n, y + 0.75f, &b0, &b1);
+    const bool top = EdgeSpan(edges, y + 0.25f, &a0, &a1);
+    const bool low = EdgeSpan(edges, y + 0.75f, &b0, &b1);
     for (int x = 0; x < w; ++x) {
       const int count = RowSamples(x, top, a0, a1, low, b0, b1);
       if (count == 0) continue;
@@ -150,7 +152,7 @@ inline void HandCutChecks() {
       seed = seed * 1664525u + 1013904223u;
       return static_cast<float>((seed >> 8) & 0xFFFF) / 65535.0f;
     };
-    int differ = 0, boxes = 0;
+    int differ = 0, boxes = 0, spans = 0;
     for (int k = 0; k < 3000; ++k) {
       const int n = 3 + (k & 1);
       float poly[4][2];
@@ -170,10 +172,65 @@ inline void HandCutChecks() {
       FillEachPixel(poly, n, ref, 64, 64, b2);
       if (memcmp(mask, ref, sizeof(mask)) != 0) ++differ;
       if (memcmp(b1, b2, sizeof(b1)) != 0) ++boxes;
+      // The span from the slopes of the edges is the span of SpanAt.
+      Edges e;
+      EdgesOf(poly, n, &e);
+      for (int s = 0; s < 8; ++s) {
+        const float sy = cy - r + 2.0f * r * next();
+        float p0 = 0.0f, p1 = 0.0f, q0 = 0.0f, q1 = 0.0f;
+        const bool p = SpanAt(poly, n, sy, &p0, &p1);
+        const bool q = EdgeSpan(e, sy, &q0, &q1);
+        if (p != q || (p && (fabsf(p0 - q0) > 1e-3f || fabsf(p1 - q1) > 1e-3f))) {
+          ++spans;
+        }
+      }
     }
+    Check(spans == 0, "the span from the slopes of the edges is the span of "
+          "each edge, within 0.001 px", spans, 0);
     Check(differ == 0, "the fill of the full pixels in one fill gives the "
           "mask of a count of each pixel", differ, 0);
     Check(boxes == 0, "and the same box", boxes, 0);
+    // THE GROWTH by 1 pixel with steps of 16 gives the largest of 3 of each
+    // pixel, as a pixel by pixel count, for spans of 1 to 70 pixels at each
+    // start, and the count of the pixels that are not 0.
+    {
+      uint8_t in[3][96], row[96], col[96];
+      int grow_bad = 0, count_bad = 0;
+      for (int start = 0; start < 8; ++start) {
+        for (int len = 1; len <= 70; ++len) {
+          for (int r = 0; r < 3; ++r) {
+            for (int i = 0; i < 96; ++i) {
+              const float v = next();
+              in[r][i] = v < 0.5f ? 0 : static_cast<uint8_t>(v * 255.0f);
+            }
+          }
+          memset(row, 7, sizeof(row));
+          GrowRow(in[1], row, start, start + len);
+          const int nonzero = GrowColumn(len > 2 ? in[0] : nullptr, in[1],
+                                         in[2], col, start, start + len);
+          int want_count = 0;
+          for (int x = start; x < start + len; ++x) {
+            uint8_t m = in[1][x];
+            if (x > start && in[1][x - 1] > m) m = in[1][x - 1];
+            if (x + 1 < start + len && in[1][x + 1] > m) m = in[1][x + 1];
+            if (row[x] != m) ++grow_bad;
+            uint8_t c = in[1][x];
+            if (len > 2 && in[0][x] > c) c = in[0][x];
+            if (in[2][x] > c) c = in[2][x];
+            if (col[x] != c) ++grow_bad;
+            if (c > 0) ++want_count;
+          }
+          if (start > 0 && row[start - 1] != 7) ++grow_bad;
+          if (row[start + len] != 7) ++grow_bad;
+          if (nonzero != want_count) ++count_bad;
+        }
+      }
+      Check(grow_bad == 0, "the growth of a mask in steps of 16 gives the "
+            "largest of 3 of each pixel, and no pixel out of its span",
+            grow_bad, 0);
+      Check(count_bad == 0, "and the count of the pixels that are not 0",
+            count_bad, 0);
+    }
     memset(mask, 0, sizeof(mask));
     const float out[3][2] = {{-40.0f, 10.0f}, {-5.0f, 12.0f},
                              {-20.0f, 300.0f}};

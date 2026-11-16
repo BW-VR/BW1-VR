@@ -13,6 +13,7 @@
 
 #pragma once
 
+#include <emmintrin.h>
 #include <math.h>
 #include <stdint.h>
 #include <string.h>
@@ -128,6 +129,43 @@ inline bool SpanAt(const float (*pt)[2], int n, float sy, float* x0,
   return any;
 }
 
+// The edges of a convex polygon of kMostEdges points at most (a triangle cut
+// at the page, or the disc of a ball), with the slope of each edge, so the
+// span on a line costs no division.
+const int kMostEdges = 32;
+struct Edges {
+  int n;
+  float y0[kMostEdges], y1[kMostEdges], x0[kMostEdges], slope[kMostEdges];
+};
+
+inline void EdgesOf(const float (*pt)[2], int n, Edges* e) {
+  e->n = n > kMostEdges ? kMostEdges : n;
+  for (int i = 0; i < e->n; ++i) {
+    const int j = (i + 1) % e->n;
+    e->y0[i] = pt[i][1];
+    e->y1[i] = pt[j][1];
+    e->x0[i] = pt[i][0];
+    const float dy = pt[j][1] - pt[i][1];
+    e->slope[i] = dy != 0.0f ? (pt[j][0] - pt[i][0]) / dy : 0.0f;
+  }
+}
+
+// The span of the polygon on the line y = sy, as SpanAt gives it.
+inline bool EdgeSpan(const Edges& e, float sy, float* x0, float* x1) {
+  bool any = false;
+  float lo = 0.0f, hi = 0.0f;
+  for (int i = 0; i < e.n; ++i) {
+    if ((e.y0[i] > sy) == (e.y1[i] > sy)) continue;
+    const float x = e.x0[i] + (sy - e.y0[i]) * e.slope[i];
+    if (!any || x < lo) lo = x;
+    if (!any || x > hi) hi = x;
+    any = true;
+  }
+  *x0 = lo;
+  *x1 = hi;
+  return any;
+}
+
 // The samples of pixel x of a row that are in the spans of the row: 0 to 4.
 // top and low tell if the line at a quarter and at three quarters of the
 // row meets the polygon, with the spans a0 to a1 and b0 to b1.
@@ -151,7 +189,7 @@ inline int RowSamples(int x, bool top, float a0, float a1, bool low, float b0,
 // x0, y0, x1, y1, with x1 and y1 past the last pixel.
 inline void FillConvex(const float (*pt)[2], int n, uint8_t* mask, int w,
                        int h, int box[4]) {
-  if (n < 3) return;
+  if (n < 3 || n > kMostEdges) return;
   float lo_x = pt[0][0], hi_x = pt[0][0];
   float lo_y = pt[0][1], hi_y = pt[0][1];
   for (int i = 1; i < n; ++i) {
@@ -168,10 +206,12 @@ inline void FillConvex(const float (*pt)[2], int n, uint8_t* mask, int w,
   int y0 = static_cast<int>(floorf(lo_y)), y1 = static_cast<int>(ceilf(hi_y));
   if (y0 < 0) y0 = 0;
   if (y1 > h) y1 = h;
+  Edges edges;
+  EdgesOf(pt, n, &edges);
   for (int y = y0; y < y1; ++y) {
     float a0 = 0.0f, a1 = 0.0f, b0 = 0.0f, b1 = 0.0f;
-    const bool top = SpanAt(pt, n, y + 0.25f, &a0, &a1);
-    const bool low = SpanAt(pt, n, y + 0.75f, &b0, &b1);
+    const bool top = EdgeSpan(edges, y + 0.25f, &a0, &a1);
+    const bool low = EdgeSpan(edges, y + 0.75f, &b0, &b1);
     if (!top && !low) continue;
     float lo = top ? a0 : b0, hi = top ? a1 : b1;
     if (low && b0 < lo) lo = b0;
@@ -225,6 +265,73 @@ inline void FillConvex(const float (*pt)[2], int n, uint8_t* mask, int w,
     if (y + 1 > box[3]) box[3] = y + 1;
     if (last + 1 > box[2]) box[2] = last + 1;
   }
+}
+
+// THE GROWTH of a mask by 1 pixel, in two passes. A row: out[x] is the
+// largest of in[x - 1], in[x] and in[x + 1], for x from x0 to x1 (x1 past
+// the end), with no pixel out of x0 to x1. 16 pixels go in one step of SSE2
+// where all three are in the row.
+inline void GrowRow(const uint8_t* in, uint8_t* out, int x0, int x1) {
+  if (x0 >= x1) return;
+  if (x1 - x0 == 1) {
+    out[x0] = in[x0];
+    return;
+  }
+  out[x0] = in[x0] > in[x0 + 1] ? in[x0] : in[x0 + 1];
+  int x = x0 + 1;
+  for (; x + 16 <= x1 - 1; x += 16) {
+    const __m128i l = _mm_loadu_si128(reinterpret_cast<const __m128i*>(in + x - 1));
+    const __m128i c = _mm_loadu_si128(reinterpret_cast<const __m128i*>(in + x));
+    const __m128i r = _mm_loadu_si128(reinterpret_cast<const __m128i*>(in + x + 1));
+    _mm_storeu_si128(reinterpret_cast<__m128i*>(out + x),
+                     _mm_max_epu8(_mm_max_epu8(l, c), r));
+  }
+  for (; x < x1 - 1; ++x) {
+    uint8_t m = in[x];
+    if (in[x - 1] > m) m = in[x - 1];
+    if (in[x + 1] > m) m = in[x + 1];
+    out[x] = m;
+  }
+  out[x1 - 1] = in[x1 - 1] > in[x1 - 2] ? in[x1 - 1] : in[x1 - 2];
+}
+
+// A column: out[x] is the largest of up[x], mid[x] and down[x], for x from
+// x0 to x1. up or down is null at the edge of the box. Returns the count of
+// the pixels of out that are not 0.
+inline int GrowColumn(const uint8_t* up, const uint8_t* mid,
+                      const uint8_t* down, uint8_t* out, int x0, int x1) {
+  int count = 0;
+  int x = x0;
+  const __m128i zero = _mm_setzero_si128();
+  for (; x + 16 <= x1; x += 16) {
+    __m128i m = _mm_loadu_si128(reinterpret_cast<const __m128i*>(mid + x));
+    if (up != nullptr) {
+      m = _mm_max_epu8(
+          m, _mm_loadu_si128(reinterpret_cast<const __m128i*>(up + x)));
+    }
+    if (down != nullptr) {
+      m = _mm_max_epu8(
+          m, _mm_loadu_si128(reinterpret_cast<const __m128i*>(down + x)));
+    }
+    _mm_storeu_si128(reinterpret_cast<__m128i*>(out + x), m);
+    // The bits of the bytes that are 0, then the count of the others.
+    unsigned zeros =
+        static_cast<unsigned>(_mm_movemask_epi8(_mm_cmpeq_epi8(m, zero)));
+    int n = 16;
+    while (zeros != 0) {
+      zeros &= zeros - 1;
+      --n;
+    }
+    count += n;
+  }
+  for (; x < x1; ++x) {
+    uint8_t m = mid[x];
+    if (up != nullptr && up[x] > m) m = up[x];
+    if (down != nullptr && down[x] > m) m = down[x];
+    out[x] = m;
+    if (m > 0) ++count;
+  }
+  return count;
 }
 
 // The pixels of a mark of the place of a hand on a page, a share of 0 to 1

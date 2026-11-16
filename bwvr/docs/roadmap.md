@@ -326,10 +326,13 @@ keeps the mod as it is.
 - **F27. The hand in front of a page.** The page of the spell book and of
   the ring has a hole for each eye where a hand or the bubble of a pull is
   in front of it (`card_hand_front=1`, `card_hand_both_sides=1`,
-  `card_ball_cut=1`, `ui-layer.md` 28). Open: the first cut after a move
-  takes 1 to 3 ms on the test laptop (0.05 ms on average). Where the
-  texture of the game makes the palm almost clear, the land shows in the
-  hole beside the arm.
+  `card_ball_cut=1`, `ui-layer.md` 28). Open: the cost. In the recipe
+  `village_run.ps1 -Kind bookring` on the PC of the owner (3600 by 2880),
+  the cut takes 0.46 ms a frame on average while a hand is at the page,
+  0.93 to 0.98 ms in a frame with a new cut, and 1.4 to 1.7 ms at most.
+  The fill of the masks is half of it: each row of each triangle of both
+  hands, on both of its sides, for each eye. Where the texture of the game
+  makes the palm almost clear, the land shows in the hole beside the arm.
 - **F22. Words that the card never shows.** The card shows the game's
   "Drop" and "Throw" with the word of the grip (`controller-hints.md`,
   9.9). The second VR mod leaves those two words out

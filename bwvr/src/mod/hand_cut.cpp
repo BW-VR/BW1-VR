@@ -40,9 +40,10 @@
 // THE COST. The mask has half of the pixels of the card each way, and the
 // cut scales it up with a soft edge of one pixel of the mask. The triangles
 // fill it by spans of rows (hand_cut_math::FillConvex): a triangle with its
-// box out of the mask costs no row, and the pixels inside both spans of a
-// row are one fill. A hand with no vertex in front of the page fills
-// nothing. Only the box of the holes of the last frame is cleared. The
+// box out of the mask costs no row, the span of a row comes from the slopes
+// of the edges with no division, and the pixels inside both spans of a row
+// are one fill. A hand with no vertex in front of the page fills nothing.
+// The growth of the masks takes 16 pixels in one step of SSE2. Only the box of the holes of the last frame is cleared. The
 // picture of the owner keeps its pixels: this file keeps a copy of the box
 // that it cut, and puts it back in the next frame while the owner gives the
 // same picture (the same pixels and the same serial). A new picture of the
@@ -184,7 +185,12 @@ uint64_t g_right_whole = 0, g_right_boxes = 0;  // the copies of the right
 uint64_t g_most_pixels = 0;
 uint64_t g_timed = 0;
 double g_sum_ms = 0.0, g_most_ms = 0.0;
-double g_part_ms[4] = {0.0, 0.0, 0.0, 0.0};  // map, masks, copies, cut
+// map, fill of the masks, growth of the masks, copies, cut
+double g_part_ms[5] = {0.0, 0.0, 0.0, 0.0, 0.0};
+double g_grow_ms = 0.0;  // the growth of the masks in this frame
+// The frames with a new cut (not the cut of the frame before) and their time.
+uint64_t g_new_frames = 0;
+double g_new_ms = 0.0;
 bool g_said_no_view = false;
 bool g_said_no_mesh = false;
 
@@ -424,35 +430,25 @@ uint64_t EyeMask(int eye, const float eye_at[3], const hc::Page& page,
   }
   // The mask 1 pixel larger: the largest value of each row of 3, then of
   // each column of 3.
+  const double grow_start = NowMs();
   int g[4] = {box[0] - 1, box[1] - 1, box[2] + 1, box[3] + 1};
   if (g[0] < 0) g[0] = 0;
   if (g[1] < 0) g[1] = 0;
   if (g[2] > hw) g[2] = hw;
   if (g[3] > hh) g[3] = hh;
   for (int y = g[1]; y < g[3]; ++y) {
-    const uint8_t* in = mask + static_cast<size_t>(y) * hw;
-    uint8_t* out = g_grown + static_cast<size_t>(y) * hw;
-    for (int x = g[0]; x < g[2]; ++x) {
-      uint8_t m = in[x];
-      if (x > g[0] && in[x - 1] > m) m = in[x - 1];
-      if (x + 1 < g[2] && in[x + 1] > m) m = in[x + 1];
-      out[x] = m;
-    }
+    hc::GrowRow(mask + static_cast<size_t>(y) * hw,
+                g_grown + static_cast<size_t>(y) * hw, g[0], g[2]);
   }
   uint64_t pixels = 0;
   for (int y = g[1]; y < g[3]; ++y) {
-    uint8_t* out = mask + static_cast<size_t>(y) * hw;
     const uint8_t* mid = g_grown + static_cast<size_t>(y) * hw;
-    const uint8_t* up = y > g[1] ? mid - hw : nullptr;
-    const uint8_t* down = y + 1 < g[3] ? mid + hw : nullptr;
-    for (int x = g[0]; x < g[2]; ++x) {
-      uint8_t m = mid[x];
-      if (up != nullptr && up[x] > m) m = up[x];
-      if (down != nullptr && down[x] > m) m = down[x];
-      out[x] = m;
-      if (m > 0) ++pixels;
-    }
+    pixels += static_cast<uint64_t>(
+        hc::GrowColumn(y > g[1] ? mid - hw : nullptr, mid,
+                       y + 1 < g[3] ? mid + hw : nullptr,
+                       mask + static_cast<size_t>(y) * hw, g[0], g[2]));
   }
+  g_grow_ms += NowMs() - grow_start;
   for (int k = 0; k < 4; ++k) box[k] = g[k];
   // The box of the cut in pixels of the card, inside the rect of the card.
   int* c = g_cut_box[eye];
@@ -565,12 +561,17 @@ void StageBoth(const bwvr::CardLayer& layer) {
   bwvr::XrScreen::StageCard(bwvr::kCardRingRight, r);
 }
 
-void Count(double start, const double part[4]) {
+// still: the cut of the frame before stayed.
+void Count(double start, const double part[5], bool still = false) {
   ++g_timed;
   const double ms = NowMs() - start;
   g_sum_ms += ms;
+  if (!still) {
+    g_new_ms += ms;
+    ++g_new_frames;
+  }
   if (ms > g_most_ms) g_most_ms = ms;
-  for (int k = 0; k < 4; ++k) g_part_ms[k] += part[k];
+  for (int k = 0; k < 5; ++k) g_part_ms[k] += part[k];
 }
 
 }  // namespace
@@ -652,7 +653,7 @@ void HandCutFrame() {
     return;
   }
   const double start = NowMs();
-  double part[4] = {0.0, 0.0, 0.0, 0.0};
+  double part[5] = {0.0, 0.0, 0.0, 0.0, 0.0};
   uint8_t* left = const_cast<uint8_t*>(layer.pixels);
   const int w = static_cast<int>(layer.texture_width);
   // The cut of a picture of the other owner (the book after the ring, or
@@ -742,7 +743,7 @@ void HandCutFrame() {
       ++g_split_frames;
     }
     ++g_still_frames;
-    Count(start, part);
+    Count(start, part, true);
     return;
   }
   g_seen = seen;
@@ -752,12 +753,14 @@ void HandCutFrame() {
 
   double t = NowMs();
   g_hand_front[0] = g_hand_front[1] = false;
+  g_grow_ms = 0.0;
   uint64_t count[2];
   for (int e = 0; e < 2; ++e) {
     count[e] = EyeMask(e, eyes[e], page, layer, hands);
   }
   g_mask_pitch = w / 2;
-  part[1] = NowMs() - t;
+  part[2] = g_grow_ms;
+  part[1] = NowMs() - t - g_grow_ms;
   const bool split = count[0] + count[1] > 0;
   if (split != g_split_before && g_logs < kMostLogs) {
     ++g_logs;
@@ -815,7 +818,7 @@ void HandCutFrame() {
   g_right_from = layer.serial;
   for (int k = 0; k < 4; ++k) g_left_box[k] = g_cut_box[0][k];
   CopyBox(g_clean, left, w, g_left_box);
-  part[2] = NowMs() - t;
+  part[3] = NowMs() - t;
   t = NowMs();
   if (count[0] > 0) {
     Cut(left, 0, w);
@@ -823,7 +826,7 @@ void HandCutFrame() {
   }
   for (int k = 0; k < 4; ++k) g_right_box[k] = g_cut_box[1][k];
   if (count[1] > 0) Cut(g_offer.right, 1, w);
-  part[3] = NowMs() - t;
+  part[4] = NowMs() - t;
   g_left_serial = bwvr::XrScreen::NewCardSerial();
   g_right_serial = bwvr::XrScreen::NewCardSerial();
   StageBoth(layer);
@@ -912,22 +915,29 @@ void HandCutReport() {
   const double n = static_cast<double>(g_timed);
   ModLog("hand cut     : this window the cut ran in %llu frames, %.3f ms on "
          "average and %.3f ms at the most (with no save of a test picture). "
-         "On average: the hands into the room %.3f ms, the masks %.3f ms, "
+         "On average: the hands into the room %.3f ms, the fill of the masks "
+         "%.3f ms, the growth of the masks %.3f ms, "
          "the copies %.3f ms, the holes %.3f ms. In %llu frames nothing "
          "moved and the cut of the frame before stayed. A hand was in front "
          "of a page in %llu frames: the card went out as one quad for each "
          "eye. The largest hole of an eye had %llu px. The picture of the "
-         "right eye was copied whole %llu times, and in boxes %llu times",
+         "right eye was copied whole %llu times, and in boxes %llu times. "
+         "The %llu frames with a new cut took %.3f ms on average",
          g_timed, g_sum_ms / n, g_most_ms, g_part_ms[0] / n,
          g_part_ms[1] / n, g_part_ms[2] / n, g_part_ms[3] / n,
+         g_part_ms[4] / n,
          g_still_frames, g_split_frames, g_most_pixels, g_right_whole,
-         g_right_boxes);
+         g_right_boxes, g_new_frames,
+         g_new_frames > 0 ? g_new_ms / static_cast<double>(g_new_frames)
+                          : 0.0);
+  g_new_frames = 0;
+  g_new_ms = 0.0;
   g_right_whole = 0;
   g_right_boxes = 0;
   g_timed = 0;
   g_sum_ms = 0.0;
   g_most_ms = 0.0;
-  for (int k = 0; k < 4; ++k) g_part_ms[k] = 0.0;
+  for (int k = 0; k < 5; ++k) g_part_ms[k] = 0.0;
   g_still_frames = 0;
   g_split_frames = 0;
   g_most_pixels = 0;

@@ -3259,10 +3259,12 @@ forearm. The rule takes the hands of the cut of the frame before.
 
 **The cost.** Only the box of the holes of the last frame is cleared. A
 hand with no vertex in front of the page fills nothing, and a triangle with
-its box out of the mask costs no row of the mask. In each row of a
-triangle, the pixels with all 4 samples inside it are one fill, and only
-the pixels at the two ends of the row count their samples
-(`FillConvex`). The picture of the owner (the book or the ring) keeps its
+its box out of the mask costs no row of the mask. Each polygon gets the
+slope of each edge one time, so its span on a row costs no division. In
+each row of a triangle, the pixels with all 4 samples inside it are one
+fill, and only the pixels at the two ends of the row count their samples
+(`FillConvex`). The growth of the masks by 1 pixel takes 16 pixels in one
+step of SSE2 (`GrowRow`, `GrowColumn`). The picture of the owner (the book or the ring) keeps its
 pixels: the cut keeps a copy of the box that it cut and puts it back in the
 next frame, while the owner gives the same pixels with the same serial.
 The spell book draws its picture again for the mark of the pick only when
@@ -3277,8 +3279,14 @@ clean pixels and the picture of the right eye get their pages of memory at
 the first offer of the card, not at the first hole. The holes scale each
 pixel with two 32 bit products. The report line has the mean and the
 longest time of the cut, with no save of a test picture in it, the mean of
-each part, and how many times the picture of the right eye was copied
-whole and in boxes.
+each part, how many times the picture of the right eye was copied whole and
+in boxes, and the mean of the frames with a new cut.
+
+In the recipe `village_run.ps1 -Kind bookring` on a PC with a render of
+3600 by 2880, a report window with a hand at the page has the cut at 0.46
+ms a frame on average (0.95 ms in a frame with a new cut) and 1.4 to 1.7
+ms at most. The fill of the masks takes 0.27 ms of it, the holes 0.1 ms,
+the copies 0.05 ms and the growth 0.02 ms.
 
 The page gets a hole where the mask is, and the eye sees its eye picture,
 with the hand, through it. A part of the hand behind the page makes no
@@ -3315,7 +3323,7 @@ the hand.
 ```
 hand cut     : frame N, a hand is in front of the page of the spell book: 4210 px of holes for the left eye and 3986 px for the right eye. The card goes out as one quad for each eye
 hand cut     : frame N, no hand is in front of the page of the spell book now. The card goes out as one quad for both eyes
-hand cut     : this window the cut ran in 450 frames, 0.120 ms on average and 0.400 ms at the most (with no save of a test picture). On average: the hands into the room 0.010 ms, the masks 0.040 ms, the copies 0.030 ms, the holes 0.040 ms. In 300 frames nothing moved and the cut of the frame before stayed. A hand was in front of a page in 120 frames: the card went out as one quad for each eye. The largest hole of an eye had 5120 px. The picture of the right eye was copied whole 2 times, and in boxes 118 times
+hand cut     : this window the cut ran in 103 frames, 0.472 ms on average and 1.662 ms at the most (with no save of a test picture). On average: the hands into the room 0.004 ms, the fill of the masks 0.264 ms, the growth of the masks 0.019 ms, the copies 0.057 ms, the holes 0.109 ms. In 51 frames nothing moved and the cut of the frame before stayed. A hand was in front of a page in 103 frames: the card went out as one quad for each eye. The largest hole of an eye had 168444 px. The picture of the right eye was copied whole 5 times, and in boxes 47 times. The 52 frames with a new cut took 0.930 ms on average
 ```
 
 | Key | Default | Meaning |
@@ -3332,7 +3340,9 @@ for a point 5 cm in front of a page 45 cm away), no hole for a point behind
 the page or for an eye behind it, the fill of a polygon and its box, the
 cover of a half pixel, the same mask and box as a count of the samples of
 each pixel for 3000 triangles and 4-gons (also across the edges of the mask
-and out of it), and no pixel for a triangle out of the mask. The recipe `village_run.ps1 -Kind bookhand`
+and out of it), the span from the slopes of the edges within 0.001 px of
+the span of each edge, no pixel for a triangle out of the mask, and the
+growth in steps of 16 against the growth of each pixel. The recipe `village_run.ps1 -Kind bookhand`
 puts the hand on the page, 5 cm in front of it and 8 cm behind it. Its
 picture `bwvr-book-N` is the page before the cut and the mark of the pick,
 and `bwvr-handcut-left-N` and `bwvr-handcut-right-N` are the page that each

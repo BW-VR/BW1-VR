@@ -68,14 +68,17 @@ inline BOOL QueryPerformanceFrequency(LARGE_INTEGER* value) {
 
 inline void Sleep(DWORD ms) { usleep(static_cast<useconds_t>(ms) * 1000); }
 
-// A lock with the names of the slim reader writer lock of Windows. The
-// renderer takes it only as exclusive.
+// A lock with the names of the slim reader writer lock of Windows. Here the
+// shared take is the exclusive take too: one mutex, so a reader also waits
+// for another reader.
 struct SRWLOCK {
   pthread_mutex_t mutex;
 };
 #define SRWLOCK_INIT {PTHREAD_MUTEX_INITIALIZER}
 inline void AcquireSRWLockExclusive(SRWLOCK* lock) { pthread_mutex_lock(&lock->mutex); }
 inline void ReleaseSRWLockExclusive(SRWLOCK* lock) { pthread_mutex_unlock(&lock->mutex); }
+inline void AcquireSRWLockShared(SRWLOCK* lock) { pthread_mutex_lock(&lock->mutex); }
+inline void ReleaseSRWLockShared(SRWLOCK* lock) { pthread_mutex_unlock(&lock->mutex); }
 
 // A critical section of Windows can be entered again by the thread that
 // holds it, so this one is a recursive mutex.
@@ -111,6 +114,10 @@ inline LONG InterlockedDecrement(volatile LONG* p) {
   return __atomic_sub_fetch(p, 1, __ATOMIC_SEQ_CST);
 }
 inline LONG InterlockedExchange(volatile LONG* p, LONG value) {
+  return __atomic_exchange_n(p, value, __ATOMIC_SEQ_CST);
+}
+typedef int64_t LONG64;
+inline LONG64 InterlockedExchange64(volatile LONG64* p, LONG64 value) {
   return __atomic_exchange_n(p, value, __ATOMIC_SEQ_CST);
 }
 inline LONG InterlockedCompareExchange(volatile LONG* p, LONG exchange,

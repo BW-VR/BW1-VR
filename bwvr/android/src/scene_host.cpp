@@ -46,6 +46,12 @@ bool VulkanOnly() { return true; }
 
 int StereoPassEye() { return g_state.pass_eye; }
 int IntroPassEye() { return g_state.intro_eye; }
+// The kept picture of an eye pass of the intro does not move here: the intro
+// gives no frame of the live stream (intro_keep_turn is of the PC).
+void IntroPassShift(float* x, float* y) {
+  *x = 0.0f;
+  *y = 0.0f;
+}
 
 bool OneWalkActive() { return g_state.one_walk; }
 bool EqualDepthNow() { return g_state.equal_depth; }

@@ -35,6 +35,7 @@ constexpr unsigned long k_DDSCAPS_TEXTURE = static_cast<unsigned long>(DDSCAPS_T
 constexpr unsigned long k_DDSCAPS_3DDEVICE = static_cast<unsigned long>(DDSCAPS_3DDEVICE);
 constexpr unsigned long k_DDPF_ALPHAPIXELS = static_cast<unsigned long>(DDPF_ALPHAPIXELS);
 constexpr unsigned long k_DDPF_RGB = static_cast<unsigned long>(DDPF_RGB);
+constexpr unsigned long k_DDPF_FOURCC = static_cast<unsigned long>(DDPF_FOURCC);
 }  // namespace vk_platform_sdk
 #undef D3DTA_SELECTMASK
 #undef D3DTA_DIFFUSE
@@ -56,6 +57,7 @@ constexpr unsigned long k_DDPF_RGB = static_cast<unsigned long>(DDPF_RGB);
 #undef DDSCAPS_3DDEVICE
 #undef DDPF_ALPHAPIXELS
 #undef DDPF_RGB
+#undef DDPF_FOURCC
 
 namespace posix_d3d {
 #include "../../src/mod/vk_d3d7_posix.h"
@@ -219,6 +221,7 @@ inline void VkPlatformChecks() {
   static_assert(posix_d3d::DDPF_ALPHAPIXELS == vk_platform_sdk::k_DDPF_ALPHAPIXELS, "DDPF_ALPHAPIXELS");
   same_as(posix_d3d::DDPF_ALPHAPIXELS, vk_platform_sdk::k_DDPF_ALPHAPIXELS);
   static_assert(posix_d3d::DDPF_RGB == vk_platform_sdk::k_DDPF_RGB, "DDPF_RGB");
+  static_assert(posix_d3d::DDPF_FOURCC == vk_platform_sdk::k_DDPF_FOURCC, "DDPF_FOURCC");
   same_as(posix_d3d::DDPF_RGB, vk_platform_sdk::k_DDPF_RGB);
   Check(same == all, "each value is the value of the Windows SDK", same, all);
 

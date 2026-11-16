@@ -319,8 +319,9 @@ if ($Kind -eq 'totem') {
     # next tap opens the book again. The grip on "Next" (cell 8) turns to
     # page 2, and the hand takes Lightning Increase (cell 1, power up 0). A
     # tap takes it out. The test key gesture_sheet_test_frame shows the sheet
-    # of the gestures for 300 frames. Then a tap opens the book and a tap
-    # closes it. The pictures of the book (bwvr-book-N), of the sheet
+    # of the gestures for 300 frames. Then a tap opens the book at page 2,
+    # and short grips on "Next" turn to page 3 and on to page 6. A tap
+    # closes the book. The pictures of the book (bwvr-book-N), of the sheet
     # (bwvr-sheet-N) and of the cut are saved. With the renderer Vulkan and
     # video_view=1 each shot writes bwvr-vk-video-N.bmp, the left eye with the
     # cards over it.
@@ -332,9 +333,11 @@ if ($Kind -eq 'totem') {
                  'book@1030+1 shot@1040+1 grip@1050+70 pull@1055+40 shot@1075+1 shot@1090+1 pull@1140+10 ' +
                  'shot@1160+1 b@1180+4 b@1230+4 book@1250+1 grip@1260+6 shot@1275+1 ' +
                  'book@1290+1 grip@1300+70 pull@1305+40 pull@1390+10 shot@1410+1 b@1430+4 ' +
-                 'shot@1500+1 shot@1600+1 b@1800+4 shot@1815+1 b@1850+4 shot@1865+1'
+                 'shot@1500+1 shot@1600+1 b@1800+4 shot@1815+1 ' +
+                 'book@1830+1 grip@1840+6 shot@1860+1 book@1880+1 grip@1890+6 book@1910+1 grip@1920+6 ' +
+                 'book@1940+1 grip@1950+6 shot@1970+1 b@2000+4 shot@2015+1'
     }
-    $keys = "$keys;debug_all_book=1;spell_book_test_items=0 8 1;spell_book_test_save=12;" +
+    $keys = "$keys;debug_all_book=1;spell_book_test_items=0 8 1 8 8 8 8;spell_book_test_save=24;" +
             "gesture_sheet_test_frame=1450;gesture_sheet_test_save=2;hand_cut_test_save=4;" +
             "fake_controller_pull_cm=25;video_view=1;test_frame_rate=60"
 } elseif ($Kind -eq 'orbsave') {

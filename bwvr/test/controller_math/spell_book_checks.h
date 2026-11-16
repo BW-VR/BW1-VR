@@ -131,8 +131,9 @@ inline void SpellBookChecks() {
     // The names under the items at the left and the right of the ring do
     // not meet the seals: a seal and its ring end before the cell of the
     // item at the left starts.
+    // In the reading order the third miracle is at the left.
     float lx = 0.0f, ly = 0.0f;
-    ItemCenter(ring, 5, &lx, &ly);
+    ItemCenter(ring, 2, &lx, &ly);
     Check(lx + 0.5f * ring.cell_m < -kSealOut * ring.cell_m -
                                          (kSealShare + 0.06f) * ring.cell_m +
                                          0.05f * ring.cell_m,
@@ -353,6 +354,78 @@ inline void SpellBookChecks() {
           1);
     Check(magic_ok, "the power up of each cell casts the magic type of its "
                     "name", magic_ok, 1);
+
+    // THE ORDER ON THE RING (spell_book_ring_order=1). Pages 1 and 2 are two
+    // families of three: the first family down the left side (the plain
+    // miracle at the top, then Increase, then Extreme at the bottom), the
+    // second down the right side. The other pages are in the reading order:
+    // the upper left, the upper right, the left, the right, the lower left,
+    // the lower right. The cells keep their miracles, so the table above
+    // and the recipes stay.
+    {
+      bool orders = true, sides = true, rows = true;
+      for (int p = 0; p < pages; ++p) {
+        PageCells(keys, starts, pages, p, cells);
+        const int order = PageOrder(cells, kPageCells);
+        const int want = p < 2 ? kOrderSides : kOrderRows;
+        if (order != want) {
+          orders = false;
+          printf("    page %d: order %d, the plan %d\n", p + 1, order, want);
+        }
+        const Layout l = LayoutFor(kPageCells, kShapeRingPage, order);
+        float x[kPageItems], y[kPageItems];
+        for (int c = 0; c < kPageItems; ++c) ItemCenter(l, c, &x[c], &y[c]);
+        if (order == kOrderSides) {
+          for (int f = 0; f < 2; ++f) {
+            const int a = 3 * f;
+            const bool side = f == 0 ? (x[a] < 0.0f && x[a + 1] < 0.0f &&
+                                        x[a + 2] < 0.0f)
+                                     : (x[a] > 0.0f && x[a + 1] > 0.0f &&
+                                        x[a + 2] > 0.0f);
+            if (!side || !(y[a] > y[a + 1]) || !(y[a + 1] > y[a + 2])) {
+              sides = false;
+            }
+          }
+        } else {
+          for (int r = 0; r < 3; ++r) {
+            const int a = 2 * r;
+            if (!(x[a] < 0.0f) || !(x[a + 1] > 0.0f) ||
+                fabsf(y[a] - y[a + 1]) > 1e-6f) {
+              rows = false;
+            }
+            if (r > 0 && !(y[a] < y[a - 2])) rows = false;
+          }
+        }
+      }
+      Check(orders, "pages 1 and 2 (two families of three) read down the "
+            "sides, the other pages in the reading order", orders, 1);
+      Check(sides, "on pages 1 and 2 the first family is down the left side "
+            "and the second down the right side, each from the top", sides,
+            1);
+      Check(rows, "on the other pages the miracles go left to right in rows "
+            "from the top", rows, 1);
+      const Layout clock = LayoutFor(kPageCells, kShapeRingPage, kOrderClock);
+      float cx = 0.0f, cy = 0.0f, mx = 0.0f, my = 0.0f;
+      ItemCenter(clock, 2, &cx, &cy);
+      ItemCenter(clock, 6, &mx, &my);  // the middle row
+      Check(cx > 0.0f && fabsf(cy - my) < 1e-6f,
+            "spell_book_ring_order=0 keeps the clockwise ring: the third "
+            "miracle at the right", cx > 0.0f, 1);
+      // The book of a Worship Site with 4 miracles: two rows of two.
+      const Layout four = LayoutFor(4, kShapeRing, kOrderRows);
+      float fx[4], fy[4];
+      for (int i = 0; i < 4; ++i) ItemCenter(four, i, &fx[i], &fy[i]);
+      Check(fx[0] < fx[1] && fx[2] < fx[3] && fabsf(fy[0] - fy[1]) < 1e-6f &&
+                fabsf(fy[2] - fy[3]) < 1e-6f && fy[2] < fy[0],
+            "a ring of 4 reads left to right in two rows", fx[2] < fx[3], 1);
+      const Layout five = LayoutFor(5, kShapeRing, kOrderRows);
+      float vx[5], vy[5];
+      for (int i = 0; i < 5; ++i) ItemCenter(five, i, &vx[i], &vy[i]);
+      Check(vx[0] < vx[1] && vy[2] < vy[0] && vy[3] < vy[2] &&
+                vx[3] < vx[4] && fabsf(vy[3] - vy[4]) < 1e-6f,
+            "a ring of 5 reads left to right and from the top", vx[3] < vx[4],
+            1);
+    }
     Check(PowerUpOfLevel(0) == -1 && PowerUpOfLevel(1) == 0 &&
               PowerUpOfLevel(2) == 1,
           "the plain miracle is the power up -1 of the game, Increase 0, "

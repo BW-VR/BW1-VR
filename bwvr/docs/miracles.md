@@ -988,9 +988,13 @@ glass ball with the miracle in it, as on the land and in the Hand (see "The
 orbs in the cells" below, `spell_book_orbs=1`). The name is under the
 bubble. With `spell_book_ring=1` a book of 1 to 6 items has them on a
 ring, as the ring menu has its items: cells of 6.5 cm on a ring of 7.8 cm
-radius with a flat top and bottom, the first item at the upper left and the
-next ones clockwise, spread evenly (2 items at the left and the right, 3 as
-a triangle, 4 as a rectangle). The item under the hand has a round light,
+radius with a flat top and bottom, spread evenly (2 items at the left and
+the right, 3 as a triangle, 4 as a rectangle). The ring of 6 has three
+rows: two items at the top, one at each side of the middle, and two at the
+bottom. The items are in the reading order (`spell_book_ring_order=1`):
+left to right in each row, the rows from the top. With
+`spell_book_ring_order=0` the first item is at the upper left and the next
+ones go clockwise. The item under the hand has a round light,
 as the ring menu has. The book of 6 is 22.1 by 23.0 cm. More than 6 items, and each book
 with `spell_book_ring=0`, are rows and columns: cells of 6.5 cm for up to 9
 items, 5 cm for up to 16 and 4 cm for more. A bubble is 0.66 of a cell
@@ -1254,9 +1258,21 @@ The orb of a level is the game's orb of its seed type at its power up
 
 **The pages.** A page has 6 miracles at most, the count of the icons of a
 Village Centre, on a ring of 6 (a hexagon) with cells of 6.5 cm, as the
-normal book of 6 has them (`spell_book_ring=1`). Cell 0 is at the upper
-left, cell 1 at the upper right, and cells 2 to 5 go on clockwise. A family (a miracle and its levels) stays on one
-page, so the 34 items are 6 pages:
+normal book of 6 has them (`spell_book_ring=1`). A family (a miracle and
+its levels) stays on one page, so the 34 items are 6 pages. The place of
+each cell on the ring (`spell_book_ring_order=1`, `PageOrder`):
+
+- A page with two families of three (pages 1 and 2) has the first family
+  down the left side: the plain miracle at the upper left, Increase at the
+  left, Extreme at the lower left. The second family is down the right
+  side in the same way. So Storm and Fireball each read from the top down.
+- Each other page is in the reading order: cell 0 at the upper left, cell 1
+  at the upper right, cell 2 at the left, cell 3 at the right, cell 4 at the
+  lower left and cell 5 at the lower right.
+- With `spell_book_ring_order=0` cell 0 is at the upper left, cell 1 at the
+  upper right, and cells 2 to 5 go on clockwise.
+
+The cells keep their miracles in each order:
 
 | Page | Cells 0 to 5 |
 | --- | --- |
@@ -1938,6 +1954,7 @@ so the plain game has no flat band.
 | `spell_book` | 1 | 0: the first face button of the hand that does not point has no job, and no book opens |
 | `spell_book_pull_cm` | 20 | The pull that takes a miracle out of the book, in cm of hand motion, 3 to 30. 0: the grip takes the miracle at once |
 | `spell_book_ring` | 1 | 1: a book of 1 to 6 miracles has them on a ring, and a page of the book of all miracles is a ring of 6 with the seals "Back" and "Next" in its middle. 0: rows and columns, and the seals in a third row |
+| `spell_book_ring_order` | 1 | 1: the miracles of a ring are in the reading order, and a page with two families of three has one family down each side ("The pages"). 0: the first at the upper left and the next ones clockwise. The switch "Ring order" of the debug page (group Miracles) |
 | `spell_book_b` | 1 | 1: a tap of B (the second face button of the pointing hand, at most `miracle_cancel_ms` and 5 cm) opens and closes the book while no miracle is in the Hand. 0: B does not open the book |
 | `spell_book_palm` | 0 | 1: the palm that turns up opens the book, and the sheet of the gestures does not show at rest. 0: the palm does not open the book |
 | `gesture_sheet` | 1 | 1: the palm that turns up at rest shows the sheet of the gestures. 0: no sheet, and the palm shows the row of the game's pictures |

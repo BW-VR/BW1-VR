@@ -169,15 +169,26 @@ const float kKeepDepthM = 0.09f;
 
 // THE SHAPES of a book. kShapeGrid: rows and columns. kShapeRing
 // (spell_book_ring=1, up to 6 items): the items on a ring, as the ring menu
-// has them, the first at the upper left and the next ones clockwise. kShapeRingPage:
-// a page of the book of all miracles, the 6 cells of a page on a ring of 6
-// (a hexagon) and the seals "Back" and "Next" side by side in its middle,
-// where the pointing hand reaches them without a move past the hand that
-// holds the book.
+// has them. kShapeRingPage: a page of the book of all miracles, the 6 cells
+// of a page on a ring of 6 (a hexagon) and the seals "Back" and "Next" side
+// by side in its middle, where the pointing hand reaches them without a move
+// past the hand that holds the book.
 const int kShapeGrid = 0;
 const int kShapeRing = 1;
 const int kShapeRingPage = 2;
 const int kRingMost = 6;
+
+// THE ORDER of the items on a ring (spell_book_ring_order). The ring of 6
+// has three rows: two items at the top, one at each side of the middle, and
+// two at the bottom. kOrderRows: the reading order, left to right in each
+// row, the rows from the top. kOrderSides: the first three items down the
+// left side and the next three down the right side, for a page with two
+// families of three (a miracle, its Increase and its Extreme), so each
+// family reads from the top down. kOrderClock (spell_book_ring_order=0):
+// the first item at the upper left and the next ones clockwise.
+const int kOrderClock = 0;
+const int kOrderRows = 1;
+const int kOrderSides = 2;
 // The radius of the ring, in cells: two items next to each other on a ring
 // of 6 are this far apart.
 const float kRingCells = 1.2f;
@@ -195,18 +206,21 @@ struct Layout {
   float height_m;
   int shape;
   float ring_m;    // the radius of the ring
+  int order;       // kOrderClock, kOrderRows or kOrderSides, for a ring
 };
 
 // The cell size goes down as the count goes up, so all 30 miracles of the
 // game fit in the picture. A ring needs a count of 1 to 6, and a ring page
 // the count of the cells of a page.
-inline Layout LayoutFor(int count, int shape = kShapeGrid) {
+inline Layout LayoutFor(int count, int shape = kShapeGrid,
+                        int order = kOrderRows) {
   Layout l;
   if (count < 0) count = 0;
   if (count > kMaxItems) count = kMaxItems;
   l.count = count;
   l.shape = kShapeGrid;
   l.ring_m = 0.0f;
+  l.order = order;
   if (count == 0) {
     l.columns = 0;
     l.rows = 0;
@@ -251,14 +265,40 @@ inline Layout LayoutFor(int count, int shape = kShapeGrid) {
 // right, and so on clockwise to slot 5 at the left. The ring has a flat top
 // and bottom, so the middle row has room for the seals between the items at
 // the left and the right, and the names under the items do not meet them. A
-// ring of fewer than 6 items keeps its items apart and the ring even.
-inline int RingSlot(int count, int i) {
-  static const int kSlots[7][6] = {{0, 0, 0, 0, 0, 0}, {-1, 0, 0, 0, 0, 0},
+// ring of fewer than 6 items keeps its items apart and the ring even: the
+// order changes the item of a slot, not the slots in use.
+inline int RingSlot(int count, int i, int order = kOrderRows) {
+  static const int kClock[7][6] = {{0, 0, 0, 0, 0, 0}, {-1, 0, 0, 0, 0, 0},
                                    {5, 2, 0, 0, 0, 0}, {0, 2, 4, 0, 0, 0},
                                    {0, 1, 3, 4, 0, 0}, {0, 1, 2, 3, 4, 0},
                                    {0, 1, 2, 3, 4, 5}};
+  static const int kRows[7][6] = {{0, 0, 0, 0, 0, 0}, {-1, 0, 0, 0, 0, 0},
+                                  {5, 2, 0, 0, 0, 0}, {0, 2, 4, 0, 0, 0},
+                                  {0, 1, 4, 3, 0, 0}, {0, 1, 2, 4, 3, 0},
+                                  {0, 1, 5, 2, 4, 3}};
+  static const int kSides[6] = {0, 5, 4, 1, 2, 3};
   if (count < 1 || count > kRingMost || i < 0 || i >= count) return -1;
-  return kSlots[count][i];
+  if (order == kOrderClock) return kClock[count][i];
+  if (order == kOrderSides && count == kRingMost) return kSides[i];
+  return kRows[count][i];
+}
+
+// The order of a page of the book of all miracles from its cells: down the
+// two sides (kOrderSides) when the 6 miracles of the page are two families
+// of three, else the reading order (kOrderRows).
+inline int PageOrder(const int cells[], int count) {
+  if (count < kPageItems) return kOrderRows;
+  for (int c = 0; c < kPageItems; ++c) {
+    if (cells[c] < 0 || IsNavKey(cells[c])) return kOrderRows;
+  }
+  const int first = TypeOfKey(cells[0]), second = TypeOfKey(cells[3]);
+  if (first == second) return kOrderRows;
+  for (int c = 0; c < 3; ++c) {
+    if (TypeOfKey(cells[c]) != first || TypeOfKey(cells[c + 3]) != second) {
+      return kOrderRows;
+    }
+  }
+  return kOrderSides;
 }
 
 // A cell of a ring page that holds a seal ("Back" or "Next").
@@ -277,9 +317,9 @@ inline void ItemCenter(const Layout& l, int i, float* x, float* y) {
     *y = mid;
     int slot = -1;
     if (l.shape == kShapeRing) {
-      slot = RingSlot(l.count, i);
+      slot = RingSlot(l.count, i, l.order);
     } else if (i < kPageItems) {
-      slot = i;
+      slot = RingSlot(kPageItems, i, l.order);
     } else if (i == kCellBack) {
       *x = -kSealOut * l.cell_m;
     } else if (i == kCellNext) {

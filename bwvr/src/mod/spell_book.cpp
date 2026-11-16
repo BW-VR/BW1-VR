@@ -467,6 +467,7 @@ uint64_t g_taps = 0;      // the taps of B that opened or closed the book
 bool g_orbs = true;       // spell_book_orbs: the cells show the orbs of the game
 bool g_point = true;      // spell_book_point: the mark of the point of the pick
 bool g_ring = true;       // spell_book_ring: the items on a ring
+bool g_ring_order = true; // spell_book_ring_order: the reading order
 bool g_game_ok = false;   // the functions of the game have their bytes
 
 bool IniPath(char path[MAX_PATH]) {
@@ -510,6 +511,7 @@ void ReadSettings() {
   g_orbs = IniKey("spell_book_orbs", 1) != 0;
   g_point = IniKey("spell_book_point", 1) != 0;
   g_ring = IniKey("spell_book_ring", 1) != 0;
+  g_ring_order = IniKey("spell_book_ring_order", 1) != 0;
   g_game_ok =
       SameBytes(kCanRequest, kCanRequestBytes, sizeof(kCanRequestBytes)) &&
       SameBytes(kSendPacket, kSendPacketBytes, sizeof(kSendPacketBytes)) &&
@@ -562,6 +564,13 @@ void ReadSettings() {
                   "of 6 with the seals Back and Next in its middle"
                 : "the miracles are in rows and columns, and the seals in a "
                   "third row");
+  ModLog("spell book   : spell_book_ring_order=%d: %s", g_ring_order ? 1 : 0,
+         g_ring_order
+             ? "the miracles of a ring are in the reading order, left to "
+               "right and from the top. A page with two families of three "
+               "has the first family down the left side and the second down "
+               "the right side"
+             : "the miracles of a ring go clockwise from the upper left");
   ModLog("spell book   : spell_book_b=%d: %s", g_tap_b ? 1 : 0,
          g_tap_b ? "a tap of B (the second face button of the pointing hand, "
                    "at most miracle_cancel_ms and 5 cm) opens and closes the "
@@ -617,6 +626,19 @@ struct Item {
 
 Item g_items[kMaxItems];
 int g_count = 0;
+
+// The order of the items on a ring (spell_book_math, THE ORDER): with
+// spell_book_ring_order=1 the reading order, and down the two sides for a
+// page of the book of all miracles with two families of three.
+int BookOrder() {
+  if (!g_ring_order) return kOrderClock;
+  if (BookShape() != kShapeRingPage) return kOrderRows;
+  int cells[kPageCells];
+  for (int c = 0; c < kPageCells; ++c) {
+    cells[c] = c < g_count ? g_items[c].type : kKeyEmpty;
+  }
+  return PageOrder(cells, g_count);
+}
 const wchar_t* g_empty_why = L"";
 bool g_open = false;
 int g_hover = -1;             // the item under the pointing hand, this frame
@@ -1003,6 +1025,7 @@ struct Look {
   bool all;
   bool orbs;         // the cells have holes for the orbs of the game
   int shape;         // spell_book_math::kShapeGrid, kShapeRing or kShapeRingPage
+  int order;         // spell_book_math::kOrderClock, kOrderRows or kOrderSides
   wchar_t title[48];
   wchar_t note[64];
 };
@@ -1224,7 +1247,7 @@ bool SameLook(const Look& a, const Look& b) {
 void Raster(const Look& look) {
   if (!RasterStart()) return;
   const double start = NowSeconds();
-  const Layout l = LayoutFor(look.count, look.shape);
+  const Layout l = LayoutFor(look.count, look.shape, look.order);
   g_width_px = PixelsOf(l.width_m);
   g_height_px = PixelsOf(l.height_m);
   const int w = g_width_px, h = g_height_px;
@@ -1547,6 +1570,7 @@ void BuildLook(Look* look) {
   look->all = g_all;
   look->orbs = g_orbs && !BookBubbleFailed();
   look->shape = BookShape();
+  look->order = BookOrder();
   for (int i = 0; i < g_count; ++i) {
     look->type[i] = g_items[i].type;
     look->can[i] = g_items[i].can;
@@ -2004,7 +2028,7 @@ const float kMarkMargin = 0.02f;
 
 bool MarkShows() {
   if (!g_point || !g_point_valid || !g_have_plane) return false;
-  const Layout l = LayoutFor(g_drawn.count, g_drawn.shape);
+  const Layout l = LayoutFor(g_drawn.count, g_drawn.shape, g_drawn.order);
   return fabsf(g_point_at[2]) <= kKeepDepthM &&
          fabsf(g_point_at[0]) <= 0.5f * l.width_m + kMarkMargin &&
          fabsf(g_point_at[1]) <= 0.5f * l.height_m + kMarkMargin;
@@ -2202,7 +2226,7 @@ bool g_said_orbs = false;
 
 void ShowOrbs(const Look& look, uint64_t frame) {
   if (!look.orbs || !g_have_plane) return;
-  const Layout l = LayoutFor(look.count, look.shape);
+  const Layout l = LayoutFor(look.count, look.shape, look.order);
   int shown = 0;
   for (int i = 0; i < look.count; ++i) {
     if (i == look.pulled || look.type[i] < 0 || IsNavKey(look.type[i])) {
@@ -2306,6 +2330,23 @@ void SpellBookRingChange(const char* by) {
   g_hover = -1;
   g_hover_type = -1;
   ModLog("spell book   : %s: spell_book_ring=%d", by, g_ring ? 1 : 0);
+}
+
+int SpellBookRingOrderValue() {
+  ReadSettings();
+  return g_ring_order ? 1 : 0;
+}
+
+void SpellBookRingOrderChange(const char* by) {
+  ReadSettings();
+  g_ring_order = !g_ring_order;
+  g_have_drawn = false;
+  g_hover = -1;
+  g_hover_type = -1;
+  ModLog("spell book   : %s: spell_book_ring_order=%d. %s", by,
+         g_ring_order ? 1 : 0,
+         g_ring_order ? "The miracles of a ring are in the reading order"
+                      : "The miracles of a ring go clockwise");
 }
 
 int SpellBookPalmValue() {
@@ -2535,7 +2576,7 @@ void SpellBookFrame() {
   // The list of the game, the place of the book, and the pick.
   ReadShapes();
   BuildList(g);
-  g_layout = LayoutFor(g_count, BookShape());
+  g_layout = LayoutFor(g_count, BookShape(), BookOrder());
   float grip[3], orientation[4], head[3];
   bool left = true;
   if (!ControllersCardPose(1, grip, orientation, head, &left)) return;

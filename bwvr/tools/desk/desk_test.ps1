@@ -90,6 +90,10 @@ try {
     # as each recipe counts, also when the installed bwvr.ini has the smooth
     # zoom (a push of 10 frames is then less than half a step, and the
     # scenes of bench_run.ps1 are not at their zoom).
+    # controls=0: the plain control scheme. Each recipe counts on its grip
+    # and its trigger, also when the installed bwvr.ini has the scheme
+    # "Trigger is grab" (controls=1). A run of that scheme gives controls=1 in
+    # its extra keys.
     # hint_counts_test_file: the mod keeps the counts of the hint cards
     # (hint_learn=1) in this file in the folder of the run, and not in the
     # file bwvr-hint-counts.ini of the game folder, which is the player's.
@@ -113,6 +117,7 @@ try {
         window_width = 800; window_height = 640
         god_zoom_forward_in = 1
         god_zoom_smooth = 0
+        controls = 0
         hint_counts_test_file = $counts
         welcome_done = 1
         hint_model_test_dir = $models

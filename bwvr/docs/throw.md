@@ -1547,6 +1547,17 @@ the real arc of a thrown object of the same swing (`BallFlightPlan` in
    no update for 2 s. Over the sea the game ends the ball as in the plain
    game: it fades near the water, and the particle system removes it.
 
+**The game's flight against the arc.** `miracle_run.ps1 -Kind throwdir` and
+`-Kind throwspeed` with `miracle_flight=0` measure it. For casts of 3.6 to
+3.9 m/s at 44.4 units per meter (k 2), the real arc meets the land 0.55 to
+0.69 s after the cast, 0.98 to 1.27 m of the room away. The game's ball 0
+is 60 cm of the room from that arc after 0.3 s, 1.7 to 2.0 m after 1 s and
+5 to 6 m after 2 s. It still climbs after 1 s, and it is 3.3 to 4.6 m of
+the room across the land after 2 to 4 s. A cast of 3.66 m/s at 100 units
+per meter gives the same picture: the arc meets the land at 0.72 m, and the
+ball is 5.3 m away after 4 s. The direction and the fan are those of the
+table below.
+
 `miracle_flight=0`, `miracle_throw=0` and the other laws of the throw give
 the game's flight. A cast with no swing of the real hand (the game's filter
 of the Hand) has the game's flight too.

@@ -296,8 +296,9 @@ keeps the mod as it is.
 - **F6. The fireball and the speed of a throw.** On hold: the owner tests
   the throw with the mod's own physics first. A fireball leaves with the top
   speed of the grip of the real hand (`miracle_throw`, `throw.md`, "A thrown
-  miracle"), and then has the game's physics. If it flies short or far in a
-  headset, a key scales that speed. For other objects, a key
+  miracle"), and then flies the real arc of the throw with the time factor
+  k of an object (`miracle_flight`). If it flies short or far in a headset,
+  a key scales that speed. For other objects, a key
   `throw_speed_pct` (100: the real speed) can make a throw stronger.
 **Comfort and moving**
 

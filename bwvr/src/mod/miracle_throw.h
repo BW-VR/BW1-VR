@@ -26,3 +26,12 @@ void MiracleThrowFrame();
 // The debug row "Miracle throw" (debug_menu.cpp).
 int MiracleThrowValue();
 void MiracleThrowChange(const char* by);
+
+// miracle_flight (docs/throw.md, "The flight of a thrown Fireball"): 1 lets
+// a thrown Fireball fly the real arc of the throw until its first contact, 0
+// keeps the game's flight. MiracleThrowInstall reads the key.
+void MiracleThrowSetFlight(int flight);
+
+// The debug row "Miracle flight" (debug_menu.cpp).
+int MiracleFlightValue();
+void MiracleFlightChange(const char* by);

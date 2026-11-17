@@ -312,6 +312,8 @@ void ThrowLandFasterChange(const char* by);
 // The throw of a miracle (miracle_throw.cpp).
 int MiracleThrowValue();
 void MiracleThrowChange(const char* by);
+int MiracleFlightValue();
+void MiracleFlightChange(const char* by);
 // The Creature, the villagers and the miracles (creature_command.cpp,
 // creature_stay.cpp, miracle.cpp, village.cpp, spell_book.cpp).
 int CreatureCommandRuleValue();
@@ -843,6 +845,8 @@ const Switch kSwitches[] = {
     {kGroupThrow, L"Miracle throw", L"Fireball at the speed of the hand",
      "miracle_throw", MiracleThrowValue, MiracleThrowChange,
      L"game|hand|hand turns"},
+    {kGroupThrow, L"Miracle flight", L"Fireball flies the real arc",
+     "miracle_flight", MiracleFlightValue, MiracleFlightChange, L"game|arc"},
     {kGroupThrow, L"Throw picture", L"Picture between the physics steps",
      "throw_draw", ThrowDrawValue, ThrowDrawChange, L"flight|real"},
     {kGroupThrow, L"Fall rule", L"Still hand lets a high object fall",
@@ -1435,6 +1439,9 @@ const wchar_t* const kTips[] = {
     L"Hand: a Fireball or a flock leaves with the top speed of the real hand "
     L"and flies straight. Hand turns: it also turns with the curve of the "
     L"swing. Game: the game's speed and curve.",
+    // Miracle flight
+    L"Arc: a thrown Fireball flies the real arc of the throw, as a thrown "
+    L"object does, until it touches the land. Game: the game's flight.",
     // Throw picture
     L"Where the mod draws a thrown object between game steps. Real: a substep "
     L"with a touch is 5 ms, and the picture waits at a guess. Flight: flight "

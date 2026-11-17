@@ -20,6 +20,166 @@ inline void SwingVelocity(double t, double v[3]) {
   v[2] = speed * cos(angle);
 }
 
+// THE FLIGHT OF A THROWN FIREBALL (miracle_flight=1). The arc of ball 0 is
+// the arc of a thrown object for the same swing, scale and k: the plan of
+// the ball and the plan of the object (throw_math::RealThrowPlan) agree, and
+// the steps of the rule of the game, with the start velocity of the mod, stay
+// on that arc.
+inline void BallFlightChecks() {
+  using namespace miracle_throw_math;
+  printf("\nThe flight of a thrown Fireball\n");
+  const float room[9] = {1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f,
+                         0.0f, 0.0f, 1.0f};
+  const float life = 7.5f;
+  // A throw of 5 m/s at 40 degrees from 1.0 m over flat land: a real flight
+  // of 0.885 s that lands 3.39 m away (the checks of throw_checks.h).
+  const float angle = 40.0f / 57.29578f;
+  const float v_room[3] = {0.0f, 5.0f * sinf(angle) * life,
+                           5.0f * cosf(angle) * life};
+  const float scales[] = {7.5f, 44.4f, 100.0f, 1000.0f};
+  const float slows[] = {1.0f, 2.0f, 4.0f};
+  for (float s : scales) {
+    for (float k : slows) {
+      throw_math::RealThrow rt;
+      throw_math::RealThrowPlan(v_room, v_room, room, 1.5f, life, s, 124.0f,
+                                2.0f, &rt, k);
+      BallFlight bf;
+      BallFlightPlan(rt.world, s, k, &bf);
+      char name[160];
+      sprintf_s(name, sizeof(name),
+                "at %.1f units per meter and k %.0f: the ball has the k of "
+                "an object", s, k);
+      Near(name, bf.slow, rt.slow, 1e-6);
+      float worst_v = 0.0f;
+      for (int i = 0; i < 3; ++i) {
+        worst_v = fmaxf(worst_v, fabsf(bf.v0[i] - rt.flight[i]));
+      }
+      sprintf_s(name, sizeof(name),
+                "at %.1f units per meter and k %.0f: ball 0 starts with the "
+                "velocity of the flight of an object", s, k);
+      Check(worst_v <= 1e-4f * (1.0f + controller_math::Length(rt.flight)),
+            name, worst_v, 0.0);
+      sprintf_s(name, sizeof(name),
+                "at %.1f units per meter and k %.0f: the gravity of the ball "
+                "is the gravity of the flight of an object", s, k);
+      Near(name, bf.gravity, rt.gravity * throw_math::kGravity,
+           1e-4 * bf.gravity);
+      // The steps of the rule, from the start velocity of the mod, against
+      // the arc of the object. The error is in meters of the room.
+      const float p0[3] = {10.0f, 1.0f * s, 20.0f};
+      float p[3] = {p0[0], p0[1], p0[2]};
+      const float dt = kBallTurn / static_cast<float>(bf.steps);
+      float v[3];
+      RuleStartVelocity(bf.v0, bf.gravity, dt, v);
+      double t = 0.0;
+      float worst = 0.0f;
+      const double real_time = 0.885 * rt.slow;
+      while (t < real_time) {
+        RuleFreeStep(p, v, bf.gravity, dt);
+        t += dt;
+        float want[3], vw[3];
+        throw_math::RealArc(p0, rt.flight, rt.gravity, t, want, vw);
+        float d[3] = {p[0] - want[0], p[1] - want[1], p[2] - want[2]};
+        worst = fmaxf(worst, controller_math::Length(d) / s);
+      }
+      sprintf_s(name, sizeof(name),
+                "at %.1f units per meter and k %.0f: %d steps of the rule a "
+                "turn stay within 1 mm of the arc of the object", s, k,
+                bf.steps);
+      Check(worst < 0.001f, name, worst, 0.0);
+      sprintf_s(name, sizeof(name),
+                "at %.1f units per meter and k %.0f: a step of the rule "
+                "moves the ball 2 cm of the room or less, or the turn has %d "
+                "steps", s, k, kBallMostSteps);
+      const float step_room =
+          (controller_math::Length(bf.v0) + 0.5f * bf.gravity) * dt / s;
+      Check(step_room <= kBallStepRoom + 1e-4f || bf.steps == kBallMostSteps,
+            name, step_room, kBallStepRoom);
+      // Where the arc meets flat land at 0.
+      double land_t = 0.0;
+      float at[3];
+      const bool meets = BallArcMeetsLand(
+          p0, bf.v0, bf.gravity, 0.0, 0.01, 30.0,
+          [](float, float) { return 0.0f; }, &land_t, at);
+      sprintf_s(name, sizeof(name),
+                "at %.1f units per meter and k %.0f: the arc meets the land "
+                "after k times 0.885 s", s, k);
+      Check(meets && fabs(land_t - real_time) < 0.002 * rt.slow, name, land_t,
+            real_time);
+      sprintf_s(name, sizeof(name),
+                "at %.1f units per meter and k %.0f: the arc meets the land "
+                "3.39 m of the room away", s, k);
+      const float across = sqrtf((at[0] - p0[0]) * (at[0] - p0[0]) +
+                                 (at[2] - p0[2]) * (at[2] - p0[2])) / s;
+      Near(name, across, 3.39, 0.01);
+    }
+  }
+  // At 7.5 units per meter k = 4 is cut to sqrt(7.5) = 2.74, as for an
+  // object.
+  {
+    const float cast[3] = {0.0f, 10.0f, 30.0f};
+    BallFlight bf;
+    BallFlightPlan(cast, 7.5f, 4.0f, &bf);
+    Near("at 7.5 units per meter k 4 is cut to 2.74", bf.slow, 2.7386, 1e-3);
+  }
+  // A long throw has the most steps.
+  {
+    const float cast[3] = {0.0f, 0.0f, 100.0f * 20.0f};
+    BallFlight bf;
+    BallFlightPlan(cast, 100.0f, 1.0f, &bf);
+    Check(bf.steps == kBallMostSteps,
+          "a throw of 20 m/s at k 1 has the most steps of the rule in a turn",
+          bf.steps, kBallMostSteps);
+  }
+
+  // A FREE STEP AND A CONTACT. The rule in the air takes g dt off the
+  // velocity up and does not change the rest. A bounce, a stop on the land
+  // and a deflection do not look like that.
+  {
+    const float before[3] = {30.0f, 12.0f, -40.0f};
+    float p[3] = {0.0f, 0.0f, 0.0f};
+    float v[3] = {before[0], before[1], before[2]};
+    RuleFreeStep(p, v, 109.0f, 0.01f);
+    Check(RuleStepWasFree(before, v, 109.0f, 0.01f),
+          "a step in the air is free", 1, 1);
+    const float kept[3] = {before[0], before[1], before[2]};
+    Check(!RuleStepWasFree(before, kept, 109.0f, 0.01f),
+          "a step with no gravity is a contact", 0, 0);
+    const float bounce[3] = {27.0f, -1.2f, -36.0f};
+    Check(!RuleStepWasFree(before, bounce, 109.0f, 0.01f),
+          "a bounce is a contact", 0, 0);
+    const float turned[3] = {-30.0f, 12.0f - 1.09f, -40.0f};
+    Check(!RuleStepWasFree(before, turned, 109.0f, 0.01f),
+          "a deflection across the land is a contact", 0, 0);
+  }
+
+  // THE FAN ON THE ARC. Ball i of the game is 7 degrees to the right of
+  // ball 0, 2 degrees higher and 20 percent slower. On the arc it keeps the
+  // same angles and the same ratio about the arc of ball 0.
+  {
+    const float up0 = 0.3f;
+    const float game0[3] = {0.0f, 100.0f * sinf(up0), 100.0f * cosf(up0)};
+    const float side = 7.0f / 57.29578f;
+    const float up_i = up0 + 2.0f / 57.29578f;
+    const float game_i[3] = {80.0f * cosf(up_i) * sinf(side),
+                             80.0f * sinf(up_i),
+                             80.0f * cosf(up_i) * cosf(side)};
+    const float yaw = -30.0f / 57.29578f;
+    const float lift = 10.0f / 57.29578f;
+    const float arc0[3] = {150.0f * cosf(lift) * sinf(yaw),
+                           150.0f * sinf(lift),
+                           150.0f * cosf(lift) * cosf(yaw)};
+    float out[3];
+    BallFanVelocity(game0, game_i, arc0, out);
+    Near("the fan on the arc: ball i is 7 degrees to the right of ball 0",
+         SideDegrees(arc0, out), 7.0, 0.01);
+    Near("the fan on the arc: ball i is 2 degrees higher than ball 0",
+         UpDegrees(out) - UpDegrees(arc0), 2.0, 0.01);
+    Near("the fan on the arc: ball i has 80 percent of the speed of ball 0",
+         controller_math::Length(out), 120.0, 0.01);
+  }
+}
+
 inline void MiracleThrowChecks() {
   using namespace miracle_throw_math;
   printf("\nA thrown miracle\n");
@@ -166,6 +326,8 @@ inline void MiracleThrowChecks() {
           "a curved swing: the top speed of the grip is the speed of the swing",
           peak_speed, 4.0);
   }
+
+  BallFlightChecks();
 }
 
 }  // namespace miracle_throw_checks

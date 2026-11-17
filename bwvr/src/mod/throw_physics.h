@@ -109,6 +109,10 @@ void ThrowPhysicsInstallEarly();
 // the real flight are not there, and in a multiplayer game.
 int ThrowPhysicsLaw();
 
+// The time factor k that throw_slow_x10 asks for now (1 to 10), before the
+// cut of throw_math::SlowFactor. A thrown Fireball flies with the same k.
+float ThrowPhysicsSlow();
+
 // The height rule (release_fall_cm) in meters of the room, now: 0 when the
 // key is 0 or the A/B key sets it off.
 float ThrowPhysicsFallLimitM();

@@ -665,7 +665,9 @@ the grip of the real hand in the 120 ms before the opening of the grip
 (`miracle_throw=1`), and no turn. The game's own speed of the Hand is a
 filter of 62 ms of the motion of the Hand's point, and it gives a direction
 of the past. The game also sends the turn of the path of the Hand, and a
-Fireball turns in its flight by it. See `throw.md`, "A thrown miracle".
+Fireball turns in its flight by it. A thrown Fireball then flies the real
+arc of the throw, as a thrown object does (`miracle_flight=1`). See
+`throw.md`, "A thrown miracle".
 
 **The circle.** The mod feeds the ring of the gestures while the grip is
 closed with a miracle that needs a circle, and the interface action is 8 or
@@ -1980,6 +1982,7 @@ so the plain game has no flat band.
 | `miracle_site_pick` | 1 | 1: a teleport site that the game offers to its pick is a candidate of the real hand, so the Hand can take a site and put a villager on it. 0: the real hand has no site as a candidate |
 | `miracle_circle_cast` | 1 | 1: Storm and the two shields cast when the game matches the circle, with the grip still closed. 0: they cast when the grip opens |
 | `miracle_throw` | 1 | 1: a Fireball and a flock leave the Hand with the top speed of the grip of the real hand and fly straight, as a thrown object does. 2: the same, and they turn with the curve of the swing. 0: the game's filter of the speed of the Hand and its turn. See `throw.md`, "A thrown miracle" |
+| `miracle_flight` | 1 | 1: a thrown Fireball flies the real arc of the throw until its first contact. 0: the game's flight. See `throw.md`, "The flight of a thrown Fireball" |
 | `miracle_touch_cm` | 3 | A body this near to the Hand's point is the target at the Hand, in cm of the room |
 | `miracle_cone_deg` | 6 | The cone of the aim for a new target at a distance |
 | `miracle_keep_deg` | the cone and 4 | The target of the last frame stays to this angle |

@@ -38,8 +38,31 @@
 // game's turn, and 0 keeps the game's velocity and turn. The log has a line
 // for each throw (the real hand, the game's filter, the turn, and what the
 // cast got), the balls and their turn from the cast, the path of ball 0 and
-// the last place of each ball: the hook on ModifyAtomCollection only reads the
-// atoms.
+// the last place of each ball. Without the arc (below) the hook on
+// ModifyAtomCollection only reads the atoms.
+//
+// THE FLIGHT OF A BALL [V]. The rule of group 0 of the particle system,
+// UpdateRuleGravityWithFloor::ModifyAtomCollection (0x006A1880, thiscall, the
+// AtomCollection, ret 4), moves each ball one step in each game turn, with
+// the time dt of the float at 0x00D4E0EC (0.1 s, miracle_throw_math.h, "The
+// flight of a ball"). It has a drag (Damping at +0x28), a gravity (Gravity at
+// +0x24 times GravityScale of the atom at +0x11C), less gravity near
+// -MaxSpeed (+0x20), the contact with the land and the deflection by a
+// Physical Shield. The game draws the atom on the line between its last two
+// places when the collection has InterpolateDrawPos (bit 2 of +0x38).
+//
+// THE ARC (miracle_flight=1, with miracle_throw 1 or 2 and throw_law=2). At
+// the first sight of the balls the mod puts each ball on the real arc of the
+// throw: from the Hand's point at the cast, with the velocity of the cast
+// over k and the gravity s g / k^2 (miracle_throw_math::BallFlightPlan). Ball
+// 0 has the velocity of the cast, and each other ball keeps the turn and the
+// speed of the game's fan about ball 0. Then the hook on the rule runs the
+// rule of the game for the collection in more steps of a shorter dt, with no
+// drag, no cap and the gravity of the arc in GravityScale. With the start
+// velocity of RuleStartVelocity each step is on the arc. The rule of the game
+// still makes the contact, the bounce, the impact sound and the deflection.
+// At the first contact of a ball the mod gives it back its GravityScale, and
+// the game's rule moves it as in the plain game.
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -52,6 +75,7 @@
 #include "debug_menu.h"
 #include "miracle_throw.h"
 #include "miracle_throw_math.h"
+#include "throw_physics.h"
 
 extern void ModLog(const char* format, ...);
 
@@ -78,9 +102,25 @@ const int kCollectionAtom = 0x40;
 const int kAtomPlace = 0x80;
 const int kAtomNext = 0x18;      // AtomCore: the next atom of the list
 const int kAtomVelocity = 0x34;  // AtomCore: units a second
+const int kAtomGravityScale = 0x11C;  // AtomCore: GravityScale
+const int kCollectionFlags = 0x38;    // AtomCollection: bit 2 InterpolateDrawPos
+const uintptr_t kGravityRule = 0x006A1880;
+const int kRuleMaxSpeed = 0x20;  // UpdateRuleGravityWithFloor
+const int kRuleGravity = 0x24;
+const int kRuleDamping = 0x28;
+const uintptr_t kParticleTime = 0x00D4E0EC;  // dt of a particle step, s
+const uintptr_t kParticleRate = 0x00D4E0F0;  // 1 / dt
+const uintptr_t kGetAltitude = 0x00803090;
+const float kMapScale = 6553.6f;  // a MapCoords int is the world unit times this
+typedef float(__fastcall* GetAltitudeFn)(const int32_t* coords);
 
 typedef bool(__fastcall* ModifyFn)(void* self, void* unused, void* collection);
 ModifyFn o_Modify = nullptr;
+ModifyFn o_Gravity = nullptr;
+bool g_gravity_hooked = false;
+// miracle_flight: 1 the real arc, 0 the game's flight.
+int g_flight = 1;
+bool g_rule_logged = false;
 
 bool g_installed = false;
 // miracle_throw: 0 the game's velocity and turn, 1 the velocity of the real
@@ -107,6 +147,10 @@ struct Cast {
   float turn_sent; // the turn that the cast got
   float hand[3];   // the Hand's point at the cast
   float units;     // world units in a meter of the room
+  bool real;       // the cast got the velocity of the real hand
+  bool arc;        // the balls fly the real arc (miracle_flight=1)
+  miracle_throw_math::BallFlight plan;  // the arc of ball 0, when real
+  float slow_asked;  // the k of throw_slow_x10
 };
 Cast g_next = {};
 Cast g_cast = {};
@@ -126,8 +170,29 @@ struct Track {
   float last[3];
   double last_time;
   int marks;
+  // The real arc of this ball: from the Hand's point at the cast, t seconds
+  // after the cast. Valid when the cast was real.
+  bool has_arc;
+  float v0[3];
+  bool land_found;   // where the arc meets the land
+  double land_t;
+  float land_at[3];
+  // The mod flies the ball on the arc (miracle_flight=1) until its first
+  // contact. arc_t is the time of the arc of the place of the atom now.
+  void* collection;
+  bool flying;
+  double arc_t;
+  float scale_game;  // GravityScale of the atom before the mod
+  int turns;         // game turns of the rule on the arc
+  int steps;         // steps of the rule on the arc
+  bool contact;
 };
 const int kTracks = 16;
+// The tracks that the mod flies on the arc now.
+int g_flying = 0;
+// The longest flight on the arc, in seconds of the arc. Then the game's
+// gravity is back.
+const double kArcLongest = 30.0;
 Track g_tracks[kTracks] = {};
 // The most balls that the log follows in one collection.
 const int kMostBalls = 8;
@@ -139,6 +204,8 @@ const int kMarkCount = sizeof(kMarks) / sizeof(kMarks[0]);
 // after the longest time.
 const double kGone = 0.5;
 const double kLongest = 10.0;
+// A ball on its arc with no update for this time is gone for the mod.
+const double kGoneFlying = 2.0;
 
 double Now() {
   static LARGE_INTEGER frequency = {};
@@ -194,14 +261,50 @@ void LogPlace(const Track& t, const float at[3], double seconds,
   const float units = t.cast.units > 0.0f ? t.cast.units : 1.0f;
   const float to_sent = SideDegrees(t.cast.sent, path);
   const float to_game = SideDegrees(t.cast.game, path);
+  // The distance from the real arc: at the time of the arc of the place of
+  // the atom while the mod flies it, and at the time since the cast for the
+  // game's flight.
+  char arc[200] = "";
+  if (t.has_arc && !t.contact) {
+    const double when = t.flying ? t.arc_t : t.last_time - t.cast.time;
+    float p[3], v[3];
+    miracle_throw_math::BallArcAt(t.cast.hand, t.v0, t.cast.plan.gravity,
+                                  when, p, v);
+    const float d[3] = {at[0] - p[0], at[1] - p[1], at[2] - p[2]};
+    sprintf_s(arc, sizeof(arc),
+              ". It is %.1f cm of the room from the real arc at %.2f s after "
+              "the cast (%s)",
+              Speed(d) / units * 100.0f, when,
+              t.flying ? "the mod flies it on the arc" : "the game's flight");
+  } else if (t.contact) {
+    strcpy_s(arc, sizeof(arc), ". It is past its first contact");
+  }
   ModLog("miracle throw: ball %d of %d of the %s of frame %llu %s %.1f %.1f "
          "%.1f, %.2f s after it started, %.1f units (%.2f m of the room) "
          "across the land from its start and %.1f units up. Its path goes "
          "%.1f degrees to the %s of the velocity that the cast got, and %.1f "
-         "degrees to the %s of the game's filter of the Hand",
+         "degrees to the %s of the game's filter of the Hand%s",
          t.ball, t.balls, t.cast.name, t.cast.frame, what, at[0], at[1], at[2],
          seconds, across, across / units, path[1], fabsf(to_sent),
-         SideWord(to_sent), fabsf(to_game), SideWord(to_game));
+         SideWord(to_sent), fabsf(to_game), SideWord(to_game), arc);
+}
+
+float LandAt(float x, float z) {
+  const int32_t coords[3] = {static_cast<int32_t>(x * kMapScale),
+                             static_cast<int32_t>(z * kMapScale), 0};
+  return reinterpret_cast<GetAltitudeFn>(kGetAltitude)(coords);
+}
+
+// A track stops the flight on the arc. With the atom still in its
+// collection, the atom gets its GravityScale back.
+void StopArc(Track* t, uint8_t* atom) {
+  if (!t->flying) return;
+  t->flying = false;
+  if (g_flying > 0) --g_flying;
+  if (atom != nullptr &&
+      !IsBadWritePtr(atom + kAtomGravityScale, sizeof(float))) {
+    *reinterpret_cast<float*>(atom + kAtomGravityScale) = t->scale_game;
+  }
 }
 
 Track* TrackOf(void* atom) {
@@ -217,6 +320,8 @@ Track* FreeTrack() {
     if (!g_tracks[i].active) return &g_tracks[i];
     if (g_tracks[i].t0 < oldest->t0) oldest = &g_tracks[i];
   }
+  // The atom of the oldest track can be gone: the mod does not write it.
+  StopArc(oldest, nullptr);
   return oldest;
 }
 
@@ -224,13 +329,48 @@ Track* FreeTrack() {
 // atom at the head of its list, so the last atom of the list is ball 0, the
 // ball on the cast. One line gives the start of ball 0 and the turn of each
 // ball from the cast, with the turn of the game's fan for that speed.
-void StartBalls(uint8_t* const* atoms, int count, double now) {
+// The mod puts a ball on its arc at the time since the cast, with the start
+// velocity of the steps of the rule.
+void StartArc(Track* t, uint8_t* atom, uint8_t* collection, double now) {
+  const miracle_throw_math::BallFlight& plan = t->cast.plan;
+  if (IsBadWritePtr(atom + kAtomVelocity, 3 * sizeof(float)) ||
+      IsBadWritePtr(atom + kAtomPlace, 3 * sizeof(float)) ||
+      IsBadWritePtr(atom + kAtomGravityScale, sizeof(float))) {
+    return;
+  }
+  const double t0 = now - t->cast.time;
+  float p[3], v[3], start[3];
+  miracle_throw_math::BallArcAt(t->cast.hand, t->v0, plan.gravity, t0, p, v);
+  miracle_throw_math::RuleStartVelocity(
+      v, plan.gravity,
+      miracle_throw_math::kBallTurn / static_cast<float>(plan.steps), start);
+  float* place = reinterpret_cast<float*>(atom + kAtomPlace);
+  float* velocity = reinterpret_cast<float*>(atom + kAtomVelocity);
+  for (int i = 0; i < 3; ++i) {
+    place[i] = p[i];
+    velocity[i] = start[i];
+    t->start[i] = t->last[i] = p[i];
+  }
+  t->scale_game = *reinterpret_cast<const float*>(atom + kAtomGravityScale);
+  t->collection = collection;
+  t->arc_t = t0;
+  t->flying = true;
+  ++g_flying;
+}
+
+void StartBalls(uint8_t* const* atoms, int count, double now,
+                uint8_t* collection) {
   const Cast cast = g_cast;
   g_cast.valid = false;
   char turns[kMostBalls * 12] = {};
   size_t used = 0;
   float start0[3] = {0.0f, 0.0f, 0.0f};
   float velocity0[3] = {0.0f, 0.0f, 0.0f};
+  // The game's velocity of ball 0, the last atom of the list: the fan of the
+  // other balls is about it.
+  float game0[3] = {0.0f, 0.0f, 0.0f};
+  ReadVector(atoms[count - 1], kAtomVelocity, game0);
+  Track* track0 = nullptr;
   for (int k = 0; k < count; ++k) {
     uint8_t* atom = atoms[k];
     float at[3], velocity[3] = {0.0f, 0.0f, 0.0f};
@@ -246,7 +386,21 @@ void StartBalls(uint8_t* const* atoms, int count, double now) {
     t->t0 = now;
     for (int i = 0; i < 3; ++i) t->start[i] = t->last[i] = at[i];
     t->last_time = now;
+    if (cast.real) {
+      t->has_arc = true;
+      if (t->ball == 0) {
+        for (int i = 0; i < 3; ++i) t->v0[i] = cast.plan.v0[i];
+      } else {
+        miracle_throw_math::BallFanVelocity(game0, velocity, cast.plan.v0,
+                                            t->v0);
+      }
+      t->land_found = miracle_throw_math::BallArcMeetsLand(
+          cast.hand, t->v0, cast.plan.gravity, 0.0, 0.01, kArcLongest, LandAt,
+          &t->land_t, t->land_at);
+      if (cast.arc) StartArc(t, atom, collection, now);
+    }
     if (t->ball == 0) {
+      track0 = t;
       for (int i = 0; i < 3; ++i) {
         start0[i] = at[i];
         velocity0[i] = velocity[i];
@@ -257,6 +411,16 @@ void StartBalls(uint8_t* const* atoms, int count, double now) {
                                   "%s%d %.2f", used == 0 ? "" : ", ", t->ball,
                                   side);
       if (wrote > 0) used += static_cast<size_t>(wrote);
+    }
+  }
+  // The picture between the steps: a ball that the mod flies moves on each
+  // frame, on the line between its last two places.
+  bool blends = false;
+  if (collection != nullptr &&
+      !IsBadWritePtr(collection + kCollectionFlags, 1)) {
+    blends = (collection[kCollectionFlags] & 2) != 0;
+    if (!blends && track0 != nullptr && track0->flying) {
+      collection[kCollectionFlags] |= 2;
     }
   }
   if (g_path_logs >= kMaxPathLogs) return;
@@ -278,6 +442,186 @@ void StartBalls(uint8_t* const* atoms, int count, double now) {
          (now - cast.time) * 1000.0, Speed(d) / units * 100.0f, fabsf(side0),
          SideWord(side0), UpDegrees(velocity0), used == 0 ? "none" : turns,
          fan);
+  if (track0 == nullptr || !track0->has_arc || g_path_logs >= kMaxPathLogs) {
+    return;
+  }
+  ++g_path_logs;
+  const Track& t = *track0;
+  const miracle_throw_math::BallFlight& plan = cast.plan;
+  char land[200] = "The arc stays over the land for 30 s";
+  if (t.land_found) {
+    const float flat[3] = {t.land_at[0] - cast.hand[0], 0.0f,
+                           t.land_at[2] - cast.hand[2]};
+    sprintf_s(land, sizeof(land),
+              "The arc meets the land %.2f s after the cast, at %.1f %.1f "
+              "%.1f, %.2f m of the room across the land from the Hand's "
+              "point",
+              t.land_t, t.land_at[0], t.land_at[1], t.land_at[2],
+              Speed(flat) / units);
+  }
+  ModLog("miracle throw: the real arc of ball 0 of the %s of frame %llu: k "
+         "%.2f (throw_slow_x10 asks %.2f), %.1f units a second (%.2f m/s of "
+         "the room) under %.1f units a second squared, from the Hand's point "
+         "at the cast. %s. miracle_flight=%d, throw_law=%d: %s. %s",
+         cast.name, cast.frame, plan.slow, cast.slow_asked, Speed(plan.v0),
+         Speed(plan.v0) / units, plan.gravity, land, g_flight,
+         ThrowPhysicsLaw(),
+         t.flying ? "the mod flies the balls on their arcs until the first "
+                    "contact"
+                  : "the game flies the balls",
+         !t.flying ? ""
+         : blends  ? "The game draws the balls between their last two places"
+                   : "The mod sets InterpolateDrawPos of the collection, so "
+                     "the game draws the balls between their last two "
+                     "places");
+  if (t.flying) {
+    ModLog("miracle throw: the arc has %d steps of the rule in a game turn "
+           "(%.1f ms each)",
+           plan.steps, 100.0f / static_cast<float>(plan.steps));
+  }
+}
+
+// THE STEPS ON THE ARC. The hook on the rule of group 0 runs the rule for a
+// collection with a ball on its arc in plan.steps steps of dt / steps, with
+// no drag and no cap, and the gravity of the arc in GravityScale. After each
+// step a ball that did not move freely had its first contact.
+bool __fastcall h_Gravity(void* self, void* unused, void* collection) {
+  uint8_t* rule = static_cast<uint8_t*>(self);
+  uint8_t* c = static_cast<uint8_t*>(collection);
+  if (g_flying <= 0 || c == nullptr || rule == nullptr ||
+      IsBadReadPtr(c + kCollectionAtom, sizeof(void*)) ||
+      IsBadWritePtr(rule + kRuleMaxSpeed, 3 * sizeof(float))) {
+    return o_Gravity(self, unused, collection);
+  }
+  // The balls of this collection that fly on the arc.
+  const int kMost = 32;
+  uint8_t* atoms[kMostBalls];
+  Track* tracks[kMostBalls];
+  int count = 0;
+  int seen = 0;
+  uint8_t* atom = *reinterpret_cast<uint8_t* const*>(c + kCollectionAtom);
+  bool here[kTracks] = {};
+  while (atom != nullptr && seen < kMost &&
+         !IsBadReadPtr(atom + kAtomNext, sizeof(void*))) {
+    ++seen;
+    for (int i = 0; i < kTracks; ++i) {
+      Track& t = g_tracks[i];
+      if (!t.active || !t.flying || t.atom != atom || t.collection != c) {
+        continue;
+      }
+      here[i] = true;
+      if (count < kMostBalls) {
+        atoms[count] = atom;
+        tracks[count] = &t;
+        ++count;
+      }
+    }
+    atom = *reinterpret_cast<uint8_t* const*>(atom + kAtomNext);
+  }
+  // A ball that left its collection flies no more.
+  for (int i = 0; i < kTracks; ++i) {
+    if (g_tracks[i].active && g_tracks[i].flying &&
+        g_tracks[i].collection == c && !here[i]) {
+      StopArc(&g_tracks[i], nullptr);
+    }
+  }
+  float* dt_global = reinterpret_cast<float*>(kParticleTime);
+  float* rate_global = reinterpret_cast<float*>(kParticleRate);
+  const float dt = *dt_global;
+  const float rate = *rate_global;
+  float* rule_f = reinterpret_cast<float*>(rule + kRuleMaxSpeed);
+  const float max_speed = rule_f[0];
+  const float gravity = rule_f[1];
+  const float damping = rule_f[2];
+  if (count == 0 || !(dt > 0.0f) || !(gravity > 0.0f)) {
+    return o_Gravity(self, unused, collection);
+  }
+  if (!g_rule_logged) {
+    g_rule_logged = true;
+    ModLog("miracle throw: the rule of the balls of a Fireball "
+           "(UpdateRuleGravityWithFloor) has MaxSpeed %.1f, Gravity %.1f and "
+           "Damping %.3f. A step of the particle system is %.3f s",
+           max_speed, gravity, damping, dt);
+  }
+  const int steps = tracks[0]->cast.plan.steps;
+  const float sub = dt / static_cast<float>(steps);
+  bool result = true;
+  for (int k = 0; k < steps; ++k) {
+    // The balls that still fly in this step.
+    float before[kMostBalls][3];
+    bool flies[kMostBalls];
+    int flying = 0;
+    for (int b = 0; b < count; ++b) {
+      Track& t = *tracks[b];
+      flies[b] = t.flying && t.arc_t < kArcLongest;
+      if (t.flying && !flies[b]) StopArc(&t, atoms[b]);
+      if (!flies[b]) continue;
+      ++flying;
+      float* scale = reinterpret_cast<float*>(atoms[b] + kAtomGravityScale);
+      *scale = t.cast.plan.gravity / gravity;
+      ReadVector(atoms[b], kAtomVelocity, before[b]);
+    }
+    if (flying == 0) {
+      // No ball flies on the arc now: the rest of the turn is one step of
+      // the game's rule.
+      *dt_global = sub * static_cast<float>(steps - k);
+      *rate_global = 1.0f / *dt_global;
+      result = o_Gravity(self, unused, collection);
+      break;
+    }
+    rule_f[0] = 1e9f;
+    rule_f[2] = 0.0f;
+    *dt_global = sub;
+    *rate_global = 1.0f / sub;
+    result = o_Gravity(self, unused, collection);
+    rule_f[0] = max_speed;
+    rule_f[2] = damping;
+    for (int b = 0; b < count; ++b) {
+      if (!flies[b]) continue;
+      Track& t = *tracks[b];
+      float after[3], at[3];
+      ReadVector(atoms[b], kAtomVelocity, after);
+      ReadVector(atoms[b], kAtomPlace, at);
+      ++t.steps;
+      if (miracle_throw_math::RuleStepWasFree(before[b], after,
+                                              t.cast.plan.gravity, sub)) {
+        t.arc_t += sub;
+        continue;
+      }
+      // THE FIRST CONTACT: the rule of the game put the ball on the land or
+      // a shield deflected it.
+      t.contact = true;
+      StopArc(&t, atoms[b]);
+      if (g_path_logs >= kMaxPathLogs) continue;
+      ++g_path_logs;
+      const float units = t.cast.units > 0.0f ? t.cast.units : 1.0f;
+      const float land = LandAt(at[0], at[2]);
+      const bool on_land = fabsf(at[1] - land) < 2.0f;
+      char where[160] = "";
+      if (t.land_found) {
+        const float d[3] = {at[0] - t.land_at[0], at[1] - t.land_at[1],
+                            at[2] - t.land_at[2]};
+        sprintf_s(where, sizeof(where),
+                  ", %.1f cm of the room from the place where its arc meets "
+                  "the land (%.2f s after the cast)",
+                  Speed(d) / units * 100.0f, t.land_t);
+      }
+      ModLog("miracle throw: ball %d of %d of the %s of frame %llu has its "
+             "first contact (%s) %.3f s after the cast on its arc, at %.1f "
+             "%.1f %.1f, %.1f units over the land there%s. It flew %d game "
+             "turns in %.2f s and %d steps of the rule. The game's rule moves "
+             "it from now",
+             t.ball, t.balls, t.cast.name, t.cast.frame,
+             on_land ? "the land" : "a deflection, for example a Physical "
+                                    "Shield",
+             t.arc_t + sub, at[0], at[1], at[2], at[1] - land, where, t.turns,
+             Now() - t.cast.time, t.steps);
+    }
+  }
+  for (int b = 0; b < count; ++b) ++tracks[b]->turns;
+  *dt_global = dt;
+  *rate_global = rate;
+  return result;
 }
 
 void Follow(uint8_t* atom, double now) {
@@ -309,7 +653,7 @@ bool __fastcall h_Modify(void* self, void* unused, void* collection) {
     const double now = Now();
     if (count > 0 && TrackOf(atoms[0]) == nullptr && g_cast.valid &&
         now - g_cast.time <= kCastWait) {
-      StartBalls(atoms, count, now);
+      StartBalls(atoms, count, now, c);
     } else {
       for (int k = 0; k < count; ++k) Follow(atoms[k], now);
     }
@@ -332,12 +676,22 @@ void LogKey(const char* from) {
                "the Hand");
 }
 
+void LogFlight(const char* from) {
+  ModLog("miracle throw: %s: miracle_flight=%d. %s", from, g_flight,
+         g_flight != 0
+             ? "A thrown Fireball flies the real arc of the throw, as a thrown "
+               "object does, until its first contact. It needs miracle_throw "
+               "1 or 2 and throw_law=2"
+             : "A thrown Fireball has the game's flight");
+}
+
 }  // namespace
 
 void MiracleThrowInstall() {
   if (g_installed) return;
   g_mode = IniInt("miracle_throw", kThrowHand);
   if (g_mode < kThrowGame || g_mode > kThrowHandCurve) g_mode = kThrowHand;
+  g_flight = IniInt("miracle_flight", 1) != 0 ? 1 : 0;
   void* target = reinterpret_cast<void*>(kModifyFireBall);
   MH_STATUS status = MH_CreateHook(target, reinterpret_cast<void*>(&h_Modify),
                                    reinterpret_cast<void**>(&o_Modify));
@@ -346,8 +700,32 @@ void MiracleThrowInstall() {
          "AttatchFireBallToAtom::ModifyAtomCollection at 0x%08X %s",
          static_cast<unsigned>(kModifyFireBall),
          status == MH_OK ? "ok" : "FAILED");
+  void* rule = reinterpret_cast<void*>(kGravityRule);
+  MH_STATUS rule_status =
+      MH_CreateHook(rule, reinterpret_cast<void*>(&h_Gravity),
+                    reinterpret_cast<void**>(&o_Gravity));
+  if (rule_status == MH_OK) rule_status = MH_EnableHook(rule);
+  g_gravity_hooked = rule_status == MH_OK;
+  ModLog("hooks        : the flight of a ball "
+         "UpdateRuleGravityWithFloor::ModifyAtomCollection at 0x%08X %s",
+         static_cast<unsigned>(kGravityRule),
+         g_gravity_hooked ? "ok" : "FAILED");
   g_installed = true;
   LogKey("the start");
+  LogFlight("the start");
+}
+
+void MiracleThrowSetFlight(int flight) { g_flight = flight != 0 ? 1 : 0; }
+
+int MiracleFlightValue() {
+  return g_installed && g_gravity_hooked ? g_flight : kDebugCannot;
+}
+
+void MiracleFlightChange(const char* by) {
+  if (!g_installed || !g_gravity_hooked) return;
+  g_flight = g_flight != 0 ? 0 : 1;
+  ControllersGesturePulse(0.5f, g_flight != 0 ? 0.30f : 0.06f);
+  LogFlight(by);
 }
 
 void MiracleThrowBeforeCast(uint8_t* hand, const char* name) {
@@ -388,6 +766,15 @@ void MiracleThrowBeforeCast(uint8_t* hand, const char* name) {
   }
   for (int i = 0; i < 3; ++i) c.sent[i] = v[i];
   c.turn_sent = turn[1];
+  // THE ARC (miracle_flight=1): only for the velocity of the real hand and
+  // with the real flight of a thrown object (throw_law=2).
+  c.real = swing && g_mode != kThrowGame && s > 0.0f;
+  c.slow_asked = ThrowPhysicsSlow();
+  if (c.real) {
+    miracle_throw_math::BallFlightPlan(c.sent, s, c.slow_asked, &c.plan);
+  }
+  c.arc = c.real && g_flight == 1 && g_gravity_hooked &&
+          ThrowPhysicsLaw() == 2;
   if (g_throw_logs >= kMaxThrowLogs) return;
   ++g_throw_logs;
   const float units = c.units > 0.0f ? c.units : 1.0f;
@@ -432,9 +819,14 @@ void MiracleThrowFrame() {
     if (!t.active) continue;
     const bool gone = now - t.last_time > kGone;
     if (!gone && now - t.t0 < kLongest) continue;
+    // The hook of the rule needs the track of a ball on its arc, up to
+    // kGoneFlying with no update.
+    if (t.flying && now - t.last_time <= kGoneFlying) continue;
     LogPlace(t, t.last, t.last_time - t.t0,
              gone ? "has no update now. Its last place is"
                   : "flies for the longest time of the log. It is at");
+    // A ball with no update can be gone: the mod does not write its atom.
+    if (gone) StopArc(&t, nullptr);
     t.active = false;
   }
 }

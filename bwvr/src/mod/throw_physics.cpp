@@ -2758,6 +2758,8 @@ int ThrowPhysicsLaw() {
   return 2;
 }
 
+float ThrowPhysicsSlow() { return g_slow; }
+
 void ThrowPhysicsInstall() {
   if (g_installed) return;
   if (g_law != 2) {

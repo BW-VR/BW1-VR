@@ -22,8 +22,10 @@ object is in `grab.md`.
 - A tree that falls comes to rest in about 1 s after its first contact
   (`throw_tree_settle`).
 - A thrown Fireball or flock leaves the Hand with the top speed of the grip
-  of the real hand and with no turn, as a thrown object does, and then has
-  the game's physics (`miracle_throw`, see "A thrown miracle").
+  of the real hand and with no turn, as a thrown object does
+  (`miracle_throw`, see "A thrown miracle"). A Fireball then flies the real
+  arc of the throw with the same time factor k, until its first contact
+  (`miracle_flight`). A flock has the game's flight.
 - A thrown object turns at about the pace of the game. The mod scales the
   turn of the release and the torque of the flick (packet `0x40`) to the
   steps of the flight. Before each substep it cuts the turn of the picture to
@@ -188,8 +190,9 @@ game sees the speeds of its own physics.
     the sea, leaves the physics (a new pick up), or after 60 s. Up to 4
     objects fly at one time.
 
-**What keeps the game's time.** A Miracle keeps the game's physics. It leaves
-the Hand with the velocity of the real hand in the world (see "A thrown
+**What keeps the game's time.** A Miracle is no physics object. A thrown
+Fireball flies the same real arc, with the same k, in the rule of its
+particle system, and a flock keeps the game's flight (see "A thrown
 miracle"). A tree flies as a rock does, unless `throw_trees=0`. The
 disassembly shows that a tree is a physics object like a rock:
 `Object::InitialisePhysicsFromHand` `0x00636F00` calls
@@ -483,7 +486,7 @@ stayed at the place of a guess: the math checks cover that rule.
 
 - The last 0.1 to 0.2 s of a roll is not drawn: when the object comes to
   rest, the picture goes to the place of rest at once.
-- A Miracle and the objects that a thrown object pushes keep the game's time.
+- The objects that a thrown object pushes keep the game's time.
 - While another object touches a thrown object, the thrown object moves at
   the speed of the game's own time (`sqrt(s) / k` times slower than in the
   flight).
@@ -1320,7 +1323,9 @@ desktop run can prove are in `roadmap.md`, R12.
 A Fireball (and its two power levels) and the two flocks are cast at the
 release: the grip closes, the hand swings, and the grip opens
 (`miracles.md`, "The grip casts"). The miracle leaves the Hand in the
-direction and with the speed of the real hand, as a thrown object does.
+direction and with the speed of the real hand, as a thrown object does. A
+Fireball then flies the real arc of the throw (see "The flight of a thrown
+Fireball").
 
 ### What the game does [V]
 
@@ -1385,8 +1390,8 @@ from the room into the world and scaled to s units in a meter
 (`miracle_throw_math::SwingWorld`). That is `s v` in world units a second:
 the speed of the real hand in the world, which is the unit of the game's
 filter. It also writes no turn to `CHand+0x48D4`, so the miracle flies
-straight, as a thrown object does. The game's physics of the miracle then
-flies it. The mod does not change the flight of a miracle.
+straight, as a thrown object does. A Fireball then flies the real arc (see
+"The flight of a thrown Fireball"). A flock has the game's flight.
 
 With no motion of the grip, or outside the God view and the table, the cast
 keeps the game's filter, and it still gets no turn. `miracle_throw=2` gives
@@ -1399,11 +1404,96 @@ A swing of 0.3 s with a top speed of 4 m/s that turns 70 degrees to the left
 8.6 degrees to the right of the swing and has 2.95 m/s. The top speed of the
 grip is 2.6 degrees from the swing and has 3.97 m/s.
 
+### The flight of a thrown Fireball
+
+**What the game does [V].** A ball of a Fireball is an atom of a particle
+system, not a physics object. The rule of its group,
+`UpdateRuleGravityWithFloor::ModifyAtomCollection` `0x006A1880`, moves each
+ball one step in each game turn. The time of the step is the float at
+`0x00D4E0EC`: `GJPSysInterface::Process_` `0x00673690` gives the particle
+system the length of a game turn (`0x00D01A38`, 100 ms, which
+`GGame::Init` sets). One step:
+
+1. The drag: the velocity goes toward the wind times 5 by the part
+   `Damping x dt` (0.1 a second). A ball of a computer player has no wind
+   and no drag (`DisableWindForNonHuman`, `DisableDampingForNonHuman`).
+2. The move: the place goes on by the velocity times dt.
+3. The land: when the bottom of the ball is under the land at the new place
+   (`LH3DIsland::GetAltitude`), the rule puts the ball on the land, plays
+   the sound of the hit (`fn_006A1630`), and bounces the ball with 10
+   percent of its speed along the normal and 90 percent across, less a drag
+   of the land. Else the velocity up loses `Gravity x GravityScale x dt`,
+   and less of it near `-MaxSpeed`.
+4. A Physical Shield that holds the new place deflects the ball
+   (`DoAnyShieldDeflections` `0x006A1FA0`, a test of the place, not of the
+   path).
+
+The rule of a thrown Fireball has Gravity 30, Damping 0.1 and MaxSpeed 100
+(the particle files `SF_FireBallThrow`, `PU` and `PU2`). Before the rule,
+`CreateWithInitialDirection` gives the ball the direction of the cast 0.3
+rad higher and a speed from its speed map. So the ball goes up more than
+the throw, flies at about 100 units a second at most, falls with a gravity
+of 30 units a second squared at each scale, and loses 10 percent of its
+speed in each second. The game has no contact of a ball with an object.
+`AttatchFireBallToAtom` moves the `MagicFireBall` object with the ball. A
+ball that comes to rest or comes near the water fades, and the particle
+system removes it.
+
+The game draws an atom on the line between its last two places when its
+collection has `InterpolateDrawPos` (bit 2 of `AtomCollection+0x38`): the
+draw (`fn_00679920`) blends `AtomCore+0x98` and `+0xD0` by the part of the
+game turn.
+
+**What the mod does** (`miracle_flight=1`, with `miracle_throw` 1 or 2 and
+`throw_law=2`). The cast got `s v` of the real hand. The mod gives each ball
+the real arc of a thrown object of the same swing (`BallFlightPlan` in
+`miracle_throw_math.h`):
+
+1. **The arc.** Ball 0 starts at the Hand's point at the cast, with `s v /
+   k`, under a gravity of `s g / k^2`. k is the time factor of
+   `throw_slow_x10`, cut to sqrt(s) as for an object (`SlowFactor`). This is
+   the arc and the time of the flight of a rock from the same swing. The
+   game's lift of 0.3 rad and its speed map do not act.
+2. **The fan.** Each other ball of Increase (3) and Extreme (8) keeps the
+   game's fan about ball 0: the turn about up, the turn up and the speed
+   ratio between that ball and ball 0 of the game (`BallFanVelocity`). Each
+   ball flies an arc of the same kind from the same place.
+3. **The start.** At the first sight of the balls (the hook on
+   `AttatchFireBallToAtom`, 70 to 90 ms after the cast), the mod puts each
+   ball at the place of its arc for the time since the cast. Its velocity
+   is that of the arc, less `g dt / 2` along up (`RuleStartVelocity`).
+4. **The steps.** A hook on the rule runs the game's rule for the
+   collection of the balls in several steps of a game turn. Each step moves
+   a ball 2 cm of the room or less (`kBallStepRoom`), with 16 steps a game
+   turn at most. In these steps the rule has no drag and no cap of the
+   speed, and `GravityScale` of each ball gives the gravity of the arc. With
+   the start velocity of step 3 each step of the rule is on the arc, with
+   no error.
+5. **The contact.** The rule of the game finds the land, the bounce, the
+   sound of the hit and a Physical Shield at each step, at the place of the
+   arc. After a step in which a ball did not move freely, the ball has its
+   first contact: the mod gives it its `GravityScale` back, and the next
+   steps of the game's rule move it as in the plain game. When no ball of
+   the collection flies on its arc, the rest of the game turn is one step
+   of the game's rule. The burn and the trail are the game's.
+6. **The picture.** The mod sets `InterpolateDrawPos` of the collection
+   when it is not set, so the game draws each ball between its last two
+   places. The trail and the light follow the ball.
+7. **The end.** The flight on the arc ends at the first contact, after 30
+   s of the arc, when the ball leaves its collection, or when the ball has
+   no update for 2 s. Over the sea the game ends the ball as in the plain
+   game: it fades near the water, and the particle system removes it.
+
+`miracle_flight=0`, `miracle_throw=0` and the other laws of the throw give
+the game's flight. A cast with no swing of the real hand (the game's filter
+of the Hand) has the game's flight too.
+
 ### Keys
 
 | Key | Default | What it does |
 | --- | --- | --- |
 | `miracle_throw` | 1 | 1: a Fireball and a flock leave the Hand with the top speed of the grip of the real hand in the 120 ms before the opening of the grip, and with no turn, as a thrown object does. 2: the same velocity, with the game's turn of the path of the Hand. 0: the game's filter of the speed of the Hand (62 ms) and its turn |
+| `miracle_flight` | 1 | 1: a thrown Fireball flies the real arc of the throw, with the time factor k of `throw_slow_x10`, until its first contact (see "The flight of a thrown Fireball"). It acts with `miracle_throw` 1 or 2 and `throw_law=2`. 0: the game's flight. The debug page has the switch "Miracle flight" in the group Throw |
 
 ### The log
 
@@ -1420,6 +1510,19 @@ last place of each ball. Each place has the distance across the land from
 the start, and how many degrees the path goes to the right or the left of
 the velocity that the cast got and of the game's filter.
 
+For a cast with the velocity of the real hand: "the real arc of ball 0" (k,
+the speed and the gravity of the arc, the time and the place where the arc
+meets the land, `miracle_flight` and `throw_law`, and whether the game or
+the mod sets `InterpolateDrawPos`), and the steps of the rule in a game
+turn. Each place of ball 0 then has its distance from the real arc in cm of
+the room: at the time of the arc of the ball while the mod flies it, and at
+the time since the cast for the game's flight. "has its first contact", for
+each ball: the land or a deflection, the time of the arc, the place, the
+height over the land, the distance from the place where its arc meets the
+land, and the game turns and the steps of the rule on the arc. One line
+gives the MaxSpeed, the Gravity and the Damping of the rule and the time of
+a particle step, at the first step on an arc.
+
 ### Checks
 
 `MiracleThrowChecks` in `bwvr/test/controller_math/miracle_throw_checks.h`
@@ -1429,6 +1532,18 @@ the curved swing above, and the balls (`FireballSpeed`, `FireballFanRadians`
 and `FireballBallSideDegrees` in `miracle_throw_math.h`): the speed map, the
 fan, and the turn of each ball of Increase for the three speeds of cast that
 the desktop runs measured (7.24, 9.00 and 6.77 degrees).
+
+`BallFlightChecks` in the same file covers the flight of a thrown Fireball.
+At 7.5, 44.4, 100 and 1000 units per meter and k = 1, 2 and 4, for a throw
+of 5 m/s at 40 degrees from 1.0 m: the ball has the k, the velocity and the
+gravity of the plan of a thrown object (`throw_math::RealThrowPlan`). The
+steps of the rule, with the start velocity of the mod, stay within 1 mm of
+the arc of the object, and a step moves the ball 2 cm of the room at most
+or the turn has 16 steps. The arc meets flat land after k times 0.885 s and
+3.39 m away. The checks also cover the cut of k to 2.74 at 7.5 units per
+meter, a free step and the steps with a contact (`RuleStepWasFree`), and
+the fan on the arc: a ball 7 degrees to the right, 2 degrees higher and 20
+percent slower than ball 0 of the game keeps these about the arc of ball 0.
 
 ### Desktop runs
 
@@ -1466,6 +1581,17 @@ a second, 82 across the land, and the flight makes about 80 units a second.
 - The range of a Fireball at each scale of the God view is not measured in
   a headset (`roadmap.md`, F6).
 - The flocks get the same velocity and no turn. No run shows where a flock
-  goes.
+  goes. A flock keeps the game's flight: the game's rule of a flock
+  (`UR_Flocking`) steers the birds, and an arc does not fit a flock of
+  birds.
+- The arc of a Fireball counts 0.1 s for each game turn. A game turn that
+  comes early or late moves the ball by the same part of its arc.
+- The rule tests the bottom of the ball against the land, so the first
+  contact comes a little before the place where the center of the arc meets
+  the land [I].
+- A pause of the game of more than 2 s while a ball flies on its arc ends
+  the flight on the arc. The ball then keeps the gravity of the arc with the
+  game's drag until it touches the land.
+- Only a headset shows if a thrown Fireball feels as a thrown object does.
 - Only a headset shows a real swing: the speed and the turn of the game for
   a real arm, and how near the path is to the throw.

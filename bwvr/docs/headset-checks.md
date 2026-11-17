@@ -99,7 +99,7 @@ want.
 10. **Throws.** Throw rocks, villagers, trees and a Fireball at
     each scale. Wrong: a throw that goes too short, too far or in a wrong
     direction, a quick set down that throws, or a flight or a landing that
-    looks wrong.
+    looks wrong. A Fireball must fly as a rock from the same swing flies.
 ### The village
 
 11. **The words over the land.** Wrong: the job icon (2 times) or the name of a villager (150 percent) is hard to read at a glance.
@@ -252,7 +252,9 @@ agents: the log does not tell the item yet.
   filter of the Hand was to the right or the left of it, what the cast got,
   how many balls the Fireball has, and how many degrees the path of ball 0
   goes to the side of that. Increase and Extreme throw a fan of balls about
-  ball 0 (`throw.md`, "A thrown miracle").
+  ball 0 (`throw.md`, "A thrown miracle"). The lines also give where the
+  real arc meets the land, the distance of ball 0 from its arc, and the
+  first contact of each ball.
 - **A miracle that shows nothing** (Storm, a shield, Shrink, Enlarge,
   Invisibility). Log: `miracle watch:` says if the game made the spell, its
   radius in cm of the room and how long it stands, or what a Creature
@@ -539,7 +541,8 @@ land in front of you, and the mod removes these orbs before each save.
 - **Gesture.** Spiral, then the vertical line. A throw.
 - **In the mod.** Close the grip, swing the hand, and open the grip. It
   leaves with the top speed of the grip of the real hand, as a thrown object
-  does (`miracle_throw`).
+  does (`miracle_throw`), and flies the real arc of the throw
+  (`miracle_flight`).
 - **Proved.** Desktop runs: the throw with a step of the hand, not with a
   real swing. A Fireball that falls from a still hand onto a house sets it
   on fire, and the house burns for 24 s and more (`miracle_run.ps1 -Kind

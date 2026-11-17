@@ -21,6 +21,7 @@
 #include <math.h>
 
 #include "controller_math.h"
+#include "throw_math.h"
 
 namespace miracle_throw_math {
 
@@ -114,6 +115,168 @@ inline float FireballBallSideDegrees(int ball, int balls, float cast_speed) {
                     static_cast<float>(balls - 1);
   return -cosf(phi) * FireballFanRadians(FireballSpeed(cast_speed)) *
          57.29578f;
+}
+
+// THE FLIGHT OF A BALL [V, runblack.exe 1.42]. The rule of group 0 of a
+// thrown Fireball, UpdateRuleGravityWithFloor::ModifyAtomCollection
+// (0x006A1880), moves each ball once in each game turn, with the time dt of
+// the float at 0x00D4E0EC. That is the turn of 100 ms (0x00D01A38) that
+// GJPSysInterface::Process_ gives the particle system. One step of the rule:
+//
+//   1. The drag: v += (w - v) Damping dt, with w the wind times
+//      WindMagnification times 0.1. With no wind: v *= 1 - Damping dt.
+//   2. The move: p += v dt.
+//   3. The land: when the bottom of the ball is under the land at p, the rule
+//      puts the ball on the land and bounces it (the impact of the Fireball).
+//      Else v.y -= Gravity GravityScale dt, and the rule adds less gravity
+//      while v.y is near -MaxSpeed.
+//   4. A Physical Shield that holds the ball deflects it.
+//
+// The Fireball has Gravity 30, Damping 0.1 and MaxSpeed 100 (the particle
+// files SF_FireBallThrow, PU and PU2).
+//
+// With no drag and no cap the step is the step below. Its places after n
+// steps are on the curve p0 + (v0 - g dt / 2) t - g t^2 / 2 + g t dt / 2.
+// So a start velocity of v0 - g dt / 2 along up puts each step on the arc
+// p0 + v0 t - g t^2 / 2, with no error.
+
+// The time of one step of the rule, in seconds.
+const float kBallTurn = 0.1f;
+// A step of the flight moves the ball this far in the room at most, in
+// meters. A game turn then has more steps of the rule, so that the rule finds
+// the land near the place where the arc meets it.
+const float kBallStepRoom = 0.02f;
+// The most steps of the rule in one game turn.
+const int kBallMostSteps = 16;
+
+// One step of the rule in the air with no drag and no cap, at the gravity g
+// (Gravity times GravityScale).
+inline void RuleFreeStep(float p[3], float v[3], float g, float dt) {
+  for (int i = 0; i < 3; ++i) p[i] += v[i] * dt;
+  v[1] -= g * dt;
+}
+
+// The velocity to give the rule at the arc time t, so that its steps of dt
+// are on the arc: the velocity of the arc, less g dt / 2 along up.
+inline void RuleStartVelocity(const float v_arc[3], float g, float dt,
+                              float out[3]) {
+  for (int i = 0; i < 3; ++i) out[i] = v_arc[i];
+  out[1] -= 0.5f * g * dt;
+}
+
+// True when one step of the rule had no contact: the velocity across the
+// land did not change, and gravity took g dt off the velocity up. A contact
+// with the land or a deflection by a shield changes the velocity in another
+// way, or keeps the gravity off.
+inline bool RuleStepWasFree(const float before[3], const float after[3],
+                            float g, float dt) {
+  const float tolerance = 1e-3f;
+  for (int i = 0; i < 3; i += 2) {
+    if (!(fabsf(after[i] - before[i]) <= tolerance * (1.0f + fabsf(before[i]))))
+      return false;
+  }
+  const float want = before[1] - g * dt;
+  return fabsf(after[1] - want) <= tolerance * (1.0f + fabsf(want));
+}
+
+// THE ARC OF A THROWN FIREBALL (miracle_flight=1, docs/throw.md, "The flight
+// of a thrown Fireball"). The cast got s v world units a second, the
+// velocity of the real hand in the world (miracle_throw 1 or 2). Ball 0 then
+// flies the arc of a thrown object of the same swing: s v / k under
+// s g / k^2, with the time factor k of throw_slow_x10, cut as for an object
+// (throw_math::SlowFactor).
+struct BallFlight {
+  float slow;     // the k that is in use
+  float gravity;  // world units a second squared: s g / k^2
+  float v0[3];    // ball 0 at the cast, world units a second: s v / k
+  int steps;      // steps of the rule in one game turn
+};
+
+inline void BallFlightPlan(const float cast[3], float s, float k,
+                           BallFlight* out) {
+  *out = BallFlight{};
+  const float root = s > 1.0f ? sqrtf(s) : 1.0f;
+  float rate = 1.0f;
+  out->slow = throw_math::SlowFactor(k, root, &rate);
+  out->gravity = s * throw_math::kGravity / (out->slow * out->slow);
+  for (int i = 0; i < 3; ++i) out->v0[i] = cast[i] / out->slow;
+  // The speed of the ball in the room, with the fall of the first half
+  // second.
+  const float room =
+      s > 0.0f
+          ? (controller_math::Length(out->v0) + 0.5f * out->gravity) / s
+          : 0.0f;
+  int steps = static_cast<int>(ceilf(room * kBallTurn / kBallStepRoom));
+  if (steps < 1) steps = 1;
+  if (steps > kBallMostSteps) steps = kBallMostSteps;
+  out->steps = steps;
+}
+
+// The place and the velocity of a ball on its arc, t seconds after the
+// cast, from the place p0 of the cast. The arc of throw_math::RealArc with
+// the gravity of the flight.
+inline void BallArcAt(const float p0[3], const float v0[3], float gravity,
+                      double t, float p[3], float v[3]) {
+  throw_math::RealArc(p0, v0, gravity / throw_math::kGravity, t, p, v);
+}
+
+// THE FAN ON THE ARC. The game gives ball i of a power level a turn about
+// up, a turn up and less speed than ball 0 (see "The balls of a Fireball").
+// The arc of ball i keeps them: the velocity of the arc of ball 0, turned by
+// the angles between ball i and ball 0 of the game, and times the ratio of
+// their speeds.
+inline void BallFanVelocity(const float game0[3], const float game_i[3],
+                            const float arc0[3], float out[3]) {
+  const float speed0 = controller_math::Length(game0);
+  const float speed_i = controller_math::Length(game_i);
+  const float ratio = speed0 > 1e-4f ? speed_i / speed0 : 1.0f;
+  const float side = SideDegrees(game0, game_i) / 57.29578f;
+  const float up = (UpDegrees(game_i) - UpDegrees(game0) + UpDegrees(arc0)) /
+                   57.29578f;
+  const float* heading = FlatLength(arc0) > 1e-4f ? arc0 : game0;
+  const float yaw = atan2f(heading[0], heading[2]) + side;
+  const float speed = controller_math::Length(arc0) * ratio;
+  out[0] = speed * cosf(up) * sinf(yaw);
+  out[1] = speed * sinf(up);
+  out[2] = speed * cosf(up) * cosf(yaw);
+}
+
+// WHERE THE ARC MEETS THE LAND. land(x, z) gives the height of the land. The
+// search goes along the arc in steps of `step` seconds up to `longest`, then
+// halves the last step 12 times. False when the arc stays over the land.
+template <class Land>
+bool BallArcMeetsLand(const float p0[3], const float v0[3], float gravity,
+                      double start, double step, double longest, Land land,
+                      double* t_out, float at[3]) {
+  float p[3], v[3];
+  double before = start;
+  for (double t = start; t <= longest + 1e-9; t += step) {
+    BallArcAt(p0, v0, gravity, t, p, v);
+    if (p[1] > land(p[0], p[2])) {
+      before = t;
+      continue;
+    }
+    if (t == start) {
+      *t_out = t;
+      for (int i = 0; i < 3; ++i) at[i] = p[i];
+      return true;
+    }
+    double low = before, high = t;
+    for (int k = 0; k < 12; ++k) {
+      const double mid = 0.5 * (low + high);
+      BallArcAt(p0, v0, gravity, mid, p, v);
+      if (p[1] > land(p[0], p[2])) {
+        low = mid;
+      } else {
+        high = mid;
+      }
+    }
+    BallArcAt(p0, v0, gravity, high, p, v);
+    *t_out = high;
+    for (int i = 0; i < 3; ++i) at[i] = p[i];
+    return true;
+  }
+  return false;
 }
 
 }  // namespace miracle_throw_math

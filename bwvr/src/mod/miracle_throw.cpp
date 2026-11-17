@@ -75,6 +75,7 @@
 #include "debug_menu.h"
 #include "miracle_throw.h"
 #include "miracle_throw_math.h"
+#include "physics_switch.h"
 #include "throw_physics.h"
 
 extern void ModLog(const char* format, ...);
@@ -691,7 +692,12 @@ void MiracleThrowInstall() {
   if (g_installed) return;
   g_mode = IniInt("miracle_throw", kThrowHand);
   if (g_mode < kThrowGame || g_mode > kThrowHandCurve) g_mode = kThrowHand;
-  g_flight = IniInt("miracle_flight", 1) != 0 ? 1 : 0;
+  // physics=0 gives miracle_flight the value 0 of the plain game when
+  // bwvr.ini does not set it (physics_switch.cpp).
+  g_flight =
+      IniInt("miracle_flight", PhysicsSwitchDefault("miracle_flight", 1)) != 0
+          ? 1
+          : 0;
   void* target = reinterpret_cast<void*>(kModifyFireBall);
   MH_STATUS status = MH_CreateHook(target, reinterpret_cast<void*>(&h_Modify),
                                    reinterpret_cast<void**>(&o_Modify));

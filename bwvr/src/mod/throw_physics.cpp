@@ -233,6 +233,9 @@ IntegrateFn o_Integrate = nullptr;
 DrawAllFn o_DrawAll = nullptr;
 
 int g_law = 2;
+// The physics switch can set throw_law=2 while the game runs, so the hooks of
+// the real flight go in with throw_law=1 too (physics_switch.cpp).
+bool g_law_live = false;
 // THE OBJECTS ON THE ARC (throw_arc_objects): true stops the real arc where it
 // goes into the box of the mesh of an object near the Hand, before the game's
 // physics has the object. false tests the land only.
@@ -2629,6 +2632,16 @@ void ThrowPhysicsSetSlow(int slow_x10, bool trees) {
   g_trees = trees;
 }
 
+void ThrowPhysicsSetLaw(int law) { g_law = law < 0 ? 0 : (law > 2 ? 2 : law); }
+
+void ThrowPhysicsSetLawLive(bool live) { g_law_live = live; }
+
+void ThrowPhysicsSetLand(int land) {
+  g_land = land < 0 ? 0 : (land > 2 ? 2 : land);
+}
+
+void ThrowPhysicsSetTrees(bool trees) { g_trees = trees; }
+
 void ThrowPhysicsSetSettle(bool settle) { g_settle = settle; }
 
 void ThrowPhysicsSetTurn(bool turn) { g_turn = turn; }
@@ -2744,7 +2757,7 @@ void ThrowPhysicsSetLanding(int land, int rate_x10, int bounce_pct,
 }
 
 void ThrowPhysicsInstallEarly() {
-  if (g_law != 2) return;
+  if (g_law != 2 && !g_law_live) return;
   if (!HandExactAddPrepareHook(&ThrowCapture)) {
     ModLog("hand throw   : the list of calls after the Hand's draw is full, "
            "so a release in the glide of a far fetch starts its flight at "
@@ -2762,7 +2775,7 @@ float ThrowPhysicsSlow() { return g_slow; }
 
 void ThrowPhysicsInstall() {
   if (g_installed) return;
-  if (g_law != 2) {
+  if (g_law != 2 && !g_law_live) {
     ModLog("hand throw   : throw_law=%d, %s", g_law,
            g_law == 1 ? "the square root law with the game's physics"
                       : "the fixed gain with the game's physics");

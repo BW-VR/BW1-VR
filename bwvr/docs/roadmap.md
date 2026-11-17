@@ -384,6 +384,17 @@ game as it is.
 
 ### Built, and not proven or not finished
 
+- **F6. The flight of a thrown Fireball.** Each ball of a thrown Fireball
+  flies the real arc of the throw with the k of an object, until its first
+  contact (`miracle_flight`, `throw.md`, "The flight of a thrown
+  Fireball"). Open: the desktop runs `miracle_run.ps1 -Kind throwdir` and
+  `-Kind throwspeed` with `miracle_flight` 1 and 0, and the feel in a
+  headset.
+- **F29. The physics switch.** The launcher row "Physics" (`physics`) gives
+  the throw physics of the mod or of the plain game (`throw.md`, "The
+  physics switch"). Open: a desktop run of a rock (`throw_queue.ps1`) and
+  of a Fireball with `physics=0`.
+
 - **N19. The model cull distance on a busy land.** `cull_distance` (default
   5x) draws the map objects to 3500 units, and the fog moves out as far
   (`backend.md`, "Models are drawn further out"). On Land 1 it costs no

@@ -45,6 +45,7 @@
 #include "far_grab.h"
 #include "take_stream.h"
 #include "target_glow.h"
+#include "physics_switch.h"
 #include "throw_physics.h"
 #include "teleport.h"
 #include "menu_room.h"
@@ -1578,13 +1579,21 @@ void ReadSettings() {
     // is the square root law, and 0 is the plain gain. See docs/throw.md, "The
     // throw physics". throw_log=1 logs each flight in full, and 2 also logs
     // each substep and each frame after the first contact.
-    g_throw_law = number("throw_law", 2);
+    // physics: 1 keeps the throw physics of the mod (VR), 0 gives the keys of
+    // its preset the values of the plain game (Original). A key of the
+    // preset in bwvr.ini keeps its own value. See docs/throw.md, "The physics
+    // switch", and physics_switch.cpp.
+    PhysicsSwitchRead(path);
+    const auto preset = [&](const char* key, int fallback) {
+      return number(key, PhysicsSwitchDefault(key, fallback));
+    };
+    g_throw_law = preset("throw_law", 2);
     g_throw_log = number("throw_log", 0);
     // throw_slow_x10: the time factor k times 10 (10 to 100). The thrown
     // object flies the real arc, k times slower. throw_trees: 1 lets a tree
     // fly as a rock does.
     g_throw_slow_x10 = number("throw_slow_x10", 20);
-    g_throw_trees = number("throw_trees", 1) != 0;
+    g_throw_trees = preset("throw_trees", 1) != 0;
     // release_fall_cm: a hand that is still at the opening of the grip sets
     // the object down only when its point is this many cm of the room over
     // the land or less. Higher up the object falls. 0 sets it down at each
@@ -1598,24 +1607,24 @@ void ReadSettings() {
     // bounce keeps, of the speed that the game gives it.
     // throw_land_brake_pct: the friction of the brake of the land, in
     // percent of the friction that the game has for the object.
-    g_throw_land = number("throw_land", 1);
+    g_throw_land = preset("throw_land", 1);
     g_throw_land_rate_x10 = number("throw_land_rate_x10", 10);
     g_throw_bounce_pct = number("throw_bounce_pct", 50);
     g_throw_land_brake_pct = number("throw_land_brake_pct", 60);
     // throw_tree_settle: 1 lets a tree that falls turn down fast while it
     // touches the land and is slow. 0 keeps the game's turn.
-    g_throw_tree_settle = number("throw_tree_settle", 1);
+    g_throw_tree_settle = preset("throw_tree_settle", 1);
     // throw_turn: 1 lets a thrown object turn as fast as the game turns it,
     // and cuts the turn of the picture to 1.5 turns a second before each
     // substep. 0 keeps the game's momentum, and the
     // picture turns as many times faster as the flight runs steps of the
     // game.
-    g_throw_turn = number("throw_turn", 1);
+    g_throw_turn = preset("throw_turn", 1);
     // throw_land_rest: 1 lets a turn in place of a thrown object wear off
     // fast after its landing, turns the brake of the land off on land that
     // is steeper than the brake holds, and gives an object that lies still
     // for 0.5 s its rest. 2, 3 and 4 are one of the three, and 0 is none.
-    g_throw_land_rest = number("throw_land_rest", 1);
+    g_throw_land_rest = preset("throw_land_rest", 1);
     // catch_rest_guard: 1 holds the end of the physics of an object back
     // while the Hand takes it. 0 lets the game end the physics, and a tree
     // that comes to rest in that time is then a dead tree and not in the
@@ -1636,8 +1645,8 @@ void ReadSettings() {
     // throw_arc_objects: 1 stops the real arc of a thrown object at the box
     // of the mesh of an object near the Hand, before the game's physics has
     // the object. 0 stops it at the land only.
-    g_throw_arc_objects = number("throw_arc_objects", 1);
-    g_throw_shield = number("throw_shield", 1);
+    g_throw_arc_objects = preset("throw_arc_objects", 1);
+    g_throw_shield = preset("throw_shield", 1);
     g_far_grab.throw_law = g_throw_law != 0;
     // far_grab_max_m: a far target is at most this many meters of the room
     // from the head, along the floor. 0 gives no limit.
@@ -2140,6 +2149,7 @@ void StartVrStep() {
         MiracleInstall();
         VillageInstall();
         ThrowPhysicsSetOptions(g_throw_law, g_throw_log, g_test_keys);
+        ThrowPhysicsSetLawLive(PhysicsSwitchSets("throw_law"));
         ThrowPhysicsSetSlow(g_throw_slow_x10, g_throw_trees);
         ThrowPhysicsSetFall(g_release_fall_cm);
         ThrowPhysicsSetLanding(g_throw_land, g_throw_land_rate_x10,
@@ -2158,6 +2168,7 @@ void StartVrStep() {
         TakeStreamSetHand(g_take_stream_hand, g_take_stream_trace);
         TakeStreamInstall();
         ThrowPhysicsInstall();
+        PhysicsSwitchLog();
         HandGlowSetEnabled(g_hand_glow);
         g_target_glow.test_keys = g_test_keys;
         TargetGlowSetOptions(g_target_glow);

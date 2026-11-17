@@ -29,7 +29,8 @@ void MiracleThrowChange(const char* by);
 
 // miracle_flight (docs/throw.md, "The flight of a thrown Fireball"): 1 lets
 // a thrown Fireball fly the real arc of the throw until its first contact, 0
-// keeps the game's flight. MiracleThrowInstall reads the key.
+// keeps the game's flight. MiracleThrowInstall reads the key, and the
+// physics switch (physics_switch.cpp) sets it when the switch changes.
 void MiracleThrowSetFlight(int flight);
 
 // The debug row "Miracle flight" (debug_menu.cpp).

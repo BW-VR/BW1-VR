@@ -42,6 +42,69 @@ object is in `grab.md`.
   `bwvr/test/controller_math/grip_checks.h`. The hooks are in
   `bwvr/src/mod/throw_physics.cpp`, `bwvr/src/mod/pass_guard.cpp` and
   `bwvr/src/mod/hand_direct.cpp`.
+- One key, `physics` (the launcher row "Physics"), gives all of this
+  physics (1, VR) or the physics of the plain game (0, Original). See "The
+  physics switch".
+
+## The physics switch
+
+A player picks "VR" (`physics=1`, the default) or "Original" (`physics=0`)
+in the row "Physics" of the launcher (`launcher.md`). Original gives a
+thrown object and a thrown Fireball the flight, the landing, the bounce,
+the turn and the rest of the plain game. The direction and the speed of the
+real hand at the release stay in both.
+
+With `physics=0` the defaults of these keys are the values of the plain
+game (`physics_switch.cpp`):
+
+| Key | VR | Original | Why |
+| --- | --- | --- | --- |
+| `throw_law` | 2 | 1 | The square root law throws with the game's physics, in the game's own time, and the object lands where the real throw lands. The fixed gain (0) also has the game's physics, but it sends the speed of the hand in the world times 1.5, which is at the game's cap of 124 units a second for most throws in the God view. So 1 is nearest to the plain game for a real hand |
+| `throw_land` | 1 | 0 | The game's landing and bounce |
+| `throw_land_rest` | 1 | 0 | Only the rest test of the game |
+| `throw_turn` | 1 | 0 | The game's turn |
+| `throw_trees` | 1 | 0 | A tree has the game's physics |
+| `throw_tree_settle` | 1 | 0 | The game's turn of a tree that falls |
+| `throw_shield` | 1 | 0 | The game tests a Physical Shield in its own steps |
+| `throw_arc_objects` | 1 | 0 | The arc stops at the land only |
+| `miracle_flight` | 1 | 0 | A thrown Fireball has the game's flight |
+
+A key of the table that `bwvr.ini` sets keeps the value of `bwvr.ini`, with
+either value of `physics`. Most of these keys act only on the real flight,
+so with `throw_law=1` the game's physics flies each thrown object. They
+matter when `bwvr.ini` sets `throw_law=2` with `physics=0`.
+
+Not in the preset:
+
+- The release of the Hand: `release_at_once`, `grip_fast_open`,
+  `grip_press_guard`, `grip_press_hold`, `catch_at_once` and
+  `release_fall_cm`. They are how the hand takes and lets go, not how a
+  thing flies. `release_fall_cm` acts only with `throw_law=2`, so with
+  Original a still hand sets an object down at each height.
+- `miracle_throw`: a Fireball and a flock leave the Hand with the speed and
+  the direction of the real hand. Only the flight goes back to the game.
+- `throw_slow_x10`, `throw_land_rate_x10`, `throw_bounce_pct`,
+  `throw_land_brake_pct` and `throw_draw`. They act only in the real flight
+  or in the landing of the mod, which the keys of the table turn off.
+  `throw_draw=1` already gives a touch the game's own time.
+
+The hooks of the real flight go in at the start also with `throw_law=1`
+when `bwvr.ini` does not set `throw_law`, so the switch can give the real
+flight back while the game runs. So `catch_at_once` and `catch_rest_guard`
+act with both values of `physics`.
+
+The debug page has the switch "Physics" at the top of the group Throw. It
+gives each key of the table that `bwvr.ini` does not set its value for the
+new setting, and the next throw uses it. A flight in the air keeps its
+rules.
+
+**The log.** Tag `physics`, one line at the start and one at each change of
+the switch: the value of `physics` and the value of each key of the table,
+with "(bwvr.ini)" after a key that `bwvr.ini` sets.
+
+| Key | Default | What it does |
+| --- | --- | --- |
+| `physics` | 1 | 1 (VR): the throw physics of the mod. 0 (Original): the keys of the table above get the values of the plain game, unless `bwvr.ini` sets them |
 
 ## The throw physics
 

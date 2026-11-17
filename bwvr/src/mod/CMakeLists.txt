@@ -116,6 +116,7 @@ add_library(bwvr_mod SHARED
     debug_menu.cpp
     temple.cpp
     throw_physics.cpp
+    physics_switch.cpp
     overlay.cpp
     ray_card.cpp
     influence_edge.cpp

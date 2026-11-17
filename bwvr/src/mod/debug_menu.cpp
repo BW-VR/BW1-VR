@@ -314,6 +314,9 @@ int MiracleThrowValue();
 void MiracleThrowChange(const char* by);
 int MiracleFlightValue();
 void MiracleFlightChange(const char* by);
+// The physics switch (physics_switch.cpp).
+int PhysicsSwitchValue();
+void PhysicsSwitchChange(const char* by);
 // The Creature, the villagers and the miracles (creature_command.cpp,
 // creature_stay.cpp, miracle.cpp, village.cpp, spell_book.cpp).
 int CreatureCommandRuleValue();
@@ -838,6 +841,8 @@ const Switch kSwitches[] = {
      L"model first|hand first"},
 
     // Throw
+    {kGroupThrow, L"Physics", L"Throw physics of the mod or of the game",
+     "physics", PhysicsSwitchValue, PhysicsSwitchChange, L"original|VR"},
     {kGroupThrow, L"Fast release", L"Release at once", "release_at_once",
      HandDirectReleaseAtOnceValue, HandDirectReleaseAtOnceChange, L"off|on"},
     {kGroupThrow, L"Throw law", L"Throw: root law or real flight",
@@ -1428,6 +1433,9 @@ const wchar_t* const kTips[] = {
     L"faint body of the controller does not hide a part of the hand. Model "
     L"first: the controller draws first, and the hand can lose triangles in "
     L"it.",
+    // Physics
+    L"VR: a thrown object or Fireball flies the real arc, with a low bounce. "
+    L"Original: the physics of the game. The next throw uses it.",
     // Fast release
     L"On: a game turn runs on the frame after a release of the Hand, or after "
     L"the grip opens in a take. Off: the mod waits up to 100 ms for the game "

@@ -109,6 +109,15 @@ void ThrowPhysicsInstallEarly();
 // the real flight are not there, and in a multiplayer game.
 int ThrowPhysicsLaw();
 
+// The physics switch (physics_switch.cpp) sets these keys while the game
+// runs: throw_law, throw_land and throw_trees. With live set before
+// ThrowPhysicsInstall, the hooks of the real flight go in with throw_law=1
+// too, so the switch can give throw_law=2 later.
+void ThrowPhysicsSetLaw(int law);
+void ThrowPhysicsSetLawLive(bool live);
+void ThrowPhysicsSetLand(int land);
+void ThrowPhysicsSetTrees(bool trees);
+
 // The time factor k that throw_slow_x10 asks for now (1 to 10), before the
 // cut of throw_math::SlowFactor. A thrown Fireball flies with the same k.
 float ThrowPhysicsSlow();

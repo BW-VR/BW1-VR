@@ -373,6 +373,12 @@ const Setting kSettings[] = {
     // {kBool, "ray_glow", "Glow on the rays", nullptr, 1,
     //  "The ray of the menu, the line to a far object and the arc of the "
     //  "teleport get a soft glow."},
+    {kValues, "physics", "Physics", "VR=1|Original=0", 1,
+     "How a thing that you throw flies and lands. VR: a thrown object or "
+     "Fireball flies the arc of a real throw. It lands with a low bounce and "
+     "stops after a short time. Original: thrown things fly, land, bounce and "
+     "turn as in the game with no mod. They fly more slowly and float more. "
+     "Both use the speed and the direction of your hand."},
     {kValues, "grab_hand", "Grab the world",
      "Grip of the other hand=1|Either grip=2|Off=0", 1,
      "Hold the grip of your other hand. Move that hand to pull the world. "

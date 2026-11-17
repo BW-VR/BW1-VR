@@ -1279,8 +1279,8 @@ with no leash. The leash stays on.
   the Creature. The mouse gets the game's function.
 
 With `leash_miracle_tap=0` the bubble is a target of a command, as in the
-plain game: the trigger sends the Creature to it. The test key is Ctrl with
-the decimal key of the number pad (section 4.5).
+plain game: the trigger sends the Creature to it. The test key is Ctrl,
+Shift and M (section 4.5).
 
 ```
 creature cmd : a click on the miracle 05705750 with the leash on the Hand. The Creature does not go to it, and the game's click taps it (packet 0x20) (leash_miracle_tap=1), frame 475
@@ -1492,8 +1492,7 @@ runs. The pointing controller gives one short pulse for each unit of the
 value (four for 4, one for 1), and the log has a line. The keys of the aim
 trim (numpad 8, 2, 4, 6 and 5) do not act while Ctrl is down.
 
-Ctrl with the decimal key of the number pad, with Shift up, changes
-`leash_miracle_tap` between 1 and 0. The pointing controller gives a long
+Ctrl, Shift and M change `leash_miracle_tap` between 1 and 0. The pointing controller gives a long
 pulse for 1 and a short pulse for 0, and the log has a line. With
 `test_keys=1` the hook of section 4.1 is there also when the game starts with
 `leash_miracle_tap=0`.
@@ -1881,7 +1880,7 @@ of a different player reads the camera of its own player, as in the game.
 When a function does not have the bytes of the disassembly, the mod hooks
 none of them, the key is 0, and a line with the tag `hooks` says so.
 
-**The A/B key.** With `test_keys=1`, Ctrl, Shift and H change
+**The A/B key.** With `test_keys=1`, Ctrl, Shift and R change
 `creature_player_head` between 1 and 0 while the game runs. The pointing
 controller gives a long pulse for 1 and a short pulse for 0, and the log has
 a line. The key works only when the game starts with
@@ -2002,7 +2001,7 @@ Sections 5.4 and 5.5 both change `Creature::LookAtCamera` (`0x004D1A30`).
 MinHook takes only one hook on one function, so only one of the two modules
 hooks it. The value of `creature_player_head` at the start decides:
 
-| `creature_player_head` at the start | Hooks | `creature_look_head` | Ctrl, Shift and H |
+| `creature_player_head` at the start | Hooks | `creature_look_head` | Ctrl, Shift and R |
 | --- | --- | --- | --- |
 | 1 (the default) | `creature_head.cpp` hooks its four functions (section 5.4). `creature_look.cpp` hooks nothing | Not used | Changes `creature_player_head` between 1 and 0 |
 | 0 | `creature_look.cpp` hooks `Creature::LookAtCamera` (section 5.5). `creature_head.cpp` hooks nothing | 1: the look at the head. 0: the game camera | Does nothing |

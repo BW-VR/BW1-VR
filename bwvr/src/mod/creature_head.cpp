@@ -370,15 +370,16 @@ bool Hook(uintptr_t address, void* replacement, void** original,
   return status == MH_OK;
 }
 
-// THE A/B KEY (test_keys=1): Ctrl, Shift and H change creature_player_head
-// between 1 and 0. Shift H with Ctrl up is a test key of the render
-// (stereo.cpp), and its message hook takes no press with Ctrl. The pointing
-// controller gives a long pulse for 1 and a short pulse for 0. The key is
-// read once a frame, and only while a window of the game is in front.
+// THE A/B KEY (test_keys=1): Ctrl, Shift and R change creature_player_head
+// between 1 and 0. The letter R with Ctrl and Shift has no other test key.
+// Shift R with Ctrl up is a test key of the render (stereo.cpp), and its
+// message hook takes no press with Ctrl. The pointing controller gives a
+// long pulse for 1 and a short pulse for 0. The key is read once a frame,
+// and only while a window of the game is in front.
 void PollKey() {
   static bool was = false;
   if (!g_test_keys || !g_hooked) return;
-  const bool down = (GetAsyncKeyState('H') & 0x8000) != 0 &&
+  const bool down = (GetAsyncKeyState('R') & 0x8000) != 0 &&
                     (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0 &&
                     (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0;
   const bool pressed = down && !was;
@@ -393,7 +394,7 @@ void PollKey() {
   ControllersGesturePulse(0.5f, g_mode == head_math::kModeHead ? 0.24f : 0.08f);
   char from[64];
   _snprintf_s(from, sizeof(from), _TRUNCATE,
-              "Ctrl, Shift and H, frame %llu", g_frame);
+              "Ctrl, Shift and R, frame %llu", g_frame);
   LogMode(from);
 }
 
@@ -407,7 +408,7 @@ void CreatureHeadInstall() {
   // Only one module hooks Creature::LookAtCamera (docs/creature.md, "One
   // hook of Creature::LookAtCamera"). With creature_player_head=0 at the start
   // creature_look.cpp has it (creature_look_head), so this module installs no
-  // hook, and Ctrl, Shift and H do nothing.
+  // hook, and Ctrl, Shift and R do nothing.
   if (g_mode == head_math::kModeGame) {
     ModLog("creature head: creature_player_head=0 at the start, so this "
            "module installs no hook. The look of the Creature at the camera "
@@ -454,7 +455,7 @@ void CreatureHeadInstall() {
   }
   LogMode("creature_player_head");
   if (g_test_keys) {
-    ModLog("keys         : Ctrl, Shift and H change creature_player_head "
+    ModLog("keys         : Ctrl, Shift and R change creature_player_head "
            "between 1 and 0 (test_keys=1)");
   }
 }

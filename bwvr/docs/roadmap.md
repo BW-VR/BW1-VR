@@ -260,7 +260,7 @@ These items come before the other work.
   - that the Creature does what you show it in the Creche quest of Land 2,
   - that in a story the Creature looks at the camera of the story.
 
-  The A/B key is Ctrl, Shift and H. Not run: a story, a cut scene, a point
+  The A/B key is Ctrl, Shift and R. Not run: a story, a cut scene, a point
   or a throw at the player, and a Creature of a different player.
 
 - **B44. The game ends with "abnormal program termination" after a fetch

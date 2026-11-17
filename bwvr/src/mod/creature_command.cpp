@@ -961,22 +961,22 @@ void Init() {
   if (g_settings.test_keys) {
     ModLog("keys         : Ctrl with numpad 5 changes creature_command_rule "
            "from 4 to 3 to 2 to 1 and back (test_keys=1)");
-    ModLog("keys         : Ctrl with the decimal key of the number pad (Shift "
-           "up) changes leash_miracle_tap between 1 and 0 (test_keys=1)");
+    ModLog("keys         : Ctrl, Shift and M change leash_miracle_tap between "
+           "1 and 0 (test_keys=1)");
   }
 }
 
-// THE A/B KEY OF THE MIRACLE (test_keys=1): Ctrl with the decimal key of the
-// number pad, with Shift up, changes leash_miracle_tap. The pointing
-// controller gives a long pulse for 1 and a short pulse for 0. Ctrl, Shift
-// and the decimal key is left_hold (controllers.cpp). Only while a window of
-// the game is in front.
+// THE A/B KEY OF THE MIRACLE (test_keys=1): Ctrl, Shift and M change
+// leash_miracle_tap. The letter M with Ctrl and Shift has no other test key,
+// and Shift M with Ctrl up is a key of the render (stereo.cpp). The pointing
+// controller gives a long pulse for 1 and a short pulse for 0. Only while a
+// window of the game is in front.
 void PollSeedKey() {
   static bool was = false;
   if (!g_settings.test_keys) return;
-  const bool down = (GetAsyncKeyState(VK_DECIMAL) & 0x8000) != 0 &&
+  const bool down = (GetAsyncKeyState('M') & 0x8000) != 0 &&
                     (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0 &&
-                    (GetAsyncKeyState(VK_SHIFT) & 0x8000) == 0;
+                    (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
   const bool pressed = down && !was;
   was = down;
   if (!pressed) return;
@@ -985,14 +985,14 @@ void PollSeedKey() {
   if (window != nullptr) GetWindowThreadProcessId(window, &process);
   if (process != GetCurrentProcessId()) return;
   if (!g_seed_hooked) {
-    ModLog("keys         : Ctrl and the decimal key: leash_miracle_tap stays 0, "
+    ModLog("keys         : Ctrl, Shift and M: leash_miracle_tap stays 0, "
            "because the hook of the command on an object is not there, frame "
            "%llu", g_frame);
     return;
   }
   g_settings.seed_tap = !g_settings.seed_tap;
   ControllersGesturePulse(0.5f, g_settings.seed_tap ? 0.24f : 0.08f);
-  ModLog("keys         : Ctrl and the decimal key: leash_miracle_tap=%d. %s, "
+  ModLog("keys         : Ctrl, Shift and M: leash_miracle_tap=%d. %s, "
          "frame %llu", g_settings.seed_tap ? 1 : 0,
          g_settings.seed_tap
              ? "A press with the Hand on a miracle taps it"

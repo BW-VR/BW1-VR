@@ -1089,7 +1089,7 @@ default. Each control has one job, and one button opens the game menu.
 | `leash_ring_left` | 1 | With `left_leash=1`: 1 the game puts the ring of the leash around the wrist of the other hand. 0 leaves it over the game's Hand (`grab.md`, "The leash at the mod's hand"). Not in the launcher |
 | `left_leash` | 1 | With `controls=1`: 1 X of the other hand is the button of the leash, and a shake of the other hand takes the leash off (5.7). 0 keeps the leash with the pointing hand. The test key Ctrl Shift and the slash key goes between the two (`test_keys=1`). Not in the launcher |
 | `left_glow` | 1 | With `controls=1` and `left_take=1`: 1 the object that the trigger of the other hand can take in its reach glows as the target at the Hand does, and the tip of the index finger of that hand has the glow of a take (`hand-model.md`, "The glow at the Hand's point"). It follows `hand_glow` and its test key. 0 gives the other hand no glow. Not in the launcher |
-| `left_hold` | 1 | With `controls=1` and `left_take=1`: 1 an object that the trigger of the other hand takes stays in that hand while the trigger is down, and the Hand of the game is free for the pointing hand (5.7). 0 keeps the object in the Hand of the game. The test key Ctrl Shift and the decimal key of the number pad goes between the two (`test_keys=1`). Not in the launcher |
+| `left_hold` | 1 | With `controls=1` and `left_take=1`: 1 an object that the trigger of the other hand takes stays in that hand while the trigger is down, and the Hand of the game is free for the pointing hand (5.7). 0 keeps the object in the Hand of the game. The test key Ctrl Shift Y goes between the two (`test_keys=1`). Not in the launcher |
 | `left_take` | 1 | With `controls=1`: 1 the trigger of the other hand also takes, and the Hand goes to that controller for the take (5.7). 0 keeps that trigger for the boost and the commands. The test key Ctrl Shift and the less than key goes between the two (`test_keys=1`). Not in the launcher |
 | `move_stick_boost_pct` | 500 | With `controls=1`: the speed of the walk with the stick at a full pull of the trigger of that hand, in percent of the speed with no trigger, 100 to 2000 (`god-view.md`, 5.7). Not in the launcher |
 | `controller_swap_buttons` | 0 | 1 makes the grip the left button and the trigger the right. With `controls=1` it changes only the dialog boxes, the rooms of the Temple and the pointer |
@@ -1516,10 +1516,14 @@ The word `controlskey` of the scripted controller does the same in a desktop
 run. Ctrl, Shift and the slash key change `left_leash` between 1 and 0 (on a
 German keyboard the key with the number sign). Ctrl, Shift and the key
 between the left Shift and Z change `left_take` between 1 and 0 (on a German
-keyboard the key with the less than sign). Ctrl, Shift and the decimal key
-of the number pad change `left_hold` between 1 and 0 (the word `holdkey` of
-the scripted controller does the same). The other controller gives a
-long pulse for 1 and a short pulse for 0.
+keyboard the key with the less than sign). Ctrl, Shift and Y change
+`left_hold` between 1 and 0 (the word `holdkey` of the scripted controller
+does the same). The other controller gives a long pulse for 1 and a short
+pulse for 0. The debug page has these four switches and the switches of
+`move_stick_climb` and `move_stick_path` (`god-view.md`, 5.7) at the start
+of the group Hand (10.8): Controls, Left leash, Left take, Left hold, Tilt
+climb and Fly path. An item calls the same change as its key, so a player
+with no keyboard changes them in the headset.
 
 **Tests.** The math tests (`grip_checks.h`, `walk_checks.h`) cover the
 choice of the press, the boost and the zoom about the land under the head.

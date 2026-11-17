@@ -362,9 +362,11 @@ Press them with the mouse still:
                       or the other choice of "Controls" (key
                       controls). The ' key is the key with the
                       letter A with two dots on a German keyboard.
-  Ctrl Shift Num 0    Change the flight with the left stick: at one
+  Ctrl Shift `        Change the flight with the left stick: at one
                       height and stopped by the land, or along the
-                      land (move_stick_path).
+                      land (move_stick_path). The ` key is the key
+                      with the letter O with two dots on a German
+                      keyboard.
   Ctrl Shift \        Turn the flight up and down by the tilt of the
                       left controller on and off (move_stick_climb).
                       The \ key is the key with the caret on a German
@@ -373,6 +375,13 @@ Press them with the mouse still:
                       X and a shake of the left hand, or the right
                       hand (key left_leash). The / key is the key
                       with the number sign on a German keyboard.
+  Ctrl Shift <        Change the left trigger of "Trigger is grab":
+                      it also takes, or it only makes you faster and
+                      commands the Creature (key left_take). The <
+                      key is the key between the left Shift and Z.
+  Ctrl Shift Y        Change what the left hand does with what it
+                      takes: it keeps it, or the Hand gets it (key
+                      left_hold).
   Ctrl Shift Comma    Change the switch of the game that the teleport
                       keeps to: the drag of the land, or the double
                       click jump (teleport_switch).

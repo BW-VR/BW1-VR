@@ -2460,8 +2460,8 @@ int g_boost_pct = -1;
 int g_climb = -1;
 
 // controls=1: the flight keeps its height and stops at the land, with no
-// follow of the land (move_stick_path). With test_keys=1, Ctrl, Shift and 0
-// of the number pad change it.
+// follow of the land (move_stick_path). With test_keys=1, Ctrl, Shift and
+// the grave accent key change it.
 int g_path = -1;
 
 bool PathOn() {
@@ -2585,8 +2585,8 @@ bool LeftTakeOn() {
 // other hand ends in the carry of that hand (left_hold.cpp): the object stays
 // in that hand while its trigger is down, and the Hand of the game is free
 // for a take of its own. 0 keeps the take in the Hand of the game, which goes
-// back when the trigger opens. With test_keys=1, Ctrl, Shift and the decimal
-// key of the number pad change it.
+// back when the trigger opens. With test_keys=1, Ctrl, Shift and Y change
+// it.
 int g_left_hold = -1;
 
 void LogLeftHold(const char* by) {
@@ -4066,16 +4066,17 @@ void PollControlsKey() {
   if (less_pressed && GameInFront()) {
     ControllersLeftTakeToggle("Ctrl, Shift and the less than key");
   }
-  // Ctrl, Shift and the decimal key of the number pad: left_hold.
-  static bool decimal_before = false;
-  const bool decimal = (GetAsyncKeyState(VK_DECIMAL) & 0x8000) != 0 &&
-                       (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0 &&
-                       (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
-  const bool decimal_pressed = decimal && !decimal_before;
-  decimal_before = decimal;
-  if (decimal_pressed && GameInFront()) {
-    ControllersLeftHoldToggle("Ctrl, Shift and the decimal key of the number "
-                              "pad");
+  // Ctrl, Shift and Y: left_hold. The letter Y with Ctrl and Shift has no
+  // other test key. Ctrl with the decimal key of the number pad is the test
+  // key of scroll_draw (hand_direct.cpp), also with Shift.
+  static bool y_before = false;
+  const bool y = (GetAsyncKeyState('Y') & 0x8000) != 0 &&
+                 (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0 &&
+                 (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
+  const bool y_pressed = y && !y_before;
+  y_before = y;
+  if (y_pressed && GameInFront()) {
+    ControllersLeftHoldToggle("Ctrl, Shift and Y");
   }
   if (!pressed || !GameInFront()) return;
   ControllersControlsToggle("Ctrl, Shift and the apostrophe key");
@@ -7575,6 +7576,34 @@ void ControllersLeftLeashToggle(const char* by) {
   g_left_leash = LeftLeashOn() ? 0 : 1;
   ControllersGrabPulse(1, 0.5f, g_left_leash != 0 ? 0.30f : 0.08f);
   LogLeftLeash(by);
+}
+
+// The values of the switches of the control scheme on the debug page
+// (debug_menu.cpp). A switch calls the change of its test key, so the page
+// and the key do the same step. kDebugCannot with the controller option off,
+// because then a change does nothing.
+int ControllersControlsValue() {
+  return g_on ? (FlyScheme() ? 1 : 0) : kDebugCannot;
+}
+
+int ControllersLeftLeashValue() {
+  return g_on ? (LeftLeashOn() ? 1 : 0) : kDebugCannot;
+}
+
+int ControllersLeftTakeValue() {
+  return g_on ? (LeftTakeOn() ? 1 : 0) : kDebugCannot;
+}
+
+int ControllersLeftHoldValue() {
+  return g_on ? (LeftHoldKeyOn() ? 1 : 0) : kDebugCannot;
+}
+
+int ControllersClimbValue() {
+  return g_on ? (ClimbOn() ? 1 : 0) : kDebugCannot;
+}
+
+int ControllersPathValue() {
+  return g_on ? (PathOn() ? 1 : 0) : kDebugCannot;
 }
 
 bool ControllersOtherMotion(float grip_room_out[3]) {

@@ -61,6 +61,19 @@ int ControllersMenuStopsTurnValue();
 void ControllersMenuStopsTurnChange(const char* by);
 int ControllersRecenterHoldValue();
 void ControllersRecenterHoldChange(const char* by);
+// The control scheme (controllers.cpp, docs/controllers.md, 5.7).
+int ControllersControlsValue();
+void ControllersControlsToggle(const char* by);
+int ControllersLeftLeashValue();
+void ControllersLeftLeashToggle(const char* by);
+int ControllersLeftTakeValue();
+void ControllersLeftTakeToggle(const char* by);
+int ControllersLeftHoldValue();
+void ControllersLeftHoldToggle(const char* by);
+int ControllersClimbValue();
+void ControllersClimbToggle(const char* by);
+int ControllersPathValue();
+void ControllersPathToggle(const char* by);
 // The comfort vignette (vignette.cpp).
 int VignetteValue();
 void VignetteChange(const char* by);
@@ -859,6 +872,23 @@ const Switch kSwitches[] = {
      L"round hole|each eye"},
 
     // Hand
+    {kGroupHand, L"Controls", L"Control scheme of the controllers",
+     "controls", ControllersControlsValue, ControllersControlsToggle,
+     L"default|trigger grab"},
+    {kGroupHand, L"Left leash", L"Leash on X of the other hand", "left_leash",
+     ControllersLeftLeashValue, ControllersLeftLeashToggle, L"off|on"},
+    {kGroupHand, L"Left take", L"Trigger of the other hand takes",
+     "left_take", ControllersLeftTakeValue, ControllersLeftTakeToggle,
+     L"off|on"},
+    {kGroupHand, L"Left hold", L"Other hand keeps what it takes",
+     "left_hold", ControllersLeftHoldValue, ControllersLeftHoldToggle,
+     L"off|on"},
+    {kGroupHand, L"Tilt climb", L"Tilt moves you up and down",
+     "move_stick_climb", ControllersClimbValue, ControllersClimbToggle,
+     L"off|on"},
+    {kGroupHand, L"Fly path", L"Flight keeps its height",
+     "move_stick_path", ControllersPathValue, ControllersPathToggle,
+     L"follow land|keep height"},
     {kGroupHand, L"Catch moving", L"Reach for an object that moves",
      "catch_moving", HandDirectCatchMovingValue, HandDirectCatchMovingChange,
      L"off|pick|rest|open"},
@@ -1535,6 +1565,30 @@ const wchar_t* const kTips[] = {
     // Orb cut
     L"Each eye: an orb that you pull out of the book cuts the page only where "
     L"each eye sees the orb. Round hole: one larger hole for both eyes.",
+    // Controls
+    L"Default: the trigger is the left button of the game, and the grip of "
+    L"the pointing hand is the right button. Trigger grab: the grips of both "
+    L"hands grab the world, the trigger takes and clicks, and the trigger of "
+    L"the other hand makes the walk faster.",
+    // Left leash
+    L"With Trigger grab. On: X of the other hand puts the leash on and gives "
+    L"its next kind, and a shake of that hand takes it off. Off: the leash "
+    L"stays with the pointing hand.",
+    // Left take
+    L"With Trigger grab. On: the trigger of the other hand also takes, and "
+    L"the Hand goes to that controller for the take. Off: that trigger makes "
+    L"the walk faster and commands the Creature.",
+    // Left hold
+    L"With Trigger grab and Left take. On: an object that the other hand "
+    L"takes stays in that hand while its trigger is down. Off: the object "
+    L"goes into the Hand of the game.",
+    // Tilt climb
+    L"With Trigger grab. On: the tilt of the controller of the stick moves "
+    L"you up and down while the stick pushes forward. Off: the walk keeps "
+    L"its height.",
+    // Fly path
+    L"With Trigger grab. Keep height: the flight with the stick keeps its "
+    L"height and stops at the land. Follow land: the walk follows the land.",
     // Catch moving
     L"Extra reach for an object that moves. Pick: on the pick reach only. "
     L"Rest: on all of the reach at rest. Open: as Rest, the guard ends at an "

@@ -36,3 +36,12 @@ void MiracleThrowSetFlight(int flight);
 // The debug row "Miracle flight" (debug_menu.cpp).
 int MiracleFlightValue();
 void MiracleFlightChange(const char* by);
+
+// The debug rows "Fireball gravity" and "Fireball speed" (debug_menu.cpp):
+// miracle_flight_gravity_pct and miracle_flight_speed_pct, the light ball of
+// the arc. A step goes to the next value of the list of the row, or to the
+// value before it with `back`. The next throw uses the new value.
+int MiracleFlightGravityValue();
+int MiracleFlightSpeedValue();
+void MiracleFlightGravityStep(bool back, const char* by);
+void MiracleFlightSpeedStep(bool back, const char* by);

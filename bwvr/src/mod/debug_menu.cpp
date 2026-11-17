@@ -314,6 +314,10 @@ int MiracleThrowValue();
 void MiracleThrowChange(const char* by);
 int MiracleFlightValue();
 void MiracleFlightChange(const char* by);
+int MiracleFlightGravityValue();
+int MiracleFlightSpeedValue();
+void MiracleFlightGravityStep(bool back, const char* by);
+void MiracleFlightSpeedStep(bool back, const char* by);
 // The physics switch (physics_switch.cpp).
 int PhysicsSwitchValue();
 void PhysicsSwitchChange(const char* by);
@@ -854,6 +858,15 @@ const Switch kSwitches[] = {
      L"game|hand|hand turns"},
     {kGroupThrow, L"Miracle flight", L"Fireball flies the real arc",
      "miracle_flight", MiracleFlightValue, MiracleFlightChange, L"game|arc"},
+    {kGroupThrow, L"Fireball grav", L"Gravity of a Fireball, percent",
+     "miracle_flight_gravity_pct", MiracleFlightGravityValue,
+     [](const char* by) { MiracleFlightGravityStep(false, by); }, L"",
+     [](const char* by) { MiracleFlightGravityStep(true, by); }, true,
+     L"Fireball gravity"},
+    {kGroupThrow, L"Fireball speed", L"Speed of a Fireball, percent",
+     "miracle_flight_speed_pct", MiracleFlightSpeedValue,
+     [](const char* by) { MiracleFlightSpeedStep(false, by); }, L"",
+     [](const char* by) { MiracleFlightSpeedStep(true, by); }},
     {kGroupThrow, L"Throw picture", L"Picture between the physics steps",
      "throw_draw", ThrowDrawValue, ThrowDrawChange, L"flight|real"},
     {kGroupThrow, L"Fall rule", L"Still hand lets a high object fall",
@@ -1455,6 +1468,14 @@ const wchar_t* const kTips[] = {
     // Miracle flight
     L"Arc: a thrown Fireball flies the real arc of the throw, as a thrown "
     L"object does, until it touches the land. Game: the game's flight.",
+    // Fireball gravity
+    L"The share of the gravity on the arc of a thrown Fireball: 100, 70, 50, "
+    L"40, 30, 20 percent. Less gravity gives a flatter, longer arc. 100 is a "
+    L"rock. The next throw uses it.",
+    // Fireball speed
+    L"The start speed of a thrown Fireball against the hand: 100, 115, 130, "
+    L"150, 175, 200 percent. The direction stays the direction of the hand. "
+    L"The next throw uses it.",
     // Throw picture
     L"Where the mod draws a thrown object between game steps. Real: a substep "
     L"with a touch is 5 ms, and the picture waits at a guess. Flight: flight "

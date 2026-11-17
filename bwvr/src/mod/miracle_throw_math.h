@@ -146,8 +146,11 @@ const float kBallTurn = 0.1f;
 // meters. A game turn then has more steps of the rule, so that the rule finds
 // the land near the place where the arc meets it.
 const float kBallStepRoom = 0.02f;
-// The most steps of the rule in one game turn.
-const int kBallMostSteps = 16;
+// The most steps of the rule in one game turn. With 24 steps a step is 2 cm
+// of the room or less up to a speed of 4.8 m/s of the room (the speed of the
+// arc and the fall of its first half second), and 2.4 cm up to 5.8 m/s. A
+// step is one call of the game's rule for the collection of the balls.
+const int kBallMostSteps = 24;
 
 // One step of the rule in the air with no drag and no cap, at the gravity g
 // (Gravity times GravityScale).
@@ -185,21 +188,38 @@ inline bool RuleStepWasFree(const float before[3], const float after[3],
 // flies the arc of a thrown object of the same swing: s v / k under
 // s g / k^2, with the time factor k of throw_slow_x10, cut as for an object
 // (throw_math::SlowFactor).
+//
+// A LIGHT BALL. Two factors make the arc of a Fireball flatter and longer
+// than the arc of a rock: the share `gravity` of the gravity of the arc
+// (miracle_flight_gravity_pct / 100) and the gain `speed` of the start speed
+// (miracle_flight_speed_pct / 100). Ball 0 then flies speed s v / k under
+// gravity s g / k^2. The direction stays the direction of the real hand, and
+// the arc in the room is the same at each scale s. On flat land the range
+// goes up by speed^2 / gravity, and the time of the flight by
+// speed / gravity. 1 and 1 give the arc of a rock.
 struct BallFlight {
   float slow;     // the k that is in use
-  float gravity;  // world units a second squared: s g / k^2
-  float v0[3];    // ball 0 at the cast, world units a second: s v / k
+  float gravity;  // world units a second squared: gravity s g / k^2
+  float v0[3];    // ball 0 at the cast, world units a second: speed s v / k
   int steps;      // steps of the rule in one game turn
 };
 
+// The smallest share of the gravity. A smaller one gives an arc that does
+// not come down in sight.
+const float kBallLeastGravity = 0.05f;
+
 inline void BallFlightPlan(const float cast[3], float s, float k,
-                           BallFlight* out) {
+                           BallFlight* out, float gravity = 1.0f,
+                           float speed = 1.0f) {
   *out = BallFlight{};
   const float root = s > 1.0f ? sqrtf(s) : 1.0f;
   float rate = 1.0f;
+  if (!(gravity >= kBallLeastGravity)) gravity = kBallLeastGravity;
+  if (!(speed > 0.0f)) speed = 1.0f;
   out->slow = throw_math::SlowFactor(k, root, &rate);
-  out->gravity = s * throw_math::kGravity / (out->slow * out->slow);
-  for (int i = 0; i < 3; ++i) out->v0[i] = cast[i] / out->slow;
+  out->gravity =
+      gravity * s * throw_math::kGravity / (out->slow * out->slow);
+  for (int i = 0; i < 3; ++i) out->v0[i] = speed * cast[i] / out->slow;
   // The speed of the ball in the room, with the fall of the first half
   // second.
   const float room =

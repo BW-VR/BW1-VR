@@ -1512,10 +1512,18 @@ game turn.
 the real arc of a thrown object of the same swing (`BallFlightPlan` in
 `miracle_throw_math.h`):
 
-1. **The arc.** Ball 0 starts at the Hand's point at the cast, with `s v /
-   k`, under a gravity of `s g / k^2`. k is the time factor of
-   `throw_slow_x10`, cut to sqrt(s) as for an object (`SlowFactor`). This is
-   the arc and the time of the flight of a rock from the same swing. The
+1. **The arc.** Ball 0 starts at the Hand's point at the cast, with `S s v /
+   k`, under a gravity of `G s g / k^2`. G is the share of the gravity
+   (`miracle_flight_gravity_pct`, 40 percent) and S is the gain of the speed
+   (`miracle_flight_speed_pct`, 130 percent), so the ball flies as a light
+   ball: on flat land S^2 / G (4.2) times as far as a rock in S / G (3.25)
+   times the time. A swing of 5.4 m/s at 16 degrees up from 0.25 to 0.5 m
+   over the land goes 7.5 to 8.1 m of the room in 2.2 to 2.4 s with k = 2,
+   and its top is 0.48 m over the hand. The direction is the direction of
+   the real hand, and the arc in the room is the same at each scale. k is
+   the time factor of `throw_slow_x10`, cut to sqrt(s) as for an object
+   (`SlowFactor`). With G and S at 100 percent this is the arc and the time
+   of the flight of a rock from the same swing. The
    game's lift of 0.3 rad and its speed map do not act.
 2. **The fan.** Each other ball of Increase (3) and Extreme (8) keeps the
    game's fan about ball 0: the turn about up, the turn up and the speed
@@ -1527,7 +1535,7 @@ the real arc of a thrown object of the same swing (`BallFlightPlan` in
    is that of the arc, less `g dt / 2` along up (`RuleStartVelocity`).
 4. **The steps.** A hook on the rule runs the game's rule for the
    collection of the balls in several steps of a game turn. Each step moves
-   a ball 2 cm of the room or less (`kBallStepRoom`), with 16 steps a game
+   a ball 2 cm of the room or less (`kBallStepRoom`), with 24 steps a game
    turn at most. In these steps the rule has no drag and no cap of the
    speed, and `GravityScale` of each ball gives the gravity of the arc. With
    the start velocity of step 3 each step of the rule is on the arc, with
@@ -1568,6 +1576,8 @@ of the Hand) has the game's flight too.
 | --- | --- | --- |
 | `miracle_throw` | 1 | 1: a Fireball and a flock leave the Hand with the top speed of the grip of the real hand in the 120 ms before the opening of the grip, and with no turn, as a thrown object does. 2: the same velocity, with the game's turn of the path of the Hand. 0: the game's filter of the speed of the Hand (62 ms) and its turn |
 | `miracle_flight` | 1 | 1: a thrown Fireball flies the real arc of the throw, with the time factor k of `throw_slow_x10`, until its first contact (see "The flight of a thrown Fireball"). It acts with `miracle_throw` 1 or 2 and `throw_law=2`. 0: the game's flight. The debug page has the switch "Miracle flight" in the group Throw |
+| `miracle_flight_gravity_pct` | 40 | The share of the gravity of the arc of a Fireball, in percent (5 to 200). 100 is the arc of a rock. The debug row "Fireball gravity" (100, 70, 50, 40, 30, 20) changes it for the next throw |
+| `miracle_flight_speed_pct` | 130 | The start speed of the arc of a Fireball against the real hand, in percent (50 to 300). 100 is the arc of a rock. The debug row "Fireball speed" (100, 115, 130, 150, 175, 200) changes it for the next throw |
 
 ### The log
 

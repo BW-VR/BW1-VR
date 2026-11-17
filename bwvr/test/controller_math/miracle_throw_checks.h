@@ -114,6 +114,87 @@ inline void BallFlightChecks() {
       Near(name, across, 3.39, 0.01);
     }
   }
+  // A LIGHT BALL: 40 percent of the gravity and 130 percent of the speed.
+  // The same throw then flies 1.3 times the velocity of the object under 0.4
+  // times its gravity, in the same direction. From 1.0 m over flat land the
+  // arc in the room is the arc of 6.5 m/s at 40 degrees under 3.924 m/s^2:
+  // 2.347 s of the real flight and 11.68 m, at each scale.
+  for (float s : scales) {
+    const float k = 2.0f;
+    throw_math::RealThrow rt;
+    throw_math::RealThrowPlan(v_room, v_room, room, 1.5f, life, s, 124.0f,
+                              2.0f, &rt, k);
+    BallFlight bf;
+    BallFlightPlan(rt.world, s, k, &bf, 0.4f, 1.3f);
+    char name[160];
+    float worst_v = 0.0f;
+    for (int i = 0; i < 3; ++i) {
+      worst_v = fmaxf(worst_v, fabsf(bf.v0[i] - 1.3f * rt.flight[i]));
+    }
+    sprintf_s(name, sizeof(name),
+              "at %.1f units per meter, a light ball starts with 1.3 times "
+              "the velocity of an object", s);
+    Check(worst_v <= 1e-4f * (1.0f + controller_math::Length(rt.flight)),
+          name, worst_v, 0.0);
+    sprintf_s(name, sizeof(name),
+              "at %.1f units per meter, a light ball has 0.4 times the "
+              "gravity of an object", s);
+    Near(name, bf.gravity, 0.4f * rt.gravity * throw_math::kGravity,
+         1e-4 * bf.gravity);
+    const float p0[3] = {10.0f, 1.0f * s, 20.0f};
+    float p[3] = {p0[0], p0[1], p0[2]};
+    const float dt = kBallTurn / static_cast<float>(bf.steps);
+    float v[3];
+    RuleStartVelocity(bf.v0, bf.gravity, dt, v);
+    const double vy = 6.5 * sin(40.0 / 57.29578), vx = 6.5 * cos(40.0 / 57.29578);
+    const double g = 0.4 * throw_math::kGravity;
+    const double real_time = (vy + sqrt(vy * vy + 2.0 * g * 1.0)) / g;
+    float worst = 0.0f;
+    for (double t = 0.0; t < real_time * rt.slow;) {
+      RuleFreeStep(p, v, bf.gravity, dt);
+      t += dt;
+      float want[3], vw[3];
+      BallArcAt(p0, bf.v0, bf.gravity, t, want, vw);
+      float d[3] = {p[0] - want[0], p[1] - want[1], p[2] - want[2]};
+      worst = fmaxf(worst, controller_math::Length(d) / s);
+    }
+    sprintf_s(name, sizeof(name),
+              "at %.1f units per meter, %d steps of the rule a turn stay "
+              "within 1 mm of the arc of a light ball", s, bf.steps);
+    Check(worst < 0.001f, name, worst, 0.0);
+    const float step_room =
+        (controller_math::Length(bf.v0) + 0.5f * bf.gravity) * dt / s;
+    sprintf_s(name, sizeof(name),
+              "at %.1f units per meter, a step of a light ball moves it 2.5 "
+              "cm of the room or less", s);
+    Check(step_room <= 0.025f, name, step_room, 0.025);
+    double land_t = 0.0;
+    float at[3];
+    const bool meets = BallArcMeetsLand(
+        p0, bf.v0, bf.gravity, 0.0, 0.01, 30.0,
+        [](float, float) { return 0.0f; }, &land_t, at);
+    sprintf_s(name, sizeof(name),
+              "at %.1f units per meter, the arc of a light ball meets the "
+              "land after k times 2.347 s", s);
+    Check(meets && fabs(land_t - real_time * rt.slow) < 0.002 * rt.slow, name,
+          land_t, real_time * rt.slow);
+    sprintf_s(name, sizeof(name),
+              "at %.1f units per meter, the arc of a light ball meets the "
+              "land 11.68 m of the room away", s);
+    const float across = sqrtf((at[0] - p0[0]) * (at[0] - p0[0]) +
+                               (at[2] - p0[2]) * (at[2] - p0[2])) / s;
+    Near(name, across, vx * real_time, 0.01);
+    Near("the range of a light ball is 11.68 m", vx * real_time, 11.68, 0.01);
+  }
+  // A share of the gravity under 5 percent is cut to 5 percent.
+  {
+    const float cast[3] = {0.0f, 10.0f, 30.0f};
+    BallFlight bf, rock;
+    BallFlightPlan(cast, 44.4f, 2.0f, &bf, 0.0f, 1.0f);
+    BallFlightPlan(cast, 44.4f, 2.0f, &rock);
+    Near("a gravity share of 0 is cut to 5 percent", bf.gravity,
+         0.05f * rock.gravity, 1e-4 * rock.gravity);
+  }
   // At 7.5 units per meter k = 4 is cut to sqrt(7.5) = 2.74, as for an
   // object.
   {

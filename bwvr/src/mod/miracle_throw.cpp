@@ -121,6 +121,15 @@ ModifyFn o_Gravity = nullptr;
 bool g_gravity_hooked = false;
 // miracle_flight: 1 the real arc, 0 the game's flight.
 int g_flight = 1;
+// The light ball: the share of the gravity of the arc and the gain of its
+// start speed, in percent (miracle_flight_gravity_pct and
+// miracle_flight_speed_pct). 100 and 100 give the arc of a rock. The plan of
+// a cast reads them, so a change acts on the next throw.
+int g_gravity_pct = 40;
+int g_speed_pct = 130;
+// The steps of the debug rows "Fireball gravity" and "Fireball speed".
+const int kGravitySteps[] = {100, 70, 50, 40, 30, 20};
+const int kSpeedSteps[] = {100, 115, 130, 150, 175, 200};
 bool g_rule_logged = false;
 
 bool g_installed = false;
@@ -152,6 +161,8 @@ struct Cast {
   bool arc;        // the balls fly the real arc (miracle_flight=1)
   miracle_throw_math::BallFlight plan;  // the arc of ball 0, when real
   float slow_asked;  // the k of throw_slow_x10
+  int gravity_pct;   // the light ball of the plan, in percent
+  int speed_pct;
 };
 Cast g_next = {};
 Cast g_cast = {};
@@ -463,9 +474,13 @@ void StartBalls(uint8_t* const* atoms, int count, double now,
   ModLog("miracle throw: the real arc of ball 0 of the %s of frame %llu: k "
          "%.2f (throw_slow_x10 asks %.2f), %.1f units a second (%.2f m/s of "
          "the room) under %.1f units a second squared, from the Hand's point "
-         "at the cast. %s. miracle_flight=%d, throw_law=%d: %s. %s",
+         "at the cast. The light ball has %d percent of the gravity and %d "
+         "percent of the speed of a rock (miracle_flight_gravity_pct, "
+         "miracle_flight_speed_pct). %s. miracle_flight=%d, throw_law=%d: %s. "
+         "%s",
          cast.name, cast.frame, plan.slow, cast.slow_asked, Speed(plan.v0),
-         Speed(plan.v0) / units, plan.gravity, land, g_flight,
+         Speed(plan.v0) / units, plan.gravity, cast.gravity_pct,
+         cast.speed_pct, land, g_flight,
          ThrowPhysicsLaw(),
          t.flying ? "the mod flies the balls on their arcs until the first "
                     "contact"
@@ -686,6 +701,30 @@ void LogFlight(const char* from) {
              : "A thrown Fireball has the game's flight");
 }
 
+void LogLightBall(const char* from) {
+  ModLog("miracle throw: %s: miracle_flight_gravity_pct=%d, "
+         "miracle_flight_speed_pct=%d. The arc of a thrown Fireball has %d "
+         "percent of the gravity and %d percent of the start speed of the arc "
+         "of a rock. On flat land it goes %.2f times as far, in %.2f times the "
+         "time",
+         from, g_gravity_pct, g_speed_pct, g_gravity_pct, g_speed_pct,
+         (g_speed_pct / 100.0f) * (g_speed_pct / 100.0f) /
+             (g_gravity_pct / 100.0f),
+         (g_speed_pct / 100.0f) / (g_gravity_pct / 100.0f));
+}
+
+// The step after `now` in a list of steps, or the step before it with
+// `back`. The list wraps. A value that is not in the list goes to the first
+// step, or to the last step with `back`.
+int NextStep(const int* steps, int count, int now, bool back) {
+  int at = -1;
+  for (int i = 0; i < count; ++i) {
+    if (steps[i] == now) at = i;
+  }
+  if (at < 0) return steps[back ? count - 1 : 0];
+  return steps[(at + (back ? count - 1 : 1)) % count];
+}
+
 }  // namespace
 
 void MiracleThrowInstall() {
@@ -698,6 +737,14 @@ void MiracleThrowInstall() {
       IniInt("miracle_flight", PhysicsSwitchDefault("miracle_flight", 1)) != 0
           ? 1
           : 0;
+  // The light ball acts only on the arc (miracle_flight=1). physics=0 gives
+  // the game's flight, so it does not act there.
+  g_gravity_pct = IniInt("miracle_flight_gravity_pct", 40);
+  if (g_gravity_pct < 5) g_gravity_pct = 5;
+  if (g_gravity_pct > 200) g_gravity_pct = 200;
+  g_speed_pct = IniInt("miracle_flight_speed_pct", 130);
+  if (g_speed_pct < 50) g_speed_pct = 50;
+  if (g_speed_pct > 300) g_speed_pct = 300;
   void* target = reinterpret_cast<void*>(kModifyFireBall);
   MH_STATUS status = MH_CreateHook(target, reinterpret_cast<void*>(&h_Modify),
                                    reinterpret_cast<void**>(&o_Modify));
@@ -719,6 +766,32 @@ void MiracleThrowInstall() {
   g_installed = true;
   LogKey("the start");
   LogFlight("the start");
+  LogLightBall("the start");
+}
+
+int MiracleFlightGravityValue() {
+  return g_installed && g_gravity_hooked ? g_gravity_pct : kDebugCannot;
+}
+
+int MiracleFlightSpeedValue() {
+  return g_installed && g_gravity_hooked ? g_speed_pct : kDebugCannot;
+}
+
+void MiracleFlightGravityStep(bool back, const char* by) {
+  if (!g_installed || !g_gravity_hooked) return;
+  const int count = sizeof(kGravitySteps) / sizeof(kGravitySteps[0]);
+  g_gravity_pct = NextStep(kGravitySteps, count, g_gravity_pct, back);
+  // A weaker pulse for less gravity, so the hand feels the end of the list.
+  ControllersGesturePulse(0.5f, 0.06f + 0.24f * g_gravity_pct / 100.0f);
+  LogLightBall(by);
+}
+
+void MiracleFlightSpeedStep(bool back, const char* by) {
+  if (!g_installed || !g_gravity_hooked) return;
+  const int count = sizeof(kSpeedSteps) / sizeof(kSpeedSteps[0]);
+  g_speed_pct = NextStep(kSpeedSteps, count, g_speed_pct, back);
+  ControllersGesturePulse(0.5f, 0.06f + 0.12f * g_speed_pct / 100.0f);
+  LogLightBall(by);
 }
 
 void MiracleThrowSetFlight(int flight) { g_flight = flight != 0 ? 1 : 0; }
@@ -776,8 +849,12 @@ void MiracleThrowBeforeCast(uint8_t* hand, const char* name) {
   // with the real flight of a thrown object (throw_law=2).
   c.real = swing && g_mode != kThrowGame && s > 0.0f;
   c.slow_asked = ThrowPhysicsSlow();
+  c.gravity_pct = g_gravity_pct;
+  c.speed_pct = g_speed_pct;
   if (c.real) {
-    miracle_throw_math::BallFlightPlan(c.sent, s, c.slow_asked, &c.plan);
+    miracle_throw_math::BallFlightPlan(c.sent, s, c.slow_asked, &c.plan,
+                                       g_gravity_pct / 100.0f,
+                                       g_speed_pct / 100.0f);
   }
   c.arc = c.real && g_flight == 1 && g_gravity_hooked &&
           ThrowPhysicsLaw() == 2;

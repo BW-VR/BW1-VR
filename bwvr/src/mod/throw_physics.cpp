@@ -2823,13 +2823,21 @@ void ThrowPhysicsInstall() {
                  "the contact of a physics object (the landing)");
   const bool prepare_hook = HandExactAddPrepareHook(&ThrowPrepare);
   g_installed = ok;
-  ModLog("hand throw   : throw_law=2, the real flight is %s. A thrown object "
+  ModLog("hand throw   : the hooks of the real flight: %s. A thrown object "
          "flies in the room as a real object: the same arc and the same "
          "time. The draw of the first frames of a flight is %s%s",
          ok ? "on" : "OFF (a hook failed), and a throw uses the square root "
                      "law",
          prepare_hook ? "in the Hand's draw" : "only in the physics draw",
          g_log ? ". throw_log logs each flight in full" : "");
+  if (g_law != 2) {
+    ModLog("hand throw   : throw_law=%d now: the hooks of the real flight are "
+           "in for the physics switch, and a throw uses %s until the switch "
+           "gives throw_law=2",
+           g_law,
+           g_law == 1 ? "the square root law with the game's physics"
+                      : "the fixed gain with the game's physics");
+  }
   ModLog("hand throw   : throw_shield=%d, %s", g_shield ? 1 : 0,
          g_shield
              ? "the real arc stops at the ball of the body of a Physical "

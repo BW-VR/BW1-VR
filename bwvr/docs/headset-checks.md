@@ -142,12 +142,13 @@ want.
     scroll, or a gold socket under the hand that is not clear at arm length. The pointing hand must show whole in front of the page when it
     is in front, with no edge of page over it or band of land beside it.
 17. **A gesture and a cast.** Draw miracles in the air, draw a circle on the
-    land with the ray for Storm or a shield, and try the switch "Gesture
-    point" (debug page, Miracles). Take a miracle out with a shake and with
-    a tap of B. Wrong: a draw that looks right and does not match (say
-    which), a circle that gets a different size or place on the land, a ray
-    or a trail on the land that is hard to see, or a way out that acts by
-    accident or not at all.
+    land with the ray for Storm or a shield, point the ray of an Explosion
+    at the land and press, and try the switch "Gesture point" (debug page,
+    Miracles). Take a miracle out with a shake and with a tap of B. Wrong: a
+    draw that looks right and does not match (say which), a circle that gets
+    a different size or place on the land, a ray, a trail or the ring of the
+    Explosion on the land that is hard to see or hard to aim, or a way out
+    that acts by accident or not at all.
 18. **Water on a fire.** Set a house on fire with a Fireball, and pour Water
     on it. Wrong: the fire does not go out, the pour looks wrong, a second
     hand, or a red flow on the hand that looks wrong or is not on your hand.
@@ -255,6 +256,10 @@ agents: the log does not tell the item yet.
   ball 0 (`throw.md`, "A thrown miracle"). The lines also give where the
   real arc meets the land, the distance of ball 0 from its arc, and the
   first contact of each ball.
+- **An Explosion that does not come where the ray points.** Log: `the grip
+  casts Explosion at the land point of the ray` gives the land point of the
+  ray, the Hand's point and the place that the cast got. A press that cast
+  nothing has `the grip presses with Explosion` with the cause.
 - **A miracle that shows nothing** (Storm, a shield, Shrink, Enlarge,
   Invisibility). Log: `miracle watch:` says if the game made the spell, its
   radius in cm of the room and how long it stands, or what a Creature
@@ -409,7 +414,8 @@ can power up. The announcer calls the steps "Increase", "Extreme" and
 
 | Kind | Miracles | What you do |
 | --- | --- | --- |
-| At a place | Heal, Forest, Teleport, Explosion | Close the grip with the Hand over the place |
+| At a place | Heal, Forest, Teleport | Close the grip with the Hand over the place |
+| At the ray | Explosion | Point the ray at the land. A ring shows where the blast comes. Close the grip |
 | A pour | Water, Food, Wood, Lightning | Keep the grip closed over the place. Open it to stop |
 | A throw | Fireball, the two flocks | Close the grip, swing the hand, and open it |
 | A circle | Storm, the two shields | Point the ray at the land, close the grip and draw a circle on the land with the ray. The cast comes when the circle closes |
@@ -668,10 +674,15 @@ land in front of you, and the mod removes these orbs before each save.
 - **Cost.** 16000. The power ups (inverse spiral, then spiral): 32000 and
   60000.
 - **Gesture.** Spiral, then the star. At a place.
-- **In the mod.** Close the grip with the Hand over the place.
-- **Proved.** Desktop runs: the cast at a place. The blast is at the place
-  under the Hand, and craters with smoke and rocks lie around that place
-  after it.
+- **In the mod.** Point the ray at the land. A ring on the land shows where
+  the blast comes. Close the grip. With no land at the ray, the grip casts
+  nothing (`miracle_point_aim=1`, `miracles.md`, "The point of the pointer
+  ray").
+- **Proved.** Desktop runs: the cast at a place. With `miracle_point_aim=0`
+  the blast is at the place under the Hand, and craters with smoke and rocks
+  lie around that place after it.
+- **To prove.** `miracle_run.ps1 -Kind blast`: the blast at the land point
+  of the ray, and no cast with the ray at the sky.
 
 ### Flying Flock ("Sky Full", the tooltip "Winged Creatures")
 

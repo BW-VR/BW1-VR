@@ -152,6 +152,7 @@
 #include "influence_edge_math.h"
 #include "one_walk.h"
 #include "overlay_math.h"
+#include "point_aim_math.h"
 #include "ray_glow_math.h"
 #include "ray_tip_math.h"
 #include "miracle.h"
@@ -1518,6 +1519,68 @@ void BuildAimTrail() {
   }
 }
 
+// THE MARK OF THE POINT OF THE RAY (miracle_point_aim=1, miracle.cpp). While
+// a miracle that aims by the ray is in the Hand (an Explosion), and the ray
+// meets the land, a ring of glow lies on the land around the land point of
+// the ray, kRingLiftM over the land. The cast comes there. The radius is in
+// meters of the room (point_aim_math::kMarkRadiusM), so the ring has the same
+// size to the eye at each scale of the God view. It is gold, and red while
+// the place is outside the influence. It moves only with the ray. It draws
+// with overlay=0 too.
+float g_point_mark[point_aim_math::kMarkPoints][3];
+bool g_point_mark_on = false;
+bool g_point_mark_warn = false;
+int g_point_mark_logs = 0;
+
+void BuildPointMark() {
+  bool warn = false;
+  float units = 0.0f;
+  const int n = MiraclePointMark(g_point_mark, point_aim_math::kMarkPoints,
+                                 &warn, &units);
+  const bool on = n >= 2 && units > 0.0f;
+  if ((on != g_point_mark_on || (on && warn != g_point_mark_warn)) &&
+      g_point_mark_logs < kMaxTrailLogs) {
+    ++g_point_mark_logs;
+    if (on) {
+      const float lift = kRingLiftM * units;
+      ModLog("overlay      : the mark of the point of the ray is %s on the land "
+             "around %.1f %.1f, %.1f units wide (%.0f cm of the room), %.1f "
+             "units over the land, frame %llu", warn ? "red" : "gold",
+             0.5f * (g_point_mark[0][0] + g_point_mark[n / 2][0]),
+             0.5f * (g_point_mark[0][2] + g_point_mark[n / 2][2]),
+             2.0f * point_aim_math::kMarkRadiusM * units,
+             2.0f * point_aim_math::kMarkRadiusM * 100.0f, lift, g_frame);
+    } else {
+      ModLog("overlay      : the mark of the point of the ray ends, frame %llu",
+             g_frame);
+    }
+  }
+  g_point_mark_on = on;
+  g_point_mark_warn = on && warn;
+  if (!on || g_glow_lines >= kGlowMaxLines ||
+      g_glow_points + n > kGlowMaxPoints) {
+    return;
+  }
+  const float* core = warn ? kAimTrailRed : kTrailCore;
+  const float* rim = warn ? kAimTrailRedRim : kTrailRim;
+  const float lift = kRingLiftM * units;
+  GlowLine& line = g_glow_line[g_glow_lines++];
+  line.first = g_glow_points;
+  line.count = n;
+  line.opacity = 0.0f;
+  for (int i = 0; i < n; ++i) {
+    glow_math::Point& p = g_glow_point[g_glow_points++];
+    p.p[0] = g_point_mark[i][0];
+    p.p[1] = TeleportGround(g_point_mark[i][0], g_point_mark[i][2]) + lift;
+    p.p[2] = g_point_mark[i][2];
+    p.half_width = kTrailHalfM * units;
+    for (int k = 0; k < 3; ++k) {
+      p.core[k] = core[k];
+      p.rim[k] = rim[k];
+    }
+  }
+}
+
 // The index tip of each hand on the screen of this eye, for the log.
 void ProjectTips(int eye, const float m[12], float near_plane, float hx,
                  float hy) {
@@ -2105,6 +2168,7 @@ void OverlayFrame() {
   BuildFar();
   BuildGestureTrail();
   BuildAimTrail();
+  BuildPointMark();
   g_build_ticks = Now() - start;
 }
 

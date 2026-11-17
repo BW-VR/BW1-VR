@@ -100,7 +100,8 @@ bool MiracleDrawsCircle();
 // THE AIM OF A CIRCLE (miracle_circle_aim=1, docs/miracles.md, "The circle
 // of the pointer ray"), latched once a frame in MiracleFrame. While a Storm
 // or a shield is in the Hand the pointing hand shows its ray, and the land
-// point of the ray draws the circle.
+// point of the ray draws the circle. The ray also shows for a miracle that
+// aims by the ray (miracle_point_aim=1, below).
 // controllers.cpp: true while the ray shows.
 bool MiracleAimShows();
 // controllers.cpp, ControllersMenuRay: true while the ray shows. meters is
@@ -119,6 +120,19 @@ int MiracleAimPath(const float (**points)[3], bool* warn, float* units);
 // The switch "Circle aim" of the debug page.
 int MiracleCircleAimValue();
 void MiracleCircleAimChange(const char* by);
+
+// THE POINT OF THE POINTER RAY (miracle_point_aim=1, docs/miracles.md, "The
+// point of the pointer ray"). While a miracle of the table of
+// point_aim_math.h (Explosion) is in the Hand, the pointing hand shows its
+// ray (MiracleAimShows, MiracleAimRay), and the press casts at the land point
+// of the ray.
+// overlay.cpp: the points of the mark on the land around the land point of
+// the ray, in the world. warn is true while the place is outside the
+// influence. Returns the count of points, 0 when no mark shows.
+int MiraclePointMark(float points[][3], int most, bool* warn, float* units);
+// The switch "Explosion aim" of the debug page.
+int MiraclePointAimValue();
+void MiraclePointAimChange(const char* by);
 
 // temple.cpp, in GInterface::SendInvisibleDrawCollision: the game offers an
 // object with no mesh to its pick as a ball. A teleport site becomes a

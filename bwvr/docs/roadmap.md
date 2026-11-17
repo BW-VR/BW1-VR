@@ -836,6 +836,11 @@ game as it is.
       "The miracles of the game" (N6): `miracle_run.ps1` with `-Seeds`.
       Water on a field and on a forest needs a test save with a field or a
       forest near the Hand.
+    - The Explosion at the land point of the ray (`miracle_point_aim`,
+      `miracles.md`, "The point of the pointer ray"): `miracle_run.ps1 -Kind
+      blast`. Also not run: a press with the land point of the ray outside
+      the influence (the red ring and the reason on the card), and the
+      levels Increase and Extreme.
   - The Temple:
     - The place of each eye in a room with one walk and with `one_walk=0`,
       and the fade in both eyes with `one_walk=0` (`temple_fade_eyes`, B13):

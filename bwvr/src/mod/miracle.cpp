@@ -29,6 +29,8 @@
 //   take the miracle out of the Hand with the game's own function.
 // - The trigger makes a seed that the Hand carries active: the Hand lets the
 //   seed go, and the mod sends the game's tap.
+// - A Storm or a shield draws its circle with the ray of the pointing hand,
+//   and an Explosion casts at the land point of that ray (h_PressHeld).
 // - Each change goes to the log with the tag "miracle", and the card of the
 //   hand says what each control does and why the game refused a cast.
 
@@ -52,6 +54,7 @@
 #include "miracle.h"
 #include "miracle_math.h"
 #include "miracle_throw.h"
+#include "point_aim_math.h"
 #include "teleport.h"
 #include "village.h"
 
@@ -290,6 +293,7 @@ struct Settings {
   bool circle_cast = true;   // miracle_circle_cast: a closed circle casts
   bool circle_hand = true;   // miracle_circle_hand: the circle of the real hand
   bool circle_aim = true;    // miracle_circle_aim: the ray draws the circle
+  bool point_aim = true;     // miracle_point_aim: an Explosion casts at the ray
   float cone_deg = 6.0f;     // miracle_cone_deg: a new target in the aim
   float keep_deg = 10.0f;    // miracle_keep_deg: the target stays to here
   float touch_cm = 3.0f;     // miracle_touch_cm
@@ -324,6 +328,10 @@ int g_test_orb_count = 0;
 // The test key miracle_test_save_steps: the frame at which the mod deletes
 // the orbs as it does before a save, with no save.
 uint64_t g_test_save_steps = 0;
+// The test key miracle_test_point_aim: a list of frames. At each frame the
+// mod changes miracle_point_aim, as the switch of the debug page does.
+uint64_t g_test_point_aims[kMaxTestSeeds];
+int g_test_point_aim_count = 0;
 
 bool IniPath(char path[MAX_PATH]) {
   const DWORD length = GetModuleFileNameA(nullptr, path, MAX_PATH);
@@ -483,6 +491,8 @@ struct Aim {
   bool too_large;      // the circle of the path is larger than the spell
   float least, most;   // the limits of the radius of the spell, or 0
   int magic;           // the magic type of the seed
+  bool point;          // a miracle that casts at the land point of the ray
+                       // (miracle_point_aim=1, point_aim_math.h)
 };
 Aim g_aim = {};
 circle_aim_math::Path g_aim_path = {};
@@ -491,6 +501,12 @@ uint64_t g_aim_draws = 0;      // draws of a circle with the ray, this window
 bool g_aim_said_shows = false;
 bool g_aim_said_land = false;
 bool g_aim_said_large = false;
+// THE POINT OF THE RAY (miracle_point_aim=1): the counts of a report window
+// and the frame of the last press with a miracle of the table.
+uint64_t g_point_shows = 0;     // frames with the ray of a point
+uint64_t g_point_casts = 0;     // casts at the land point of the ray
+uint64_t g_point_none = 0;      // presses that cast nothing
+uint64_t g_point_press_frame = 0;
 // The limits of the radius of the spell of this seed and power level.
 const void* g_limit_seed = nullptr;
 int g_limit_power = -1;
@@ -786,6 +802,162 @@ int __fastcall h_CastOnObject(void* self, void* unused) {
   return result;
 }
 
+// THE POINT OF THE POINTER RAY (miracle_point_aim=1, point_aim_math.h) [V,
+// runblack.exe 1.42]. FUN_005D1560 (thiscall on GInterface, no arguments,
+// plain ret) is the press of the Action button with an object in the Hand.
+// The right press FUN_005D1330 calls it, and so does the step of action 13 at
+// 0x005D54CB. With no object to cast on, it tests the influence at the land
+// point of the record (GInterface+0x48, which the interface step fn_005D1120
+// sets from the land point +0x3F0). With no influence the press does nothing.
+// With the influence, a miracle of the press goes to FUN_005D1850: it tests
+// the land point (ValidToApplyThisToMapCoord, slot 0x724) and calls
+// FUN_005D3340. That copies the land point, tests it and +0x48 again, sends it
+// in packet 0x16, puts it in the cast record (+0x1A4, fn_0057C960: the world
+// place at +0x1AC) and sends the record in packet 0x12. No test of the cast
+// reads the place of the Hand: the game takes the prayer power when it makes
+// the seed, and packet 0x4D sends the velocity of the Hand, which a cast at a
+// place does not use.
+// So for a miracle of the table the mod puts the land point of the ray in
+// +0x3F0 and the influence at it in +0x48 for this call only, and then puts
+// the values of the game back. The tests of the game then decide at the land
+// point of the ray, and the Hand stays at the real hand. With no land at the
+// end of the ray, +0x48 is clear for the call, so the game casts nothing and
+// does not cast under the Hand.
+const uintptr_t kPressHeld = 0x005D1560;
+FaceFn o_PressHeld = nullptr;
+
+// The influence of the player at a land point, as fn_005D1120 sets +0x48.
+bool InfluenceAt(const Facts& f, const MapCoords* at) {
+  if (reinterpret_cast<CoordsFn>(kInBounds)(at, nullptr) == 0) return false;
+  void* player = Player(f.face);
+  return player != nullptr &&
+         reinterpret_cast<PlayerInfluenceFn>(kPlayerInfluence)(at, player, 0,
+                                                               1, 1) > 0.0f;
+}
+
+// The feedback of a press that casts nothing: the reason on the card, the
+// pulse of a refused cast and the tally of the book.
+void PointRefused(const Facts& f, int why) {
+  g_refusal = why;
+  g_refusal_at = NowSeconds();
+  ++g_refusals;
+  ++g_point_none;
+  SpellBookNoteCast(f.info.type, f.power, true,
+                    miracle_math::RefusalWords(why));
+  HapticsPulse(haptics_math::kRefused);
+}
+
+int __fastcall h_PressHeld(void* self, void* unused) {
+  Facts f = {};
+  if (!g_ready || !Active(&f) || f.face != self || f.seed == nullptr ||
+      !point_aim_math::AimsByRay(f.info.type, f.power)) {
+    return o_PressHeld(self, unused);
+  }
+  // The handler runs on each frame while the button is down and no action
+  // started, so one press gives one line and one pulse.
+  const bool fresh = g_frame > g_point_press_frame + 1;
+  g_point_press_frame = g_frame;
+  const int press = point_aim_math::PressOf(
+      g_settings.point_aim, true, g_target != nullptr,
+      g_aim.shows && g_aim.point && g_aim.have_land);
+  int32_t* land = reinterpret_cast<int32_t*>(f.face + kFaceNextLand);
+  int32_t* influence = reinterpret_cast<int32_t*>(f.face + kFaceInfluence);
+  const int32_t game_land[3] = {land[0], land[1], land[2]};
+  const int32_t game_influence = *influence;
+  bool inside = game_influence != 0;
+  if (press == point_aim_math::kPressRay) {
+    const MapCoords at = {point_aim_math::ToMap(g_aim.land[0]),
+                          point_aim_math::ToMap(g_aim.land[2]), 0.0f};
+    inside = InfluenceAt(f, &at);
+    memcpy(land, &at, sizeof(at));
+    *influence = inside ? 1 : 0;
+  } else if (press == point_aim_math::kPressNone) {
+    inside = false;
+    *influence = 0;
+  }
+  const int32_t before =
+      *reinterpret_cast<const int32_t*>(f.face + kFaceDropTurn);
+  const uint64_t refusals = g_refusals;
+  const int result = o_PressHeld(self, unused);
+  const bool sent =
+      before == 0 &&
+      *reinterpret_cast<const int32_t*>(f.face + kFaceDropTurn) != 0;
+  const bool game_refused = g_refusals != refusals;
+  memcpy(land, game_land, sizeof(game_land));
+  *influence = game_influence;
+  // The place of the cast and the land under the Hand, in the world.
+  const float* place = reinterpret_cast<const float*>(f.face + kFaceCastCircle);
+  const float under[2] = {point_aim_math::FromMap(game_land[0]),
+                          point_aim_math::FromMap(game_land[1])};
+  float hand[3] = {under[0], 0.0f, under[1]};
+  HandDirectRealPoint(hand);
+  const float units = HandDirectRoomUnits();
+  if (sent) {
+    if (press == point_aim_math::kPressRay) ++g_point_casts;
+    if (Log()) {
+      const float to_ray_x = place[0] - g_aim.land[0];
+      const float to_ray_z = place[2] - g_aim.land[2];
+      const float to_under_x = place[0] - under[0];
+      const float to_under_z = place[2] - under[1];
+      if (press == point_aim_math::kPressRay) {
+        ModLog("miracle      : the grip casts %s at the land point of the ray "
+               "%.1f %.1f, %.2f m of the room across the land from the Hand's "
+               "point %.1f %.1f %.1f. The cast got the place %.1f %.1f %.1f "
+               "(GInterface+0x1AC, packet 0x12): %.1f units from the land "
+               "point of the ray and %.1f units from the land under the Hand "
+               "%.1f %.1f (miracle_point_aim=1), frame %llu",
+               SeedName(f.info.type), g_aim.land[0], g_aim.land[2],
+               point_aim_math::AcrossM(hand, g_aim.land, units), hand[0],
+               hand[1], hand[2], place[0], place[1], place[2],
+               sqrtf(to_ray_x * to_ray_x + to_ray_z * to_ray_z),
+               sqrtf(to_under_x * to_under_x + to_under_z * to_under_z),
+               under[0], under[1], g_frame);
+      } else {
+        ModLog("miracle      : the grip casts %s at the land under the Hand "
+               "%.1f %.1f, and the Hand's point is %.1f %.1f %.1f. The cast "
+               "got the place %.1f %.1f %.1f (GInterface+0x1AC, packet 0x12), "
+               "%.1f units from the land under the Hand. %s "
+               "(miracle_point_aim=%d), frame %llu",
+               SeedName(f.info.type), under[0], under[1], hand[0], hand[1],
+               hand[2], place[0], place[1], place[2],
+               sqrtf(to_under_x * to_under_x + to_under_z * to_under_z),
+               g_target != nullptr ? "The target with the halo is in the "
+                                     "record, so the game's own cast runs"
+                                   : "The ray does not aim the cast",
+               g_settings.point_aim ? 1 : 0, g_frame);
+      }
+    }
+    return result;
+  }
+  // A press that the game neither cast nor refused: the ray meets no land,
+  // or its land point is outside the influence. The game does nothing then,
+  // so the mod gives the feedback of a refused cast.
+  if (!fresh || game_refused || press == point_aim_math::kPressGame) {
+    return result;
+  }
+  if (press == point_aim_math::kPressNone) {
+    PointRefused(f, miracle_math::kRefuseNoRayLand);
+    if (Log()) {
+      ModLog("miracle      : the grip presses with %s, but the ray %s, so the "
+             "mod gives the game no place and the game casts nothing. The Hand "
+             "keeps the miracle (miracle_point_aim=1), frame %llu",
+             SeedName(f.info.type),
+             g_aim.shows ? "meets no land" : "does not show", g_frame);
+    }
+  } else if (!inside) {
+    PointRefused(f, miracle_math::kRefuseInfluence);
+    if (Log()) {
+      ModLog("miracle      : the grip presses with %s at the land point of the "
+             "ray %.1f %.1f, %.2f m of the room from the Hand's point, but that "
+             "place is outside your influence, so the game casts nothing (its "
+             "rule for a press outside the influence) (miracle_point_aim=1), "
+             "frame %llu", SeedName(f.info.type), g_aim.land[0], g_aim.land[2],
+             point_aim_math::AcrossM(hand, g_aim.land, units), g_frame);
+    }
+  }
+  return result;
+}
+
 float RoomCm(const float* a, const float* b, float units) {
   const float dx = a[0] - b[0], dy = a[1] - b[1], dz = a[2] - b[2];
   return units > 0.0f ? sqrtf(dx * dx + dy * dy + dz * dz) / units * 100.0f
@@ -866,6 +1038,17 @@ void LogKeys(const char* from) {
          g_frame);
 }
 
+void LogPointAim(const char* from) {
+  ModLog("miracle      : %s: miracle_point_aim=%d: %s, frame %llu", from,
+         g_settings.point_aim ? 1 : 0,
+         g_settings.point_aim
+             ? "an Explosion in the Hand shows the ray of the pointing hand "
+               "and a mark at its land point, and the press casts there. With "
+               "no land at the ray the press casts nothing"
+             : "an Explosion casts at the land under the Hand",
+         g_frame);
+}
+
 void Init() {
   if (g_ready) return;
   g_ready = true;
@@ -884,6 +1067,7 @@ void Init() {
   g_settings.circle_cast = IniInt("miracle_circle_cast", 1) != 0;
   g_settings.circle_hand = IniInt("miracle_circle_hand", 1) != 0;
   g_settings.circle_aim = IniInt("miracle_circle_aim", 1) != 0;
+  g_settings.point_aim = IniInt("miracle_point_aim", 1) != 0;
   g_settings.cone_deg = IniFloat("miracle_cone_deg", 6.0f);
   if (!(g_settings.cone_deg >= 0.5f)) g_settings.cone_deg = 0.5f;
   if (g_settings.cone_deg > 30.0f) g_settings.cone_deg = 30.0f;
@@ -932,6 +1116,20 @@ void Init() {
   }
   g_test_save_steps =
       static_cast<uint64_t>(IniInt("miracle_test_save_steps", 0));
+  IniText("miracle_test_point_aim", text, sizeof(text));
+  for (const char* p = text;
+       *p != 0 && g_test_point_aim_count < kMaxTestSeeds;) {
+    while (*p == ' ' || *p == ',') ++p;
+    int frame = 0, used = 0;
+    if (sscanf_s(p, "%d%n", &frame, &used) < 1 || used == 0) break;
+    g_test_point_aims[g_test_point_aim_count++] = static_cast<uint64_t>(frame);
+    p += used;
+  }
+  if (g_test_point_aim_count > 0) {
+    ModLog("miracle      : test key miracle_test_point_aim: miracle_point_aim "
+           "changes at %d frames, the first at frame %llu",
+           g_test_point_aim_count, g_test_point_aims[0]);
+  }
   if (g_test_orb_count > 0) {
     ModLog("miracle      : test key miracle_test_orbs: the orbs of all "
            "miracles go onto the land at %d frames, the first at frame %llu",
@@ -954,6 +1152,9 @@ void Init() {
   HookOne(kUpdateSpellInfo, &h_UpdateSpellInfo,
           reinterpret_cast<void**>(&o_UpdateSpellInfo),
           "the spell info of a player GInterfaceStatus::UpdateSpellInfo");
+  // With miracle_point_aim=0 the hook only reads and logs.
+  HookOne(kPressHeld, &h_PressHeld, reinterpret_cast<void**>(&o_PressHeld),
+          "the press with an object in the Hand FUN_005D1560");
   MiracleWatchInstall();
   MiracleThrowInstall();
   LogKeys("miracle_hand");
@@ -999,6 +1200,7 @@ void Init() {
                "hand, and the land point of the ray draws the circle on the "
                "land"
              : "the hand draws the circle of a Storm or a shield in the air");
+  LogPointAim("miracle_point_aim");
   if (g_settings.test_keys) {
     ModLog("keys         : Ctrl with numpad 8 changes miracle_hand between 1 "
            "and 0 (test_keys=1)");
@@ -1032,6 +1234,20 @@ void MiracleCircleAimChange(const char* by) {
 int MiracleCircleAimValue() {
   Init();
   return g_settings.circle_aim ? 1 : 0;
+}
+
+// The switch "Explosion aim" of the debug page: miracle_point_aim. The next
+// frame shows the ray or takes it away, and the next press uses the value.
+void MiraclePointAimChange(const char* by) {
+  Init();
+  g_settings.point_aim = !g_settings.point_aim;
+  ControllersGesturePulse(0.5f, g_settings.point_aim ? 0.24f : 0.08f);
+  LogPointAim(by);
+}
+
+int MiraclePointAimValue() {
+  Init();
+  return g_settings.point_aim ? 1 : 0;
 }
 
 namespace {
@@ -1607,13 +1823,86 @@ bool OutsideInfluence(const Facts& f, const float at[3]) {
 // each frame goes into the path of the circle. The game reads the place of
 // the Hand many times a frame, so the mod changes no place of the Hand: the
 // drawn Hand stays at the real hand.
+// The land along the ray up to kAimLandMostM of the room, into g_aim.
+void AimLandOfRay(const float origin[3], const float direction[3],
+                  float units) {
+  float step = kAimLandStepM * units;
+  if (step < 1.0f) step = 1.0f;
+  const float land = command_math::RayLandDistance(
+      origin, direction, step, kAimLandMostM * units,
+      [](float x, float z) { return TeleportGround(x, z); });
+  if (land > 0.0f) {
+    float point[3];
+    for (int k = 0; k < 3; ++k) point[k] = origin[k] + direction[k] * land;
+    if (point[0] >= 0.0f && point[0] < kMapSize && point[2] >= 0.0f &&
+        point[2] < kMapSize) {
+      g_aim.have_land = true;
+      g_aim.distance = land;
+      for (int k = 0; k < 3; ++k) g_aim.land[k] = point[k];
+    }
+  }
+}
+
+// THE POINT OF THE RAY (miracle_point_aim=1). While a miracle of the table of
+// point_aim_math.h is in the Hand, the ray of the pointing hand shows, and its
+// land point is the place of the cast (h_PressHeld) and of the mark
+// (overlay.cpp). The Hand stays at the real hand.
+void PointFrame(const Facts& f) {
+  float origin[3], direction[3], eye[3], units = 0.0f;
+  if (!ControllersFarRay(origin, direction, &units, eye) || !(units > 0.0f)) {
+    return;
+  }
+  g_aim.shows = true;
+  g_aim.point = true;
+  g_aim.units = units;
+  for (int k = 0; k < 3; ++k) g_aim.direction[k] = direction[k];
+  ++g_point_shows;
+  AimLandOfRay(origin, direction, units);
+  if (g_aim.have_land) g_aim.outside = OutsideInfluence(f, g_aim.land);
+  if (!g_aim_said_shows && Log()) {
+    g_aim_said_shows = true;
+    float hand[3];
+    const bool real = HandDirectRealPoint(hand);
+    ModLog("miracle      : %s (power up %d) is in the Hand, so the pointing "
+           "hand shows its ray and a mark at its land point, and the press "
+           "casts there (miracle_point_aim=1). The ray meets the land %s, "
+           "frame %llu", SeedName(f.info.type), f.power,
+           !g_aim.have_land ? "nowhere within 60 m of the room"
+           : g_aim.outside  ? "outside your influence"
+                            : "inside your influence",
+           g_frame);
+    if (g_aim.have_land && real) {
+      ModLog("miracle      : the land point of the ray is %.1f %.1f %.1f, "
+             "%.2f m of the room along the ray and %.2f m across the land from "
+             "the Hand's point %.1f %.1f %.1f, frame %llu", g_aim.land[0],
+             g_aim.land[1], g_aim.land[2], g_aim.distance / units,
+             point_aim_math::AcrossM(hand, g_aim.land, units), hand[0],
+             hand[1], hand[2], g_frame);
+    }
+  }
+}
+
 void AimFrame(const Facts& f, bool have) {
   const Aim last = g_aim;
   g_aim = Aim{};
   const bool circle_seed = have && f.seed != nullptr &&
                            f.info.cast == miracle_math::kCastThrow &&
                            f.info.gesture != 0;
-  if (!circle_seed) g_aim_said_shows = false;
+  const bool point_seed = have && f.seed != nullptr && g_settings.point_aim &&
+                          point_aim_math::AimsByRay(f.info.type, f.power);
+  if (!circle_seed && !point_seed) g_aim_said_shows = false;
+  if (point_seed) {
+    PointFrame(f);
+    if (g_aim.shows && g_aim.have_land != g_aim_said_land) {
+      g_aim_said_land = g_aim.have_land;
+      if (Log()) {
+        ModLog("miracle      : the ray of %s meets %s now%s, frame %llu",
+               SeedName(f.info.type), g_aim.have_land ? "the land" : "no land",
+               g_aim.have_land ? "" : ", so no mark shows", g_frame);
+      }
+    }
+    return;
+  }
   if (!g_settings.circle_aim || !circle_seed || f.face[kFaceCircle] != 0) {
     // The path stays after the match, for the circle of the cast
     // (CircleFromHand). The next draw clears it.
@@ -1649,21 +1938,7 @@ void AimFrame(const Facts& f, bool have) {
   g_aim.least = g_limit_least;
   g_aim.most = g_limit_most;
   g_aim.magic = g_limit_magic;
-  float step = kAimLandStepM * units;
-  if (step < 1.0f) step = 1.0f;
-  const float land = command_math::RayLandDistance(
-      origin, direction, step, kAimLandMostM * units,
-      [](float x, float z) { return TeleportGround(x, z); });
-  if (land > 0.0f) {
-    float point[3];
-    for (int k = 0; k < 3; ++k) point[k] = origin[k] + direction[k] * land;
-    if (point[0] >= 0.0f && point[0] < kMapSize && point[2] >= 0.0f &&
-        point[2] < kMapSize) {
-      g_aim.have_land = true;
-      g_aim.distance = land;
-      for (int k = 0; k < 3; ++k) g_aim.land[k] = point[k];
-    }
-  }
+  AimLandOfRay(origin, direction, units);
   g_aim.draws = MiracleDrawsCircle();
   if (g_aim.draws && !last.draws) {
     circle_aim_math::Clear(&g_aim_path);
@@ -1736,6 +2011,12 @@ void MiracleFrame() {
   g_frame = ControllersFrameCount();
   PollKey();
   TestSeeds();
+  for (int i = 0; i < g_test_point_aim_count; ++i) {
+    if (ControllersTestFrame(g_test_point_aims[i], g_frame) ==
+        g_test_point_aims[i]) {
+      MiraclePointAimChange("test key miracle_test_point_aim");
+    }
+  }
   MiracleThrowFrame();
   // The orbs of all miracles of the test key, as the debug row makes them.
   for (int i = 0; i < g_test_orb_count; ++i) {
@@ -2399,6 +2680,15 @@ int MiracleAimPath(const float (**points)[3], bool* warn, float* units) {
   return g_aim_path.count;
 }
 
+int MiraclePointMark(float points[][3], int most, bool* warn, float* units) {
+  *warn = false;
+  *units = 0.0f;
+  if (!g_ready || !g_aim.shows || !g_aim.point || !g_aim.have_land) return 0;
+  *warn = g_aim.outside;
+  *units = g_aim.units;
+  return point_aim_math::MarkRing(g_aim.land, g_aim.units, points, most);
+}
+
 int MiracleHint(MiracleLine lines[kMiracleLines]) {
   if (!g_ready || !g_settings.on || !g_have) return 0;
   const bool seed_held = g_now.one_off && g_now.held != nullptr;
@@ -2414,6 +2704,9 @@ int MiracleHint(MiracleLine lines[kMiracleLines]) {
   const int prompt = miracle_math::PromptOf(
       seed_held, miracle, g_now.info, g_target != nullptr, GripDown(),
       g_now.spell != nullptr);
+  // A miracle that aims by the ray (miracle_point_aim=1, h_PressHeld).
+  const bool point = miracle && g_settings.point_aim &&
+                     point_aim_math::AimsByRay(g_now.info.type, g_now.power);
   // Why the game refused the last cast, or why it will refuse this one.
   int why = g_refusal;
   if (why == miracle_math::kRefuseNone && miracle && g_blocked != nullptr &&
@@ -2443,7 +2736,8 @@ int MiracleHint(MiracleLine lines[kMiracleLines]) {
       }
       break;
     case miracle_math::kPromptPlace:
-      add(kWordGrab, L"Cast here");
+      // A miracle that aims by the ray casts at the land point of the ray.
+      add(kWordGrab, point ? L"Point, press to cast" : L"Cast here");
       break;
     case miracle_math::kPromptPour:
       add(kWordGrab, L"Hold to pour");
@@ -2498,9 +2792,16 @@ int MiracleHint(MiracleLine lines[kMiracleLines]) {
       add(-1, miracle ? L"The game refused the cast here"
                       : L"Use it inside your influence");
       break;
+    case miracle_math::kRefuseNoRayLand:
+      add(-1, L"Point the ray at the land");
+      break;
     default:
-      // THE AIM OF A CIRCLE: what the game will do with the circle now.
-      if (g_aim.shows && g_aim.outside) {
+      // THE AIM OF A CIRCLE OR A POINT: what the game will do with the place
+      // now.
+      if (point && g_target == nullptr &&
+          !(g_aim.point && g_aim.have_land)) {
+        add(-1, L"Point the ray at the land");
+      } else if (g_aim.shows && g_aim.outside) {
         add(-1, L"This place is outside your influence");
       } else if (g_aim.draws && g_aim.too_large) {
         add(-1, L"The miracle is smaller than this circle");
@@ -2531,6 +2832,16 @@ void MiracleReport() {
            g_aim_shows, g_aim_draws, g_settings.circle_aim ? 1 : 0);
     g_aim_shows = 0;
     g_aim_draws = 0;
+  }
+  if (g_point_shows > 0 || g_point_casts > 0 || g_point_none > 0) {
+    ModLog("miracle      : the ray of a point showed on %llu frames. The grip "
+           "cast %llu times at the land point of the ray, and %llu presses "
+           "cast nothing, this window (miracle_point_aim=%d)",
+           g_point_shows, g_point_casts, g_point_none,
+           g_settings.point_aim ? 1 : 0);
+    g_point_shows = 0;
+    g_point_casts = 0;
+    g_point_none = 0;
   }
   ModLog("miracle      : a miracle was in the Hand on %llu frames and a "
          "one-off seed on %llu. %llu casts sent, %llu casts refused, %llu "

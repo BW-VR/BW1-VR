@@ -78,6 +78,9 @@ enum Refusal {
   kRefuseNeedsTarget, // a miracle for an object, cast with no object
   kRefuseNeedsCircle, // the miracle needs its gesture first
   kRefuseOther,
+  // Not a test of the game: a miracle that aims by the pointer ray, and the
+  // ray meets no land (point_aim_math.h). The mod gives the game no place.
+  kRefuseNoRayLand,
 };
 
 // CAST_RULE_TYPE of the game: 0 anywhere, 1 on land, 2 in the influence, 3 on
@@ -108,6 +111,7 @@ inline const char* RefusalWords(int refusal) {
     case kRefuseNeedsTarget: return "this miracle needs a Creature as its target";
     case kRefuseNeedsCircle: return "this miracle needs a circle on the land first";
     case kRefuseOther: return "the game gave no reason that the mod knows";
+    case kRefuseNoRayLand: return "the ray of the pointing hand meets no land";
     default: return "";
   }
 }

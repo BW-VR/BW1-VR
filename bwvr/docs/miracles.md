@@ -31,6 +31,10 @@ Related docs: `grab.md` (the grip), `throw.md` (the throw), `creature.md`
   the grip closed, the point of the ray on the land draws the circle, and a
   gold trail lies on the land along it. The miracle goes where the ray drew
   (`miracle_circle_aim=1`).
+- An Explosion in the Hand also shows the ray, with a ring on the land at
+  its land point. The press of the grip casts the Explosion there, and not
+  under the Hand. With no land at the ray the press casts nothing
+  (`miracle_point_aim=1`).
 - The first face button of the hand that does not point opens the spell
   book. It shows the miracles that the player can ask for now, with the
   pictures of their gestures. The grip of the pointing hand holds one, and a
@@ -655,7 +659,8 @@ Hand (see `grab.md`, "The grip holds").
 | Kind of miracle | What the player does | What the game does |
 | --- | --- | --- |
 | A Creature miracle | Close the grip with the halo on a Creature | `fn_005D30D0`: the cast on the object |
-| Heal, Forest, Teleport, Explosion | Close the grip with the Hand over the place | `FUN_005D3340`: the cast at the land under the Hand |
+| Heal, Forest, Teleport | Close the grip with the Hand over the place | `FUN_005D3340`: the cast at the land under the Hand |
+| Explosion (and its two levels) | Point the ray at the land, where the ring shows, and close the grip | `FUN_005D3340`: the cast at the land point of the ray (see "The point of the pointer ray"). With `miracle_point_aim=0` the cast at the land under the Hand |
 | Food, Wood, Water, Lightning | Keep the grip closed over the place | Action 10: a cast each game turn. The opening ends the pour |
 | Fireball, the flocks | Close the grip, swing the hand, open the grip | Action 8: the release sends the throw velocity, which the mod makes the speed of the real hand |
 | Storm, the two shields | Point the ray at the land, close the grip and draw a circle on the land with the ray | The game matches the circle, and the cast comes at once, at its place. The grip that opens then does nothing more |
@@ -819,6 +824,76 @@ Its lines `influence    : the hologram at the edge` (or `the glow at the
 edge` for the round patch) say when it shows and where. The game draws its influence ring in the
 same red. A run with `influence_wall=0` tells the two apart.
 
+### The point of the pointer ray (`miracle_point_aim=1`)
+
+An Explosion lands at a place, and the plain game puts it where the pointer
+points. The Hand is the real hand, so the land under the Hand is near the
+player. So while an Explosion is in the Hand (each of its three power
+levels), the pointing hand shows its ray, as for the circle of a Storm. The
+land point of the ray is the place of the cast. The Hand stays at the real
+hand, and the Explosion stays in the Hand until the cast. The code is
+`PointFrame` and `h_PressHeld` in `miracle.cpp`, with the pure math in
+`point_aim_math.h`.
+
+- **The table.** `point_aim_math::kTable` holds the miracles that aim by
+  the ray: a seed type and its power levels. Only Explosion (seed type 29,
+  levels 0 to 2) is in it. Another miracle that casts at a place can go in.
+- **The ray and its land point** are latched once a frame (`MiracleFrame`),
+  as for the circle: the ray of the far grab, and the land along it up to
+  60 m of the room. The ray shows from the aim pose to its land point, with
+  the glow at its end, or 2 m long when it meets no land.
+- **The mark** (`overlay.cpp`, `BuildPointMark`): a ring of glow on the land
+  around the land point of the ray, 12 cm of the room across, 2 cm of the
+  room over the land. It has the same size to the eye at each scale of the
+  God view. It is gold, and red while the place is outside the influence. It
+  moves only with the ray. No mark shows when the ray meets no land.
+- **The cast** [V]. The press of the Action button with an object in the
+  Hand is `FUN_005D1560` (from the right press `FUN_005D1330`, and from the
+  step of action 13). With no object to cast on, it tests the influence at
+  the land point of the pick record (`GInterface+0x48`, which the interface
+  step `fn_005D1120` sets from the land point `+0x3F0`). With no influence
+  the press does nothing. Else `FUN_005D1850` tests the land point
+  (`ValidToApplyThisToMapCoord`) and calls `FUN_005D3340`. That tests the
+  land point and `+0x48` again, sends the land point in packet `0x16`, puts
+  it in the cast record (`+0x1A4`, with the world place at `+0x1AC`) and
+  sends the record in packet `0x12`. No test of the cast reads the place of
+  the Hand: the game takes the prayer power when it makes the seed, and
+  packet `0x4D` sends the velocity of the Hand, which a cast at a place does
+  not use. So for the call of `FUN_005D1560` the mod puts the land point of
+  the ray in `+0x3F0` and the influence of the player at that point in
+  `+0x48`, as `fn_005D1120` computes it. After the call it puts the values of
+  the game back. The game's own tests then decide at the land point of the
+  ray: a place outside the influence casts nothing (the rule of the game),
+  and a place that fails the cast rule of the magic info gets the refusal of
+  the game (the yellow cross and its sound).
+- **No land.** When the ray meets no land (the sky, past the edge of the
+  map), the mod clears `+0x48` for the call. So the game casts nothing, and
+  never under the Hand.
+- **The feedback.** A press that casts nothing (no land, or a place outside
+  the influence) gets the feedback of a refused cast: the pulse `refused`,
+  and the reason on the card for 4 s ("Point the ray at the land", or "This
+  place is outside your influence"). The game itself shows nothing then.
+- A target with the halo in the pick record (the place of a Worship Site
+  that takes the miracle back, a dispenser) gets the game's own cast on it.
+
+The log lines: `Explosion (power up 0) is in the Hand, so the pointing hand
+shows its ray and a mark at its land point, and the press casts there`, then
+`the land point of the ray is x y z, N m of the room along the ray and N m
+across the land from the Hand's point ...`. `the ray of Explosion meets the
+land now` (or `no land now, so no mark shows`). Each cast: `the grip casts
+Explosion at the land point of the ray x z, N m of the room across the land
+from the Hand's point x y z. The cast got the place x y z (GInterface+0x1AC,
+packet 0x12): N units from the land point of the ray and N units from the
+land under the Hand x z`. With `miracle_point_aim=0`: `the grip casts
+Explosion at the land under the Hand ...`. A press that casts nothing: `the
+grip presses with Explosion, but the ray meets no land, so the mod gives the
+game no place and the game casts nothing`, or `... at the land point of the
+ray ..., but that place is outside your influence`. Each report window has
+`the ray of a point showed on N frames. The grip cast N times at the land
+point of the ray, and N presses cast nothing`. The overlay has `the mark of
+the point of the ray is gold on the land around x z ...` (or red), and
+`ends`.
+
 ### A teleport site in the pick (`miracle_site_pick=1`)
 
 `MagicTeleport::Draw` (`0x005FCCC0`) gives the site to the pick of the game
@@ -898,6 +973,7 @@ go, and one line of its text stays (the name of the miracle).
 | A miracle with a target | "[Grip] Cast on the Creature" (or "Give the miracle back", "Put it in the dispenser", "Cast on the target") |
 | A Creature miracle with no target | "Touch a Creature, or point at one" |
 | A miracle for a place | "[Grip] Cast here" |
+| An Explosion (`miracle_point_aim=1`) | "[Grip] Point, press to cast". "Point the ray at the land" while the ray meets no land, and "This place is outside your influence" while its land point is outside the influence |
 | A miracle to pour | "[Grip] Hold to pour", and "[Grip] Open to stop" while it pours |
 | A miracle to throw | "[Grip] Hold, swing, open to throw", and "[Grip] Open to throw" while the grip is closed |
 | A miracle that needs a circle | "[Grip] Point, hold, draw a circle", and "[Grip] Draw a circle on the land" while the grip is closed ("Draw a circle on the land, then open" with `miracle_circle_cast=0`). With `miracle_circle_aim=0`: "[Grip] Hold and draw a circle", and "[Grip] Draw a circle to cast" ("Draw a circle, then open") |
@@ -909,8 +985,8 @@ After a refusal the card has the reason for 4 s (`miracle_math::RefusalOf`,
 the tests of the game in its order): "The miracle is not ready yet", "The
 Hand is not over the land", "This miracle needs land here", "This place is
 outside your influence", "The Creature is outside your influence", "It needs
-a Creature as its target", "Draw a circle on the land first" or "The game
-refused the cast here".
+a Creature as its target", "Draw a circle on the land first", "Point the
+ray at the land" or "The game refused the cast here".
 
 ### Haptics
 
@@ -1978,6 +2054,7 @@ so the plain game has no flat band.
 | `miracle_cancel_ms` | 400 | The longest press of that button that is a cancel. 50 to 2000 |
 | `miracle_seed_use` | 1 | 0: the trigger does not make a carried seed active. Then only a short press of the grip does |
 | `miracle_circle_aim` | 1 | 1: a Storm or a shield in the Hand shows the ray of the pointing hand, and the land point of the ray draws the circle on the land, with a trail on the land (see "The circle of the pointer ray"). 0: the hand draws the circle in the air |
+| `miracle_point_aim` | 1 | 1: an Explosion in the Hand shows the ray of the pointing hand and a ring on the land at its land point, and the press casts there. With no land at the ray the press casts nothing (see "The point of the pointer ray"). 0: the press casts at the land under the Hand |
 | `miracle_circle_hand` | 1 | With `miracle_circle_aim=0`. 1: the circle of a Storm or a shield is on the land under the middle of the path of the real hand, with 1.05 times the widest span of that path as its size. 0: the circle that the game makes from the pixels of the path |
 | `miracle_site_pick` | 1 | 1: a teleport site that the game offers to its pick is a candidate of the real hand, so the Hand can take a site and put a villager on it. 0: the real hand has no site as a candidate |
 | `miracle_circle_cast` | 1 | 1: Storm and the two shields cast when the game matches the circle, with the grip still closed. 0: they cast when the grip opens |
@@ -2025,8 +2102,8 @@ pull" changes `spell_book_pull_cm` between
 0 and its value in `bwvr.ini` (10 when that is 0), "Book bubble" changes
 `spell_book_bubble`, "Miracle hand" changes `miracle_hand`, "Gesture point"
 changes `gesture_point` (grip or fingertip), "Gesture trail" changes
-`gesture_trail`, and "Circle aim" changes `miracle_circle_aim` (hand or
-ray). The hand that does not point gives a long pulse for
+`gesture_trail`, "Circle aim" changes `miracle_circle_aim` (hand or ray),
+and "Explosion aim" changes `miracle_point_aim` (hand or ray). The hand that does not point gives a long pulse for
 1 and a short pulse for 0. These switches have no key of the keyboard. Choose
 "Gesture point" between two draws. In the group Picture, "Edge look" changes
 `influence_wall_look` (patch or hologram).
@@ -2038,6 +2115,8 @@ Test keys for the desktop runs only (the launcher removes them):
   Hand (`OneOffSpellSeed::Create`).
 - `miracle_test_cancel`: a list of frames. At each one the mod asks for a
   cancel.
+- `miracle_test_point_aim`: a list of frames. At each one
+  `miracle_point_aim` changes, as the switch "Explosion aim" changes it.
 - `miracle_test_orbs`: up to 4 frames. At each one the orbs of all miracles
   go onto the land, as the row "Spawn orbs" puts them.
 - `miracle_test_save_steps`: a frame. At that frame the mod makes the steps
@@ -2115,7 +2194,9 @@ The tag `miracle` has one line for each change:
   "the draw did not offer it". "the ... is at the Hand, but the game does
   not let ... act on it", with the reason.
 - "the game casts ... on the ..." and "the game casts ... at the land
-  point ...", with the speed of the Hand. For a pour: the first cast, and
+  point ...", with the speed of the Hand. For an Explosion also "the grip
+  casts Explosion at the land point of the ray ..." with the place that the
+  cast got (see "The point of the pointer ray"). For a pour: the first cast, and
   "the pour ends: the game sent N casts in M frames".
 - "the game refused the cast of ... at ...", with the reason, the object of
   the pick record and the influence. Also with `miracle_hand=0`.
@@ -2212,6 +2293,25 @@ and 1025, and casts each one 2 frames later, while the grip stays closed for
 80 more frames. The opening of the grip then gives no second cast. With
 `miracle_circle_cast=0` the cast comes at the opening of the grip, 82
 frames after the match, at the same land point.
+
+The math test (`point_aim_checks.h`) covers the point of the pointer ray:
+the table (Explosion at its three levels, and no other seed type), what a
+press does for each value of the key, a target and the land, the map
+coordinates of the game, the distance across the land, and the ring of the
+mark (closed, flat, 6 cm of the room from the point at 44.4 and at 1973
+units a meter).
+
+`miracle_run.ps1 -Kind blast` casts two Explosions (`tools/desk/README.md`).
+The word `aimturn` points the ray 35 degrees down for the first one, and a
+press casts it. For the second one the ray points 40 degrees up, at the sky,
+and a press casts nothing. Then the test key `miracle_test_point_aim`
+changes the key to 0, and a press with the ray still at the sky casts the
+second one under the Hand. What a run must show: the place that the first
+cast got is within a few units of the land point of the ray and far from
+the land under the Hand, the blast is at the ring in the eye pictures, the
+press at the sky gives `the ray meets no land` and no cast, and the third
+press gives `the grip casts Explosion at the land under the Hand`. No run of
+the recipe has shown it yet.
 
 The math test (`spell_book_checks.h`) covers the layout of the book for 0 to
 32 items, the place of the book from the grip pose, the plane that faces the

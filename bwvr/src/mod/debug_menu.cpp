@@ -346,6 +346,8 @@ int MiracleHandValue();
 void MiracleHandChange(const char* by);
 int MiracleCircleAimValue();
 void MiracleCircleAimChange(const char* by);
+int MiraclePointAimValue();
+void MiraclePointAimChange(const char* by);
 int VillageTotemValue();
 void VillageTotemChange(const char* by);
 int VillageHoldValue();
@@ -981,6 +983,9 @@ const Switch kSwitches[] = {
     {kGroupMiracles, L"Circle aim", L"The ray draws a Storm or a shield",
      "miracle_circle_aim", MiracleCircleAimValue, MiracleCircleAimChange,
      L"hand|ray"},
+    {kGroupMiracles, L"Explosion aim", L"The ray aims an Explosion",
+     "miracle_point_aim", MiraclePointAimValue, MiraclePointAimChange,
+     L"hand|ray"},
 
     // Sound
     {kGroupSound, L"Sound step", L"Sound of the mod, step by step", "",
@@ -1594,6 +1599,9 @@ const wchar_t* const kTips[] = {
     // Circle aim
     L"Ray: a Storm or a shield in the Hand shows the ray, and its point on "
     L"the land draws the circle. Hand: the hand draws the circle in the air.",
+    // Explosion aim
+    L"Ray: an Explosion in the Hand shows the ray and a ring on the land. "
+    L"The grip casts at the ring. Hand: it casts under the Hand.",
     // Sound step
     L"A test. Each step removes more of the mod sound: as set, same distance "
     L"at each zoom, QMixer pans, the game picks the sounds, the game ears.",

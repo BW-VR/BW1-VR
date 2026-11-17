@@ -26,7 +26,7 @@
 #   Water (9): hold the grip for 90 frames, and a tap of B. Water stays in
 #   the Hand after a pour, and the tap takes it out. Then Heal (7): a press.
 #   Then a Creature seed that the Hand carries, and the trigger.
-# The other kinds (cancel, place, shield, aim, away, fire, firelong,
+# The other kinds (cancel, place, shield, aim, blast, away, fire, firelong,
 # pshield, teleport, storm, throwdir, throwspeed) have a comment at their steps below. -Seeds gives other
 # seed types to the steps of a kind (the types are in bwvr/docs/miracles.md),
 # and -Steps gives other steps.
@@ -287,6 +287,30 @@ if ($Kind -eq 'away') {
                  'point@1470+1 seek@1540+1 grip@1580+3 trace@1680+200 grip@1686+150 shot@1750+1 shot@1900+1 ' +
                  'b@1980+5 shot@2060+1'
     }
+} elseif ($Kind -eq 'blast') {
+    # The point of the pointer ray (miracle_point_aim=1): two Explosions (29).
+    # For each one a tap makes the seed active and the hand goes back to its
+    # point. Then the word "aimturn" points the ray of the hand: 35 degrees
+    # down for the first one, so the ray meets the land about 1 m of the room
+    # ahead, and 40 degrees up for the second one, at the sky. A press of the
+    # grip casts the first one at the land point of the ray. The press with
+    # the ray at the sky casts nothing. Then the test key
+    # miracle_test_point_aim changes miracle_point_aim to 0, and a press with
+    # the ray still at the sky casts the second one under the Hand. The lines
+    # "miracle" give the land point of the ray, the Hand's point and the place
+    # that each cast got, and "overlay" the mark on the land. Eye pictures
+    # before and after each press. Give it the dxwrapper renderer for the
+    # pictures.
+    if ($Seeds -eq '') { $Seeds = '29@930 29@1400' }
+    $keys = "$keys;fake_controller_turns=0,-35,1 0,40,1;miracle_test_point_aim=1700"
+    $points = '0,-30,60 0,-30,60 0,-30,60 0,-30,60'
+    if ($Steps -eq '') {
+        $Steps = 'stick_up@800+10 stick_up@830+10 look@860+5000 point@900+1 ' +
+                 'seek@960+1 grip@1000+3 point@1080+1 aimturn@1100+1 shot@1140+1 ' +
+                 'grip@1160+10 shot@1185+1 shot@1230+1 shot@1320+1 ' +
+                 'point@1380+1 seek@1430+1 grip@1470+3 point@1540+1 aimturn@1560+1 shot@1600+1 ' +
+                 'grip@1620+10 shot@1650+1 grip@1760+10 shot@1785+1 shot@1830+1 shot@1920+1'
+    }
 } elseif ($Kind -eq 'shield') {
     # A shield (4): the grip stays closed while the hand steps through the
     # circle of Gestures.jty (template 5), and opens. Then a storm (0).
@@ -327,11 +351,12 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 $log = Join-Path $sp "desk-$Name\bwvr.log"
 if (-not (Test-Path $log)) { "no log at $log"; exit 1 }
 $pattern = '^miracle      :|^sky mist     :|^sky cloud    :|^sky          : (sky_test|cloud_round|cloud_fade|the test keys|.*near sky cloud)|^hand press   : the grip pressed|^haptics      : (effect (14|18|19|20|21|23|24|25|26|27|28)|cast|refused)|' +
-           '^hint card    : frame .*(iracle|ancel|Cast|pour|throw|Use)|^hand         : state|^miracle watch: |' +
+           '^hint card    : frame .*(iracle|ancel|Cast|pour|throw|Use|Point)|^hand         : state|^miracle watch: |' +
            '^hand pick    : seek plan|^creature cmd : (the leash|a double press|test: aimcmd)|' +
            '^far grab    : (the grip closed|the grip opened)|^hand throw   : release|^miracle throw: |' +
            '^comfort      : (the (snap|smooth) turn|\d+ snap turns)|^god view     : turned|^controllers  : the stick|' +
-           '^gesture      : (the ray|the draw|the game matched)|^overlay      : the trail of the circle|' +
+           '^gesture      : (the ray|the draw|the game matched)|^overlay      : the (trail of the circle|mark of the point)|' +
+           '^controllers  : the fake hand turns its aim|' +
            '^controllers  : (test key fake_controller_trace|the fake hand traces)'
 Get-Content $log | Where-Object { $_ -match $pattern } | ForEach-Object {
     $_.Substring(0, [Math]::Min(420, $_.Length))

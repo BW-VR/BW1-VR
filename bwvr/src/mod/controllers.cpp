@@ -5909,7 +5909,8 @@ bool ControllersMenuRay(float from[3], float to[3], float* units) {
   // The aim of a new bookmark: to its target, or 2 m long with none.
   if (!panel) panel = BookmarkAimRay(&panel_meters);
   // A Storm or a shield in the Hand: to the land point that draws its
-  // circle (miracle_circle_aim=1), or 2 m long when it meets no land.
+  // circle (miracle_circle_aim=1). An Explosion: to the land point of its
+  // cast (miracle_point_aim=1). 2 m long when it meets no land.
   if (!panel) panel = MiracleAimRay(&panel_meters);
   if (!g_on || !g_pointer_owned || !(MenuUp() || TempleRayOn() || panel)) {
     return false;
@@ -5944,8 +5945,9 @@ bool ControllersMenuRay(float from[3], float to[3], float* units) {
 }
 
 // For hint_card.cpp: the ray of ControllersMenuRay shows only for the circle
-// of a Storm or a shield (miracle_circle_aim=1), so the card keeps the lines
-// of the miracle and not the lines of a dialog box.
+// of a Storm or a shield (miracle_circle_aim=1) or for the place of an
+// Explosion (miracle_point_aim=1), so the card keeps the lines of the miracle
+// and not the lines of a dialog box.
 bool ControllersRayIsMiracleAim() {
   float meters = 0.0f;
   if (PlacesPanelRay(&meters) || DebugWindowRay(&meters) ||

@@ -133,7 +133,7 @@ $extra = @{
     fake_controller_yaw = 8; fake_controller_pitch = 1
     fake_controller_sweep_yaw = 8; fake_controller_sweep_pitch = -6
     test_keys = 1; far_test_influence = 1; far_grab = 0; grab_hand = 1
-    throw_log = 1; throw_law = 2; depth24 = 1; help_test = 1; fake_controller_front = 1
+    throw_log = 1; depth24 = 1; help_test = 1; fake_controller_front = 1
     # The zoom steps of these recipes keep the land under the head in its
     # place.
     god_zoom_about = 0

@@ -80,7 +80,7 @@ $extra = @{
     fake_controller_yaw = 8; fake_controller_pitch = 1
     fake_controller_sweep_yaw = 8; fake_controller_sweep_pitch = -6
     test_keys = 1; far_test_influence = 1; far_test_no_trees = 1
-    far_grab_max_m = 0; throw_log = 1; throw_law = 2; depth24 = 1; help_test = 1
+    far_grab_max_m = 0; throw_log = 1; depth24 = 1; help_test = 1
     fake_controller_points = $Points
     fake_controller_script = "$dialog $Steps"
 }

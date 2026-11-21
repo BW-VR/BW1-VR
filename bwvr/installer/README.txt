@@ -1059,8 +1059,9 @@ YOUR CREATURE
 
 To stroke or slap your Creature, put your open hand on its body. A
 slow move strokes it, and a fast hit slaps it. You can also close
-the grip on it. The view does not move, and your hand stays open: the index
-finger for a small Creature, the flat hand for a large one. The flat
+the grip on it. The view does not move, and your hand stays open:
+the index finger for a small Creature, the flat hand for a large
+one. The flat
 hand shows when the Creature is three quarters as tall as your hand
 is long, or more. The hand opens half a second after you close the
 grip. Move your hand slowly over the Creature to stroke it. Hit its

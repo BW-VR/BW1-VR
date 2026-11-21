@@ -17,7 +17,7 @@ inline void UpdateChecks() {
   {
     const char json[] =
         "{\"url\":\"https://api.github.com/repos/BW-VR/BW1-VR/releases/1\","
-        "\"html_url\":\"https:\\/\\/github.com\\/BW1-VR\\/BW1-VR\\/releases"
+        "\"html_url\":\"https:\\/\\/github.com\\/BW-VR\\/BW1-VR\\/releases"
         "\\/tag\\/v1.2.0-20261020-fd7f198\","
         "\"id\":418801387,"
         "\"author\":{\"login\":\"github-actions[bot]\","

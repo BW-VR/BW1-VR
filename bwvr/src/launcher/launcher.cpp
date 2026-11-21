@@ -106,8 +106,8 @@ const Setting kSettings[] = {
      "How big a picture the game draws for each eye, as a percentage of what "
      "your headset asks for. The headset's own figure is read when the game "
      "runs, and shown beside the slider. Note that the mod renders a wider "
-     "view than the headset needs, so 100% is a little softer than native and "
-     "about 115% matches it."},
+     "view than the headset needs, so 100% is a little softer than native. "
+     "On a Quest 3 through Virtual Desktop, about 120% matches it."},
     {kValues, "anisotropy", "Anisotropic filtering",
      "Off=1|2x=2|4x=4|8x=8|16x=16", 16,
      "Sharpens textures seen at a shallow angle, such as the ground. 16x is "

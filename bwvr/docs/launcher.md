@@ -344,7 +344,9 @@ and wastes the fewest pixels.
 
 100% is a little softer than native. The mod renders a 108 by 110 degree
 symmetric view where the view of the headset is 94 by 99 asymmetric, so the same
-pixels cover a wider angle. About 115% matches the native density.
+pixels cover a wider angle. For a Quest 3 through Virtual Desktop, about 120%
+matches the native density: the render at 100% has 1008 pixels for each unit of
+tangent, and the runtime asks for about 1208.
 
 ## What it checks
 

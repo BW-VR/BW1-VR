@@ -1743,6 +1743,44 @@ the scaled fields and the cap of the start speed.
 
 ### Desktop runs
 
+`miracle_run.ps1 -Kind ballscale` throws one Fireball with one swing of about
+3.7 m/s. `-Set "god_units_per_meter=447"` gives the scale. With
+`seek_plan=hold,go` and `seek_go=x,z`, and a second step `seek` after the
+tap, the view goes to another place before the swing. On the sea, which is
+the same flat surface at each scale:
+
+| Units per meter | `miracle_bounce_scale` | First hop | First contact to the rest | First contact to the end | Contacts |
+| --- | --- | --- | --- | --- | --- |
+| 100 | 1 | 0.68 s, 0.29 m | 0.88 s | 0.32 m | 19 |
+| 100 | 0 | 0.70 s, 0.30 m | 0.90 s | 0.33 m | 19 |
+| 447 | 1 | 0.73 s, 0.30 m | 0.93 s | 0.33 m | 19 |
+| 447 | 0 | 2.63 s, 0.99 m | 3.23 s | 1.01 m | 9 |
+| 1000 | 1 | 0.68 s, 0.29 m | 0.88 s | 0.32 m | 23 |
+
+On the land the ball meets a different slope at each scale, so these runs do
+not compare the hop there. At 100 units per meter a hill gives a first hop
+of 3.5 to 3.6 s and 3.0 m with both values of the key. Two runs with the key
+at 0 came to rest after 6.5 s and 8.0 s, so a throw on a hill changes from
+run to run.
+
+After the contact the rule keeps one step in each game turn. Shorter steps
+would change the law, because each contact takes 10 percent of the speed
+across the land. The long step does not put a ball farther from its path in
+the room at a far zoom:
+
+| Throw on the land | Steps more than 1 cm under the land | Deepest path | Largest move up at a contact |
+| --- | --- | --- | --- |
+| 100 units per meter, on a hill | 1 or 2 of 120 to 135 | 4.6 cm | 6.3 cm |
+| 447 units per meter | 1 of 82 | 1.1 cm | 4.0 cm |
+| 1000 units per meter, 50 percent of the start speed | 5 of 63 | 2.3 cm | 3.6 cm |
+
+No run has a throw at full speed on the land at 1000 units per meter. That
+throw goes about 2900 units, and from the places of the runs it lands in the
+sea.
+
+`miracle_flight_top_speed=1500` at 1000 units per meter gives an arc of 1500
+units a second, and the throw goes 1.50 m of the room and not 2.91 m.
+
 `miracle_run.ps1 -Kind throwdir` throws four Fireballs from seeds of the test
 key `miracle_test_seeds`: ahead, to the left, to the right, and on a swing
 that curves to the left. A fifth Fireball stays in the Hand with the grip

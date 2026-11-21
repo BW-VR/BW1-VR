@@ -392,8 +392,8 @@ game as it is.
   `miracle_flight_speed_pct`, `throw.md`, "The flight of a thrown
   Fireball"). After the contact it moves in the room as it does at 100
   units per meter (`miracle_bounce_scale`). Open: `-Kind ballscale` at 100,
-  447 and 1000 units per meter on one land slope, the effect of the step of
-  0.1 s on a slope at a far zoom, the short steps that a landed ball gets
+  447 and 1000 units per meter on one land slope, a throw at full speed on
+  the land at 1000 units per meter, the short steps that a landed ball gets
   while another ball of its Fireball flies, and the feel in a headset.
 - **F29. The physics switch.** The launcher row "Physics" (`physics`) gives
   the throw physics of the mod or of the plain game (`throw.md`, "The

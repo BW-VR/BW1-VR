@@ -3535,6 +3535,55 @@ each eye (`intro.md`, "The trails"). The log has a line for each of the
 first 24 walks that copy, and the report of 450 frames counts them. With
 `vk_keep_picture=0` each walk starts black.
 
+**Anti-aliasing** (`vk_msaa`, `vk_msaa_alpha`, `vk_msaa_math.h`, the debug
+page: Render, Anti-aliasing and Alpha edges). Only `backend=vulkan` has it.
+The walks of the eyes draw into one color image and one depth image with 2,
+4 or 8 samples and a layer for each eye. The two targets of the walks keep
+one sample, because each multisampled image costs much memory at the size of
+a render. The two images take 16 bytes for each pixel and sample of an eye
+pair, so 4 samples at 4096 by 4096 take 1 GB of GPU memory and no address
+space of the process. The log gives the asked count, the used count and the
+size of the images. The used count is at most what the GPU has for both
+formats.
+
+- **The resolve.** The end of a walk resolves the color image into the target
+  of the walk, one time, after the last rendering of the walk. So an end and
+  a new start of a rendering in a walk (the panel, a clear for one eye) do
+  not resolve. Each reader of an eye picture reads the target with one
+  sample: the black check, the save picture, the window, the session, the
+  picture files and the view for videos. The right eye of a pair resolves
+  its layer only.
+- **The picture of the walk before.** The color image already has the
+  picture of the last walk in all samples. So a walk that can take that
+  picture starts with a load of the color and a clear of the depth. After a
+  walk of one sample, one quad for each eye draws the picture of the other
+  target into all samples.
+- **The walks with one sample.** The intro in stereo (each eye draws over
+  its own target), foveated resolution, and foveation on a GPU that does not
+  allow the sample count with the map of the rates. The log has one line for
+  each of the last two. The panel, its depth and the video view always have
+  one sample.
+- **The alpha test** (`vk_msaa_alpha=1`). The game draws its trees, fences
+  and thatch as cut-out draws: the alpha test with a high reference (most
+  are 180 to 227), the blend of the source alpha, and a depth write. A
+  cut-out draw uses a second fragment shader (`vk_scene_frag_coverage.h`,
+  from `vk_scene.frag` with `-DCOVERAGE`). For a "greater" test the shader
+  makes the alpha sharp around the reference and writes the result as a
+  sample mask. The edge stays where the plain test has it, so a far tree
+  does not get thinner. The blend of the draw stays. The renderer does not
+  use the alpha to coverage state of the pipeline, because that state would
+  put the sharp alpha into the blend and into the eye picture. A draw with
+  another blend or with no depth write (smoke, glows) keeps the plain test.
+  On a GPU with no sample mask at a coarse shading rate, a walk with
+  foveation uses the plain test.
+- **A change while the game runs.** The rows of the debug page take effect at
+  the next walk. The right eye of a pair stays with the count of its left
+  eye. A new count waits for the GPU and makes the images again.
+- **No memory.** A failed allocation frees what it made and writes a line of
+  the log. The walks then have one sample, and the game goes on.
+- **The limit.** Anti-aliasing smooths the edges of triangles and of the
+  alpha test. It does not smooth the inside of a texture.
+
 **Test aids of a frame with no eye pass.** The log has a line for each of
 the first 48 writes of the CPU into the render target, with the caller in
 the game (`vk ddraw : write N of the CPU into the render target`), and a
@@ -6344,6 +6393,11 @@ keys that the launcher sets.
 | `vk_lines` | 1 | With `backend=vulkan`: 1 a draw of points or lines becomes triangles of 1 pixel across, 0 it is not drawn. See "The backend of the mod on Vulkan" |
 | `vk_keep_picture` | 1 | With `backend=vulkan`: 1 a walk with no clear of the whole target before its first draw starts with the picture of the walk before, and the intro in stereo keeps the picture of each eye. 0 each walk starts black. A test key: Shift T. See "The picture of the walk before" |
 | `vk_black_check` | 1 | With `backend=vulkan`, a test aid: 1 checks 16 by 16 points of each eye picture, and a black picture gives a line of the log with what its walk drew. 0 no check. See "The check for a black picture" |
+| `vk_msaa` | 4 | With `backend=vulkan`: the samples of each pixel of the eye pictures, 1 (no anti-aliasing), 2, 4 or 8, and at most what the GPU has. The launcher row Anti-aliasing and the debug page (Render, Anti-aliasing) change it. See "Anti-aliasing" |
+| `vk_msaa_alpha` | 1 | With `backend=vulkan` and more than one sample: 1 a cut-out draw (the alpha test with no blend, or with the blend of the source alpha and a depth write) gets a smooth edge from its alpha. 0 the plain alpha test. The debug page: Render, Alpha edges. See "Anti-aliasing" |
+| `vk_msaa_test_cycle` | 0 | A test aid: the next value of `vk_msaa` each that many frames, through the code of the debug row. 0 is off |
+| `vk_msaa_seed_test` | 0 | A test aid: at this frame `vk_msaa` goes to 4, and for 30 frames the walks draw only into the panel, so each walk keeps the picture of the walk before. The eye pictures of the frame before and of 10 frames after must be the same, pixel for pixel. 0 is off |
+| `vk_alpha_survey` | 0 | A test aid: 1 the report of 450 frames counts the draws by mag filter, the draws with the alpha test by blend, depth write, filter and reference, and lists the textures with a POINT mag filter (lines `vk survey`) |
 | `vk_untextured` | 1 | With `backend=vulkan` or the Vulkan eyes: 1 a stage 0 with no texture gives the diffuse color for an operation with the texture as an argument, as Direct3D does. 0 it reads a white texel with an alpha of 1. A test key: Shift R. See "A stage with no texture" |
 | `vk_stage1` | 1 | With the Vulkan renderer: 1 a draw with a color operation and a texture on texture stage 1 gets that stage, for example the light maps of the Temple. 0 the renderer makes stage 0 alone. A test key: Shift E. See "The second stage" |
 | `vk_present_late` | 1 | With `backend=vulkan` and the way through the CPU (`vk_window=0`): 1 the window on the monitor shows the picture of the present before, with no wait for the GPU, 0 each present waits for its own picture. See "The backend of the mod on Vulkan" |

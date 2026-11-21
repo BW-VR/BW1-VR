@@ -112,6 +112,10 @@ const Setting kSettings[] = {
      "Off=1|2x=2|4x=4|8x=8|16x=16", 16,
      "Sharpens textures seen at a shallow angle, such as the ground. 16x is "
      "the sharpest and costs almost nothing here."},
+    {kValues, "vk_msaa", "Anti-aliasing", "Off=1|2x=2|4x=4|8x=8", 4,
+     "Makes the edges of the land, models, houses and trees smooth. A higher "
+     "value uses more GPU time and more GPU memory. This setting operates "
+     "only with the Vulkan renderer."},
     {kBool, "force_mips", "Enable texture mipmaps", nullptr, 1,
      "Uses smaller copies of each texture in the distance. This removes most "
      "of the shimmer on far land and water."},

@@ -216,6 +216,9 @@ want.
     cannot see or that disturb the play, a video that shakes, a video that
     cuts off what you look at, or a card, the ring or a panel that is not
     in the video or not where you saw it.
+25. **Smooth edges.** Look at roofs, trees and the coast, near and far.
+    Wrong: edges that still crawl when your head moves, trees with a halo,
+    or trees that get thinner with distance.
 
 ## Play as normal and send the log
 

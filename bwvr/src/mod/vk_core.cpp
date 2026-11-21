@@ -116,6 +116,9 @@ void ReadShadingRate() {
     return;
   }
   g_core.rate_quarter = false;
+  g_core.rate_samples = VK_SAMPLE_COUNT_1_BIT;
+  g_core.rate_shader_mask =
+      rate.fragmentShadingRateWithShaderSampleMask != VK_FALSE;
   PFN_vkGetPhysicalDeviceFragmentShadingRatesKHR rates =
       reinterpret_cast<PFN_vkGetPhysicalDeviceFragmentShadingRatesKHR>(
           f.vkGetInstanceProcAddr(g_core.instance,
@@ -134,6 +137,19 @@ void ReadShadingRate() {
           g_core.rate_quarter = true;
         }
       }
+      // The sample counts that each coarse size of the map allows: 2 by 2,
+      // and 4 by 4 when the map uses it.
+      VkSampleCountFlags allowed = ~static_cast<VkSampleCountFlags>(0);
+      bool listed = false;
+      for (uint32_t i = 0; i < count && i < 16; ++i) {
+        const uint32_t w = list[i].fragmentSize.width;
+        const uint32_t h = list[i].fragmentSize.height;
+        if ((w == 2 && h == 2) || (w == 4 && h == 4 && g_core.rate_quarter)) {
+          allowed &= list[i].sampleCounts;
+          listed = true;
+        }
+      }
+      if (listed) g_core.rate_samples = allowed;
     }
   }
   ModLog("vulkan       : a shading rate attachment, a texel of %u by %u "
@@ -515,7 +531,8 @@ void FreeBuffer(Buffer* b) {
 
 bool MakeImage(uint32_t width, uint32_t height, uint32_t levels,
                VkFormat format, VkImageUsageFlags usage,
-               VkImageAspectFlags aspect, Image* out, uint32_t layers) {
+               VkImageAspectFlags aspect, Image* out, uint32_t layers,
+               VkSampleCountFlagBits samples) {
   memset(out, 0, sizeof(*out));
   VkImageCreateInfo info = {VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
   info.imageType = VK_IMAGE_TYPE_2D;
@@ -523,7 +540,7 @@ bool MakeImage(uint32_t width, uint32_t height, uint32_t levels,
   info.extent = {width, height, 1};
   info.mipLevels = levels;
   info.arrayLayers = layers;
-  info.samples = VK_SAMPLE_COUNT_1_BIT;
+  info.samples = samples;
   info.tiling = VK_IMAGE_TILING_OPTIMAL;
   info.usage = usage;
   info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;

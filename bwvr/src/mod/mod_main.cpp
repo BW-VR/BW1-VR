@@ -711,6 +711,11 @@ int g_vk_texture_forget = 1;
 int g_vk_upload_keep = 1;
 int g_vk_keep_picture = 1;
 int g_vk_black_check = 1;
+int g_vk_msaa = 4;
+int g_vk_msaa_alpha = 1;
+int g_vk_msaa_test_cycle = 0;
+int g_vk_alpha_survey = 0;
+int g_vk_msaa_seed_test = 0;
 int g_vk_untextured = 1;
 int g_vk_stage1 = 1;
 // Foveated rendering (docs/backend.md, "Foveated rendering").
@@ -1855,6 +1860,15 @@ void ReadSettings() {
       GetPrivateProfileIntA("bwvr", "vk_keep_picture", 1, path) != 0 ? 1 : 0;
   g_vk_black_check =
       GetPrivateProfileIntA("bwvr", "vk_black_check", 1, path) != 0 ? 1 : 0;
+  g_vk_msaa = static_cast<int>(GetPrivateProfileIntA("bwvr", "vk_msaa", 4, path));
+  g_vk_msaa_alpha =
+      GetPrivateProfileIntA("bwvr", "vk_msaa_alpha", 1, path) != 0 ? 1 : 0;
+  g_vk_msaa_test_cycle = static_cast<int>(
+      GetPrivateProfileIntA("bwvr", "vk_msaa_test_cycle", 0, path));
+  g_vk_alpha_survey =
+      GetPrivateProfileIntA("bwvr", "vk_alpha_survey", 0, path) != 0 ? 1 : 0;
+  g_vk_msaa_seed_test = static_cast<int>(
+      GetPrivateProfileIntA("bwvr", "vk_msaa_seed_test", 0, path));
   g_vk_untextured =
       GetPrivateProfileIntA("bwvr", "vk_untextured", 1, path) != 0 ? 1 : 0;
   g_vk_stage1 =
@@ -2334,6 +2348,9 @@ void StartVrStep() {
     VkSceneSetUploadKeep(g_vk_upload_keep);
     VkSceneSetKeepPicture(g_vk_keep_picture);
     VkSceneSetBlackCheck(g_vk_black_check);
+    VkSceneSetMsaa(g_vk_msaa, g_vk_msaa_alpha, g_vk_msaa_test_cycle);
+    VkSceneSetAlphaSurvey(g_vk_alpha_survey);
+    VkSceneSetMsaaSeedTest(g_vk_msaa_seed_test);
     VkSceneSetUntextured(g_vk_untextured);
     VkSceneSetStage1(g_vk_stage1);
     VkSceneSetFoveation(g_foveation, g_foveation_inner_deg,

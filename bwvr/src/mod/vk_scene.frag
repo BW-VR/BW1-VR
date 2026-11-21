@@ -19,6 +19,15 @@
 // Compile with:
 //   glslang -V --target-env vulkan1.3 --vn kVkSceneFrag -o vk_scene_frag.h
 //       vk_scene.frag
+//   glslang -V --target-env vulkan1.3 -DCOVERAGE --vn kVkSceneFragCoverage
+//       -o vk_scene_frag_coverage.h vk_scene.frag
+//
+// COVERAGE. The second shader is for a cut-out draw with more than one
+// sample (vk_msaa_alpha=1): the alpha test with no blend, or with the blend
+// of the source alpha and a depth write. A "greater" test gives a sample mask
+// in place of a discard, so the edge of a leaf is smooth. The alpha of the
+// output stays the alpha of the draw, because the blend and a later blend
+// read it. alpha.y is the sample count.
 
 layout(location = 0) in vec4 in_diffuse;
 layout(location = 1) in vec4 in_specular;
@@ -85,7 +94,31 @@ bool Passes(uint func, float value, float reference) {
   return true;
 }
 
+#ifdef COVERAGE
+// As vk_msaa_math.h: kFlatAlpha, CoverageOf and SampleMask.
+const float kFlatAlpha = 0.001;
+
+void CoverOrDiscard(uint func, float value, float reference, float samples) {
+  const bool passes = Passes(func, floor(value * 255.0 + 0.5),
+                             floor(reference * 255.0 + 0.5));
+  if (func != 5u && func != 7u) {
+    if (!passes) discard;
+    return;
+  }
+  const float width = fwidth(value);
+  const float coverage =
+      width < kFlatAlpha ? (passes ? 1.0 : 0.0)
+                         : clamp((value - reference) / width + 0.5, 0.0, 1.0);
+  const int count = int(floor(coverage * samples + 0.5));
+  if (count <= 0) discard;
+  gl_SampleMask[0] = (1 << count) - 1;
+}
+#endif
+
 void main() {
+#ifdef COVERAGE
+  gl_SampleMask[0] = -1;
+#endif
   const uint flags = draw.ops.z;
   const vec4 texel = (flags & 1u) != 0u ? texture(tex, in_uv) : vec4(1.0);
   const uint color_op = draw.ops.x & 255u;
@@ -114,11 +147,17 @@ void main() {
                    Arg((draw.ops1.y >> 16) & 255u, texel1, current)).a;
     }
   }
+#ifdef COVERAGE
+  if ((flags & 2u) != 0u) {
+    CoverOrDiscard((flags >> 4) & 15u, color.a, draw.alpha.x, draw.alpha.y);
+  }
+#else
   if ((flags & 2u) != 0u &&
       !Passes((flags >> 4) & 15u, floor(color.a * 255.0 + 0.5),
               floor(draw.alpha.x * 255.0 + 0.5))) {
     discard;
   }
+#endif
   if ((flags & 0x100u) != 0u) {
     color.rgb = clamp(color.rgb + in_specular.rgb, 0.0, 1.0);
   }

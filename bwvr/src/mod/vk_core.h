@@ -35,6 +35,7 @@ namespace vk {
   X(vkGetPhysicalDeviceQueueFamilyProperties) \
   X(vkGetPhysicalDeviceMemoryProperties)     \
   X(vkGetPhysicalDeviceFormatProperties)     \
+  X(vkGetPhysicalDeviceImageFormatProperties) \
   X(vkCreateDevice)                          \
   X(vkGetDeviceProcAddr)
 
@@ -90,6 +91,7 @@ namespace vk {
   X(vkCmdCopyBufferToImage)           \
   X(vkCmdCopyImageToBuffer)           \
   X(vkCmdBlitImage)                   \
+  X(vkCmdResolveImage)                \
   X(vkCmdClearColorImage)             \
   X(vkCmdBeginRendering)              \
   X(vkCmdEndRendering)                \
@@ -152,6 +154,11 @@ struct Core {
   uint32_t rate_texel_w;
   uint32_t rate_texel_h;
   bool rate_quarter;
+  // ANTI-ALIASING with the map of the rates: the sample counts that each
+  // fragment size of the map allows, and whether a shader can write the
+  // sample mask at a fragment size above 1 by 1.
+  VkSampleCountFlags rate_samples;
+  bool rate_shader_mask;
   // THE WINDOW (vk_window.cpp): the instance has VK_KHR_surface and
   // VK_KHR_win32_surface, and the device has VK_KHR_swapchain.
   bool window_present;
@@ -202,8 +209,9 @@ bool MakeBuffer(VkDeviceSize size, VkBufferUsageFlags usage, bool host,
                 Buffer* out);
 void FreeBuffer(Buffer* b);
 
-// An image of one sample with its memory and a view of all its levels and
-// layers (an array view when it has more than one layer).
+// An image with its memory and a view of all its levels and layers (an
+// array view when it has more than one layer). It has one sample, or the
+// count of `samples` for a target of the anti-aliasing.
 struct Image {
   VkImage image;
   VkDeviceMemory memory;
@@ -214,7 +222,8 @@ struct Image {
 };
 bool MakeImage(uint32_t width, uint32_t height, uint32_t levels,
                VkFormat format, VkImageUsageFlags usage,
-               VkImageAspectFlags aspect, Image* out, uint32_t layers = 1);
+               VkImageAspectFlags aspect, Image* out, uint32_t layers = 1,
+               VkSampleCountFlagBits samples = VK_SAMPLE_COUNT_1_BIT);
 void FreeImage(Image* image);
 
 // THE MEMORY OF MAKEBUFFER AND MAKEIMAGE, for the report. Each buffer and

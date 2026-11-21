@@ -3719,6 +3719,7 @@ void CreatureChecks() {
 #include "fast_transform_checks.h"
 #include "vk_scene_checks.h"
 #include "vk_texture_checks.h"
+#include "vk_msaa_checks.h"
 #include "vk_prim_checks.h"
 #include "address_space_checks.h"
 #include "large_address_checks.h"
@@ -4191,6 +4192,7 @@ int main() {
   fast_transform_checks::FastTransformChecks();
   vk_scene_checks::VkSceneChecks();
   vk_texture_checks::VkTextureChecks();
+  vk_msaa_checks::VkMsaaChecks();
   vk_prim_checks::VkPrimChecks();
   address_space_checks::AddressSpaceChecks();
   large_address_checks::LargeAddressChecks();

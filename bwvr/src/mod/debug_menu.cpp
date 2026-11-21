@@ -158,6 +158,10 @@ int VkSceneStage1Value();
 void VkSceneStage1Toggle(const char* by);
 int VkSceneUntexturedValue();
 void VkSceneUntexturedToggle(const char* by);
+int VkSceneMsaaValue();
+void VkSceneMsaaChange(const char* by);
+int VkSceneMsaaAlphaValue();
+void VkSceneMsaaAlphaToggle(const char* by);
 int StereoHeadPoseFrameValue();
 void StereoHeadPoseFrameToggle(const char* by);
 // The render (one_walk.cpp, frame_time.cpp, frame_send.cpp, render_thread.cpp,
@@ -644,6 +648,11 @@ const Switch kSwitches[] = {
     // Render
     {kGroupRender, L"One walk", L"One walk for both eyes", "one_walk",
      OneWalkValue, [](const char*) { OneWalkToggle(); }, L"off|on"},
+    {kGroupRender, L"Anti-aliasing", L"Smooth edges in the eye pictures",
+     "vk_msaa", VkSceneMsaaValue, VkSceneMsaaChange, L"off|2x|4x|8x"},
+    {kGroupRender, L"Alpha edges", L"Smooth edges of leaves and fences",
+     "vk_msaa_alpha", VkSceneMsaaAlphaValue, VkSceneMsaaAlphaToggle,
+     L"plain|smooth"},
     {kGroupRender, L"Foveation", L"Foveated rate of the eye pictures",
      "foveation", VkSceneFoveationValue, VkSceneFoveationToggle,
      L"off|on|marks"},
@@ -1224,6 +1233,12 @@ const wchar_t* const kTips[] = {
     // One walk
     L"Walks the scene of the game one time for both eyes. Off walks it one "
     L"time for each eye, which costs more time.",
+    // Anti-aliasing
+    L"The samples of each pixel of the Vulkan eye pictures. More samples "
+    L"make the edges smoother and use more GPU time and memory.",
+    // Alpha edges
+    L"Smooth: leaves and fences get a smooth edge from their alpha. Plain: "
+    L"the alpha test of the game, with a hard edge.",
     // Foveation
     L"On: fewer shades away from the center of the Vulkan eye pictures. "
     L"Marks: also a color over the coarse parts. For a test.",

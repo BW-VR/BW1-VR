@@ -185,6 +185,24 @@ void VkSceneSetKeepPicture(int on);
 void VkSceneCounts(uint64_t* walks, uint64_t* draws, uint64_t* clears,
                    uint64_t* kept, uint64_t* whole);
 void VkSceneKeepPictureToggle(const char* keys);
+// ANTI-ALIASING, backend=vulkan (docs/backend.md, "Anti-aliasing").
+// vk_msaa of bwvr.ini: the samples of a pixel of the eye pictures, 1 (no
+// anti-aliasing), 2, 4 (the default) or 8, and at most what the GPU has.
+// vk_msaa_alpha: 1 (the default) a cut-out draw (the alpha test with no
+// blend, or with the blend of the source alpha and a depth write) gets a
+// smooth edge from its alpha, 0 the plain alpha test. test_cycle: a
+// test aid, the next count of the row each that many frames, 0 for none.
+void VkSceneSetMsaa(int samples, int alpha, int test_cycle);
+// vk_alpha_survey=1, a test aid: the report counts the draws with the alpha
+// test by kind, and lists the textures with a POINT mag filter.
+void VkSceneSetAlphaSurvey(int on);
+// vk_msaa_seed_test=F, a test aid: at frame F the count goes to 4, and the
+// walks of 30 frames keep the picture. The pictures of the frames F - 1 and
+// F + 10 must be the same.
+void VkSceneSetMsaaSeedTest(int frame);
+// The rows of the debug page. They take effect at the next walk.
+void VkSceneMsaaChange(const char* keys);
+void VkSceneMsaaAlphaToggle(const char* keys);
 // vk_black_check of bwvr.ini, backend=vulkan, a test aid: 1 (the default)
 // 16 by 16 points of each eye picture go to the CPU, and a black picture
 // gives a line of the log with what its walk drew. 0: no check.
@@ -265,8 +283,8 @@ void VkSceneSetPresentLate(int on);
 
 // The values of the test keys for the debug page (vk_eyes, vk_scene_follow,
 // vk_panel, vk_only, vk_upload_queue, the step of the foveation key,
-// fovea_res, vk_keep_picture, vk_stage1 and vk_untextured), or kDebugCannot
-// when the renderer is off. vk_eyes and vk_only are kDebugCannot with
+// fovea_res, vk_keep_picture, vk_stage1, vk_untextured, the step of vk_msaa
+// and vk_msaa_alpha), or kDebugCannot when the renderer is off. vk_eyes and vk_only are kDebugCannot with
 // vulkan_only=1 too.
 int VkSceneEyesValue();
 int VkSceneFollowValue();
@@ -278,3 +296,5 @@ int VkSceneFoveaResValue();
 int VkSceneKeepPictureValue();
 int VkSceneStage1Value();
 int VkSceneUntexturedValue();
+int VkSceneMsaaValue();
+int VkSceneMsaaAlphaValue();

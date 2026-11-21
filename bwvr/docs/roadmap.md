@@ -402,6 +402,11 @@ game as it is.
   `physics=0` (`throw_queue.ps1 -Runs base -More "physics=0"`), and the
   switch of the debug page while the game runs.
 
+- **N20. Anti-aliasing of the Vulkan renderer.** `vk_msaa` (default 4) and
+  `vk_msaa_alpha` (`backend.md`, "Anti-aliasing"). Open: the look in a
+  headset (`headset-checks.md`, 25), the cost at a render smaller than 4096
+  by 4096, the path of a failed allocation, and 2 samples with foveation on
+  a GPU that allows 2 and not 4 (the walk now takes one sample).
 - **N19. The model cull distance on a busy land.** `cull_distance` (default
   5x) draws the map objects to 3500 units, and the fog moves out as far
   (`backend.md`, "Models are drawn further out"). On Land 1 it costs no

@@ -121,9 +121,11 @@
 #include "../common/bw_addresses.h"
 #include "fovea_res_math.h"
 #include "foveation_math.h"
+#include "vk_msaa_math.h"
 #include "vk_scene_math.h"
 #include "vk_texture_math.h"
 #include "vk_scene_frag.h"
+#include "vk_scene_frag_coverage.h"
 #include "vk_scene_vert.h"
 
 void ModLog(const char* format, ...);
@@ -266,6 +268,12 @@ vk::Buffer g_half_buffer = {};
 bool g_half_locked = false;
 // Pipelines of the panel: no multiview, and the alpha blend of the panel.
 const uint32_t kPanelKey = 1u << 24;
+// The other parts of the key of a pipeline: the blend, the base 2 logarithm
+// of the sample count (0 is one sample), and the shader that gives the alpha
+// test a sample mask (ANTI-ALIASING).
+const uint32_t kBlendKeyMask = 0x1FFFFu;
+const uint32_t kSamplesShift = 25;
+const uint32_t kCoverageKey = 1u << 28;
 
 // THE WALK WITHOUT DIRECT3D 9 (vk_only). On the frame thread: the key now,
 // the test key of the desktop, the frame of stereo.cpp, and a walk of
@@ -293,14 +301,17 @@ vk::Image& Target() { return g_colors[g_target]; }
 // THE PIPELINES: one for each blend (off, or a pair of factors).
 VkShaderModule g_vert = VK_NULL_HANDLE;
 VkShaderModule g_frag = VK_NULL_HANDLE;
+VkShaderModule g_frag_coverage = VK_NULL_HANDLE;
 VkDescriptorSetLayout g_set_layout = VK_NULL_HANDLE;
 VkPipelineLayout g_layout = VK_NULL_HANDLE;
 VkDescriptorPool g_pool = VK_NULL_HANDLE;
 struct PipelineSlot {
-  uint32_t key;  // 0 for no blend, else 1 << 16 | src << 8 | dst
+  // The blend (0 for none, else 1 << 16 | src << 8 | dst), kPanelKey, the
+  // samples and kCoverageKey.
+  uint32_t key;
   VkPipeline pipeline;
 };
-const int kMaxPipelines = 32;
+const int kMaxPipelines = 128;
 PipelineSlot g_pipelines[kMaxPipelines];
 int g_pipeline_count = 0;
 
@@ -373,6 +384,63 @@ VkDeviceSize g_stage_most = 0;
 // FOVEATED RESOLUTION: the layers of the outer and the centre image as
 // textures for the eye picture, [image][eye].
 Texture g_mres_texture[2][2] = {};
+// ANTI-ALIASING (vk_msaa, docs/backend.md, "Anti-aliasing"). The walks of the
+// eyes draw into one color image and one depth image with more than one
+// sample and a layer for each eye. The end of a walk resolves the color into
+// the target of the walk, so each reader of an eye picture reads an image of
+// one sample. On the frame thread: the keys now. On the walk: the images and
+// the count of the walk now.
+volatile LONG g_msaa_asked = 1;
+volatile LONG g_msaa_alpha = 1;
+int g_msaa_test_cycle = 0;
+vk::Image g_ms_color = {};
+vk::Image g_ms_depth = {};
+uint32_t g_ms_samples = 1;   // the sample count of the two images
+uint32_t g_ms_failed = 0;    // the count that got no memory at this size
+uint32_t g_walk_samples = 1;
+// The color image has the picture of the last walk in each sample.
+bool g_ms_valid = false;
+uint32_t g_ms_device = 0;    // the counts of the device for both formats
+uint32_t g_ms_said = 0;      // the last count that the log has
+bool g_ms_keys_read = false;  // VkSceneSetMsaa came
+bool g_said_ms_mres = false;
+bool g_said_ms_rate = false;
+uint64_t g_ms_walks = 0;     // for the report
+uint64_t g_ms_seeds = 0;
+uint64_t g_ms_covered = 0;   // draws with the sample mask of the alpha test
+// The draws of the eyes with the alpha test: cut-out draws with a "greater"
+// compare, cut-out draws with another compare, and the other draws.
+uint64_t g_alpha_draws[3] = {0, 0, 0};
+// A TEST AID (vk_alpha_survey=1): the kinds of the draws of the eyes with the
+// alpha test, and the textures that a draw reads with a POINT mag filter.
+bool g_alpha_survey = false;
+// A TEST AID (vk_msaa_seed_test=F): at frame F the count goes to 4, and for
+// 30 frames the walks draw only into the panel, so each walk keeps the
+// picture of the walk before. The pictures of the frames F - 1 and F + 10
+// must be the same, pixel for pixel.
+int g_ms_seed_test = 0;
+bool g_ms_freeze = false;
+struct AlphaKind {
+  uint32_t key;  // src << 24 | dst << 16 | z write << 15 | mag << 8 | reference
+  uint64_t draws;
+};
+const int kAlphaKinds = 32;
+AlphaKind g_alpha_kinds[kAlphaKinds];
+int g_alpha_kind_count = 0;
+struct PointTexture {
+  uint32_t width, height;
+  const void* texture;
+  uint64_t draws;
+  uint64_t alpha_draws;  // of them with the alpha test
+};
+const int kPointTextures = 256;
+PointTexture g_point_textures[kPointTextures];
+int g_point_texture_count = 0;
+uint64_t g_mag_draws[3] = {0, 0, 0};  // POINT, LINEAR, another filter
+// A view of each layer of each target, for the draw that puts the picture of
+// a walk of one sample into all samples (SeedMsPicture).
+Texture g_seed_texture[2][2] = {};
+VkImageView g_seed_view[2][2] = {};
 
 // THE FRAME. Two slots, so the CPU fills one while the GPU draws the other.
 // THE UPLOADS OF A WALK (vk_upload_queue=1). A texture that the walk reads
@@ -676,7 +744,7 @@ VkPipeline Pipeline(uint32_t key) {
   stages[0].module = g_vert;
   stages[0].pName = "main";
   stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-  stages[1].module = g_frag;
+  stages[1].module = (key & kCoverageKey) != 0 ? g_frag_coverage : g_frag;
   stages[1].pName = "main";
   // Buffer 1 has the texture coordinates of stage 1 (THE SECOND STAGE).
   const VkVertexInputBindingDescription bindings[2] = {
@@ -708,7 +776,8 @@ VkPipeline Pipeline(uint32_t key) {
   raster.lineWidth = 1.0f;
   VkPipelineMultisampleStateCreateInfo multisample = {
       VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO};
-  multisample.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+  multisample.rasterizationSamples = static_cast<VkSampleCountFlagBits>(
+      1u << ((key >> kSamplesShift) & 7u));
   VkPipelineDepthStencilStateCreateInfo depth = {
       VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO};
   depth.depthTestEnable = VK_TRUE;
@@ -717,7 +786,7 @@ VkPipeline Pipeline(uint32_t key) {
   VkPipelineColorBlendAttachmentState blend = {};
   blend.colorWriteMask = 0xF;
   const bool panel = (key & kPanelKey) != 0;
-  if ((key & ~kPanelKey) != 0) {
+  if ((key & kBlendKeyMask) != 0) {
     blend.blendEnable = VK_TRUE;
     blend.srcColorBlendFactor = Factor((key >> 8) & 255);
     blend.dstColorBlendFactor = Factor(key & 255);
@@ -1509,6 +1578,106 @@ VkDescriptorSet SetOf(Texture* t, VkSampler sampler) {
   return set;
 }
 
+// ANTI-ALIASING: frees the two images. The GPU must be done with them.
+void FreeMsImages() {
+  vk::FreeImage(&g_ms_color);
+  vk::FreeImage(&g_ms_depth);
+  g_ms_samples = 1;
+  g_ms_valid = false;
+}
+
+// Frees the views of the layers of the targets, with their sets. The GPU
+// must be done with them.
+void FreeSeedViews() {
+  const VkDevice device = vk::Get().device;
+  for (int i = 0; i < 2; ++i) {
+    for (int e = 0; e < 2; ++e) {
+      Texture& t = g_seed_texture[i][e];
+      for (int k = 0; k < t.set_count; ++k) {
+        f.vkFreeDescriptorSets(device, g_pool, 1, &t.sets[k].set);
+        --g_sets_live;
+      }
+      memset(&t, 0, sizeof(t));
+      if (g_seed_view[i][e] != VK_NULL_HANDLE) {
+        f.vkDestroyImageView(device, g_seed_view[i][e], nullptr);
+        g_seed_view[i][e] = VK_NULL_HANDLE;
+      }
+    }
+  }
+}
+
+// The sample counts that the device has for a target with the color format
+// and the depth format of the eye images.
+uint32_t DeviceSampleCounts() {
+  if (g_ms_device != 0) return g_ms_device;
+  const vk::Core& core = vk::Get();
+  VkPhysicalDeviceProperties properties = {};
+  f.vkGetPhysicalDeviceProperties(core.physical, &properties);
+  uint32_t counts = properties.limits.framebufferColorSampleCounts &
+                    properties.limits.framebufferDepthSampleCounts;
+  VkImageFormatProperties format = {};
+  if (f.vkGetPhysicalDeviceImageFormatProperties(
+          core.physical, core.color_format, VK_IMAGE_TYPE_2D,
+          VK_IMAGE_TILING_OPTIMAL,
+          VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+          0, &format) != VK_SUCCESS) {
+    format.sampleCounts = VK_SAMPLE_COUNT_1_BIT;
+  }
+  counts &= format.sampleCounts;
+  if (f.vkGetPhysicalDeviceImageFormatProperties(
+          core.physical, kDepthFormat, VK_IMAGE_TYPE_2D,
+          VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
+          0, &format) != VK_SUCCESS) {
+    format.sampleCounts = VK_SAMPLE_COUNT_1_BIT;
+  }
+  counts &= format.sampleCounts;
+  g_ms_device = counts | VK_SAMPLE_COUNT_1_BIT;
+  ModLog("vk scene     : vk_msaa: the GPU has these sample counts for the color "
+         "and the depth of the eye images:%s%s%s%s",
+         (g_ms_device & 1) ? " 1" : "", (g_ms_device & 2) ? " 2" : "",
+         (g_ms_device & 4) ? " 4" : "", (g_ms_device & 8) ? " 8" : "");
+  return g_ms_device;
+}
+
+// The two images for `samples` at the size of the targets. A failed
+// allocation frees what it made and gives false: the walks then have one
+// sample, and the game goes on.
+bool MakeMsImages(uint32_t samples) {
+  const uint32_t width = g_colors[0].width, height = g_colors[0].height;
+  if (g_ms_color.image != VK_NULL_HANDLE && g_ms_samples == samples &&
+      g_ms_color.width == width && g_ms_color.height == height) {
+    return true;
+  }
+  if (g_ms_failed == samples) return false;
+  if (g_ms_color.image != VK_NULL_HANDLE) {
+    vk::LockQueue();
+    f.vkDeviceWaitIdle(vk::Get().device);
+    vk::UnlockQueue();
+  }
+  FreeMsImages();
+  const VkSampleCountFlagBits bits = static_cast<VkSampleCountFlagBits>(samples);
+  if (!vk::MakeImage(width, height, 1, vk::Get().color_format,
+                     VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+                         VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+                     VK_IMAGE_ASPECT_COLOR_BIT, &g_ms_color, 2, bits) ||
+      !vk::MakeImage(width, height, 1, kDepthFormat,
+                     VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
+                     VK_IMAGE_ASPECT_DEPTH_BIT, &g_ms_depth, 2, bits)) {
+    FreeMsImages();
+    g_ms_failed = samples;
+    ModLog("vk scene     : vk_msaa: the GPU has no memory for two images of %u "
+           "by %u with %u samples, so the walks have one sample",
+           width, height, samples);
+    return false;
+  }
+  g_ms_samples = samples;
+  ModLog("vk scene     : vk_msaa: the images of %u samples are %u by %u with 2 "
+         "layers: %.0f MB of color and %.0f MB of depth",
+         samples, width, height, g_ms_color.memory_bytes / 1048576.0,
+         g_ms_depth.memory_bytes / 1048576.0);
+  return true;
+}
+
 bool MakeTarget(uint32_t width, uint32_t height) {
   if (g_colors[0].image != VK_NULL_HANDLE && g_colors[0].width == width &&
       g_colors[0].height == height) {
@@ -1517,6 +1686,9 @@ bool MakeTarget(uint32_t width, uint32_t height) {
   vk::LockQueue();
   f.vkDeviceWaitIdle(vk::Get().device);
   vk::UnlockQueue();
+  FreeSeedViews();
+  FreeMsImages();
+  g_ms_failed = 0;
   vk::FreeImage(&g_colors[0]);
   vk::FreeImage(&g_colors[1]);
   vk::FreeImage(&g_keep_scratch);
@@ -1531,10 +1703,12 @@ bool MakeTarget(uint32_t width, uint32_t height) {
   g_target_drawn[0] = g_target_drawn[1] = false;
   InterlockedExchange(&g_panel_walk, 0);
   for (int i = 0; i < 2; ++i) {
+    // SeedMsPicture samples a target.
     if (!vk::MakeImage(width, height, 1, vk::Get().color_format,
                        VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
                            VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
-                           VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+                           VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                           VK_IMAGE_USAGE_SAMPLED_BIT,
                        VK_IMAGE_ASPECT_COLOR_BIT, &g_colors[i], 2) ||
         // The view for videos samples the panel (vk_video.cpp).
         !vk::MakeImage(width, height, 1, vk::Get().color_format,
@@ -1638,7 +1812,9 @@ bool Ready() {
   const VkDevice device = vk::Get().device;
   g_vert = Module(kVkSceneVert, sizeof(kVkSceneVert));
   g_frag = Module(kVkSceneFrag, sizeof(kVkSceneFrag));
-  if (g_vert == VK_NULL_HANDLE || g_frag == VK_NULL_HANDLE) {
+  g_frag_coverage = Module(kVkSceneFragCoverage, sizeof(kVkSceneFragCoverage));
+  if (g_vert == VK_NULL_HANDLE || g_frag == VK_NULL_HANDLE ||
+      g_frag_coverage == VK_NULL_HANDLE) {
     return Fail("the shaders");
   }
   VkDescriptorSetLayoutBinding binding = {
@@ -1817,15 +1993,17 @@ void WritePicture(const vk::Image& image, uint32_t layer, const char* what,
 // layer with no eye). load keeps the pixels and the depth that the images
 // have, else both are cleared: the color to 0 and the depth to 1. keep_depth
 // stores the depth at the end of the rendering, for a rendering after it in
-// the same walk.
+// the same walk. keep_color keeps the pixels of the color when load is
+// false: the depth is then cleared alone.
 void BeginRenderingOf(VkCommandBuffer cb, const vk::Image& color_image,
                       const vk::Image& depth_image, uint32_t view_mask,
-                      bool load, bool keep_depth) {
+                      bool load, bool keep_depth, bool keep_color = false) {
   VkRenderingAttachmentInfo color = {
       VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
   color.imageView = color_image.view;
   color.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-  color.loadOp = load ? VK_ATTACHMENT_LOAD_OP_LOAD : VK_ATTACHMENT_LOAD_OP_CLEAR;
+  color.loadOp = load || keep_color ? VK_ATTACHMENT_LOAD_OP_LOAD
+                                    : VK_ATTACHMENT_LOAD_OP_CLEAR;
   color.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
   VkRenderingAttachmentInfo depth = {
       VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
@@ -1856,10 +2034,13 @@ void BeginRenderingOf(VkCommandBuffer cb, const vk::Image& color_image,
   f.vkCmdBeginRendering(cb, &rendering);
 }
 
-// Starts the rendering into the target of the walk (BeginRenderingOf).
+// Starts the rendering into the target of the walk (BeginRenderingOf). A
+// walk with more than one sample draws into the images of the anti-aliasing.
 void BeginRendering(VkCommandBuffer cb, uint32_t view_mask, bool load,
-                    bool keep_depth) {
-  BeginRenderingOf(cb, Target(), g_depth, view_mask, load, keep_depth);
+                    bool keep_depth, bool keep_color = false) {
+  const bool ms = g_walk_samples > 1;
+  BeginRenderingOf(cb, ms ? g_ms_color : Target(), ms ? g_ms_depth : g_depth,
+                   view_mask, load, keep_depth, keep_color);
 }
 
 // The part of a rect of pixels that is in the target. False when nothing
@@ -1930,7 +2111,12 @@ void UsePanel(bool panel) {
 // THE PICTURE OF THE WALK BEFORE: before the first draw or part clear of a
 // walk with no clear of the whole target, a copy of both layers of the other
 // target into this one. The rendering of the eyes is open, and it is open
-// again after the copy, with the dynamic states of the walk.
+// again after the copy, with the dynamic states of the walk. A walk with more
+// than one sample has the picture in its color image when the walk before
+// had the same samples (the walk started with a load of the color). After a
+// walk of one sample, SeedMsPicture draws that picture into all samples.
+void SeedMsPicture(VkCommandBuffer cb, int before);
+
 void KeepPicture() {
   if (!g_walk_keep) return;
   g_walk_keep = false;
@@ -1940,29 +2126,33 @@ void KeepPicture() {
   const vk::Image& to = Target();
   if (from.width != to.width || from.height != to.height) return;
   const VkCommandBuffer cb = g_slots[g_slot].cb;
-  f.vkCmdEndRendering(cb);
-  vk::Barrier(cb, from.image, VK_IMAGE_ASPECT_COLOR_BIT,
-              VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-              VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, 1, 2);
-  vk::Barrier(cb, to.image, VK_IMAGE_ASPECT_COLOR_BIT,
-              VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-              VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, 2);
-  VkImageBlit region = {};
-  region.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 2};
-  region.srcOffsets[1] = {static_cast<int32_t>(from.width),
-                          static_cast<int32_t>(from.height), 1};
-  region.dstSubresource = region.srcSubresource;
-  region.dstOffsets[1] = region.srcOffsets[1];
-  f.vkCmdBlitImage(cb, from.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                   to.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region,
-                   VK_FILTER_NEAREST);
-  vk::Barrier(cb, from.image, VK_IMAGE_ASPECT_COLOR_BIT,
-              VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-              VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, 1, 2);
-  vk::Barrier(cb, to.image, VK_IMAGE_ASPECT_COLOR_BIT,
-              VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-              VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, 1, 2);
-  BeginRendering(cb, 3u, true, true);
+  if (g_walk_samples > 1) {
+    if (!g_ms_valid) SeedMsPicture(cb, before);
+  } else {
+    f.vkCmdEndRendering(cb);
+    vk::Barrier(cb, from.image, VK_IMAGE_ASPECT_COLOR_BIT,
+                VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, 1, 2);
+    vk::Barrier(cb, to.image, VK_IMAGE_ASPECT_COLOR_BIT,
+                VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, 2);
+    VkImageBlit region = {};
+    region.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 2};
+    region.srcOffsets[1] = {static_cast<int32_t>(from.width),
+                            static_cast<int32_t>(from.height), 1};
+    region.dstSubresource = region.srcSubresource;
+    region.dstOffsets[1] = region.srcOffsets[1];
+    f.vkCmdBlitImage(cb, from.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                     to.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region,
+                     VK_FILTER_NEAREST);
+    vk::Barrier(cb, from.image, VK_IMAGE_ASPECT_COLOR_BIT,
+                VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, 1, 2);
+    vk::Barrier(cb, to.image, VK_IMAGE_ASPECT_COLOR_BIT,
+                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, 1, 2);
+    BeginRendering(cb, 3u, true, true);
+  }
   ++g_kept_walks;
   // The first ones go into the log: the walks of a frame with no eye pass
   // have no report of 450 frames.
@@ -2003,6 +2193,7 @@ void ClearOnWorker(const void* data) {
     ++g_clears_off;
     return;
   }
+  if (g_ms_freeze) return;
   UsePanel(false);
   const ClearArgs* a = static_cast<const ClearArgs*>(data);
   VkClearAttachment attachments[2] = {};
@@ -2277,6 +2468,165 @@ VkDeviceSize RingVertices(Slot& s, const void* data, VkDeviceSize bytes) {
          static_cast<size_t>(bytes));
   s.used = (s.used + bytes + 31) & ~31ull;
   return at;
+}
+
+// ANTI-ALIASING: the picture of target `before`, which a walk of one sample
+// made, into all samples of the color image. The rendering of the eyes is
+// open before and after, and the depth stays. One quad for each eye, with the
+// nearest texel, so a pixel keeps its value.
+void SeedMsPicture(VkCommandBuffer cb, int before) {
+  Slot& s = g_slots[g_slot];
+  const vk::Image& from = g_colors[before];
+  const uint32_t width = from.width, height = from.height;
+  const VkPipeline pipeline =
+      Pipeline(vk_msaa_math::LogOf(g_walk_samples) << kSamplesShift);
+  const VkSampler sampler = Sampler(1, 1, 1, 3, 3, 1);
+  if (pipeline == VK_NULL_HANDLE) return;
+  VkDescriptorSet sets[2] = {VK_NULL_HANDLE, VK_NULL_HANDLE};
+  for (int eye = 0; eye < 2; ++eye) {
+    if (g_seed_view[before][eye] == VK_NULL_HANDLE) {
+      VkImageViewCreateInfo view = {VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+      view.image = from.image;
+      view.viewType = VK_IMAGE_VIEW_TYPE_2D;
+      view.format = from.format;
+      view.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1,
+                               static_cast<uint32_t>(eye), 1};
+      if (f.vkCreateImageView(vk::Get().device, &view, nullptr,
+                              &g_seed_view[before][eye]) != VK_SUCCESS) {
+        g_seed_view[before][eye] = VK_NULL_HANDLE;
+        return;
+      }
+      g_seed_texture[before][eye].image.view = g_seed_view[before][eye];
+    }
+    sets[eye] = SetOf(&g_seed_texture[before][eye], sampler);
+    if (sets[eye] == VK_NULL_HANDLE) return;
+  }
+  f.vkCmdEndRendering(cb);
+  vk::Barrier(cb, from.image, VK_IMAGE_ASPECT_COLOR_BIT,
+              VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+              VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 1, 2);
+  BeginRendering(cb, 3u, true, true);
+  const VkViewport viewport = {0.0f, 0.0f, static_cast<float>(width),
+                               static_cast<float>(height), 0.0f, 1.0f};
+  f.vkCmdSetViewport(cb, 0, 1, &viewport);
+  const VkRect2D scissor = {{0, 0}, {width, height}};
+  f.vkCmdSetScissor(cb, 0, 1, &scissor);
+  DrawStates(cb, D3DCULL_NONE, 0, 0, D3DCMP_ALWAYS, D3DPT_TRIANGLELIST);
+  f.vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+  struct Vertex {
+    float x, y, z, rhw;
+    uint32_t diffuse, specular;
+    float u, v;
+  };
+  const float x1 = static_cast<float>(width) - 0.5f;
+  const float y1 = static_cast<float>(height) - 0.5f;
+  const uint32_t white = 0xFFFFFFFFu;
+  const Vertex quad[6] = {{-0.5f, -0.5f, 0, 1, white, 0, 0, 0},
+                          {x1, -0.5f, 0, 1, white, 0, 1, 0},
+                          {x1, y1, 0, 1, white, 0, 1, 1},
+                          {-0.5f, -0.5f, 0, 1, white, 0, 0, 0},
+                          {x1, y1, 0, 1, white, 0, 1, 1},
+                          {-0.5f, y1, 0, 1, white, 0, 0, 1}};
+  const VkDeviceSize at = RingVertices(s, quad, sizeof(quad));
+  if (at != UINT64_MAX) {
+    BindVertices(cb, s, at, at);
+    for (int eye = 0; eye < 2; ++eye) {
+      DrawPush push = {};
+      push.viewport[2] = 2.0f / static_cast<float>(width);
+      push.viewport[3] = 2.0f / static_cast<float>(height);
+      push.depth[1] = 1.0f;
+      // D3DTOP_SELECTARG1 of the texture, for the color and for the alpha.
+      push.ops[0] = 2u | 2u << 8;
+      push.ops[1] = 2u | 2u << 8;
+      push.ops[2] = 1u;  // a texture
+      push.ops[3] = 1u | (1u << eye) << 8;  // still, the eye
+      BindSets(cb, sets[eye], VK_NULL_HANDLE);
+      f.vkCmdPushConstants(
+          cb, g_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+          0, sizeof(push), &push);
+      f.vkCmdDraw(cb, 6, 1, 0, 0);
+    }
+  }
+  f.vkCmdEndRendering(cb);
+  vk::Barrier(cb, from.image, VK_IMAGE_ASPECT_COLOR_BIT,
+              VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+              VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, 1, 2);
+  BeginRendering(cb, 3u, true, true);
+  if (g_viewport.dwWidth != 0 && g_viewport.dwHeight != 0) SetViewportState(cb);
+  ++g_ms_seeds;
+}
+
+// ANTI-ALIASING: the sample count of the walk. The right eye of a pair stays
+// with the count of its left eye, because the left eye is in the images. A
+// walk of the intro draws over the picture of its eye in its own target, so
+// it has one sample. Foveated resolution has one sample. The map of the rates
+// has one sample when the device does not allow the pair.
+void PrepareSamples(const Seed* seed) {
+  if (g_walk_right) {
+    if (g_walk_mres || !g_ms_valid) g_walk_samples = 1;
+    return;
+  }
+  const uint32_t asked = vk_msaa_math::CountOfKey(
+      static_cast<int>(InterlockedCompareExchange(&g_msaa_asked, 0, 0)));
+  uint32_t want = 1;
+  if (g_direct && asked > 1) {
+    want = vk_msaa_math::Supported(asked, DeviceSampleCounts());
+  }
+  if (want > 1 && seed->intro_eye >= 0) want = 1;
+  if (want > 1 && g_walk_mres) {
+    want = 1;
+    if (!g_said_ms_mres) {
+      g_said_ms_mres = true;
+      ModLog("vk scene     : vk_msaa: a walk with fovea_res has one sample");
+    }
+  }
+  if (want > 1 && g_walk_fovea && (vk::Get().rate_samples & want) == 0) {
+    if (!g_said_ms_rate) {
+      g_said_ms_rate = true;
+      ModLog("vk scene     : vk_msaa: the GPU does not allow %u samples with "
+             "the map of the rates, so a walk with foveation has one sample",
+             want);
+    }
+    want = 1;
+  }
+  if (want > 1 && !MakeMsImages(want)) want = 1;
+  if (g_ms_keys_read && want != g_ms_said && seed->intro_eye < 0) {
+    g_ms_said = want;
+    ModLog("vk scene     : vk_msaa: the key asks for %u samples, and the walks "
+           "use %u", asked, want);
+  }
+  g_walk_samples = want;
+}
+
+// ANTI-ALIASING: the color image into the target of the walk, once, after the
+// last rendering of the walk and before the first reader of the target. The
+// right eye of a pair resolves its layer, and the layer of the left eye
+// stays. The two images end in the layout of a color attachment.
+void ResolveWalk(Slot& s) {
+  if (g_walk_samples <= 1) return;
+  const VkCommandBuffer cb = s.cb;
+  const vk::Image& to = Target();
+  vk::Barrier(cb, g_ms_color.image, VK_IMAGE_ASPECT_COLOR_BIT,
+              VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+              VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, 1, 2);
+  vk::Barrier(cb, to.image, VK_IMAGE_ASPECT_COLOR_BIT,
+              VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+              VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, 2);
+  VkImageResolve region = {};
+  region.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0,
+                           g_walk_right ? 1u : 0u, g_walk_right ? 1u : 2u};
+  region.dstSubresource = region.srcSubresource;
+  region.extent = {to.width, to.height, 1};
+  f.vkCmdResolveImage(cb, g_ms_color.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                      to.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1,
+                      &region);
+  vk::Barrier(cb, g_ms_color.image, VK_IMAGE_ASPECT_COLOR_BIT,
+              VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+              VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, 1, 2);
+  vk::Barrier(cb, to.image, VK_IMAGE_ASPECT_COLOR_BIT,
+              VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+              VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, 1, 2);
+  ++g_ms_walks;
 }
 
 // A clear of the records in an image of a pass.
@@ -3007,6 +3357,29 @@ void BeginOnWorker(const void* data) {
   // here.
   g_walk_keep = g_keep_picture && g_direct && g_walk_follow && !g_walk_right &&
                 !g_walk_mres && seed->intro_eye < 0;
+  PrepareSamples(seed);
+  if (g_walk_samples > 1) {
+    if (g_walk_right) {
+      // Layer 0 has the left eye: the barrier keeps it.
+      vk::Barrier(s.cb, g_ms_color.image, VK_IMAGE_ASPECT_COLOR_BIT,
+                  VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                  VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, 1, 1);
+      vk::Barrier(s.cb, g_ms_color.image, VK_IMAGE_ASPECT_COLOR_BIT,
+                  VK_IMAGE_LAYOUT_UNDEFINED,
+                  VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, 1, 1, 1);
+    } else {
+      // A walk that can take the picture of the walk before keeps the
+      // samples of that picture.
+      vk::Barrier(s.cb, g_ms_color.image, VK_IMAGE_ASPECT_COLOR_BIT,
+                  g_ms_valid && g_walk_keep
+                      ? VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+                      : VK_IMAGE_LAYOUT_UNDEFINED,
+                  VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, 1, 2);
+    }
+    vk::Barrier(s.cb, g_ms_depth.image, VK_IMAGE_ASPECT_DEPTH_BIT,
+                VK_IMAGE_LAYOUT_UNDEFINED,
+                VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, 1, 2);
+  }
   g_eye_target = seed->target;
   g_draw_target = seed->target;
   g_walk_panel = seed->panel;
@@ -3049,7 +3422,8 @@ void BeginOnWorker(const void* data) {
              g_target);
     }
   } else {
-    BeginRendering(s.cb, 3u, false, g_walk_follow);
+    BeginRendering(s.cb, 3u, false, g_walk_follow,
+                   g_walk_samples > 1 && g_ms_valid && g_walk_keep);
   }
   if (g_walk_follow) {
     SetViewportState(s.cb);
@@ -3207,6 +3581,7 @@ void EndOnWorker(const void*) {
   } else {
     f.vkCmdEndRendering(s.cb);
   }
+  ResolveWalk(s);
   BlackCheckWrite(s);
   if (s.query != VK_NULL_HANDLE) {
     f.vkCmdWriteTimestamp2(s.cb, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
@@ -3237,6 +3612,7 @@ void EndOnWorker(const void*) {
     return;
   }
   g_target_drawn[g_target] = true;
+  g_ms_valid = g_walk_samples > 1;
   g_walk_keep = false;
   if (g_walk_both || g_walk_right) {
     g_done_image = (uint64_t)Target().image;  // a handle of 64 bits
@@ -3473,6 +3849,23 @@ void VkSceneFrame(uint64_t frame, uint64_t name, bool capture) {
       capture ||
       (g_test_frame > 0 && frame == static_cast<uint64_t>(g_test_frame));
   g_picture_name = name;
+  if (g_ms_seed_test > 0) {
+    const uint64_t at = static_cast<uint64_t>(g_ms_seed_test);
+    if (frame + 1 == at || frame == at + 10) {
+      g_picture_next = true;
+      g_picture_name = frame;
+    }
+    if (frame == at) {
+      InterlockedExchange(&g_msaa_asked, 4);
+      ModLog("test key     : vk_msaa_seed_test, frame %llu: vk_msaa is 4, and "
+             "the walks of 30 frames keep the picture", frame);
+    }
+    g_ms_freeze = frame >= at && frame < at + 30;
+  }
+  if (g_msaa_test_cycle > 0 && frame > 0 &&
+      frame % static_cast<uint64_t>(g_msaa_test_cycle) == 0) {
+    VkSceneMsaaChange("vk_msaa_test_cycle");
+  }
 }
 
 void VkSceneSetFollow(int on) {
@@ -3576,6 +3969,7 @@ void VkSceneDraw(uint32_t type, uint32_t fvf, const void* vertices,
     ++g_skip_target;
     return;
   }
+  if (!panel && g_ms_freeze) return;
   if (OneWalkActive() && OneWalkModeNow() == kOneWalkRightOnly) {
     ++g_right_only;
   }
@@ -3667,7 +4061,31 @@ void VkSceneDraw(uint32_t type, uint32_t fvf, const void* vertices,
           ? (1u << 16) | (rs[D3DRENDERSTATE_SRCBLEND] & 255) << 8 |
                 (rs[D3DRENDERSTATE_DESTBLEND] & 255)
           : 0u;
-  VkPipeline pipeline = Pipeline(blend | (panel ? kPanelKey : 0u));
+  uint32_t pipeline_key = blend | (panel ? kPanelKey : 0u);
+  bool coverage = false;
+  if (!panel && g_walk_samples > 1) {
+    pipeline_key |= vk_msaa_math::LogOf(g_walk_samples) << kSamplesShift;
+    // ANTI-ALIASING: the alpha test of a cut-out draw gets a sample mask
+    // (vk_scene.frag, COVERAGE). The game draws its trees, fences and thatch
+    // with the alpha test, the blend of the source alpha and a depth write.
+    // The blend stays. A draw with another blend or with no depth write
+    // (smoke, glows) keeps the plain test. The map of the rates needs the
+    // device to allow a sample mask.
+    const uint32_t func = rs[D3DRENDERSTATE_ALPHAFUNC];
+    const bool tested = rs[D3DRENDERSTATE_ALPHATESTENABLE] != 0;
+    const bool greater = func == D3DCMP_GREATER || func == D3DCMP_GREATEREQUAL;
+    const bool cutout =
+        blend == 0 ||
+        (blend == ((1u << 16) | (D3DBLEND_SRCALPHA << 8) | D3DBLEND_INVSRCALPHA) &&
+         rs[D3DRENDERSTATE_ZENABLE] != 0 &&
+         rs[D3DRENDERSTATE_ZWRITEENABLE] != 0);
+    if (tested) ++g_alpha_draws[!cutout ? 2 : greater ? 0 : 1];
+    coverage = InterlockedCompareExchange(&g_msaa_alpha, 0, 0) != 0 && tested &&
+               cutout && greater &&
+               (!g_walk_fovea || vk::Get().rate_shader_mask);
+    if (coverage) pipeline_key |= kCoverageKey;
+  }
+  VkPipeline pipeline = Pipeline(pipeline_key);
   if (pipeline == VK_NULL_HANDLE) {
     ++g_skipped;
     ++g_skip_state;
@@ -3676,6 +4094,45 @@ void VkSceneDraw(uint32_t type, uint32_t fvf, const void* vertices,
   Texture* texture = TextureOf(g_texture);
   texture->used_walk = g_walk_number;
   const uint32_t* ts = g_ts[0];
+  if (g_alpha_survey && !panel && texture != g_white) {
+    const uint32_t mag = ts[D3DTSS_MAGFILTER];
+    const bool tested = rs[D3DRENDERSTATE_ALPHATESTENABLE] != 0;
+    ++g_mag_draws[mag == D3DTFG_POINT ? 0 : mag == D3DTFG_LINEAR ? 1 : 2];
+    if (tested) {
+      const uint32_t on = rs[D3DRENDERSTATE_ALPHABLENDENABLE] != 0;
+      const uint32_t key = (on * (rs[D3DRENDERSTATE_SRCBLEND] & 255)) << 24 |
+                           (on * (rs[D3DRENDERSTATE_DESTBLEND] & 255)) << 16 |
+                           (rs[D3DRENDERSTATE_ZWRITEENABLE] != 0 ? 1u : 0u) << 15 |
+                           (mag & 7) << 8 | (rs[D3DRENDERSTATE_ALPHAREF] & 255);
+      int k = 0;
+      while (k < g_alpha_kind_count && g_alpha_kinds[k].key != key) ++k;
+      if (k == g_alpha_kind_count && k < kAlphaKinds) {
+        g_alpha_kinds[k].key = key;
+        g_alpha_kinds[k].draws = 0;
+        ++g_alpha_kind_count;
+      }
+      if (k < g_alpha_kind_count) ++g_alpha_kinds[k].draws;
+    }
+    if (mag == D3DTFG_POINT) {
+      int k = 0;
+      while (k < g_point_texture_count &&
+             g_point_textures[k].texture != texture) {
+        ++k;
+      }
+      if (k == g_point_texture_count && k < kPointTextures) {
+        g_point_textures[k].texture = texture;
+        g_point_textures[k].width = texture->image.width;
+        g_point_textures[k].height = texture->image.height;
+        g_point_textures[k].draws = 0;
+        g_point_textures[k].alpha_draws = 0;
+        ++g_point_texture_count;
+      }
+      if (k < g_point_texture_count) {
+        ++g_point_textures[k].draws;
+        if (tested) ++g_point_textures[k].alpha_draws;
+      }
+    }
+  }
   VkSampler sampler =
       Sampler(ts[D3DTSS_MAGFILTER], ts[D3DTSS_MINFILTER], ts[D3DTSS_MIPFILTER],
               ts[D3DTSS_ADDRESSU] != 0 ? ts[D3DTSS_ADDRESSU] : 1,
@@ -3796,6 +4253,10 @@ void VkSceneDraw(uint32_t type, uint32_t fvf, const void* vertices,
                    (ts1[D3DTSS_ALPHAARG2] & 255) << 16;
   }
   push.alpha[0] = static_cast<float>(rs[D3DRENDERSTATE_ALPHAREF] & 255) / 255.0f;
+  if (coverage) {
+    push.alpha[1] = static_cast<float>(g_walk_samples);
+    ++g_ms_covered;
+  }
   const uint32_t fog = rs[D3DRENDERSTATE_FOGCOLOR];
   push.fog_color[0] = static_cast<float>((fog >> 16) & 255) / 255.0f;
   push.fog_color[1] = static_cast<float>((fog >> 8) & 255) / 255.0f;
@@ -4245,6 +4706,41 @@ void VkSceneSetBlackCheck(int on) {
              : "No check for a black eye picture");
 }
 
+void VkSceneSetAlphaSurvey(int on) { g_alpha_survey = on != 0; }
+void VkSceneSetMsaaSeedTest(int frame) {
+  g_ms_seed_test = frame > 0 ? frame : 0;
+}
+
+void VkSceneSetMsaa(int samples, int alpha, int test_cycle) {
+  const uint32_t count = vk_msaa_math::CountOfKey(samples);
+  InterlockedExchange(&g_msaa_asked, static_cast<LONG>(count));
+  InterlockedExchange(&g_msaa_alpha, alpha != 0 ? 1 : 0);
+  g_msaa_test_cycle = test_cycle > 0 ? test_cycle : 0;
+  g_ms_keys_read = true;
+  if (!g_direct) return;
+  ModLog("vk scene     : vk_msaa=%u, vk_msaa_alpha=%d. %s", count,
+         alpha != 0 ? 1 : 0,
+         count > 1 ? "The walks of the eyes draw with more than one sample, "
+                     "and the end of each walk resolves the eye picture"
+                   : "The walks draw with one sample");
+}
+
+void VkSceneMsaaChange(const char* keys) {
+  const uint32_t next = vk_msaa_math::NextCount(static_cast<uint32_t>(
+      InterlockedCompareExchange(&g_msaa_asked, 0, 0)));
+  InterlockedExchange(&g_msaa_asked, static_cast<LONG>(next));
+  ControllersGesturePulse(0.5f, next > 1 ? 0.30f : 0.08f);
+  ModLog("test key     : %s, vk_msaa is %u from the next walk", keys, next);
+}
+
+void VkSceneMsaaAlphaToggle(const char* keys) {
+  const LONG next = InterlockedCompareExchange(&g_msaa_alpha, 0, 0) != 0 ? 0 : 1;
+  InterlockedExchange(&g_msaa_alpha, next);
+  ControllersGesturePulse(0.5f, next != 0 ? 0.30f : 0.08f);
+  ModLog("test key     : %s, vk_msaa_alpha is %d from the next draw", keys,
+         static_cast<int>(next));
+}
+
 void VkSceneKeepPictureToggle(const char* keys) {
   g_keep_picture = !g_keep_picture;
   ControllersGesturePulse(0.5f, g_keep_picture ? 0.30f : 0.08f);
@@ -4685,6 +5181,41 @@ void VkSceneReport(uint64_t frames) {
     }
     g_kept_walks = g_cleared_walks = g_own_walks = 0;
     g_moved_walks = 0;
+    if (g_ms_walks > 0 || g_msaa_asked > 1) {
+      ModLog("vk scene     : vk_msaa=%d, vk_msaa_alpha=%d. The images have %u "
+             "samples. %llu walks resolved their picture, %llu walks drew the "
+             "picture of a walk of one sample into all samples, %llu draws of "
+             "the alpha test had a sample mask. Draws with the alpha test: "
+             "%llu cut-out draws with a greater compare, %llu cut-out draws "
+             "with another compare, %llu with another blend or no depth write",
+             static_cast<int>(g_msaa_asked), static_cast<int>(g_msaa_alpha),
+             g_ms_samples, g_ms_walks, g_ms_seeds, g_ms_covered,
+             g_alpha_draws[0], g_alpha_draws[1], g_alpha_draws[2]);
+      g_ms_walks = g_ms_seeds = g_ms_covered = 0;
+      g_alpha_draws[0] = g_alpha_draws[1] = g_alpha_draws[2] = 0;
+    }
+    if (g_alpha_survey) {
+      ModLog("vk survey    : draws with a texture by mag filter: POINT %llu, "
+             "LINEAR %llu, another %llu. %d textures with POINT",
+             g_mag_draws[0], g_mag_draws[1], g_mag_draws[2],
+             g_point_texture_count);
+      for (int i = 0; i < g_alpha_kind_count; ++i) {
+        const uint32_t key = g_alpha_kinds[i].key;
+        ModLog("vk survey    : alpha test: blend %u %u, z write %u, mag filter "
+               "%u, reference %u: %llu draws",
+               key >> 24, (key >> 16) & 255, (key >> 15) & 1, (key >> 8) & 7,
+               key & 255, g_alpha_kinds[i].draws);
+      }
+      for (int i = 0; i < g_point_texture_count && i < 40; ++i) {
+        const PointTexture& p = g_point_textures[i];
+        ModLog("vk survey    : POINT texture %d: %u by %u, %llu draws, %llu with "
+               "the alpha test",
+               i, p.width, p.height, p.draws, p.alpha_draws);
+      }
+      g_alpha_kind_count = 0;
+      g_point_texture_count = 0;
+      g_mag_draws[0] = g_mag_draws[1] = g_mag_draws[2] = 0;
+    }
     if (g_black_check) {
       ModLog("vk scene     : vk_black_check=1. %llu of %llu checked eye "
              "pictures were black", g_black_walks, g_probed_walks);
@@ -4780,4 +5311,15 @@ int VkSceneStage1Value() {
 
 int VkSceneUntexturedValue() {
   return VkSceneOn() ? (g_untextured ? 1 : 0) : kDebugCannot;
+}
+
+// The step of the key: 0 off, 1 2x, 2 4x, 3 8x. Only backend=vulkan has it.
+int VkSceneMsaaValue() {
+  if (!VkSceneOn() || !g_direct) return kDebugCannot;
+  return vk_msaa_math::StepOf(static_cast<uint32_t>(g_msaa_asked));
+}
+
+int VkSceneMsaaAlphaValue() {
+  if (!VkSceneOn() || !g_direct) return kDebugCannot;
+  return g_msaa_alpha != 0 ? 1 : 0;
 }

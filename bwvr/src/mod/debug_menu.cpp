@@ -324,6 +324,10 @@ int MiracleFlightGravityValue();
 int MiracleFlightSpeedValue();
 void MiracleFlightGravityStep(bool back, const char* by);
 void MiracleFlightSpeedStep(bool back, const char* by);
+int MiracleBounceValue();
+void MiracleBounceChange(const char* by);
+int MiracleTopSpeedValue();
+void MiracleTopSpeedStep(bool back, const char* by);
 // The physics switch (physics_switch.cpp).
 int PhysicsSwitchValue();
 void PhysicsSwitchChange(const char* by);
@@ -882,6 +886,14 @@ const Switch kSwitches[] = {
      "miracle_flight_speed_pct", MiracleFlightSpeedValue,
      [](const char* by) { MiracleFlightSpeedStep(false, by); }, L"",
      [](const char* by) { MiracleFlightSpeedStep(true, by); }},
+    {kGroupThrow, L"Fireball top", L"Top speed of a Fireball, units a second",
+     "miracle_flight_top_speed", MiracleTopSpeedValue,
+     [](const char* by) { MiracleTopSpeedStep(false, by); }, L"off",
+     [](const char* by) { MiracleTopSpeedStep(true, by); }, true,
+     L"Fireball top speed"},
+    {kGroupThrow, L"Ball bounce", L"Bounce of a Fireball at each scale",
+     "miracle_bounce_scale", MiracleBounceValue, MiracleBounceChange,
+     L"game|room", nullptr, true, L"Fireball bounce"},
     {kGroupThrow, L"Throw picture", L"Picture between the physics steps",
      "throw_draw", ThrowDrawValue, ThrowDrawChange, L"flight|real"},
     {kGroupThrow, L"Fall rule", L"Still hand lets a high object fall",
@@ -1500,6 +1512,14 @@ const wchar_t* const kTips[] = {
     // Fireball speed
     L"The start speed of a thrown Fireball against the hand: 100, 115, 130, "
     L"150, 175, 200 percent. The direction stays the direction of the hand. "
+    L"The next throw uses it.",
+    // Fireball top speed
+    L"A cap of the start speed of a thrown Fireball, in world units a second: "
+    L"off, 800, 1500, 3000. A cap makes a throw shorter at a far zoom. The "
+    L"next throw uses it.",
+    // Fireball bounce
+    L"Room: after it touches the land, a Fireball moves in the room as it "
+    L"does at 100 units per meter, at each zoom. Game: the game's constants. "
     L"The next throw uses it.",
     // Throw picture
     L"Where the mod draws a thrown object between game steps. Real: a substep "

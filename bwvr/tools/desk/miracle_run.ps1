@@ -27,7 +27,7 @@
 #   the Hand after a pour, and the tap takes it out. Then Heal (7): a press.
 #   Then a Creature seed that the Hand carries, and the trigger.
 # The other kinds (cancel, place, shield, aim, blast, away, fire, firelong,
-# pshield, teleport, storm, throwdir, throwspeed) have a comment at their steps below. -Seeds gives other
+# pshield, teleport, storm, throwdir, throwspeed, ballscale) have a comment at their steps below. -Seeds gives other
 # seed types to the steps of a kind (the types are in bwvr/docs/miracles.md),
 # and -Steps gives other steps.
 param(
@@ -242,6 +242,20 @@ if ($Kind -eq 'away') {
                       " point@$($b + 247)+1 point@$($b + 248)+1"
         }
         $Steps += ' point@1610+1 point@1620+1 stick_down@1640+10 stick_down@1680+10'
+    }
+} elseif ($Kind -eq 'ballscale') {
+    # One Fireball (2) with one swing that steps 6 cm two times (about 3.6
+    # m/s), from the scale at the start. -Set "god_units_per_meter=447" gives
+    # the scale, so each run has the same steps. The run stays open for the
+    # bounces and the fade. The line "ball 0 of the Fireball of frame N ends"
+    # gives the contacts, the first hop, the time to the rest and the way.
+    if ($Seeds -eq '') { $Seeds = '2@930' }
+    if ($Seconds -le 0) { $Seconds = 45 }
+    $keys = "$keys;test_frame_rate=60;seek_plan=hold;seek_class=OneOffSpellSeed"
+    $points = '0,-30,60 0,-32,40 0,-31,46 0,-30,52'
+    if ($Steps -eq '') {
+        $Steps = 'look@860+5000 point@900+1 seek@960+1 grip@1000+3 point@1080+1 ' +
+                 'grip@1120+60 point@1177+1 point@1178+1'
     }
 } elseif ($Kind -eq 'cancel') {
     # A shake of a new miracle, the button on a new miracle, and a shake while

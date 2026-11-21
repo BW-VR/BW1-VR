@@ -182,6 +182,65 @@ inline bool RuleStepWasFree(const float before[3], const float after[3],
   return fabsf(after[1] - want) <= tolerance * (1.0f + fabsf(want));
 }
 
+// THE RULE AFTER THE FIRST CONTACT (miracle_bounce_scale=1, docs/throw.md,
+// "The flight of a thrown Fireball"). The ball has a world speed that grows
+// with the scale s, and these fields of the rule are in world units. The mod
+// multiplies them by the ratio s / 100 for each call of the rule, and puts
+// them back after the call. On flat land each step in the room is then the
+// step at 100 units per meter, in the same time. The bounce shares, Damping
+// and the time of a step have no unit of length, so they stay.
+struct RuleWorldFields {
+  float max_speed;     // +0x20: MaxSpeed
+  float gravity;       // +0x24: Gravity
+  float wind;          // +0x2C: WindMagnification, the wind target
+  float ground_drag;   // +0x3C: GroundDrag
+  float impact_small;  // +0x60: the speeds of the three levels of the sound
+  float impact_medium;  // +0x64
+  float impact_large;   // +0x68
+};
+
+// The scale at which the rule keeps the constants of the game.
+const float kBounceBaseUnits = 100.0f;
+// The lowest scale of the God view is 1 unit per meter.
+const float kBounceLeastRatio = 0.01f;
+// CutOffSpeed of the speed test of a thrown Fireball (SF_FireBallThrow, PU
+// and PU2). Under it the game starts the fade of the ball.
+const float kBallRestSpeed = 1.0f;
+
+inline float BounceRatio(float s) {
+  const float ratio = s / kBounceBaseUnits;
+  return ratio > kBounceLeastRatio ? ratio : kBounceLeastRatio;
+}
+
+inline RuleWorldFields ScaledRuleFields(const RuleWorldFields& game,
+                                        float ratio) {
+  RuleWorldFields out = game;
+  out.max_speed *= ratio;
+  out.gravity *= ratio;
+  out.wind *= ratio;
+  out.ground_drag *= ratio;
+  out.impact_small *= ratio;
+  out.impact_medium *= ratio;
+  out.impact_large *= ratio;
+  return out;
+}
+
+// True when a ball is under the speed at which the game starts its fade, with
+// the cut off speed in the units of the ratio.
+inline bool BallIsAtRest(const float v[3], float cut_off, float ratio) {
+  return controller_math::Length(v) < cut_off * ratio;
+}
+
+// miracle_flight_top_speed: a cap of the start speed of the arc, in world
+// units a second. 0 is no cap. The direction does not change.
+inline void LimitTopSpeed(float v[3], float top_speed) {
+  if (!(top_speed > 0.0f)) return;
+  const float speed = controller_math::Length(v);
+  if (speed <= top_speed) return;
+  const float share = top_speed / speed;
+  for (int i = 0; i < 3; ++i) v[i] *= share;
+}
+
 // THE ARC OF A THROWN FIREBALL (miracle_flight=1, docs/throw.md, "The flight
 // of a thrown Fireball"). The cast got s v world units a second, the
 // velocity of the real hand in the world (miracle_throw 1 or 2). Ball 0 then
@@ -210,7 +269,7 @@ const float kBallLeastGravity = 0.05f;
 
 inline void BallFlightPlan(const float cast[3], float s, float k,
                            BallFlight* out, float gravity = 1.0f,
-                           float speed = 1.0f) {
+                           float speed = 1.0f, float top_speed = 0.0f) {
   *out = BallFlight{};
   const float root = s > 1.0f ? sqrtf(s) : 1.0f;
   float rate = 1.0f;
@@ -220,6 +279,7 @@ inline void BallFlightPlan(const float cast[3], float s, float k,
   out->gravity =
       gravity * s * throw_math::kGravity / (out->slow * out->slow);
   for (int i = 0; i < 3; ++i) out->v0[i] = speed * cast[i] / out->slow;
+  LimitTopSpeed(out->v0, top_speed);
   // The speed of the ball in the room, with the fall of the first half
   // second.
   const float room =

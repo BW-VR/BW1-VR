@@ -261,9 +261,172 @@ inline void BallFlightChecks() {
   }
 }
 
+// One step of the rule of the game (0x006A1880) on flat land at height 0,
+// with the fields f, the shares of the Fireball and a wind w.
+inline void FloorStep(float p[3], float v[3],
+                      const miracle_throw_math::RuleWorldFields& f,
+                      const float w[3], float dt) {
+  const float kDamping = 0.1f, kAcross = 0.9f, kAlong = 0.1f;
+  for (int i = 0; i < 3; ++i) {
+    v[i] += (w[i] * f.wind * 0.1f - v[i]) * kDamping * dt;
+    p[i] += v[i] * dt;
+  }
+  if (p[1] >= 0.0f) {
+    const float room = v[1] + f.max_speed;
+    const float share = room <= 0.0f ? 0.0f : room >= 1.0f ? 1.0f : room;
+    v[1] -= f.gravity * share * dt;
+    return;
+  }
+  p[1] = 0.0f;
+  if (v[1] >= 0.0f) return;
+  float x = v[0], z = v[2];
+  float length = sqrtf(x * x + z * z);
+  if (x * x + z * z < 1e-4f) {
+    x = 1e-4f;
+    z = 0.0f;
+    length = 1e-4f;
+  }
+  const float drag = fminf(dt * f.ground_drag, length);
+  v[0] = (v[0] - x / length * drag) * kAcross;
+  v[2] = (v[2] - z / length * drag) * kAcross;
+  v[1] *= -kAlong;
+}
+
+struct BounceResult {
+  double hop_t;      // the first hop, seconds
+  float hop_room;    // meters of the room
+  double rest_t;     // the first contact to the rest, seconds
+  float rest_room;   // meters of the room
+  int touches;
+};
+
+// A ball that meets flat land with `speed` m/s of the room, `down` degrees
+// under the level, at the scale s, with the ratio of the rule.
+inline BounceResult BounceOnFlatLand(float s, float ratio, float speed,
+                                     float down) {
+  using namespace miracle_throw_math;
+  const RuleWorldFields game = {100.0f, 30.0f, 50.0f, 40.0f,
+                                0.0f,   10.0f, 20.0f};
+  const RuleWorldFields f = ScaledRuleFields(game, ratio);
+  const float wind[3] = {0.0f, 0.0f, 0.0f};
+  const float a = down / 57.29578f;
+  float p[3] = {0.0f, 0.0f, 0.0f};
+  float v[3] = {0.0f, -s * speed * sinf(a), s * speed * cosf(a)};
+  BounceResult r = {};
+  bool left = false;
+  double t = 0.0;
+  // The step that makes the first contact starts the clock.
+  FloorStep(p, v, f, wind, kBallTurn);
+  const float first = p[2];
+  r.touches = 1;
+  while (t < 60.0) {
+    FloorStep(p, v, f, wind, kBallTurn);
+    t += kBallTurn;
+    if (p[1] > 0.0f) {
+      left = true;
+    } else if (left) {
+      left = false;
+      ++r.touches;
+      if (r.hop_t == 0.0) {
+        r.hop_t = t;
+        r.hop_room = (p[2] - first) / s;
+      }
+    }
+    if (BallIsAtRest(v, kBallRestSpeed, ratio)) {
+      r.rest_t = t;
+      r.rest_room = (p[2] - first) / s;
+      break;
+    }
+  }
+  return r;
+}
+
+// AFTER THE FIRST CONTACT (miracle_bounce_scale, docs/throw.md, "The flight
+// of a thrown Fireball").
+inline void BounceScaleChecks() {
+  using namespace miracle_throw_math;
+  printf("\nA Fireball after its first contact\n");
+  Near("the ratio at 100 units per meter is 1", BounceRatio(100.0f), 1.0,
+       1e-6);
+  Near("the ratio at 447 units per meter is 4.47", BounceRatio(447.0f), 4.47,
+       1e-5);
+  Near("a scale of 0 has the least ratio", BounceRatio(0.0f),
+       kBounceLeastRatio, 1e-6);
+  const RuleWorldFields game = {100.0f, 30.0f, 50.0f, 40.0f,
+                                0.0f,   10.0f, 20.0f};
+  const RuleWorldFields same = ScaledRuleFields(game, 1.0f);
+  Check(same.max_speed == game.max_speed && same.gravity == game.gravity &&
+            same.wind == game.wind && same.ground_drag == game.ground_drag &&
+            same.impact_medium == game.impact_medium &&
+            same.impact_large == game.impact_large,
+        "at the ratio 1 each field of the rule is the field of the game", 1,
+        1);
+  const RuleWorldFields at447 = ScaledRuleFields(game, 4.47f);
+  Near("at 447 the gravity is 134.1", at447.gravity, 134.1, 1e-3);
+  Near("at 447 MaxSpeed is 447", at447.max_speed, 447.0, 1e-3);
+  Near("at 447 the ground drag is 178.8", at447.ground_drag, 178.8, 1e-3);
+  Near("at 447 the wind target is 223.5", at447.wind, 223.5, 1e-3);
+  Near("at 447 the speed of a large impact is 89.4", at447.impact_large, 89.4,
+       1e-3);
+  const float still[3] = {0.0f, 0.0f, 3.0f};
+  Check(BallIsAtRest(still, kBallRestSpeed, 4.47f),
+        "3 units a second is a rest at 447 units per meter", 1, 1);
+  Check(!BallIsAtRest(still, kBallRestSpeed, 1.0f),
+        "3 units a second is no rest at 100 units per meter", 0, 0);
+
+  // The swing of the fault: 2.925 m/s at the contact, 10 degrees down. With
+  // the ratio, each scale has the hop and the rest of 100 units per meter.
+  const BounceResult base = BounceOnFlatLand(100.0f, 1.0f, 2.925f, 10.0f);
+  Check(base.hop_t > 0.2 && base.hop_t < 0.8,
+        "at 100 units per meter the first hop is under 0.8 s", base.hop_t,
+        0.5);
+  const float scales[] = {1.0f, 7.5f, 44.4f, 447.0f, 1000.0f, 4000.0f};
+  for (float s : scales) {
+    const BounceResult r =
+        BounceOnFlatLand(s, BounceRatio(s), 2.925f, 10.0f);
+    char name[120];
+    sprintf_s(name, sizeof(name),
+              "at %.1f units per meter the first hop has the time at 100", s);
+    Near(name, r.hop_t, base.hop_t, 1e-6);
+    sprintf_s(name, sizeof(name),
+              "at %.1f units per meter the first hop has the length at 100",
+              s);
+    Near(name, r.hop_room, base.hop_room, 0.01);
+    sprintf_s(name, sizeof(name),
+              "at %.1f units per meter the time to the rest is the time at "
+              "100", s);
+    Near(name, r.rest_t, base.rest_t, 0.11);
+    sprintf_s(name, sizeof(name),
+              "at %.1f units per meter the way to the rest is the way at 100",
+              s);
+    Near(name, r.rest_room, base.rest_room, 0.05);
+  }
+  // With the game's constants the hop grows with the scale.
+  const BounceResult game447 = BounceOnFlatLand(447.0f, 1.0f, 2.925f, 10.0f);
+  Check(game447.hop_t > 2.5 * base.hop_t,
+        "with the game's constants the hop at 447 is over 2.5 times as long",
+        game447.hop_t, 2.5 * base.hop_t);
+
+  // The cap of the start speed.
+  const float cast[3] = {0.0f, 300.0f, 4000.0f};
+  BallFlight free_ball, capped;
+  BallFlightPlan(cast, 1000.0f, 1.0f, &free_ball);
+  BallFlightPlan(cast, 1000.0f, 1.0f, &capped, 1.0f, 1.0f, 1500.0f);
+  Near("a cap of 1500 gives a speed of 1500",
+       controller_math::Length(capped.v0), 1500.0, 0.01);
+  Near("a cap keeps the direction", UpDegrees(capped.v0),
+       UpDegrees(free_ball.v0), 1e-3);
+  BallFlight slow;
+  BallFlightPlan(cast, 1000.0f, 1.0f, &slow, 1.0f, 1.0f, 9000.0f);
+  Near("a cap over the speed changes nothing",
+       controller_math::Length(slow.v0),
+       controller_math::Length(free_ball.v0), 1e-3);
+}
+
 inline void MiracleThrowChecks() {
   using namespace miracle_throw_math;
   printf("\nA thrown miracle\n");
+  BounceScaleChecks();
 
   // THE SIDE OF A DIRECTION, in the axes of the game (x right, y up, z
   // forward).

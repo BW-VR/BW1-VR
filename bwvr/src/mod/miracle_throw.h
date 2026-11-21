@@ -45,3 +45,15 @@ int MiracleFlightGravityValue();
 int MiracleFlightSpeedValue();
 void MiracleFlightGravityStep(bool back, const char* by);
 void MiracleFlightSpeedStep(bool back, const char* by);
+
+// The debug row "Fireball bounce" (miracle_bounce_scale): 1 lets a ball move
+// in the room after its first contact as it does at 100 units per meter, 0
+// keeps the game's constants. The next throw uses the new value.
+int MiracleBounceValue();
+void MiracleBounceChange(const char* by);
+
+// The debug row "Fireball top speed" (miracle_flight_top_speed): the cap of
+// the start speed of the arc, in world units a second. 0 is no cap. The next
+// throw uses the new value.
+int MiracleTopSpeedValue();
+void MiracleTopSpeedStep(bool back, const char* by);

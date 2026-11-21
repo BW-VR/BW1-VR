@@ -884,7 +884,7 @@ const Switch kSwitches[] = {
      false},
     {kGroupThrow, L"Throw faster", L"Time factor of a throw x10",
      "throw_slow_x10", ThrowSlowValue, ThrowFasterChange, L"",
-     ThrowSlowerChange, true, L"Throw speed"},
+     ThrowSlowerChange, true, L"Flight time"},
     {kGroupThrow, L"Land slower", L"Rate of the land x10",
      "throw_land_rate_x10", ThrowLandRateValue, ThrowLandSlowerChange, L"",
      nullptr, false},

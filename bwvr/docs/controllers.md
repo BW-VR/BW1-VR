@@ -2195,7 +2195,7 @@ release of the button on it chooses it, as on `places`.
 | --- | --- |
 | The tabs at the left | One for each group: View, Picture, Render, Interface, Hand, Throw, Creature, Miracles, Sound, Temple. A press shows the switches of the group. The tab of the group that shows is bright gold |
 | A row with a toggle | A switch with two values. The word of the value, and a slot with a knob of wax: green at the right for the value 1, red at the left for 0. A press anywhere on the row changes it |
-| A row with two arrows | A switch with more values, or with a number. The right arrow makes the step of the test key. The left arrow makes a step back for "Throw speed", "Land speed" and "Video height". For each other switch the left arrow makes the same step as the right arrow, because the change function of a test key steps one way only, and many of them go between the value of the ini and one other value |
+| A row with two arrows | A switch with more values, or with a number. The right arrow makes the step of the test key. The left arrow makes a step back for "Flight time", "Land speed" and "Video height". For each other switch the left arrow makes the same step as the right arrow, because the change function of a test key steps one way only, and many of them go between the value of the ini and one other value |
 | A dim row | A switch that cannot change now (its part is off, its hook is not in, or it is for the other renderer). It says "not now", and a press gives the pulse `refused` |
 | The scroll bar | When the group has more than 10 rows. The ray drags the thumb, and a press on the track goes one view up or down. While the ray is on the window, the stick of the pointing hand forward and back scrolls the list, and it does not zoom then (5.1) |
 | The note | When the ray rests on a row for 0.35 s, a small note of paper shows the name of the switch, what it does, and its ini key |
@@ -2209,7 +2209,7 @@ the trigger belongs to it, as for the panel of places (`ui-layer.md`,
 
 "Throw slower" and "Throw faster" are two switches of the ring with one ini
 key, and so are "Land slower" and "Land faster", and "Video higher" and
-"Video lower". The window has one row for each pair, "Throw speed", "Land
+"Video lower". The window has one row for each pair, "Flight time", "Land
 speed" and "Video height", with the slower step (or the higher area) on the
 left arrow. The table marks that line as a line of the ring only.
 
@@ -2291,7 +2291,7 @@ Desktop runs [R] (the test save `temple`, `debug_menu=1`, Vulkan with
 the window. The word `aimdebug` aims the ray at the parts of
 `debug_test_parts`, and the trigger presses them. In one run the note of a
 row shows after 0.35 s, a toggle changes `god_spawn`, both arrows of "Zoom
-point" step it, the left arrow of "Throw speed" steps it back and the right
+point" step it, the left arrow of "Flight time" steps it back and the right
 arrow steps it again, the stick scrolls the group Render, the ray drags the
 thumb to the top, a press on the track goes one view down, and Close, B and
 the menu button each close the window. `debug_window_test_save` saves the

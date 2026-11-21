@@ -2588,7 +2588,7 @@ debug window : 67 new pictures, 1.34 ms each on average and 5.69 ms at the most.
 The math checks are in `test/controller_math/debug_window_checks.h`
 (`controllers.md`, 10.8). A desktop run opens the window from page 2 of the
 ring and presses a toggle, both arrows of a switch of three values, the
-arrows of "Throw speed", a tab, the stick, the thumb, the track and Close,
+arrows of "Flight time", a tab, the stick, the thumb, the track and Close,
 and closes the window with B and with the menu button.
 
 The check in a headset is in `headset-checks.md`, check 23.

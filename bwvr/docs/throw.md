@@ -1564,6 +1564,21 @@ speed in each second. The game has no contact of a ball with an object.
 ball that comes to rest or comes near the water fades, and the particle
 system removes it.
 
+These values of the rule and its conditions are in world units [V]:
+
+| Value | Fireball | Use |
+| --- | --- | --- |
+| `Gravity` (`+0x24`) | 30 | Units a second squared |
+| `MaxSpeed` (`+0x20`) | 100 | The fall speed at which gravity stops |
+| `WindMagnification` (`+0x2C`) | 50 | The wind target is the wind times this times 0.1 |
+| `GroundDrag` (`+0x3C`) | 40 | Units a second squared, at each step with a contact |
+| `ImpactSpeedSmall`, `Medium`, `Large` (`+0x60` to `+0x68`) | 0, 10, 20 | The level of the sound of the hit |
+| `CutOffSpeed` of `EventConditionAtomBelowSpeed` (`0x0067DAB0`) | 1 | Under this speed the ball starts its fade of 1 s |
+| `CutOffHeight` of the conditions for the land and the water | 2 | The flames on the land and the fade near the water |
+
+`Damping` (0.1 a second) and the bounce (0.9 across, 0.1 along the normal)
+have no unit of length.
+
 The game draws an atom on the line between its last two places when its
 collection has `InterpolateDrawPos` (bit 2 of `AtomCollection+0x38`): the
 draw (`fn_00679920`) blends `AtomCore+0x98` and `+0xD0` by the part of the
@@ -1607,13 +1622,26 @@ the real arc of a thrown object of the same swing (`BallFlightPlan` in
    sound of the hit and a Physical Shield at each step, at the place of the
    arc. After a step in which a ball did not move freely, the ball has its
    first contact: the mod gives it its `GravityScale` back, and the next
-   steps of the game's rule move it as in the plain game. When no ball of
-   the collection flies on its arc, the rest of the game turn is one step
-   of the game's rule. The burn and the trail are the game's.
-6. **The picture.** The mod sets `InterpolateDrawPos` of the collection
+   steps of the game's rule move it. When no ball of the collection flies
+   on its arc, the rest of the game turn is one step of the game's rule.
+   The burn and the trail are the game's.
+6. **After the contact** (`miracle_bounce_scale=1`). For each call of the
+   rule the mod multiplies `Gravity`, `MaxSpeed`, `WindMagnification`,
+   `GroundDrag` and the three impact speeds by `s / 100`, and puts them back
+   after the call. A hook on the speed test of the fade gives `CutOffSpeed`
+   the same ratio for a ball after its contact. So on flat land each step
+   of the ball in the room is the step at 100 units per meter, with the
+   same time, and at 100 units per meter each value is the game's value.
+   The ratio has a lower limit of 0.01, the lowest scale of the God view.
+   The height tests of 2 units stay in world units, because the flames and
+   the water are in the world. Known limit: while another ball of the same
+   collection flies on its arc, a ball after its contact also gets the short
+   steps of the arc, with no drag. Each contact in these steps keeps 90
+   percent of its speed across the land, so this ball slows faster.
+7. **The picture.** The mod sets `InterpolateDrawPos` of the collection
    when it is not set, so the game draws each ball between its last two
    places. The trail and the light follow the ball.
-7. **The end.** The flight on the arc ends at the first contact, after 30
+8. **The end.** The flight on the arc ends at the first contact, after 30
    s of the arc, when the ball leaves its collection, or when the ball has
    no update for 2 s. Over the sea the game ends the ball as in the plain
    game: it fades near the water, and the particle system removes it.
@@ -1641,6 +1669,8 @@ of the Hand) has the game's flight too.
 | `miracle_flight` | 1 | 1: a thrown Fireball flies the real arc of the throw, with the time factor k of `throw_slow_x10`, until its first contact (see "The flight of a thrown Fireball"). It acts with `miracle_throw` 1 or 2 and `throw_law=2`. 0: the game's flight. The debug page has the switch "Miracle flight" in the group Throw |
 | `miracle_flight_gravity_pct` | 40 | The share of the gravity of the arc of a Fireball, in percent (5 to 200). 100 is the arc of a rock. The debug row "Fireball gravity" (100, 70, 50, 40, 30, 20) changes it for the next throw |
 | `miracle_flight_speed_pct` | 130 | The start speed of the arc of a Fireball against the real hand, in percent (50 to 300). 100 is the arc of a rock. The debug row "Fireball speed" (100, 115, 130, 150, 175, 200) changes it for the next throw |
+| `miracle_bounce_scale` | 1 | 1: after its first contact a ball moves in the room as it does at 100 units per meter, at each scale. 0: the game's constants in world units after the contact. The debug switch "Fireball bounce" in the group Throw changes it for the next throw |
+| `miracle_flight_top_speed` | 0 | A cap of the start speed of the arc, in world units a second (0 to 20000). 0 is no cap, so the arc in the room is the same at each scale. A cap makes a throw shorter at a far zoom. The debug row "Fireball top speed" (off, 800, 1500, 3000) changes it for the next throw |
 
 ### The log
 
@@ -1670,6 +1700,18 @@ land, and the game turns and the steps of the rule on the arc. One line
 gives the MaxSpeed, the Gravity and the Damping of the rule and the time of
 a particle step, at the first step on an arc.
 
+Each throw has its own share of 32 lines for the places and the contacts, so
+a late throw of a long session still has its lines. The log has the lines of
+200 throws at most.
+
+At the end of its flight ball 0 has one line, "ball 0 of the Fireball of
+frame N ends": the scale, the ratio and `miracle_bounce_scale`, the number of
+contacts, the first hop (time, m of the room, world units), the time from the
+first contact to the rest or the fade, and the way in m of the room from the
+first contact to the end. The line also counts the steps of the rule whose
+straight path went under the land, with the largest depth, and gives the
+largest move up that the rule made at a contact, both in cm of the room.
+
 ### Checks
 
 `MiracleThrowChecks` in `bwvr/test/controller_math/miracle_throw_checks.h`
@@ -1691,6 +1733,13 @@ or the turn has 16 steps. The arc meets flat land after k times 0.885 s and
 meter, a free step and the steps with a contact (`RuleStepWasFree`), and
 the fan on the arc: a ball 7 degrees to the right, 2 degrees higher and 20
 percent slower than ball 0 of the game keeps these about the arc of ball 0.
+
+`BounceScaleChecks` in the same file runs a copy of the rule on flat land,
+for a ball that meets the land with 2.925 m/s of the room, 10 degrees down.
+At 1, 7.5, 44.4, 447, 1000 and 4000 units per meter the first hop and the way
+to the rest are those of 100 units per meter. With the game's constants the
+hop at 447 is more than 2.5 times as long. The checks also cover the ratio,
+the scaled fields and the cap of the start speed.
 
 ### Desktop runs
 

@@ -390,9 +390,11 @@ game as it is.
   40 percent of the gravity and 130 percent of the speed of a rock
   (`miracle_flight`, `miracle_flight_gravity_pct`,
   `miracle_flight_speed_pct`, `throw.md`, "The flight of a thrown
-  Fireball"). Open: the desktop runs `miracle_run.ps1 -Kind throwdir` and
-  `-Kind throwspeed` with `miracle_flight` 1 and 0, and the feel in a
-  headset.
+  Fireball"). After the contact it moves in the room as it does at 100
+  units per meter (`miracle_bounce_scale`). Open: `-Kind ballscale` at 100,
+  447 and 1000 units per meter on one land slope, the effect of the step of
+  0.1 s on a slope at a far zoom, the short steps that a landed ball gets
+  while another ball of its Fireball flies, and the feel in a headset.
 - **F29. The physics switch.** The launcher row "Physics" (`physics`) gives
   the throw physics of the mod or of the plain game (`throw.md`, "The
   physics switch"). A desktop run of a Fireball with `physics=0` shows the

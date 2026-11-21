@@ -100,7 +100,8 @@ want.
     each scale. Wrong: a throw that goes too short, too far or in a wrong
     direction, a quick set down that throws, or a flight or a landing that
     looks wrong. A Fireball flies as a light ball: flatter and farther than
-    a rock from the same swing. The debug rows "Fireball grav" and "Fireball
+    a rock from the same swing. After it touches the land, it must bounce
+    the same at each zoom. The debug rows "Fireball grav" and "Fireball
     speed" change the next throw (`miracle_flight_gravity_pct`,
     `miracle_flight_speed_pct`). Wrong: an object or a Fireball that leaves
     later than the hand opens, or that stops for a moment just after it
@@ -261,6 +262,9 @@ agents: the log does not tell the item yet.
   ball 0 (`throw.md`, "A thrown miracle"). The lines also give where the
   real arc meets the land, the distance of ball 0 from its arc, and the
   first contact of each ball.
+- **A Fireball that bounces differently at a far zoom.** Log: `ball 0 of the
+  Fireball of frame N ends` gives the scale, the first hop in s and in m of
+  the room, the time to the rest and the way after the first contact.
 - **An Explosion that does not come where the ray points.** Log: `the grip
   casts Explosion at the land point of the ray` gives the land point of the
   ray, the Hand's point and the place that the cast got. A press that cast

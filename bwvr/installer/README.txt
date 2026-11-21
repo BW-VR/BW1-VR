@@ -13,8 +13,10 @@ into a VR headset. You see the world in real stereo 3D, and your head
 turns the view. You play with motion controllers, or with the mouse
 and the keyboard.
 
-The mod adds its own files beside the game. It changes no game file,
-and it does not touch your saved games.
+The mod adds its own files beside the game, and it does not touch
+your saved games. The launcher changes one file of the game: it sets
+a memory flag in runblack.exe and keeps a copy of the original (see
+HOW TO START).
 
 
 WHAT YOU NEED
@@ -115,7 +117,8 @@ them too.
 The Lionhead logo is in 3D around you. Your view goes between the
 orbs on the path of the game, and then back to the place from which
 the logo shows. The view does not turn: you look where your head
-looks. The menu button skips the logo. If the motion is not
+looks. Move your hands through the orbs to push them. The menu
+button skips the logo. If the motion is not
 comfortable, set intro_motion=2 in bwvr.ini: the orbs are then a model
 in front of you, and the room stays still. intro_motion=0 gives a
 still view of the logo.
@@ -127,10 +130,11 @@ THE SETTINGS
 These are some of the groups of the launcher.
 
   Picture         How big a picture each eye gets, a margin around
-                  the view, how sharp the textures are, how far out
-                  models keep their full detail, and how far out
-                  models are drawn at all. The fog moves out with the
-                  cull distance, so far models go into the fog.
+                  the view, how sharp the textures are,
+                  anti-aliasing for smooth edges (Vulkan only), how
+                  far out models keep their full detail, and how far
+                  out models are drawn at all. The fog moves out with
+                  the cull distance, so far models go into the fog.
 
   View            The cut scenes, and the Video Capture Mode. A cut
                   scene plays on a screen in front of you. "Around
@@ -142,13 +146,15 @@ These are some of the groups of the launcher.
                   capture tool. "Lower capture window" moves that part
                   down from the middle of your view.
 
-  Moving around   Turns in steps, the zoom with the stick, the walk
-                  with the left stick, and a blink when you jump or
+  Moving around   A turn in steps or a smooth turn, the zoom with the
+                  stick, the walk or the fly with the left stick, a
+                  comfort vignette, and a blink when you jump or
                   turn.
 
-  Controllers     The glow at the Hand, the grab of the world, and
-                  "Show 3D controller for hints" (see HINTS AND
-                  SUBTITLES).
+  Controllers     The glow at the Hand, the grab of the world,
+                  "Physics" (VR, or Original for the floaty throw of
+                  the game), and "Show 3D controller for hints" (see
+                  HINTS AND SUBTITLES).
 
   Launcher        "Use 4 GB of memory": the launcher gives the game
                   4 GB of memory space before each start (see HOW TO
@@ -162,6 +168,12 @@ the tooltip tells you what the setting does.
 
 If you are not sure, leave the settings as they are. Each default is
 a tested value.
+
+You can also change the most used settings in the headset. Open the
+VR Settings window from the ring (see THE RING). Its tab Controls
+shows your controllers, and you can give a job to a different button
+of the same controller. At the first start, a welcome page shows the
+main controls, with the buttons VR Settings and Play.
 
 Some settings are not in the launcher. You can set them in the file
 bwvr.ini in the game folder, in the section [bwvr]. The text of this
@@ -179,14 +191,17 @@ mouse.
 When you move with the left stick, the view goes up and down
 smoothly with the hills, so the land stays below your hands. When you
 do not move, the view stays where it is. Zoom out to see more of the
-island. Zoom in until the world is life size. A cut scene of
-the game plays on a screen in front of you, and the God view comes
+island. Zoom in until you are as small as a villager. A cut scene
+of the game plays on a screen in front of you, and the God view comes
 back after it. When you load a saved game, the God view starts again
 at the place of that game.
 
 With motion controllers, the Hand is your own hand, at the size of
 your hand, at every zoom. Put your hand down on the land to touch it
-or to take a villager.
+or to take a villager. The drawn hand stops at the land, a house, a
+rock and a tree trunk. When your head goes into one of them, a gold
+and red overlay covers the view. Set head_blinder=0 in bwvr.ini to
+turn the overlay off.
 
 Your two hands look like the Hand of the game. The mod reads the hand
 from your own copy of the game. The fingers follow the trigger and
@@ -223,7 +238,9 @@ hand_feel=0 for fingers that follow the trigger and the grip only.
                       (key god_zoom_about), and "Zoom with the stick"
                       gives a zoom while you hold the stick (key
                       god_zoom_smooth).
-  Stick left, right   Turn one step. You stay where you are.
+  Stick left, right   Turn one step, or turn smoothly with the value
+                      Smooth of "Turn" in the launcher. You stay
+                      where you are.
   Left grip           Grab the land and pull it to move. Pull up to
                       raise the land. Pull down to lower it. The land
                       stops when it is too near or too far below you.
@@ -239,8 +256,8 @@ hand_feel=0 for fingers that follow the trigger and the grip only.
                       makes you ill, move with the left grip and
                       with A.
   Left menu button    Open the game menu.
-  Y (left hand)       Hold it for the ring: the Temple, your Creature,
-                      the leashes and more. See MOTION CONTROLLERS.
+  Y (left hand)       Hold it for the ring: the leashes, places, VR
+                      Settings and more. See THE RING.
   Trigger             Click on things. A drag with the trigger does
                       not move the land. Use the left grip.
   A                   Hold it and an arc shows where you will go. A
@@ -360,8 +377,8 @@ Press them with the mouse still:
   Number pad keys     Switch between two ways of one behavior, while
                       you play. See TEST KEYS OF THE NUMBER PAD.
 
-With "Debug menu" on, the ring has the same switches on its debug
-page, so you can change them in the headset (see THE RING).
+With "Debug menu" on, the debug window has the same switches, so you
+can change them in the headset (see THE RING).
 
 
 MOTION CONTROLLERS
@@ -427,6 +444,8 @@ controller. The left menu button opens the game menu with each hand.
   Left stick          In the God view, push it to move over the land.
                       Forward is where your head faces. You stop when
                       you let the stick go.
+  Left stick click    Hold it for 1 second with the stick at rest to
+                      recenter the view, as F11 does.
   Left menu button    Open the game menu. With the left hand as the
                       pointing hand, the same button does it.
   Y (left hand)       Hold it, and a ring of items opens at your left
@@ -503,13 +522,26 @@ vr_keyboard=0 in bwvr.ini.
 THE RING
 --------
 
-The ring holds what the plain game has only on the keyboard. An item
-acts as its key does in the game. The first page has: go to the
-Temple, go to your Creature, go to the next town, the Leash of
-Learning, the Leash of Compassion, the Leash of Aggression, go into
-the Temple, and More. Keep your hand on More for a moment to get the
-second page: set a bookmark at your Hand, go to the next bookmark, go
-back, pause, the help of the game, the villager names and quick save.
+The ring holds what the plain game has only on the keyboard, and the
+VR Settings of the mod. Each item is a wax seal with an icon and a
+name, and it acts as its key does in the game. The first page has:
+the leashes, the places, recenter, quick save, More, VR Settings, the
+villager names and pause. Keep your hand on More for a moment to get
+the second page: a snapshot for a report, the help of the game, the
+villager details, and faster and slower for the speed of the game.
+
+The item Leash opens a sheet with a turning picture of each leash:
+Compassion, Learning and Aggression. A leash that your Creature does
+not have is dim.
+
+The item Places opens a sheet with Back, your Creature, the next
+town, the Temple, the way into the Temple and the whole land. Under
+them are your bookmarks. Choose a number to go to that bookmark, or
+the bin under it to remove it. Choose the plus to set a new one: the
+pointing hand shows its ray, so point at the land or at an object
+and close the grip. B stops. The aim stays on a villager or an
+animal that walks.
+
 In the Temple the ring has the rooms and the way out. An item that
 cannot act now is dim, and the ring says why. The ring stays where it
 opened. It does not follow your hand. A grip does not move the land
@@ -524,8 +556,8 @@ follows the Creature.
 
 To change the items, set radial_menu_items, radial_menu_items2 and
 radial_menu_items_temple in bwvr.ini: 8 words with commas, from the
-top and clockwise. The words are temple, enter, creature, town, land,
-leash_learning, leash_compassion, leash_aggression, leash_next,
+top and clockwise. The words are leash, places, recenter, settings,
+snapshot, temple, enter, creature, town, land, leash_learning, leash_compassion, leash_aggression, leash_next,
 leash_previous, mark_set, mark_go, mark_back, pause, slower, faster,
 help, names, details, save, load, playground, hall, room_creature,
 room_challenge, room_save, room_options, room_library, leave, more,
@@ -536,17 +568,13 @@ the stick only. Set radial_menu_reach_cm to change how far your hand
 moves to pick an item (5), and radial_menu_size_pct for the size of
 the ring (100).
 
-The debug page is for tests. Turn on "Debug menu" in the launcher
+The debug window is for tests. Turn on "Debug menu" in the launcher
 (debug_menu=1), and the ring gets the item Debug. On the second page
 it takes the place of the help of the game, and in the Temple it
-takes the empty slot. Keep your hand on Debug for a moment to get the
-groups: View, Picture, Render, Interface, Hand, Throw, Creature,
-Sound and Temple. Keep your hand on a group to get its switches. Each
-switch shows its value now, for example "One walk" with "on" under
-it. Choose a switch, and it changes at once, as its test key does.
-For 30 seconds after a choice, the ring opens on the same page again.
-Back goes to the page before. A switch that cannot change now is not
-on the page. The debug page does not need test_keys=1.
+takes the empty slot. Choose it to open a window with a tab for each
+group of switches. Point with the ray and pull the trigger to change
+a switch. It changes at once, as its test key does. The debug window
+does not need test_keys=1.
 
 
 THE TEMPLE
@@ -922,16 +950,19 @@ game then drops the object at once, and does not wait for its next
 game turn. Set release_at_once=0 in bwvr.ini to make the game wait
 for its next game turn.
 
-In the God view, an object that you throw flies as a real object flies in your room: as fast as your hand
-moved, on the same arc, for the same time. Swing your hand and open
-the grip in the swing. A hard throw can kill a villager, as in the
+In the God view, an object that you throw flies like a light ball
+that you throw in your room, at each zoom. When you zoom out, the
+same throw goes farther in the world. The object leaves your hand
+one frame after you open the grip. Swing your hand and open the grip
+in the swing. A hard throw can kill a villager, as in the
 game. Open the grip with a still hand to put an object down. If your
 hand is more than 15 cm over the land, the object falls and does not
 go to the land at once. Set release_fall_cm in bwvr.ini to change this
 height, or release_fall_cm=0 to put the object down at each height.
-A miracle flies as the game makes it fly. Set throw_law=1 in
-bwvr.ini for the slower flight of the physics of the game, or
-throw_law=0 for a throw that scales your hand speed by a fixed gain.
+A Fireball flies the same way as a lighter ball, and it bounces the
+same in your room at each zoom. For the throw of the plain game, set
+"Physics" in the launcher to Original. Thrown things then fly more
+slowly and float more.
 
 After a thrown object touches the land, it slows to the pace of the
 game, bounces low and comes to rest soon. Set throw_land=0 in bwvr.ini
@@ -955,15 +986,17 @@ MIRACLES
 
 To cast a miracle, hold B and draw its gesture in the air: the same
 shape that you draw with the mouse. Draw it in front of you, as you
-see it, about 30 cm across. Moves of the Hand without B do not draw.
+see it, about 30 cm across. A gold trail follows your fingertip while
+you draw. Moves of the Hand without B do not draw.
 
 The spell book is the other way. Tap B on your right hand, or press
 X on your left hand: a book opens over your left hand with each miracle that your Worship Sites can
 give you now, each in its orb of the game. Put your right hand
 on a miracle: a gold halo shows on it, the controller ticks, and the
-card on your hand names it. Close the grip to take the miracle. The
-game takes the prayer power as for the gestures, and the Miracle
-comes into your Hand. A grey miracle is one that the game refuses
+card on your hand names it. Close the grip and pull your hand 20 cm
+away from the book. The game takes the prayer power as for the
+gestures, and the miracle snaps into your Hand. Open the grip sooner
+to put the miracle back. A gray miracle is one that the game refuses
 now, and the card says why. Tap B or press X again to close the book.
 A tap is short, with a still hand: a longer press of B draws a
 gesture. With the left hand as the pointing hand, Y or A opens the
@@ -1008,8 +1041,11 @@ says what the grip does with it:
                       Open the grip to stop.
   A fireball          Close the grip, swing your hand and open the
                       grip in the swing.
-  A shield, a storm   Close the grip, draw a circle with your hand
-                      and open the grip.
+  A shield, a storm   Point at the land and close the grip. The ray
+                      draws a circle on the land. The miracle casts
+                      when the circle closes.
+  An Explosion        Point the ray at the land, where a ring shows,
+                      and close the grip.
 When the game refuses a cast, the card says why.
 
 To cancel a miracle, shake your hand or press B for a short time. As
@@ -1021,8 +1057,9 @@ to turn off the miracle in your Hand.
 YOUR CREATURE
 -------------
 
-To stroke or slap your Creature, put your hand on it and close the
-grip. The view does not move, and your hand stays open: the index
+To stroke or slap your Creature, put your open hand on its body. A
+slow move strokes it, and a fast hit slaps it. You can also close
+the grip on it. The view does not move, and your hand stays open: the index
 finger for a small Creature, the flat hand for a large one. The flat
 hand shows when the Creature is three quarters as tall as your hand
 is long, or more. The hand opens half a second after you close the
@@ -1038,8 +1075,9 @@ touch are at your palm. Set creature_palm_point=0 in bwvr.ini to keep
 them at the tip of your index finger.
 The glow is pale gold while your hand touches the Creature. Open the
 grip to stop. A short press of the grip on your Creature changes its
-leash, as a short click with the mouse does. When the interface panel
-is set up, the panel of the Creature shows near the Creature.
+leash, as a short click with the mouse does. The panel of the
+Creature shows over its head while your hand is at it, and for 3
+seconds after your hand leaves.
 
 To give an object to your Creature, take the object, hold it in the
 body of your Creature and open the grip. Your Creature has a gold halo
@@ -1238,6 +1276,16 @@ KNOWN ISSUES
 This is an alpha build for testers. Expect faults. Save the game
 before you start a quest. These faults are known:
 
+  - Some testers still get crashes, up to two a day. Save often.
+    Send bwvr.log and bwvr-crash.dmp with a report (see SUPPORT).
+  - With the Vulkan renderer, some characters of a quest can show
+    white or invisible.
+  - A Pimax can show a double picture (issue 12). This version
+    changes how such a headset draws each eye, but no one has
+    tested it on a Pimax yet.
+  - Anti-aliasing turns off with "Fewer pixels away from the
+    middle". It also turns off with foveated rendering on a GPU
+    that does not allow both.
   - A catch of an object in the air, and a grip on an object that
     still rolls, put the object in your hand at once. This is tested
     on the desktop only, and not in a headset.
@@ -1269,8 +1317,8 @@ and level, whatever the camera of the game does. This keeps the
 world still when you tilt your head. The cost is that you look down
 at the land, as you would from a real place above an island.
 
-The interface stays in front of your view. Subtitles, help text and
-tooltips follow your head. They do not hang in the world.
+Interface parts of the game that are not on a card or a panel stay
+in front of your view and follow your head.
 
 Smoke and other particles shimmer. The game asks for new random
 numbers for each eye, so each eye gets a different jitter.
@@ -1283,8 +1331,8 @@ the edge of a step can get a different shape in the two eyes, and
 the two pictures then do not join.
 
 The frame rate drops in busy scenes. If it gets too low, lower the
-resolution scale, or bring the model detail distance or the model
-cull distance in.
+resolution scale or the anti-aliasing, or bring the model detail
+distance or the model cull distance in.
 
 The mod uses the refresh rate that you set for the headset. To ask
 the headset for a different rate, set refresh_rate_hz in bwvr.ini to
@@ -1309,7 +1357,7 @@ first line of the log gives the build of the mod.
 To report a fault:
 
 1. Open the Issues page of the project on GitHub:
-   https://github.com/BW1-VR/BW1-VR/issues
+   https://github.com/BW-VR/BW1-VR/issues
 2. Select "New issue", and fill in the form.
 3. Attach bwvr.log and each bwvr-old file of the same day.
 4. If the game crashed, put bwvr-crash.dmp from the game folder in
@@ -1340,8 +1388,9 @@ HOW TO REMOVE IT
 The uninstaller takes away only the files that the mod put in the
 game folder, and the log. If the game folder held a ddraw.dll from
 another program before you installed the mod, the installer kept
-that file, and the uninstaller puts it back. Your saved games, your
-creature and the game files are never touched.
+that file, and the uninstaller puts it back. It also puts the
+original runblack.exe back. Your saved games and your creature stay
+as they are.
 
 The uninstaller asks if you want to keep your settings (bwvr.ini). A
 later install of the mod starts where you left off if you keep them.

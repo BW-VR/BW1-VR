@@ -70,8 +70,9 @@ release.
 3. To update, run a newer installer over the old build. You do not need to
    remove the old build first.
 
-The mod adds its own files beside the game. It changes no file of the game,
-and it does not touch your saved games.
+The mod adds its own files beside the game, and it does not touch your saved
+games. The launcher sets one memory flag in `runblack.exe` and keeps a copy of
+the original. The uninstaller puts the original back.
 
 ## 3. Set up your headset
 
@@ -110,7 +111,7 @@ Creature select". To keep your Creature, select "Keep your old Creature".
 | Trigger | Click on a thing or in a menu. With the leash on, point and press to send your Creature there |
 | Stick | Up and down: zoom. Left and right: turn |
 | A | Hold to aim a teleport, let go to go. B cancels |
-| B | Hold and draw a gesture in the air to cast a miracle |
+| B | Hold and draw a gesture in the air to cast a miracle. Tap to open the spell book |
 
 ### The left controller
 
@@ -119,6 +120,9 @@ Creature select". To keep your Creature, select "Keep your old Creature".
 | Grip | Grab the land and pull to move. With both grips: turn and zoom |
 | Stick | Move over the land, in the direction of your head. "Movement type" in the launcher chooses Walk or Fly |
 | Y | Hold for a ring menu: leashes, places and bookmarks, recenter, quick save, VR Settings |
+| X | Open or close the spell book |
+| Stick click | Hold for 1 second to recenter the view |
+| Palm up | Shows how to draw the gesture of each miracle |
 | Menu button | The game menu. In a menu, point with the line and click with the trigger |
 
 The full list is in "Black & White VR Mod readme.txt" in your game folder.
@@ -131,7 +135,8 @@ The full list is in "Black & White VR Mod readme.txt" in your game folder.
   thing is outside your influence.
 - Save the game before you start a quest. Quick save is on the first page
   of the ring menu.
-- If the frame rate is low, lower "Resolution scale" in the launcher.
+- If the frame rate is low, lower "Resolution scale" or "Anti-aliasing" in
+  the launcher.
 - A walk or a fly with the left stick makes some people ill. If it makes you
   ill, do not push the left stick. Move with the left grip and with A.
 - If you see no hints and no subtitles, open the options of the game, then

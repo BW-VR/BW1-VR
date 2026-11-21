@@ -85,6 +85,11 @@ bool ThrowPhysicsCatchFrom(void* object, float matrix[12]);
 // back after a wait. 0: each substep has its time of the flight. With
 // test_keys=1, Ctrl with Scroll Lock goes between the two.
 void ThrowPhysicsSetDraw(int rule);
+// throw_from_opening: 1 starts a flight at the place and the time of the
+// opening of the grip, and the picture comes from the Hand to the arc
+// (docs/throw.md, "The release at once"). 0 starts it at the place in the
+// Hand at the release action.
+void ThrowPhysicsSetFromOpening(bool on);
 // throw_arc_objects: 1 stops the real arc of a thrown object where it goes
 // into the box of the mesh of an object near the Hand, in the time before
 // the game's physics has the object (docs/throw.md, "The objects on the

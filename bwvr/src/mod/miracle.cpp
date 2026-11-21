@@ -95,6 +95,7 @@ bool HandDirectRecordTarget(void* object, const float position[3]);
 bool HandDirectOffer(void* object, const float position[3], float radius,
                      const char** words);
 float HandDirectRoomUnits();
+void HandDirectCastSent();
 bool HandDirectRealPoint(float out[3]);
 
 namespace {
@@ -776,6 +777,7 @@ int __fastcall h_CastAtLand(void* self, void* unused) {
       watch && before == 0 &&
       *reinterpret_cast<const int32_t*>(f.face + kFaceDropTurn) != 0;
   if (thrown) MiracleThrowAfterCast(sent);
+  if (thrown && sent) HandDirectCastSent();
   if (sent) SaidCast(f, false);
   return result;
 }
@@ -797,6 +799,10 @@ int __fastcall h_CastOnObject(void* self, void* unused) {
   const bool sent =
       have && before == 0 &&
       *reinterpret_cast<const int32_t*>(f.face + kFaceDropTurn) != 0;
+  if (watch && sent && f.info.cast == miracle_math::kCastThrow &&
+      f.info.gesture == 0) {
+    HandDirectCastSent();
+  }
   if (watch && sent) SaidCast(f, true);
   if (other && sent) VillageApplied(f.held, object);
   return result;

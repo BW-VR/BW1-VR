@@ -1276,6 +1276,72 @@ inline void ThrowChecks() {
     Check(!BallsNear(pig, 1.0f, m, 10.0f, 1.0f),
           "with a margin of 1 unit it is not near", 0, 0);
   }
+  // THE FLIGHT FROM THE OPENING OF THE GRIP. A grip at 4 m/s along x, with a
+  // sample each 10 ms, at 2 units in a meter at the life size scale. The grip
+  // opens at 25 ms, and the release action comes at 50 ms.
+  {
+    MotionSample path[6];
+    for (int k = 0; k < 6; ++k) {
+      path[k].time = k * 0.010;
+      path[k].point[0] = static_cast<float>(8.0 * path[k].time);
+      path[k].point[1] = 1.0f;
+      path[k].point[2] = 0.0f;
+    }
+    float at[3];
+    Check(GripPlaceAt(path, 6, 0.025, at), "the opening is in the samples", 1,
+          1);
+    Near("the place at the opening is between two samples", at[0], 0.2, 1e-5);
+    Check(!GripPlaceAt(path, 6, -0.001, at),
+          "a time before the first sample has no place", 0, 0);
+    Check(GripPlaceAt(path, 6, 0.9, at), "a time after the last sample", 1, 1);
+    Near("it has the newest place", at[0], 0.4, 1e-5);
+    // s = 100 units a meter, so 0.2 units at the life size scale (0.1 m) are
+    // 10 world units.
+    float move[3];
+    Check(GripMoveSince(path, 6, 0.025, identity, 2.0f, 100.0f, move),
+          "the move since the opening exists", 1, 1);
+    Near("the grip moved 10 world units", move[0], 10.0, 1e-3);
+    Near("it did not move up", move[1], 0.0, 1e-5);
+    const float turned[9] = {0, 0, 1, 0, 1, 0, -1, 0, 0};
+    float expected[3];
+    const float room_move[3] = {0.2f, 0.0f, 0.0f};
+    controller_math::Apply(turned, false, room_move, expected);
+    Check(GripMoveSince(path, 6, 0.025, turned, 2.0f, 100.0f, move),
+          "the move goes through the room basis", 1, 1);
+    for (int i = 0; i < 3; ++i) {
+      Near("the move has the axes of the room", move[i], expected[i] * 50.0f,
+           1e-3);
+    }
+    Check(!GripMoveSince(path, 6, 0.05 - kOpeningMost - 0.001, identity, 2.0f,
+                         100.0f, move),
+          "an opening older than the limit gives no move", 0, 0);
+    Check(!GripMoveSince(path, 6, 0.06, identity, 2.0f, 100.0f, move),
+          "an opening after the newest sample gives no move", 0, 0);
+    // The picture at the time of the release is the place in the Hand.
+    const float drawn[3] = {10.0f, 2.0f, -3.0f};
+    const float arc[3] = {11.0f, 2.5f, -3.0f};
+    const double t = 0.025;
+    float lead[3];
+    Check(OpeningLead(drawn, arc, t, lead), "a lead exists at 25 ms", 1, 1);
+    const float left = CatchUpLeft(t, kCatchUp);
+    for (int i = 0; i < 3; ++i) {
+      Near("the arc and the lead give the place in the Hand",
+           arc[i] + lead[i] * left, drawn[i], 1e-4);
+    }
+    Check(!OpeningLead(drawn, arc, kCatchUp, lead),
+          "at the end of the catch up no lead is left", 0, 0);
+    // A turn at once. Turn 50 is due at 5000 ms.
+    Check(TurnEarlyMs(4960, 50) == 40,
+          "a turn 40 ms early moves the clock 40 ms", TurnEarlyMs(4960, 50), 40);
+    Check(TurnEarlyMs(5000, 50) == 0, "a turn that is due moves no clock",
+          TurnEarlyMs(5000, 50), 0);
+    Check(TurnEarlyMs(5030, 50) == 0, "a late turn moves no clock",
+          TurnEarlyMs(5030, 50), 0);
+    Check(TurnEarlyMs(4900, 50) == 100, "at most one turn, 100 ms",
+          TurnEarlyMs(4900, 50), 100);
+    Check(TurnEarlyMs(4000, 50) == 0, "a clock far behind does not move",
+          TurnEarlyMs(4000, 50), 0);
+  }
 }
 
 }  // namespace throw_checks

@@ -627,6 +627,7 @@ int g_throw_tree_settle = 1;
 int g_throw_turn = 1;
 int g_throw_land_rest = 1;
 int g_throw_draw = 1;
+int g_throw_from_opening = 1;
 int g_throw_arc_objects = 1;
 int g_throw_shield = 1;
 // The take of an object that comes to rest (throw_physics.cpp).
@@ -1642,6 +1643,9 @@ void ReadSettings() {
     // the picture of a thrown object, and the picture does not go back to a
     // place behind a guess. 0 gives each substep its time of the flight.
     g_throw_draw = number("throw_draw", 1);
+    // throw_from_opening: 1 starts a flight at the place and the time of the
+    // opening of the grip. 0 starts it at the release action.
+    g_throw_from_opening = number("throw_from_opening", 1);
     // throw_arc_objects: 1 stops the real arc of a thrown object at the box
     // of the mesh of an object near the Hand, before the game's physics has
     // the object. 0 stops it at the land only.
@@ -2160,6 +2164,7 @@ void StartVrStep() {
         ThrowPhysicsSetTake(g_catch_rest_guard != 0, g_catch_rest_test);
         ThrowPhysicsSetCatch(g_catch_at_once);
         ThrowPhysicsSetDraw(g_throw_draw);
+        ThrowPhysicsSetFromOpening(g_throw_from_opening != 0);
         ThrowPhysicsSetArcObjects(g_throw_arc_objects != 0);
         ThrowPhysicsSetShield(g_throw_shield != 0);
         ThrowPhysicsInstallEarly();

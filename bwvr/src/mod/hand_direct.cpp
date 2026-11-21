@@ -368,6 +368,22 @@ const int32_t kTakeEndAction = 6;
 // 0x0054CD45 and runs one game turn for a yes. [V]
 const uintptr_t kDoATurn = 0x0054C4A0;
 const int kGameFlags = 0x14;  // GGame: bit 4 is the pause
+// The packets of a frame. The senders put them in the buffer at GGame+0x5318,
+// and its first byte is their count. fn_005525E0 (thiscall on GGame) writes
+// the buffer to the session. GGame::Loop calls it at 0x0054D291, after
+// ProcessNetworkPackets at 0x0054D28A. A game turn reads only the session.
+// The turn test at 0x0054CD52 allows one turn a frame in a single player
+// game, and 0x00D01978 counts the turns of this frame. [V]
+const uintptr_t kFlushPackets = 0x005525E0;
+const int kGamePackets = 0x5318;
+const uintptr_t kTurnsThisFrame = 0x00D01978;
+// The clock of the game turns (LHTimer in GGame). The game time in ms is
+// (GetTickCount - kTimerTicks) * kTimerSpeed + kTimerElapsed, and a turn is
+// due when it is at or past 100 times kGameTurnCount (0x0054C4AF). [V]
+const int kTimerTicks = 0x205E68;
+const int kTimerElapsed = 0x205E6C;
+const int kTimerSpeed = 0x205E70;
+const int kGameTurnCount = 0x205A40;
 // THE CLOCK OF A PRESS (docs/grab.md, "The grip holds"). fn_005D1740 keeps
 // the clock and the game turn of a press on an object in GInterface+0x454
 // and +0x458. The clock is the one that LH3DRender::StartFrame writes at
@@ -1413,6 +1429,10 @@ bool g_take_end_test = false;        // the ask of this frame is the test's
 // turn gets a yes.
 int g_turn_now = 0;
 bool g_turn_on = true;            // release_at_once
+int g_turn_flush = 2;             // release_flush: 0, 1 or 2
+bool g_cast_turn = true;          // cast_at_once
+int g_turn_logs = 0;
+const int kMaxTurnLogs = 80;
 uint64_t g_turns_asked = 0;
 uint64_t g_turns_given = 0;
 uint64_t g_release_frame = 0;     // the frame of the last release action
@@ -3662,9 +3682,8 @@ bool Multiplayer();
 
 // A GAME TURN NOW (docs/throw.md, "The release at once"). The game runs its
 // packets once a game turn, 10 times a second. A release of the Hand is two
-// packets (0x4D and the drop), and the end of a take is one (0x1C). So after
-// the release action the object stayed in the Hand until the next turn, up to
-// 100 ms, and it went on with the real hand.
+// packets (0x4D and the drop), and the end of a take is one (0x1C). Until a
+// turn runs them, the object stays in the Hand.
 //
 // After an interface step that sends such packets, the next ask of the game
 // for a turn gets a yes (h_DoATurn). The game counts that turn as each turn,
@@ -3672,7 +3691,30 @@ bool Multiplayer();
 // its own time. The game does not run faster. Never in a multiplayer game,
 // where all players must run the same turns, and never while the game is
 // paused.
+//
+// The interface step of a frame comes after the turn of that frame, and the
+// game writes its packets to the session after the turn of the next frame.
+// So a turn at the start of the next frame must write them first, or it runs
+// with no packets and they wait for the turn after it (release_flush=1).
+//
+// A turn that comes E ms early leaves E + 100 ms to the turn after it. The
+// picture of a thrown object and of a Fireball moves between two turns, so it
+// stops for E ms in that time. With release_flush=2 the clock of the game goes
+// forward by E, and the next turn comes 100 ms after this one. Each release
+// puts the game time up to 100 ms ahead of the real time.
 const int kTurnNowFrames = 3;
+// What release_flush does, for the log.
+const char* ReleaseFlushWords() {
+  return g_turn_flush == 2
+             ? "the turn at once has the packets of the release, and the next "
+               "turn comes 100 ms after it"
+         : g_turn_flush == 1
+             ? "the turn at once has the packets of the release, and the next "
+               "turn keeps its own time"
+             : "the packets of a release wait for the turn after the turn at "
+               "once";
+}
+
 void TurnNow() {
   if (!g_turn_on || !g_turn_hooked || !g_owns) return;
   g_turn_now = kTurnNowFrames;
@@ -3681,10 +3723,41 @@ void TurnNow() {
 
 int __fastcall h_DoATurn(void* game, void* unused) {
   const int due = o_DoATurn(game, unused);
-  if (due != 0 || g_turn_now <= 0 || game == nullptr) return due;
+  if (g_turn_now <= 0 || game == nullptr) return due;
+  // release_flush=0: only a turn that is not due takes the request, and it
+  // runs with the packets that the session has.
+  if (g_turn_flush == 0 && due != 0) return due;
   const uint32_t flags = *reinterpret_cast<const uint32_t*>(
       static_cast<const uint8_t*>(game) + kGameFlags);
   if ((flags & 4) != 0 || Multiplayer()) return due;
+  if (g_turn_flush != 0) {
+    // The game asks again after the turn of this frame, and it runs no second
+    // turn. The request stays for the next frame.
+    if (*reinterpret_cast<const uint32_t*>(kTurnsThisFrame) != 0) return due;
+    uint8_t* bytes = static_cast<uint8_t*>(game);
+    const int packets = bytes[kGamePackets];
+    reinterpret_cast<void(__thiscall*)(void*)>(kFlushPackets)(game);
+    int early = 0;
+    if (g_turn_flush == 2) {
+      const uint32_t ticks =
+          GetTickCount() - *reinterpret_cast<const uint32_t*>(bytes + kTimerTicks);
+      uint32_t* elapsed = reinterpret_cast<uint32_t*>(bytes + kTimerElapsed);
+      const float speed = *reinterpret_cast<const float*>(bytes + kTimerSpeed);
+      const int now_ms = static_cast<int>(static_cast<float>(ticks) * speed +
+                                          static_cast<float>(*elapsed));
+      early = throw_math::TurnEarlyMs(
+          now_ms, *reinterpret_cast<const uint32_t*>(bytes + kGameTurnCount));
+      *elapsed += static_cast<uint32_t>(early);
+    }
+    if (g_turn_logs < kMaxTurnLogs) {
+      ++g_turn_logs;
+      ModLog("hand throw   : a game turn runs at once on frame %llu with %d "
+             "packets of the interface. The game's own turn was %s. The clock "
+             "of the game went forward by %d ms (release_flush=%d)",
+             g_frame, packets, due != 0 ? "due" : "not due", early,
+             g_turn_flush);
+    }
+  }
   g_turn_now = 0;
   ++g_turns_given;
   return 1;
@@ -3737,6 +3810,36 @@ void HandDirectReleaseAtOnceChange(const char* by) {
 }
 int HandDirectReleaseAtOnceValue() {
   return g_installed ? (g_turn_on ? 1 : 0) : kDebugCannot;
+}
+
+// release_flush goes 2, 0, 1 and back to 2.
+void HandDirectReleaseFlushChange(const char* by) {
+  if (!g_installed || !g_turn_hooked) return;
+  g_turn_flush = (g_turn_flush + 1) % 3;
+  ControllersGesturePulse(0.5f, g_turn_flush == 2 ? 0.30f : 0.08f);
+  ModLog("hand throw   : %s: release_flush is %d now, frame %llu: %s", by,
+         g_turn_flush, g_frame, ReleaseFlushWords());
+}
+int HandDirectReleaseFlushValue() {
+  return g_installed && g_turn_hooked ? g_turn_flush : kDebugCannot;
+}
+
+// cast_at_once: a thrown miracle asks for a game turn at once.
+void HandDirectCastAtOnceChange(const char* by) {
+  if (!g_installed || !g_turn_hooked) return;
+  g_cast_turn = !g_cast_turn;
+  ControllersGesturePulse(0.5f, g_cast_turn ? 0.30f : 0.08f);
+  ModLog("hand throw   : %s: cast_at_once is %d now, frame %llu", by,
+         g_cast_turn ? 1 : 0, g_frame);
+}
+int HandDirectCastAtOnceValue() {
+  return g_installed && g_turn_hooked ? (g_cast_turn ? 1 : 0) : kDebugCannot;
+}
+
+// For miracle.cpp: the game sent the packets of a thrown miracle in this
+// interface step.
+void HandDirectCastSent() {
+  if (g_cast_turn) TurnNow();
 }
 
 // Ctrl and Page Up: catch_moving goes from 3 to 2 to 1 to 0 and back to 3.
@@ -4243,7 +4346,8 @@ void LogRelease() {
     ++g_release_logs;
     if (held != g_release_object) {
       ModLog("hand throw   : the object left the Hand %llu frames after the "
-             "release action, frame %llu", frames, g_frame);
+             "release action, frame %llu. The grip opened %.0f ms before",
+             frames, g_frame, (NowSeconds() - g_latch.time) * 1000.0);
     } else {
       ModLog("hand throw   : the Hand still holds the object %llu frames after "
              "the release action, so the game refused the drop, frame %llu",
@@ -8316,6 +8420,13 @@ void HandDirectInstallTable() {
   // With test_keys=1 or debug_menu=1 the hook goes in for both values, so the
   // A/B key and the debug page can turn the release at once on.
   g_turn_on = IniKey("release_at_once", 1) != 0;
+  g_turn_flush = IniKey("release_flush", 2);
+  if (g_turn_flush < 0 || g_turn_flush > 2) g_turn_flush = 2;
+  g_cast_turn = IniKey("cast_at_once", 1) != 0;
+  ModLog("hand throw   : release_flush=%d: %s. cast_at_once=%d: %s",
+         g_turn_flush, ReleaseFlushWords(), g_cast_turn ? 1 : 0,
+         g_cast_turn ? "a thrown miracle asks for a game turn at once"
+                     : "a thrown miracle waits for the game's own turn");
   g_release_key = IniKey("test_keys", 0) != 0;
   if (g_turn_on || TestSwitchesOn()) {
     g_turn_hooked = Hook(kDoATurn, reinterpret_cast<void*>(&h_DoATurn),

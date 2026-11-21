@@ -33,9 +33,12 @@ object is in `grab.md`.
 - A still hand near the land sets the object down. A still hand higher up
   than `release_fall_cm` lets the object fall (see "The height of a
   release").
-- A release runs a game turn at once, so the object leaves the Hand on the
-  frame after the release action (`release_at_once`). A fast fall of the grip
-  value opens the grip at once (`grip_fast_open`).
+- A release runs a game turn at once with the packets of the release, so the
+  object leaves the Hand on the frame after the release action
+  (`release_at_once`, `release_flush`). A thrown miracle asks for the same
+  turn (`cast_at_once`). The flight of an object starts at the place and the
+  time of the opening of the grip (`throw_from_opening`). A fast fall of the
+  grip value opens the grip at once (`grip_fast_open`).
 - The math is in `bwvr/src/mod/throw_math.h` (the throw, the flight and the
   landing) and in `bwvr/src/mod/controller_math.h` (`GripLevelStep`). The
   checks are in `bwvr/test/controller_math/throw_checks.h` and
@@ -76,7 +79,8 @@ matter when `bwvr.ini` sets `throw_law=2` with `physics=0`.
 
 Not in the preset:
 
-- The release of the Hand: `release_at_once`, `grip_fast_open`,
+- The release of the Hand: `release_at_once`, `release_flush`,
+  `cast_at_once`, `throw_from_opening`, `grip_fast_open`,
   `grip_press_guard`, `grip_press_hold`, `catch_at_once` and
   `release_fall_cm`. They are how the hand takes and lets go, not how a
   thing flies. `release_fall_cm` acts only with `throw_law=2`, so with
@@ -204,7 +208,8 @@ game sees the speeds of its own physics.
    action sends `sqrt(s) v`, cut to 124, with 2.5 units per second or more
    across the land (`kSendFlat`), so the game throws the object. After the
    action `ThrowPhysicsReleased` reads the mark at `0x00D47824`. With the mark
-   the flight starts, from the mesh position of that moment.
+   the flight starts, from the place of the grip at the opening (see "The
+   release at once").
 2. **The first frames.** The game holds the object in the Hand until the drop
    action of a game turn. In that time the mod draws the object on the real
    arc `p0 + s v t - s g t^2 / 2`, stopped at the land or at an object (see
@@ -1248,16 +1253,13 @@ physics".
 | The grip opens | F | The grip value comes below 35 percent |
 | The click of the open grip | F and F + 1 | `GripStep` presses on the frame of the opening and releases when hand mode `0x17` shows |
 | The release action `FUN_005D4DB0` | F + 2 | The game runs it one frame after the button goes up |
-| The object leaves the Hand | F + 2 to F + 4 | The packets of the release wait for the next game turn |
+| The object leaves the Hand | F + 3 | The game turn at once on the next frame runs the packets of the release |
 
 Hand mode `0x17` shows one frame after each press, so the release action
 comes 2 frames after the opening. That is the least that a click can take.
-Without the mod's change the packets wait for the game's turn, up to 100 ms.
-In that time the Hand is in the Holding state, so the game draws the object at
-the Hand, and the Hand is on the real hand. A hand that swings at 3 m/s moves
-26 cm in 87 ms. Then the object goes back to the release point of packet
-`0x4D` and starts its flight. A late pick up (the grip opened during the pick
-up) makes the click wait some frames for the object.
+With no turn at once the packets wait for the game's turn, up to 100 ms, and
+the Hand stays in the Holding state in that time. A late pick up (the grip
+opened during the pick up) makes the click wait some frames for the object.
 
 ### The game turn [V]
 
@@ -1268,8 +1270,28 @@ The game runs packets only in a game turn (`GGame::ProcessOneGameTurn`).
 player game runs at most one turn in a frame (`0x00D01978` counts them). The
 timer gives 1 when the game time in ms is at or past 100 times the turn count
 (`GGame+0x205A40`). It gives 0 while a single player game is paused (bit 4 of
-`GGame+0x14`). So a turn comes each 100 ms of game time, and a packet waits
-0 to 100 ms for it.
+`GGame+0x14`). So a turn comes each 100 ms of game time.
+
+A packet takes this path:
+
+1. A sender (`fn_00551690`) puts the packet in the buffer at `GGame+0x5318`.
+   The first byte of the buffer is the count of packets.
+2. `fn_005525E0` writes the buffer to the session (`LHSession::Write`).
+   `GGame::Loop` calls it at `0x0054D291`, straight after
+   `ProcessNetworkPackets` at `0x0054D28A`.
+3. A game turn reads the session (`GetSuperPacketNextData`) and runs each
+   packet.
+
+The interface step of a frame (`ProcessFrameInputs`) comes after the turn of
+that frame. So a packet that the step sends is not in the session when the
+turn of the next frame starts. With no change, the packet runs in the first
+turn after the write, 0 to 100 ms later. A turn that the mod asks for on the
+next frame and that does not write the buffer first runs without the packet,
+and the packet then waits for the turn after it, 100 to 200 ms.
+
+`ProcessNetworkPackets` asks the timer again after a turn, and then tests the
+limit of one turn a frame (`0x00D01978`, at `0x0054CD52`). A yes to that
+second ask runs no turn.
 
 ### What the mod does
 
@@ -1277,15 +1299,38 @@ timer gives 1 when the game time in ms is at or past 100 times the turn count
 step will send such packets: the release bit (`+0x39` bit `0x40`) with
 interface action 12 and an object in the Hand, or the release bit while a
 bulk take runs. After that step it calls `TurnNow`. A hook on
-`LocalTimerSaysDoATurn` (`h_DoATurn`) then gives 1 to the next ask of the
-game, once, in the next 3 frames. The game runs that turn as each turn: the
-turn count goes up by one. The turn after it is due at 100 ms times the new
-count, so it comes later by the time that this turn came early. The game does
-not run faster, and it runs no turn that it would not run. The hook gives no
-turn while the game is paused, in a multiplayer game (all players must run
-the same turns), or when the controller does not place the Hand. So the mouse
-is the game's own. `release_at_once=0` in `bwvr.ini` leaves the function
-unhooked.
+`LocalTimerSaysDoATurn` (`h_DoATurn`) then gives 1 to the first ask of the
+game in a frame, once, in the next 3 frames. Before it gives the 1, it calls
+`fn_005525E0`, so the turn has the packets (`release_flush` 1 or 2). When the
+game has run its turn of this frame, the request stays for the next frame.
+The game runs that turn as each turn: the turn count goes up by one. The hook
+gives no turn while the game is paused, in a multiplayer game (all players
+must run the same turns), or when the controller does not place the Hand. So
+the mouse is the game's own. `release_at_once=0` in `bwvr.ini` leaves the
+function unhooked.
+
+**The clock after a turn at once.** A turn that comes E ms early leaves E +
+100 ms to the next turn. A thrown object and a Fireball are drawn between two
+turns, so the picture stops for up to E ms in that time. With
+`release_flush=2` (`TurnEarlyMs` in `throw_math.h`) the hook adds E to the
+elapsed time of the game's timer (`GGame+0x205E6C`). The next turn then comes
+100 ms after this one, and the time of the picture goes on with no step. Each
+release puts the game up to 100 ms ahead of the real time.
+
+**A thrown miracle.** The cast of a Fireball or a flock is interface action
+8, so the test for action 12 does not see it. After the cast sends its
+packets, `h_CastAtLand` and `h_CastOnObject` call `HandDirectCastSent`, which
+asks for the same turn (`cast_at_once=1`).
+
+**The flight starts at the opening.** The release action comes about 2 frames
+after the opening of the grip, and the real hand goes on in that time. With
+`throw_from_opening=1` the arc of an object starts at the place of the grip at
+the opening, at the time of the opening (`GripMoveSince` in `throw_math.h`).
+The velocity is the top speed from the window before the opening, so the arc
+and the swing agree at that place. The picture does not jump to the arc. It
+starts at the place in the Hand and comes to the arc in 150 ms (`OpeningLead`,
+`CatchUpLeft`). A release more than 80 ms after the opening (`kOpeningMost`)
+and a release in the glide of a far fetch start at the release action.
 
 **The grip opens on a fast fall.** A closed grip opens below 35 percent
 (`kGripOpenBelow`). A hand that opens for a throw takes some frames to come
@@ -1318,17 +1363,21 @@ spring of the Holding state). This is not built.
 turn (`LoopTimeRemainder`, `0x00D019BC`, at `0x0054D2E7`). It takes 100 ms
 from it when the turn count changes, and it keeps it from 0 to 99
 (`0x0054D325`). The game time at `GGame+0x25053C` is 100 times the turn count
-plus this time. After a turn that came early, that game time goes forward by
-up to 100 ms at once, and then it waits for the same time at 99. So a thing
-that the game moves by this time jumps a part of a turn forward and then
-stands still for that part. This comes once for each release. Which things
-use this time is not traced.
+plus this time. With `release_flush=2` the step of the timer goes into this
+time too, so the game time has no step. With `release_flush` 0 or 1, after a
+turn that came early, that game time goes forward by up to 100 ms at once,
+and then it waits for the same time at 99. So a thing that the game moves by
+this time jumps a part of a turn forward and then stands still for that part.
+Which things use this time is not traced.
 
 ### Keys
 
 | Key | Default | What it does |
 | --- | --- | --- |
 | `release_at_once` | 1 | 1 runs a game turn on the frame after a release of the Hand and after the opening of the grip in a bulk take. 0 waits for the game's own turn, up to 100 ms |
+| `release_flush` | 2 | 2 writes the packets of the frame to the session before the turn at once, so that turn runs them, and the next turn comes 100 ms after it. 1 writes the packets, and the next turn keeps its own time, so the picture stops for up to 100 ms. 0 runs the turn without the packets, and they wait for the turn after it. The debug row "Release turn" (late, first, even) changes it |
+| `cast_at_once` | 1 | 1 asks for the turn at once after the cast of a thrown miracle. 0 waits for the game's own turn. It needs `release_at_once=1`. The debug row "Fast cast" changes it |
+| `throw_from_opening` | 1 | 1 starts the flight of an object at the place and the time of the opening of the grip. 0 starts it at the place in the Hand at the release action. The debug row "Throw start" changes it |
 | `grip_fast_open` | 1 | 1 also opens a closed grip on a fast fall of its value. 0 opens it only below 35 percent |
 | `grip_press_guard` | 1 | 1 keeps the fast fall from opening the grip in the first 300 ms of a press, before the Hand holds the object. 0 lets it open the grip at any time. The test key Ctrl Shift Home goes between the two (`test_keys=1`) |
 | `grip_press_hold` | 1 | 1 keeps the button of the game down until the game has the object in its Hand, and until a press on an object that moves is no click for the game. 0 lets the button go up 167 ms after the object came into the Hand of the picture (`grab.md`, "The press of the game"). The test key Shift and the plus key of the number pad goes between the two (`test_keys=1`) |
@@ -1349,8 +1398,10 @@ law. Whether the game itself uses the star key is not known [G].
 
 ### The log
 
-Tag `hand throw`: "the object left the Hand N frames after the release
-action" for each release, or "the Hand still holds the object" 90 frames
+Tag `hand throw`: "a game turn runs at once" with the count of packets, "the
+flight starts at the opening of the grip" with the move of the grip, and "the
+object left the Hand N frames after the release action" with the time from
+the opening, for each release, or "the Hand still holds the object" 90 frames
 later when the game refused the drop. Each report window: the count of
 releases, the mean and the largest count of frames, the turns that the mod
 asked for and the turns that the game ran. Tag `grip`: for each opening of
@@ -1372,11 +1423,12 @@ closes it again, and the trace of 12 values.
 
 - Not tested: a game turn at once while a story or a script runs, and in a
   saved game that loads.
-- Not shown by a desktop run: the object leaves the Hand 1 or 2 frames after
-  the release action with the defaults, and 1 to 6 frames with
-  `release_at_once=0`. The run needs the start dialog of `god-view.md`,
-  section 12, a far target that is no tree (`far_test_influence=1`,
-  `far_grab_max_m=4.0`) and a pull, a grip open and a release.
+- Not shown by a desktop run: the picture of an object in the frames between
+  the release action and the game turn. The log gives the place that the mod
+  writes, and an eye picture does not show the object apart from the Hand.
+- Not tested: `release_flush=2` for a bulk take, and many releases in a row.
+  Each release puts the game time up to 100 ms ahead of the real time.
+- Only a headset can show if a release now feels as the hand opens.
 
 The checks in a headset are in `headset-checks.md`, and the checks that a
 desktop run can prove are in `roadmap.md`, R12.
@@ -1530,7 +1582,8 @@ the real arc of a thrown object of the same swing (`BallFlightPlan` in
    ratio between that ball and ball 0 of the game (`BallFanVelocity`). Each
    ball flies an arc of the same kind from the same place.
 3. **The start.** At the first sight of the balls (the hook on
-   `AttatchFireBallToAtom`, 70 to 90 ms after the cast), the mod puts each
+   `AttatchFireBallToAtom`, in the game turn at once on the frame after the
+   cast, see "The release at once"), the mod puts each
    ball at the place of its arc for the time since the cast. Its velocity
    is that of the arc, less `g dt / 2` along up (`RuleStartVelocity`).
 4. **The steps.** A hook on the rule runs the game's rule for the

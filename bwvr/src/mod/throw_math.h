@@ -1051,4 +1051,73 @@ inline float CatchUpLeft(double t, double seconds) {
   return static_cast<float>(u * u * u);
 }
 
+// THE FLIGHT FROM THE OPENING OF THE GRIP (throw_from_opening). The player
+// opens the hand at the top speed of the swing. The release action comes
+// some frames later, and the hand goes on in that time. So the flight starts
+// at the place of the grip at the opening, at the time of the opening.
+// kOpeningMost is the longest time from the opening to the release action
+// for this rule. A longer wait is no throw at the opening.
+const double kOpeningMost = 0.08;
+
+// The place of the grip at time t, on the line between two samples. False
+// when no sample is at or before t.
+inline bool GripPlaceAt(const controller_math::MotionSample* samples,
+                        int count, double t, float out[3]) {
+  if (count < 1 || t < samples[0].time - 1e-6) return false;
+  int b = 0;
+  while (b < count - 1 && samples[b].time < t) ++b;
+  if (samples[b].time <= t || b == 0) {
+    for (int i = 0; i < 3; ++i) out[i] = samples[b].point[i];
+    return true;
+  }
+  const controller_math::MotionSample& p = samples[b - 1];
+  const controller_math::MotionSample& q = samples[b];
+  const double span = q.time - p.time;
+  const float u = span > 1e-9 ? static_cast<float>((t - p.time) / span) : 1.0f;
+  for (int i = 0; i < 3; ++i) out[i] = p.point[i] + (q.point[i] - p.point[i]) * u;
+  return true;
+}
+
+// The move of the grip from the opening to the newest sample, in world units.
+// The points are in the room's axes, in units at the life size scale. room is
+// the room basis L, and s is the world units in a meter of the room. False
+// when the opening is not in the samples, or is older than kOpeningMost.
+inline bool GripMoveSince(const controller_math::MotionSample* samples,
+                          int count, double opened, const float room[9],
+                          float life, float s, float out[3]) {
+  if (count < 2 || !(life > 0.0f) || !(s > 0.0f)) return false;
+  const controller_math::MotionSample& newest = samples[count - 1];
+  const double wait = newest.time - opened;
+  if (wait < 0.0 || wait > kOpeningMost) return false;
+  float at[3];
+  if (!GripPlaceAt(samples, count, opened, at)) return false;
+  const float move[3] = {newest.point[0] - at[0], newest.point[1] - at[1],
+                         newest.point[2] - at[2]};
+  float along[3];
+  controller_math::Apply(room, false, move, along);
+  for (int i = 0; i < 3; ++i) out[i] = along[i] * (s / life);
+  return true;
+}
+
+// The lead of the picture when the flight starts at the opening. At time t of
+// the flight the picture must be at `drawn`, where the Hand showed the object,
+// and it comes to the arc in kCatchUp. So the lead is the gap at t over the
+// part of the catch up that is left at t. False when no part is left.
+inline bool OpeningLead(const float drawn[3], const float arc[3], double t,
+                        float lead[3]) {
+  const float left = CatchUpLeft(t, kCatchUp);
+  if (!(left > 0.0f)) return false;
+  for (int i = 0; i < 3; ++i) lead[i] = (drawn[i] - arc[i]) / left;
+  return true;
+}
+
+// THE CLOCK OF A TURN AT ONCE (release_flush=2). A turn is due when the game
+// time is at or past 100 ms times the turn count. The answer is how many ms
+// this turn comes before that time, from 0 to 100. The clock goes forward by
+// it, so the next turn comes 100 ms after this one.
+inline int TurnEarlyMs(int game_ms, unsigned int turn) {
+  const int early = static_cast<int>(turn * 100u) - game_ms;
+  return early > 0 && early <= 100 ? early : 0;
+}
+
 }  // namespace throw_math

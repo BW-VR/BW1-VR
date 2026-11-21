@@ -217,6 +217,10 @@ void FileReadAheadToggle(const char* by);
 // target_glow.cpp, take_stream.cpp, forest_take.cpp).
 int HandDirectReleaseAtOnceValue();
 void HandDirectReleaseAtOnceChange(const char* by);
+int HandDirectReleaseFlushValue();
+void HandDirectReleaseFlushChange(const char* by);
+int HandDirectCastAtOnceValue();
+void HandDirectCastAtOnceChange(const char* by);
 int HandDirectCatchMovingValue();
 void HandDirectCatchMovingChange(const char* by);
 int HandDirectWidePickValue();
@@ -289,6 +293,8 @@ int ThrowLawValue();
 void ThrowLawChange(const char* by);
 int ThrowDrawValue();
 void ThrowDrawChange(const char* by);
+int ThrowFromOpeningValue();
+void ThrowFromOpeningChange(const char* by);
 int ThrowFallValue();
 void ThrowFallChange(const char* by);
 int ThrowLandValue();
@@ -851,6 +857,15 @@ const Switch kSwitches[] = {
      "physics", PhysicsSwitchValue, PhysicsSwitchChange, L"original|VR"},
     {kGroupThrow, L"Fast release", L"Release at once", "release_at_once",
      HandDirectReleaseAtOnceValue, HandDirectReleaseAtOnceChange, L"off|on"},
+    {kGroupThrow, L"Release turn", L"The turn at once has the release",
+     "release_flush", HandDirectReleaseFlushValue,
+     HandDirectReleaseFlushChange, L"late|first|even"},
+    {kGroupThrow, L"Fast cast", L"A thrown miracle asks for a turn at once",
+     "cast_at_once", HandDirectCastAtOnceValue, HandDirectCastAtOnceChange,
+     L"off|on"},
+    {kGroupThrow, L"Throw start", L"The flight starts at the opening",
+     "throw_from_opening", ThrowFromOpeningValue, ThrowFromOpeningChange,
+     L"release|opening"},
     {kGroupThrow, L"Throw law", L"Throw: root law or real flight",
      "throw_law", ThrowLawValue, ThrowLawChange, L"gain|root|real"},
     {kGroupThrow, L"Miracle throw", L"Fireball at the speed of the hand",
@@ -1458,6 +1473,16 @@ const wchar_t* const kTips[] = {
     L"On: a game turn runs on the frame after a release of the Hand, or after "
     L"the grip opens in a take. Off: the mod waits up to 100 ms for the game "
     L"turn.",
+    // Release turn
+    L"Even: the turn at once runs the release on the next frame, and the next "
+    L"turn comes 100 ms later. First: the next turn keeps its time. Late: the "
+    L"release waits for the next turn.",
+    // Fast cast
+    L"On: a thrown Fireball asks for a game turn at once, and it leaves the "
+    L"Hand on the next frame. Off: it waits for the game turn.",
+    // Throw start
+    L"Opening: the flight starts where the grip was when it opened. Release: "
+    L"it starts at the Hand at the release, some frames later.",
     // Throw law
     L"Real: a throw has the real flight. Root: the square root law with the "
     L"game physics. Gain: a fixed gain with the game physics.",

@@ -442,7 +442,13 @@ struct Plan {
   void* held;
   throw_math::RealThrow t;
   float s;
+  // The flight starts at the opening of the grip (throw_from_opening): the
+  // time of the opening, and the move of the grip since then in world units.
+  bool from_opening;
+  double opened;
+  float grip_move[3];
 };
+bool g_from_opening = true;  // throw_from_opening
 Plan g_plan = {};
 int g_plan_logs = 0;
 const int kMaxPlanLogs = 200;
@@ -2136,6 +2142,20 @@ void ThrowLawChange(const char* by) {
                       "(throw_law=1)");
 }
 
+int ThrowFromOpeningValue() {
+  return g_installed ? (g_from_opening ? 1 : 0) : kDebugCannot;
+}
+
+void ThrowFromOpeningChange(const char* by) {
+  if (!g_installed) return;
+  g_from_opening = !g_from_opening;
+  ControllersGesturePulse(0.5f, g_from_opening ? 0.30f : 0.06f);
+  ModLog("hand throw   : %s: throw_from_opening is %d now. A flight starts %s",
+         by, g_from_opening ? 1 : 0,
+         g_from_opening ? "at the place and the time of the opening of the grip"
+                        : "at the place in the Hand at the release action");
+}
+
 int ThrowDrawValue() { return g_installed ? g_draw : kDebugCannot; }
 
 void ThrowDrawChange(const char* by) {
@@ -2728,6 +2748,8 @@ bool ThrowPhysicsCatchFrom(void* object, float matrix[12]) {
   return true;
 }
 
+void ThrowPhysicsSetFromOpening(bool on) { g_from_opening = on; }
+
 void ThrowPhysicsSetDraw(int rule) {
   g_draw = rule != 0 ? throw_math::kDrawReal : throw_math::kDrawFlight;
 }
@@ -2925,6 +2947,10 @@ void ThrowPhysicsInstall() {
            "an object that the physics of the game has, one step of the "
            "object answers that the object came to rest", g_take_test);
   }
+  ModLog("hand throw   : throw_from_opening=%d: a flight starts %s",
+         g_from_opening ? 1 : 0,
+         g_from_opening ? "at the place and the time of the opening of the grip"
+                        : "at the place in the Hand at the release action");
   ModLog("hand throw   : throw_draw=%d: %s", g_draw,
          g_draw == throw_math::kDrawReal
              ? "between the steps of the game, a substep with a touch of "
@@ -2972,6 +2998,11 @@ bool ThrowPhysicsPlan(const ThrowPlanIn& in, ThrowPlanOut* out) {
   throw_math::RealThrowPlan(in.v_end_room, peak, in.room, in.gain, in.life,
                             in.units_per_meter, in.cap, in.drop_speed,
                             &plan.t, g_slow, high);
+  plan.from_opening =
+      g_from_opening && in.latched &&
+      throw_math::GripMoveSince(in.grip, in.count, in.opened, in.room, in.life,
+                                in.units_per_meter, plan.grip_move);
+  plan.opened = in.opened;
   g_plan = plan;
   out->drop = plan.t.drop;
   out->fall = plan.t.fall;
@@ -3112,6 +3143,29 @@ void ThrowPhysicsReleased(void* held) {
              "the picture comes to the flight in %.0f ms", held,
              controller_math::Length(f->lead) / f->s * 100.0f, f->p0[0],
              f->p0[1], f->p0[2], throw_math::kCatchUp * 1000.0);
+    }
+  }
+  // THE FLIGHT FROM THE OPENING OF THE GRIP (throw_math.h, GripMoveSince). The
+  // arc starts where the grip was at the opening, at that time. The picture
+  // goes on from the place in the Hand and comes to the arc in kCatchUp, so
+  // the player sees no jump.
+  if (!f->has_lead && plan.from_opening) {
+    const float drawn[3] = {f->p0[0], f->p0[1], f->p0[2]};
+    for (int i = 0; i < 3; ++i) f->p0[i] -= plan.grip_move[i];
+    f->t0 = plan.opened;
+    const double t = NowSeconds() - f->t0;
+    float arc[3], arc_v[3];
+    throw_math::RealArc(f->p0, f->v0, f->gs, t, arc, arc_v);
+    f->has_lead = throw_math::OpeningLead(drawn, arc, t, f->lead);
+    if (g_flight_logs < kMaxFlightLogs) {
+      ++g_flight_logs;
+      ModLog("hand throw   : the flight of %p starts at the opening of the "
+             "grip, %.0f ms before the release action. The grip moved %.1f cm "
+             "of the room in that time. The arc is %.1f cm of the room from "
+             "the place in the Hand, and the picture comes to it in %.0f ms "
+             "(throw_from_opening=1)", held, t * 1000.0,
+             controller_math::Length(plan.grip_move) / f->s * 100.0f,
+             Gap(drawn, arc) / f->s * 100.0f, throw_math::kCatchUp * 1000.0);
     }
   }
   FindLanding(f);

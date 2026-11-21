@@ -102,7 +102,9 @@ want.
     looks wrong. A Fireball flies as a light ball: flatter and farther than
     a rock from the same swing. The debug rows "Fireball grav" and "Fireball
     speed" change the next throw (`miracle_flight_gravity_pct`,
-    `miracle_flight_speed_pct`).
+    `miracle_flight_speed_pct`). Wrong: an object or a Fireball that leaves
+    later than the hand opens, or that stops for a moment just after it
+    leaves.
 ### The village
 
 11. **The words over the land.** Wrong: the job icon (2 times) or the name of a villager (150 percent) is hard to read at a glance.

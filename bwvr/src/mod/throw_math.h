@@ -1120,4 +1120,22 @@ inline int TurnEarlyMs(int game_ms, unsigned int turn) {
   return early > 0 && early <= 100 ? early : 0;
 }
 
+// THE LIMITS OF THE TURN AT ONCE. A request can come on many frames in a row,
+// and the game must not run fast. The clock goes forward at most once in
+// kClockStepGapMs of real time. The ticks are those of GetTickCount, so the
+// unsigned difference stays right when the count wraps.
+const unsigned int kClockStepGapMs = 250;
+
+inline bool ClockStepAllowed(bool stepped_before, unsigned int last_tick,
+                             unsigned int now_tick) {
+  return !stepped_before || now_tick - last_tick >= kClockStepGapMs;
+}
+
+// True when the turn that the game would run now is more than one turn
+// before its time. The game is then one turn ahead of its clock already, so
+// it gets no other turn at once.
+inline bool TurnIsTooFarAhead(int game_ms, unsigned int turn) {
+  return static_cast<int>(turn * 100u) - game_ms > 100;
+}
+
 }  // namespace throw_math

@@ -1317,6 +1317,16 @@ elapsed time of the game's timer (`GGame+0x205E6C`). The next turn then comes
 100 ms after this one, and the time of the picture goes on with no step. Each
 release puts the game up to 100 ms ahead of the real time.
 
+**The limits of a turn at once.** A request can come on many frames in a row,
+and the game must not run fast. The clock goes forward at most once in 250 ms
+of real time (`ClockStepAllowed`). A turn at once inside that time runs with
+its packets and no clock step. A game that is already one turn ahead of its
+clock gets no other turn at once (`TurnIsTooFarAhead`), and its packets run
+in its own next turn. The report line of the tag `hand throw` counts the
+clock steps and the turns that the limits refused. The test key
+`release_turn_test=F` asks for a turn at once on 48 frames in a row from
+frame F.
+
 **A thrown miracle.** The cast of a Fireball or a flock is interface action
 8, so the test for action 12 does not see it. After the cast sends its
 packets, `h_CastAtLand` and `h_CastOnObject` call `HandDirectCastSent`, which

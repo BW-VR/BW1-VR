@@ -1341,6 +1341,22 @@ inline void ThrowChecks() {
           TurnEarlyMs(4900, 50), 100);
     Check(TurnEarlyMs(4000, 50) == 0, "a clock far behind does not move",
           TurnEarlyMs(4000, 50), 0);
+    // The limits of the turn at once.
+    Check(ClockStepAllowed(false, 0u, 5u), "the first clock step goes", 1, 1);
+    Check(!ClockStepAllowed(true, 1000u, 1100u),
+          "a step 100 ms after the last one is refused", 0, 0);
+    Check(!ClockStepAllowed(true, 1000u, 1249u),
+          "a step 249 ms after the last one is refused", 0, 0);
+    Check(ClockStepAllowed(true, 1000u, 1250u),
+          "a step 250 ms after the last one goes", 1, 1);
+    Check(ClockStepAllowed(true, 1000u, 9000u), "a late step goes", 1, 1);
+    Check(!ClockStepAllowed(true, 0xFFFFFFF0u, 0x00000010u),
+          "32 ms across the wrap of the tick count is refused", 0, 0);
+    Check(ClockStepAllowed(true, 0xFFFFFF00u, 0x00000010u),
+          "272 ms across the wrap of the tick count goes", 1, 1);
+    Check(!TurnIsTooFarAhead(4900, 50), "a turn 100 ms early can run", 0, 0);
+    Check(TurnIsTooFarAhead(4899, 50), "a turn 101 ms early cannot", 1, 1);
+    Check(!TurnIsTooFarAhead(5100, 50), "a late turn can run", 0, 0);
   }
 }
 

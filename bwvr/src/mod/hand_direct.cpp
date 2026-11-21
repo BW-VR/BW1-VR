@@ -1433,6 +1433,16 @@ int g_turn_flush = 2;             // release_flush: 0, 1 or 2
 bool g_cast_turn = true;          // cast_at_once
 int g_turn_logs = 0;
 const int kMaxTurnLogs = 80;
+// The limits of the turn at once (throw_math.h, ClockStepAllowed).
+bool g_clock_stepped = false;
+uint32_t g_clock_tick = 0;        // GetTickCount at the last clock step
+uint64_t g_clock_refused = 0;     // clock steps refused, this window
+uint64_t g_turns_held = 0;        // turns at once refused, this window
+// The test key release_turn_test=F asks for a turn at once on each of
+// kTurnTestFrames frames from frame F. For the desktop run that shows the
+// limits. Never for play.
+int g_turn_test_frame = 0;
+const uint64_t kTurnTestFrames = 48;
 uint64_t g_turns_asked = 0;
 uint64_t g_turns_given = 0;
 uint64_t g_release_frame = 0;     // the frame of the last release action
@@ -3702,6 +3712,10 @@ bool Multiplayer();
 // stops for E ms in that time. With release_flush=2 the clock of the game goes
 // forward by E, and the next turn comes 100 ms after this one. Each release
 // puts the game time up to 100 ms ahead of the real time.
+//
+// A request can come on many frames in a row. So the clock goes forward at
+// most once in 250 ms, and a game that is one turn ahead of its clock gets
+// no other turn at once. Its packets then run in its own next turn.
 const int kTurnNowFrames = 3;
 // What release_flush does, for the log.
 const char* ReleaseFlushWords() {
@@ -3735,26 +3749,43 @@ int __fastcall h_DoATurn(void* game, void* unused) {
     // turn. The request stays for the next frame.
     if (*reinterpret_cast<const uint32_t*>(kTurnsThisFrame) != 0) return due;
     uint8_t* bytes = static_cast<uint8_t*>(game);
+    const uint32_t tick = GetTickCount();
+    uint32_t* elapsed = reinterpret_cast<uint32_t*>(bytes + kTimerElapsed);
+    const float speed = *reinterpret_cast<const float*>(bytes + kTimerSpeed);
+    const int now_ms = static_cast<int>(
+        static_cast<double>(
+            tick - *reinterpret_cast<const uint32_t*>(bytes + kTimerTicks)) *
+            speed +
+        static_cast<double>(*elapsed));
+    const uint32_t turn =
+        *reinterpret_cast<const uint32_t*>(bytes + kGameTurnCount);
+    if (due == 0 && throw_math::TurnIsTooFarAhead(now_ms, turn)) {
+      ++g_turns_held;
+      return due;
+    }
     const int packets = bytes[kGamePackets];
     reinterpret_cast<void(__thiscall*)(void*)>(kFlushPackets)(game);
-    int early = 0;
+    int early = 0, refused = 0;
     if (g_turn_flush == 2) {
-      const uint32_t ticks =
-          GetTickCount() - *reinterpret_cast<const uint32_t*>(bytes + kTimerTicks);
-      uint32_t* elapsed = reinterpret_cast<uint32_t*>(bytes + kTimerElapsed);
-      const float speed = *reinterpret_cast<const float*>(bytes + kTimerSpeed);
-      const int now_ms = static_cast<int>(static_cast<float>(ticks) * speed +
-                                          static_cast<float>(*elapsed));
-      early = throw_math::TurnEarlyMs(
-          now_ms, *reinterpret_cast<const uint32_t*>(bytes + kGameTurnCount));
-      *elapsed += static_cast<uint32_t>(early);
+      const int wanted = throw_math::TurnEarlyMs(now_ms, turn);
+      if (wanted > 0 &&
+          throw_math::ClockStepAllowed(g_clock_stepped, g_clock_tick, tick)) {
+        early = wanted;
+        *elapsed += static_cast<uint32_t>(early);
+        g_clock_stepped = true;
+        g_clock_tick = tick;
+      } else if (wanted > 0) {
+        refused = wanted;
+        ++g_clock_refused;
+      }
     }
     if (g_turn_logs < kMaxTurnLogs) {
       ++g_turn_logs;
       ModLog("hand throw   : a game turn runs at once on frame %llu with %d "
              "packets of the interface. The game's own turn was %s. The clock "
-             "of the game went forward by %d ms (release_flush=%d)",
-             g_frame, packets, due != 0 ? "due" : "not due", early,
+             "of the game went forward by %d ms, and the limit of 250 ms "
+             "refused %d ms (release_flush=%d)",
+             g_frame, packets, due != 0 ? "due" : "not due", early, refused,
              g_turn_flush);
     }
   }
@@ -8427,6 +8458,12 @@ void HandDirectInstallTable() {
          g_turn_flush, ReleaseFlushWords(), g_cast_turn ? 1 : 0,
          g_cast_turn ? "a thrown miracle asks for a game turn at once"
                      : "a thrown miracle waits for the game's own turn");
+  g_turn_test_frame = TestKey("release_turn_test");
+  if (g_turn_test_frame > 0) {
+    ModLog("hand throw   : test key release_turn_test=%d, so the mod asks for "
+           "a game turn at once on %llu frames in a row from that frame",
+           g_turn_test_frame, kTurnTestFrames);
+  }
   g_release_key = IniKey("test_keys", 0) != 0;
   if (g_turn_on || TestSwitchesOn()) {
     g_turn_hooked = Hook(kDoATurn, reinterpret_cast<void*>(&h_DoATurn),
@@ -9203,6 +9240,11 @@ void HandDirectFrame() {
   }
   if (g_face != nullptr) LogTake(g_face, g_hand);
   if (g_turn_now > 0) --g_turn_now;
+  if (g_turn_test_frame > 0) {
+    const uint64_t at = static_cast<uint64_t>(g_turn_test_frame);
+    const uint64_t counted = ControllersTestFrame(at, g_frame);
+    if (counted >= at && counted < at + kTurnTestFrames) TurnNow();
+  }
   PollReleaseKey();
   PollNearKey();
   PollChoiceKey();
@@ -12544,14 +12586,17 @@ void HandDirectReport() {
   if (g_turns_asked != 0 || g_release_count != 0) {
     ModLog("hand throw   : %llu objects left the Hand, %.1f frames after the "
            "release action as a mean and %llu at most. The mod asked for a "
-           "game turn at once %llu times, and the game ran %llu, this window",
+           "game turn at once %llu times, and the game ran %llu. The limits "
+           "refused %llu clock steps and %llu turns, this window",
            g_release_count,
            g_release_count != 0
                ? static_cast<double>(g_release_frames_sum) / g_release_count
                : 0.0,
-           g_release_worst, g_turns_asked, g_turns_given);
+           g_release_worst, g_turns_asked, g_turns_given, g_clock_refused,
+           g_turns_held);
     g_release_count = g_release_frames_sum = g_release_worst = 0;
     g_turns_asked = g_turns_given = 0;
+    g_clock_refused = g_turns_held = 0;
   }
   if (g_virtual_count != 0 || g_touch_vetoes != 0 || g_touch_forced != 0 ||
       g_touch_kept != 0 || g_open_slow != 0) {

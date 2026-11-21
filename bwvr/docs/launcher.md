@@ -398,7 +398,7 @@ which it links to Segoe UI. So the status line is a control of Unicode.
 ## The update check
 
 When the launcher opens, it asks GitHub for the latest release of the mod:
-a GET of `https://api.github.com/repos/BW1-VR/BW1-VR/releases/latest` with
+a GET of `https://api.github.com/repos/BW-VR/BW1-VR/releases/latest` with
 WinHTTP, over HTTPS, with the User-Agent `BW1-VR-launcher/<version>`. The
 owner marks the release for the players as the latest one. The code is
 `StartUpdateCheck` and `AskForUpdate` in `launcher.cpp`, and the parse is

@@ -16,7 +16,7 @@ inline void UpdateChecks() {
   // "author" has an "html_url" of its own before "tag_name".
   {
     const char json[] =
-        "{\"url\":\"https://api.github.com/repos/BW1-VR/BW1-VR/releases/1\","
+        "{\"url\":\"https://api.github.com/repos/BW-VR/BW1-VR/releases/1\","
         "\"html_url\":\"https:\\/\\/github.com\\/BW1-VR\\/BW1-VR\\/releases"
         "\\/tag\\/v1.2.0-20261020-fd7f198\","
         "\"id\":418801387,"
@@ -31,7 +31,7 @@ inline void UpdateChecks() {
           "the tag of the release", 1, 1);
     Check(TopString(json, strlen(json), "html_url", out, sizeof(out)) &&
               strcmp(out,
-                     "https://github.com/BW1-VR/BW1-VR/releases/tag/"
+                     "https://github.com/BW-VR/BW1-VR/releases/tag/"
                      "v1.2.0-20261020-fd7f198") == 0,
           "the page of the release, with the escapes of the slashes", 1, 1);
     Check(!TopString(json, strlen(json), "login", out, sizeof(out)),
@@ -44,10 +44,10 @@ inline void UpdateChecks() {
     const char later[] =
         "{\"author\":{\"html_url\":\"https://github.com/someone\"},"
         "\"tag_name\":\"v2.0.0\","
-        "\"html_url\":\"https://github.com/BW1-VR/BW1-VR/releases/tag/v2.0.0\"}";
+        "\"html_url\":\"https://github.com/BW-VR/BW1-VR/releases/tag/v2.0.0\"}";
     Check(TopString(later, strlen(later), "html_url", out, sizeof(out)) &&
               strcmp(out,
-                     "https://github.com/BW1-VR/BW1-VR/releases/tag/v2.0.0") ==
+                     "https://github.com/BW-VR/BW1-VR/releases/tag/v2.0.0") ==
                   0,
           "the html_url of the author is not the page of the release", 1, 1);
   }
@@ -116,10 +116,10 @@ inline void UpdateChecks() {
 
   // THE PAGE THAT THE LAUNCHER OPENS.
   {
-    Check(IsGitHubPage("https://github.com/BW1-VR/BW1-VR/releases/tag/v1.3.0"),
+    Check(IsGitHubPage("https://github.com/BW-VR/BW1-VR/releases/tag/v1.3.0"),
           "a page of a release is a page of GitHub", 1, 1);
     const char* const kBad[] = {"", "https://github.com/",
-                                "http://github.com/BW1-VR",
+                                "http://github.com/BW-VR",
                                 "https://github.com.example.org/x",
                                 "https://example.org/https://github.com/",
                                 "https://github.com/a b", "file:///C:/x.exe",
@@ -135,13 +135,13 @@ inline void UpdateChecks() {
   {
     Release release;
     const char newer[] =
-        "{\"html_url\":\"https://github.com/BW1-VR/BW1-VR/releases/tag/"
+        "{\"html_url\":\"https://github.com/BW-VR/BW1-VR/releases/tag/"
         "v1.3.0-20261101-abc1234\",\"tag_name\":\"v1.3.0-20261101-abc1234\"}";
     Check(Judge(newer, strlen(newer), 1, 2, 0, &release) == kNewer &&
               release.major == 1 && release.minor == 3 && release.patch == 0,
           "a release of 1.3.0 is newer", 1, 1);
     const char same[] =
-        "{\"html_url\":\"https://github.com/BW1-VR/BW1-VR/releases/tag/"
+        "{\"html_url\":\"https://github.com/BW-VR/BW1-VR/releases/tag/"
         "v1.2.0-20261020-fd7f198\",\"tag_name\":\"v1.2.0-20261020-fd7f198\"}";
     Check(Judge(same, strlen(same), 1, 2, 0, &release) == kNotNewer,
           "a release of 1.2.0 is not newer", 1, 1);

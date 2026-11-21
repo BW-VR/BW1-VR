@@ -843,7 +843,7 @@ void SayStatus(const char* text) {
 // gives the cause.
 
 const char kLatestReleaseUrl[] =
-    "https://api.github.com/repos/BW1-VR/BW1-VR/releases/latest";
+    "https://api.github.com/repos/BW-VR/BW1-VR/releases/latest";
 // The thread posts this message to the window when it has the result.
 const UINT kUpdateAnswer = WM_APP + 1;
 // The time out of each step of the ask: the name, the connection, the send
@@ -998,7 +998,7 @@ DWORD WINAPI AskForUpdate(void*) {
     from = "the tag of the test";
     _snprintf_s(body, sizeof(body), _TRUNCATE,
                 "{\"tag_name\":\"%s\",\"html_url\":\"https://github.com/"
-                "BW1-VR/BW1-VR/releases/tag/%s\"}",
+                "BW-VR/BW1-VR/releases/tag/%s\"}",
                 g_update_test_tag, g_update_test_tag);
     got = static_cast<DWORD>(strlen(body));
     answered = true;

@@ -4,7 +4,7 @@
 // here, so the math test compiles this file.
 //
 // The answer is the JSON of
-// https://api.github.com/repos/BW1-VR/BW1-VR/releases/latest. The launcher
+// https://api.github.com/repos/BW-VR/BW1-VR/releases/latest. The launcher
 // needs two fields of its top object: "tag_name" (for example
 // "v1.2.0-20261020-fd7f198") and "html_url" (the page of the release). The
 // objects in the answer ("author", each asset) have an "html_url" too, so

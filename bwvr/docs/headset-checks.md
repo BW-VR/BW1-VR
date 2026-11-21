@@ -99,7 +99,10 @@ want.
 10. **Throws.** Throw rocks, villagers, trees and a Fireball at
     each scale. Wrong: a throw that goes too short, too far or in a wrong
     direction, a quick set down that throws, or a flight or a landing that
-    looks wrong. A Fireball must fly as a rock from the same swing flies.
+    looks wrong. A Fireball flies as a light ball: flatter and farther than
+    a rock from the same swing. The debug rows "Fireball grav" and "Fireball
+    speed" change the next throw (`miracle_flight_gravity_pct`,
+    `miracle_flight_speed_pct`).
 ### The village
 
 11. **The words over the land.** Wrong: the job icon (2 times) or the name of a villager (150 percent) is hard to read at a glance.

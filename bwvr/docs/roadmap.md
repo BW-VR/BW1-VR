@@ -296,9 +296,10 @@ keeps the mod as it is.
 - **F6. The fireball and the speed of a throw.** On hold: the owner tests
   the throw with the mod's own physics first. A fireball leaves with the top
   speed of the grip of the real hand (`miracle_throw`, `throw.md`, "A thrown
-  miracle"), and then flies the real arc of the throw with the time factor
-  k of an object (`miracle_flight`). If it flies short or far in a headset,
-  a key scales that speed. For other objects, a key
+  miracle"), and then flies as a light ball with the time factor k of an
+  object (`miracle_flight`). If it flies short or far in a headset,
+  `miracle_flight_gravity_pct` and `miracle_flight_speed_pct` change the arc,
+  and the debug page has a row for each. For other objects, a key
   `throw_speed_pct` (100: the real speed) can make a throw stronger.
 **Comfort and moving**
 
@@ -385,8 +386,10 @@ game as it is.
 ### Built, and not proven or not finished
 
 - **F6. The flight of a thrown Fireball.** Each ball of a thrown Fireball
-  flies the real arc of the throw with the k of an object, until its first
-  contact (`miracle_flight`, `throw.md`, "The flight of a thrown
+  flies as a light ball with the k of an object, until its first contact:
+  40 percent of the gravity and 130 percent of the speed of a rock
+  (`miracle_flight`, `miracle_flight_gravity_pct`,
+  `miracle_flight_speed_pct`, `throw.md`, "The flight of a thrown
   Fireball"). Open: the desktop runs `miracle_run.ps1 -Kind throwdir` and
   `-Kind throwspeed` with `miracle_flight` 1 and 0, and the feel in a
   headset.

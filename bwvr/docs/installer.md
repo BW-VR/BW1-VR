@@ -1,7 +1,7 @@
 # The installer
 
 One file goes out to players: `Black & White VR Mod <version> Setup.exe`,
-about 5 MB. The version is `BWVR_VERSION_TEXT` in `src/common/version.h`.
+about 30 MB. The version is `BWVR_VERSION_TEXT` in `src/common/version.h`.
 Inno Setup 6 builds the file from `installer/bwvr.iss`.
 
 ## How it is built

@@ -31,6 +31,11 @@
 #include "../common/bw_addresses.h"
 
 extern void ModLog(const char* format, ...);
+// gpu_bridge.cpp: the D3D9 device that dxwrapper made for the game.
+void* GpuBridgeDeviceObject();
+const void* FrameD3D9Readback(void* device, int* pitch, uint32_t* width,
+                              uint32_t* height);
+void FrameD3D9ReadbackShutdown();
 
 namespace {
 
@@ -45,6 +50,8 @@ bool g_failed = false;
 // the VR layer can read it without a copy in between.
 IDirectDrawSurface7* g_surface = nullptr;
 bool g_locked = false;
+
+bool g_logged_d3d_fallback = false;
 
 // Timing, so the cost of the readback is a number rather than a guess.
 LARGE_INTEGER g_frequency = {0};
@@ -131,7 +138,15 @@ const void* FrameSourceBegin(int* pitch) {
 
   if (FAILED(hr)) {
     target->Release();
-    return nullptr;
+    if (!g_logged_d3d_fallback) {
+      ModLog("  frame source : DirectDraw Lock failed (0x%08lX); using "
+             "D3D9 GetRenderTargetData for Proton", hr);
+      g_logged_d3d_fallback = true;
+    }
+    const void* pixels = FrameD3D9Readback(GpuBridgeDeviceObject(), pitch,
+                                           &g_width, &g_height);
+    if (pixels != nullptr) ++g_samples;
+    return pixels;
   }
 
   const uint32_t width = desc.dwWidth;
@@ -256,6 +271,7 @@ void FrameSourceReport() {
 
 void FrameSourceShutdown() {
   FrameSourceEnd();
+  FrameD3D9ReadbackShutdown();
   delete[] g_buffer;
   g_buffer = nullptr;
   g_buffer_width = 0;

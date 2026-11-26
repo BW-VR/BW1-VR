@@ -4,6 +4,7 @@ add_library(bwvr_mod SHARED
     mod_main.cpp
     vr_start.cpp
     frame_source.cpp
+    d3d9_readback.cpp
     stereo.cpp
     one_walk.cpp
     intro_vr.cpp

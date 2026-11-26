@@ -7,6 +7,8 @@
 #include <stdint.h>
 #include <string.h>
 
+extern void ModLog(const char* format, ...);
+
 namespace {
 
 IDirect3DSurface9* g_readback = nullptr;
@@ -29,17 +31,30 @@ void ReleaseSurface() {
 
 }  // namespace
 
-const void* FrameD3D9Readback(void* object, int* pitch, uint32_t* width,
+const void* FrameD3D9Readback(void* object, int* pitch,
+                              uint32_t expected_width,
+                              uint32_t expected_height, uint32_t* width,
                               uint32_t* height) {
   IDirect3DDevice9* device = static_cast<IDirect3DDevice9*>(object);
-  if (device == nullptr) return nullptr;
+  if (device == nullptr) {
+    ModLog("  frame source : D3D9 readback has no device");
+    return nullptr;
+  }
 
   IDirect3DSurface9* source = nullptr;
   if (FAILED(device->GetRenderTarget(0, &source)) || source == nullptr) {
+    ModLog("  frame source : D3D9 GetRenderTarget(0) failed");
     return nullptr;
   }
   D3DSURFACE_DESC desc;
   if (FAILED(source->GetDesc(&desc))) {
+    ModLog("  frame source : D3D9 GetDesc failed");
+    source->Release();
+    return nullptr;
+  }
+  if (desc.Width != expected_width || desc.Height != expected_height) {
+    ModLog("  frame source : D3D9 render target is %ux%u, but DirectDraw is "
+           "%ux%u", desc.Width, desc.Height, expected_width, expected_height);
     source->Release();
     return nullptr;
   }
@@ -54,15 +69,22 @@ const void* FrameD3D9Readback(void* object, int* pitch, uint32_t* width,
       FAILED(device->CreateOffscreenPlainSurface(
           desc.Width, desc.Height, desc.Format, D3DPOOL_SYSTEMMEM,
           &g_readback, nullptr))) {
+    ModLog("  frame source : D3D9 CreateOffscreenPlainSurface failed for "
+           "%ux%u format 0x%08lX", desc.Width, desc.Height, desc.Format);
     source->Release();
     return nullptr;
   }
   const HRESULT copied = device->GetRenderTargetData(source, g_readback);
   source->Release();
-  if (FAILED(copied)) return nullptr;
+  if (FAILED(copied)) {
+    ModLog("  frame source : D3D9 GetRenderTargetData failed (0x%08lX)",
+           copied);
+    return nullptr;
+  }
 
   D3DLOCKED_RECT locked;
   if (FAILED(g_readback->LockRect(&locked, nullptr, D3DLOCK_READONLY))) {
+    ModLog("  frame source : D3D9 readback LockRect failed");
     return nullptr;
   }
   const size_t row_bytes = static_cast<size_t>(desc.Width) * 4;
@@ -95,6 +117,8 @@ const void* FrameD3D9Readback(void* object, int* pitch, uint32_t* width,
       }
     }
   } else {
+    ModLog("  frame source : D3D9 readback format 0x%08lX is unsupported",
+           desc.Format);
     g_readback->UnlockRect();
     return nullptr;
   }

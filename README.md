@@ -33,6 +33,30 @@ OpenXR host. Use the normal installer and the Steam Frame add-on from the
 same build. See the [Steam Frame instructions](bwvr/src/vr/bridge/README.md)
 for the tested runtime, installation, launcher settings and limits.
 
+### Linux PC streaming with WiVRn (experimental)
+
+The mod has also been tested streaming from a Linux PC to a Meta Quest 3 with
+WiVRn. This uses a non-Flatpak Steam installation, the Flatpak WiVRn runtime,
+and Proton Experimental. Connect the Quest 3 to WiVRn before starting the
+game; SteamVR is not required.
+
+Add these launch options to the Steam shortcut:
+
+```text
+PROTON_USE_WOW64=1 WINEDLLOVERRIDES="ddraw=n,b;openxr_loader=n" PRESSURE_VESSEL_IMPORT_OPENXR_1_RUNTIMES=1 PRESSURE_VESSEL_FILESYSTEMS_RW=/var/lib/flatpak/app/io.github.wivrn.wivrn %command%
+```
+
+The working values in `bwvr.ini` are:
+
+```ini
+xr_bridge=1
+backend=vulkan
+d3d9_backend=0
+xr_vulkan=0
+vr=1
+stereo=1
+```
+
 ## 1. Set up a clean copy of the game
 
 The mod does not contain the game. No store sells Black & White today, so you

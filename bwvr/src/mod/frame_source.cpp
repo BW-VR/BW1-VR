@@ -33,7 +33,9 @@
 extern void ModLog(const char* format, ...);
 // gpu_bridge.cpp: the D3D9 device that dxwrapper made for the game.
 void* GpuBridgeDeviceObject();
-const void* FrameD3D9Readback(void* device, int* pitch, uint32_t* width,
+const void* FrameD3D9Readback(void* device, int* pitch,
+                              uint32_t expected_width,
+                              uint32_t expected_height, uint32_t* width,
                               uint32_t* height);
 void FrameD3D9ReadbackShutdown();
 
@@ -45,6 +47,7 @@ uint32_t g_buffer_height = 0;
 uint32_t g_width = 0;
 uint32_t g_height = 0;
 bool g_failed = false;
+bool g_d3d9_readback = false;
 
 // The surface stays locked between FrameSourceBegin and FrameSourceEnd, so
 // the VR layer can read it without a copy in between.
@@ -97,6 +100,10 @@ IDirectDrawSurface7* RenderTarget() {
 
 }  // namespace
 
+void FrameSourceSetD3D9Readback(bool enabled) {
+  g_d3d9_readback = enabled;
+}
+
 // Returns the size of the game's render target, or false if there is none yet.
 bool FrameSourceSize(uint32_t* width, uint32_t* height) {
   IDirectDrawSurface7* target = RenderTarget();
@@ -137,14 +144,52 @@ const void* FrameSourceBegin(int* pitch) {
   QueryPerformanceCounter(&after_lock);
 
   if (FAILED(hr)) {
-    target->Release();
+    if (!g_d3d9_readback) {
+      if (!g_logged_d3d_fallback) {
+        ModLog("  frame source : DirectDraw Lock failed (0x%08lX); "
+               "d3d9_readback=0, skipping the frame", hr);
+        g_logged_d3d_fallback = true;
+      }
+      target->Release();
+      return nullptr;
+    }
+    HMODULE ntdll = GetModuleHandleA("ntdll.dll");
+    if (ntdll == nullptr ||
+        GetProcAddress(ntdll, "wine_get_version") == nullptr) {
+      if (!g_logged_d3d_fallback) {
+        ModLog("  frame source : DirectDraw Lock failed (0x%08lX); "
+               "d3d9_readback is enabled but Wine was not found, "
+               "skipping the frame", hr);
+        g_logged_d3d_fallback = true;
+      }
+      target->Release();
+      return nullptr;
+    }
     if (!g_logged_d3d_fallback) {
       ModLog("  frame source : DirectDraw Lock failed (0x%08lX); using "
-             "D3D9 GetRenderTargetData for Proton", hr);
+             "D3D9 GetRenderTargetData under Wine", hr);
       g_logged_d3d_fallback = true;
     }
+    DDSURFACEDESC2 expected;
+    ZeroMemory(&expected, sizeof(expected));
+    expected.dwSize = sizeof(expected);
+    if (FAILED(target->GetSurfaceDesc(&expected))) {
+      ModLog("  frame source : cannot get the DirectDraw size after Lock "
+             "failed; skipping the D3D9 readback");
+      target->Release();
+      return nullptr;
+    }
     const void* pixels = FrameD3D9Readback(GpuBridgeDeviceObject(), pitch,
+                                           expected.dwWidth, expected.dwHeight,
                                            &g_width, &g_height);
+    target->Release();
+    if (pixels == nullptr) return nullptr;
+    if (g_width != expected.dwWidth || g_height != expected.dwHeight) {
+      ModLog("  frame source : D3D9 render target is %ux%u, but DirectDraw "
+             "is %ux%u; skipping the frame", g_width, g_height,
+             expected.dwWidth, expected.dwHeight);
+      return nullptr;
+    }
     if (pixels != nullptr) ++g_samples;
     return pixels;
   }

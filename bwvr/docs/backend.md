@@ -75,6 +75,7 @@ Other docs: `software-tnl.md` (the CPU transform and the camera matrix),
 | `src/mod/video_view.cpp`, `video_view_math.h` | The view for videos in the window of the game, and its corner marks in the headset (`video_view`) |
 | `src/mod/vk_video.cpp`, `vk_video.vert`, `vk_video.frag`, `video_layers_math.h` | The quad layers of the headset in the view for videos (`video_view_layers`) |
 | `src/mod/vk_fallback.cpp` | The file of the fall back of `backend=vulkan` (`vulkan_fallback`) |
+| `src/mod/frame_source.cpp`, `src/mod/d3d9_readback.cpp` | The DirectDraw frame readback, including the optional D3D9 system-memory fallback (`d3d9_readback`) |
 | `src/common/exe_check.h`, `version.h` | The build check and the product name |
 
 ## How the game draws
@@ -3016,6 +3017,16 @@ values. 624 draws of a frame go to dxwrapper as 200 draws. The pictures of
 frame 3001 with both values differ in 1533 pixels of 8.7 million, as two runs
 with one value do. `d3d7_thread_merge=0` merges on the frame thread. With
 `test_keys=1`, Shift and V turn it on and off from the next walk.
+
+## The D3D9 readback fallback
+
+When the DirectDraw render target cannot be CPU-locked under Wine or Proton,
+the optional `d3d9_readback=1` path asks the D3D9 device for render target 0,
+copies it with `GetRenderTargetData` into a system-memory surface, and locks
+that copy. The fallback accepts only a matching render-target size and a
+supported pixel format. It is disabled by default (`d3d9_readback=0`), and it
+does not run on native Windows; a failed DirectDraw lock keeps the old behavior
+and skips the frame in both cases.
 
 ## DXVK under dxwrapper
 
@@ -6369,6 +6380,7 @@ keys that the launcher sets.
 | `render_thread_right_eye` | 1 | 1: with the render thread, the render thread makes the copy of a batch of one walk for the right eye. 0: the frame thread makes it. See "The right eye on the render thread" |
 | `ab_test` | (empty) | A test key: `gpu_flush`, `render_thread_right_eye`, `fast_transform`, `d3d7_thread`, `render_thread_late_end`, `thread_wait` or `d3d7_thread_merge` changes at each window of 450 frames. See "The flush" |
 | `d3d9_backend` | 0 | 0: dxwrapper draws with the Direct3D 9 of Windows. 1: with DXVK from the folder `dxvk` of the game, when the PC can run it. There is no test key: the choice is made at the start. See "DXVK under dxwrapper" |
+| `d3d9_readback` | 0 | 1: after a failed DirectDraw lock, under Wine or Proton, copy render target 0 through D3D9 system memory when its size matches the DirectDraw target. 0: skip the frame as before. See "The D3D9 readback fallback" |
 | `thread_wait` | 1 | 1: a thread of the mod that waits spins for a short time that comes from the count of the cores, and then it sleeps, and the second thread of `frame_send` sleeps until the GPU is nearly done. 0: the render thread and the D3D7 thread spin for the whole walk, and the second thread asks the GPU each 50 microseconds. See "How the threads wait" |
 | `test_cores`, `test_smt` | 0, 0 | Test keys: the process runs on that count of physical cores, with one logical core each, or with each logical core (`test_smt=1`). See "How the threads wait" |
 | `render_thread_late_end` | 1 | 1: with `render_thread=1` the end of a walk does not wait for the render thread. 0: it waits. See "The late end of a walk" |

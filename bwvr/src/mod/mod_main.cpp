@@ -57,6 +57,7 @@ bool ProxyLoadRealDDraw();
 const char* ProxyBackendNote();
 
 bool FrameSourceSize(uint32_t* width, uint32_t* height);
+void FrameSourceSetD3D9Readback(bool enabled);
 const void* FrameSourceGrab(int* pitch);
 void FrameSourceReport();
 void FrameSourceShutdown();
@@ -871,6 +872,13 @@ void ReadSettings() {
   }
   g_vr_enabled = GetPrivateProfileIntA("bwvr", "vr", 1, path) != 0;
   g_stereo = GetPrivateProfileIntA("bwvr", "stereo", 1, path) != 0;
+  const bool d3d9_readback =
+      GetPrivateProfileIntA("bwvr", "d3d9_readback", 0, path) != 0;
+  FrameSourceSetD3D9Readback(d3d9_readback);
+  ModLog("frame source : d3d9_readback=%d. %s", d3d9_readback ? 1 : 0,
+         d3d9_readback
+             ? "a failed DirectDraw Lock can use D3D9 readback under Wine"
+             : "a failed DirectDraw Lock skips the frame");
   g_distance = GetPrivateProfileIntA("bwvr", "screen_distance_cm", 200, path) /
                100.0f;
   g_width = GetPrivateProfileIntA("bwvr", "screen_width_cm", 260, path) / 100.0f;

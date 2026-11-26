@@ -7,7 +7,7 @@ name: Build
 
 on:
   push:
-    branches: [main]
+    branches: [main, quest3-wivrn-ci]
   pull_request:
   workflow_dispatch:
 

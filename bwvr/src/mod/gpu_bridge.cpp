@@ -156,6 +156,8 @@ typedef HRESULT(STDMETHODCALLTYPE* CreateDeviceExFn)(IDirect3D9Ex*, UINT,
 
 Direct3DCreate9ExFn o_Direct3DCreate9Ex = nullptr;
 Direct3DCreate9Fn o_Direct3DCreate9 = nullptr;
+Direct3DCreate9ExFn o_SystemDirect3DCreate9Ex = nullptr;
+Direct3DCreate9Fn o_SystemDirect3DCreate9 = nullptr;
 CreateDeviceFn o_CreateDevice = nullptr;
 CreateDeviceExFn o_CreateDeviceEx = nullptr;
 
@@ -702,7 +704,7 @@ HRESULT STDMETHODCALLTYPE h_CreateDeviceEx(IDirect3D9Ex* self, UINT adapter,
 // made. The hooks go on the resolved function addresses, not on the object,
 // so they survive whatever wrapping happens later.
 void HookDeviceCreation(IDirect3D9* d3d, bool is_ex) {
-  if (d3d == nullptr || g_device_hooked) return;
+  if (d3d == nullptr) return;
   void** vtable = *reinterpret_cast<void***>(d3d);
   if (IsBadReadPtr(vtable, sizeof(void*) * 21)) return;
 
@@ -723,8 +725,10 @@ void HookDeviceCreation(IDirect3D9* d3d, bool is_ex) {
       any = true;
     }
   }
-  g_device_hooked = any;
-  ModLog("gpu bridge   : device creation %s", any ? "watched" : "NOT watched");
+  if (any) g_device_hooked = true;
+  ModLog("gpu bridge   : device creation %s",
+         any ? "watched" : (g_device_hooked ? "already watched"
+                                              : "NOT watched"));
 }
 
 HRESULT WINAPI h_Direct3DCreate9Ex(UINT sdk, IDirect3D9Ex** out) {
@@ -733,6 +737,22 @@ HRESULT WINAPI h_Direct3DCreate9Ex(UINT sdk, IDirect3D9Ex** out) {
     HookDeviceCreation(*out, true);
   }
   return hr;
+}
+
+// dxwrapper can load the system D3D9 by an explicit path even when the game
+// directory also contains a D3D9.dll. Keep a second pair of trampolines so
+// both module copies can be watched; a single original pointer cannot safely
+// serve two different export addresses.
+HRESULT WINAPI h_SystemDirect3DCreate9Ex(UINT sdk, IDirect3D9Ex** out) {
+  const HRESULT hr = o_SystemDirect3DCreate9Ex(sdk, out);
+  if (SUCCEEDED(hr) && out != nullptr) HookDeviceCreation(*out, true);
+  return hr;
+}
+
+IDirect3D9* WINAPI h_SystemDirect3DCreate9(UINT sdk) {
+  IDirect3D9* d3d = o_SystemDirect3DCreate9(sdk);
+  HookDeviceCreation(d3d, false);
+  return d3d;
 }
 
 IDirect3D9* WINAPI h_Direct3DCreate9(UINT sdk) {
@@ -812,33 +832,54 @@ void GpuBridgeInstall() {
   if (!g_enabled || g_installed) return;
 
   // Load Direct3D 9 ourselves so the entry points exist to hook. The backend
-  // will get the same module.
+  // may use either the game's local D3D9.dll or the system copy (dxwrapper
+  // can choose the latter by an explicit path), so watch both copies.
   HMODULE d3d9 = LoadLibraryA("d3d9.dll");
   if (d3d9 == nullptr) {
     ModLog("gpu bridge   : d3d9.dll is not available, staying on the CPU path");
     return;
   }
 
-  void* create_ex =
-      reinterpret_cast<void*>(GetProcAddress(d3d9, "Direct3DCreate9Ex"));
-  void* create = reinterpret_cast<void*>(GetProcAddress(d3d9, "Direct3DCreate9"));
-
   int hooked = 0;
-  if (create_ex != nullptr &&
-      MH_CreateHook(create_ex, reinterpret_cast<void*>(&h_Direct3DCreate9Ex),
-                    reinterpret_cast<void**>(&o_Direct3DCreate9Ex)) == MH_OK &&
-      MH_EnableHook(create_ex) == MH_OK) {
-    ++hooked;
-  }
-  if (create != nullptr &&
-      MH_CreateHook(create, reinterpret_cast<void*>(&h_Direct3DCreate9),
-                    reinterpret_cast<void**>(&o_Direct3DCreate9)) == MH_OK &&
-      MH_EnableHook(create) == MH_OK) {
-    ++hooked;
+  auto hook_module = [&hooked](HMODULE module, bool system_copy) {
+    if (module == nullptr) return;
+    void* create_ex = reinterpret_cast<void*>(
+        GetProcAddress(module, "Direct3DCreate9Ex"));
+    void* create = reinterpret_cast<void*>(
+        GetProcAddress(module, "Direct3DCreate9"));
+    void* ex_hook = reinterpret_cast<void*>(system_copy
+                                                ? &h_SystemDirect3DCreate9Ex
+                                                : &h_Direct3DCreate9Ex);
+    void* hook = reinterpret_cast<void*>(system_copy
+                                             ? &h_SystemDirect3DCreate9
+                                             : &h_Direct3DCreate9);
+    void** ex_original = system_copy
+                             ? reinterpret_cast<void**>(&o_SystemDirect3DCreate9Ex)
+                             : reinterpret_cast<void**>(&o_Direct3DCreate9Ex);
+    void** original = system_copy
+                          ? reinterpret_cast<void**>(&o_SystemDirect3DCreate9)
+                          : reinterpret_cast<void**>(&o_Direct3DCreate9);
+    if (create_ex != nullptr && MH_CreateHook(create_ex, ex_hook, ex_original) == MH_OK &&
+        MH_EnableHook(create_ex) == MH_OK) ++hooked;
+    if (create != nullptr && MH_CreateHook(create, hook, original) == MH_OK &&
+        MH_EnableHook(create) == MH_OK) ++hooked;
+  };
+
+  hook_module(d3d9, false);
+
+  char system_path[MAX_PATH] = {};
+  const UINT system_length = GetSystemDirectoryA(system_path, MAX_PATH);
+  if (system_length > 0 && system_length < MAX_PATH - 10) {
+    lstrcatA(system_path, "\\d3d9.dll");
+    HMODULE system_d3d9 = LoadLibraryA(system_path);
+    if (system_d3d9 != nullptr && system_d3d9 != d3d9) {
+      hook_module(system_d3d9, true);
+    }
   }
 
   g_installed = hooked > 0;
-  ModLog("gpu bridge   : %d of 2 Direct3D 9 entry points hooked", hooked);
+  ModLog("gpu bridge   : %d Direct3D 9 entry points hooked across local and "
+         "system modules", hooked);
 }
 
 // True once a 9Ex device has been captured, so the shared path is possible.

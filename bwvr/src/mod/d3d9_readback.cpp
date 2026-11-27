@@ -15,6 +15,7 @@ IDirect3DSurface9* g_readback = nullptr;
 uint8_t* g_pixels = nullptr;
 uint32_t g_pixels_width = 0;
 uint32_t g_pixels_height = 0;
+bool g_logged_no_device = false;
 
 uint8_t Expand(uint32_t value, int bits) {
   if (bits >= 8) return static_cast<uint8_t>(value >> (bits - 8));
@@ -37,7 +38,10 @@ const void* FrameD3D9Readback(void* object, int* pitch,
                               uint32_t* height) {
   IDirect3DDevice9* device = static_cast<IDirect3DDevice9*>(object);
   if (device == nullptr) {
-    ModLog("  frame source : D3D9 readback has no device");
+    if (!g_logged_no_device) {
+      ModLog("  frame source : D3D9 readback has no device");
+      g_logged_no_device = true;
+    }
     return nullptr;
   }
 
@@ -135,4 +139,5 @@ void FrameD3D9ReadbackShutdown() {
   g_pixels = nullptr;
   g_pixels_width = 0;
   g_pixels_height = 0;
+  g_logged_no_device = false;
 }

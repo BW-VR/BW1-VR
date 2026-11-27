@@ -33,6 +33,14 @@ OpenXR host. Use the normal installer and the Steam Frame add-on from the
 same build. See the [Steam Frame instructions](bwvr/src/vr/bridge/README.md)
 for the tested runtime, installation, launcher settings and limits.
 
+### Pimax
+
+Use Pimax OpenXR, the OpenXR runtime of Pimax Play, as the active OpenXR
+runtime. A player with a Pimax Crystal tested this setup, and the picture is
+correct. Through SteamVR as the OpenXR runtime, the game shows a double
+picture, and the cause is not known yet (issue
+[#12](https://github.com/BW-VR/BW1-VR/issues/12)).
+
 ## 1. Set up a clean copy of the game
 
 The mod does not contain the game. No store sells Black & White today, so you

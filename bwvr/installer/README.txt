@@ -1281,9 +1281,9 @@ before you start a quest. These faults are known:
     Send bwvr.log and bwvr-crash.dmp with a report (see SUPPORT).
   - With the Vulkan renderer, some characters of a quest can show
     white or invisible.
-  - A Pimax can show a double picture (issue 12). This version
-    changes how such a headset draws each eye, but no one has
-    tested it on a Pimax yet.
+  - A Pimax through SteamVR shows a double picture (issue 12).
+    Use Pimax OpenXR, the OpenXR runtime of Pimax Play, as the
+    active OpenXR runtime. With it, the picture is correct.
   - Anti-aliasing turns off with "Fewer pixels away from the
     middle". It also turns off with foveated rendering on a GPU
     that does not allow both.

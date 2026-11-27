@@ -4775,9 +4775,9 @@ picture to the right. With `eye_cant=0` both pictures turn to the left.
 
 Known limits:
 
-- Only a headset with canted views can show that the two pictures fuse. A
-  player of a Pimax can also turn on "Parallel projections" in Pimax Play.
-  The runtime then gives two views with one orientation.
+- Only a headset with canted views can show that the two pictures fuse.
+  No such headset has been tested. A Pimax Crystal gives views that are not
+  canted, through Pimax OpenXR and through SteamVR/OpenXR.
 - A flat batch of the interface that stays in an eye picture has the same
   place in both eye pictures. The turn of a canted view does not move it.
   With the panels, the cards and the subtitle card in the headset, few

@@ -691,10 +691,12 @@ game as it is.
   and the quads in a headset.
 - **N17. Headset coverage.** Quest 3 through Virtual Desktop and Steam Frame
   through Proton have game coverage. Other headsets and runtimes need tests.
-  A headset with canted views (Pimax) needs a test: with `eye_cant=1` each
-  eye draws with the turn of its own view (backend.md, "Canted views"). A
-  player with a Pimax must say if the two pictures fuse in play, and the log
-  line `eye cant` gives the cant of his views.
+  A Pimax Crystal with the runtime Pimax OpenXR shows a correct picture,
+  from a player's report. The same headset through SteamVR/OpenXR shows a
+  double picture in play, with the local runtime and with the x64 host
+  (`xr_bridge=1`). Its views are not canted (`eye cant` gives 0.00 degrees
+  for each view), so the cause is not the cant. The cause is not known. No
+  headset with canted views has been tested.
 - **N18. The x64 host for Steam Frame** (`xr_bridge=1`). Not tested: all
   controls, the haptics, the loss of the device, long sessions, and the
   install and the uninstall of the add-on on a clean setup. The game ran

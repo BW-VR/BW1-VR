@@ -520,6 +520,17 @@ class XrScreen {
   // static so the mod can set it with no XrScreen at hand. Both are on when
   // the mod does not call it (the x64 host).
   static void SetCardSending(bool clear_edge, bool mips);
+  // THE LAYER GUARD (layer_guard, docs/backend.md, "The layer guard",
+  // layer_guard_math.h). 0: no guard. 1: the guard only when the process
+  // runs under Wine or Proton. 2: the guard on each runtime. With the guard,
+  // a frame with the projection layer first gets one tiny clear quad before
+  // it. A change takes effect at the next frame. Static, so the mod can set
+  // it with no XrScreen at hand. 1 when the mod does not call it.
+  static void SetLayerGuard(int mode);
+  static int LayerGuard();
+  // True when ntdll.dll has the export wine_get_version: the process runs
+  // under Wine or Proton.
+  static bool UnderWine();
   // THE TEST PICTURES (card_send_test_save=N). For the first N new pictures
   // of the cards, StageCard makes the levels of the picture as SendCard
   // does, also with no session, and gives two pictures to `save`: the

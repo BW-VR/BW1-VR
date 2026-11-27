@@ -1235,8 +1235,9 @@ facts:
 - The mod stages a card with `XrScreen::StageCard` before `EndFrame`, as
   `StagePanelQuad` does for the Creature panel. It shows only in the frame that
   staged it.
-- When the runtime refuses a frame with a card, `CardFailed` turns that kind
-  of card off: first the subtitle card, and then the hint cards.
+- When the runtime refuses a frame with a card, `CardFailed` turns one kind
+  of card off for each refused frame: the newest kind in the frame first,
+  and the interface panel last (`backend.md`, "The layer guard").
 - With `ui_panel=1` the route of 12.2 does not change: a tooltip never goes to
   the panel. It goes to the card.
 - With `ui_panel=0` the test key Ctrl Shift F11 switches the cards on and off:

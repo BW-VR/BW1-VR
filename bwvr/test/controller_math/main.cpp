@@ -3754,6 +3754,7 @@ void CreatureChecks() {
 #include "card_send_checks.h"
 #include "controls_layout_checks.h"
 #include "head_lag_checks.h"
+#include "layer_guard_checks.h"
 
 int main() {
   const float eye[3] = {120.0f, 45.0f, -300.0f};
@@ -4224,6 +4225,7 @@ int main() {
   panel_raster_checks::PanelRasterChecks();
   card_send_checks::CardSendChecks();
   controls_layout_checks::ControlsLayoutChecks();
+  layer_guard_checks::LayerGuardChecks();
 
   printf("\n%d checks, %d failed\n", g_checks, g_failures);
   return g_failures == 0 ? 0 : 1;

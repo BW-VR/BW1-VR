@@ -24,6 +24,7 @@
 
 #include "../common/version.h"
 #include "card_send_math.h"
+#include "layer_guard_math.h"
 #include "refresh_rate_math.h"
 
 namespace bwvr {
@@ -261,6 +262,8 @@ const char* const kCardHolds[kCards] = {"hints", "hints", "subtitles",
                                         "gestures of the miracles"};
 // The runtime refused a frame with a quad of the interface panel.
 bool g_panel_refused = false;
+// THE LAYER GUARD (XrScreen::SetLayerGuard, layer_guard_math.h).
+volatile LONG g_layer_guard = layer_guard_math::kGuardWine;
 
 // HOW A CARD GOES INTO ITS SWAPCHAIN (XrScreen::SetCardSending,
 // card_send_math.h).
@@ -765,7 +768,9 @@ struct XrScreen::Impl {
     VkImage* images;
     Relay* relays;
   };
-  static const int kVkChains = 16;
+  // Room for each swapchain of a session: the eyes, the panel, each card,
+  // the walls of the cut scene window and the layer guard.
+  static const int kVkChains = 32;
   VkChain vk_chains[kVkChains] = {};
   static const int kVkSlots = 8;
   VkCommandPool vk_pool = VK_NULL_HANDLE;
@@ -895,6 +900,16 @@ struct XrScreen::Impl {
   uint64_t mask_frames = 0;    // for the report
   uint64_t window_frames = 0;
 
+  // THE LAYER GUARD (layer_guard_math.h): one swapchain with a clear
+  // picture, made and written at the first frame that needs it. Each frame
+  // with the guard names the image that was released last.
+  XrSwapchain guard_swapchain = XR_NULL_HANDLE;
+  ID3D11Texture2D** guard_images = nullptr;
+  uint32_t guard_image_count = 0;
+  bool guard_ready = false;   // the clear picture is in the swapchain
+  bool guard_failed = false;  // no swapchain or no image: no guard
+  bool logged_guard = false;
+
   // Motion controllers. All of these stay null when CreateInput fails, and
   // the screen works without them.
   XrActionSet action_set = XR_NULL_HANDLE;
@@ -945,7 +960,8 @@ struct XrScreen::Impl {
     XrCompositionLayerQuad walls[4];
     XrCompositionLayerQuad quads[2];
     XrCompositionLayerQuad subtitle_quad;
-    const XrCompositionLayerBaseHeader* layers[2 + kPanelQuads + kCards + 4];
+    XrCompositionLayerQuad guard;  // THE LAYER GUARD, the first layer
+    const XrCompositionLayerBaseHeader* layers[3 + kPanelQuads + kCards + 4];
     uint32_t layer_count;
     XrTime display_time;
     bool world;               // a projection layer, and not a screen
@@ -1148,6 +1164,8 @@ struct XrScreen::Impl {
   void DestroyCard(int index);
   bool SendMask(const WindowLayer& window, XrCompositionLayerQuad quads[4]);
   void DestroyMask();
+  bool SendGuard(XrCompositionLayerQuad* quad);
+  void DestroyGuard();
 
   bool Check(XrResult result, const char* what) {
     if (XR_SUCCEEDED(result)) return true;
@@ -1914,9 +1932,14 @@ bool XrScreen::StartSession(uint32_t width, uint32_t height, int eyes) {
     p.width = width; p.height = height; p.eyes = eyes >= 2 ? 2 : 1;
     p.distance = impl_->distance; p.screen_width = impl_->quad_width;
     p.panel_enabled = impl_->panel_wanted;
+    p.layer_guard = static_cast<uint32_t>(LayerGuard());
     if (!remote_->Call(bridge::Session) || !p.result || !remote_->MakeDevice()) return false;
     eyes_ = p.eyes; running_ = true;
     impl_->log("xr bridge    : session ready. Frame submission is synchronous in this mode");
+    impl_->log("xr bridge    : layer_guard=%d goes to the host. The host looks "
+               "for Wine itself and writes its layer guard line in "
+               "bwvr-host.log",
+               LayerGuard());
     return true;
   }
   Impl& s = *impl_;
@@ -2097,6 +2120,13 @@ bool XrScreen::StartSession(uint32_t width, uint32_t height, int eyes) {
 
   s.log("  openxr: ready, %d eye(s), %u swapchain images each%s", eyes_,
         s.image_count[0], s.device == nullptr ? ", with no Direct3D 11" : "");
+  // THE LAYER GUARD (layer_guard_math.h). The key can change during the
+  // session, so each frame reads it again.
+  const bool wine = UnderWine();
+  s.log("  openxr: layer_guard=%d, Wine or Proton %s, so the layer guard is "
+        "%s",
+        LayerGuard(), wine ? "found" : "not found",
+        layer_guard_math::GuardOn(LayerGuard(), wine) ? "on" : "off");
   // A layer that was staged before the session is not for its first frame.
   for (int i = 0; i < kCards; ++i) g_have_staged_card[i] = false;
   g_have_staged_window = false;
@@ -2501,6 +2531,24 @@ void XrScreen::StageCard(int card, const CardLayer& layer) {
 void XrScreen::SetCardSending(bool clear_edge, bool mips) {
   g_card_clear_edge = clear_edge;
   g_card_mips = mips;
+}
+
+void XrScreen::SetLayerGuard(int mode) {
+  InterlockedExchange(&g_layer_guard, layer_guard_math::ClampMode(mode));
+}
+
+int XrScreen::LayerGuard() { return static_cast<int>(g_layer_guard); }
+
+bool XrScreen::UnderWine() {
+  // 0: not known yet, 1: Windows, 2: Wine or Proton.
+  static volatile LONG found = 0;
+  if (found == 0) {
+    const HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
+    const bool wine = ntdll != nullptr &&
+                      GetProcAddress(ntdll, "wine_get_version") != nullptr;
+    InterlockedExchange(&found, wine ? 2 : 1);
+  }
+  return found == 2;
 }
 
 void XrScreen::SetCardTestSave(int count, CardSaveFn save, LogFn log) {
@@ -2940,6 +2988,101 @@ void XrScreen::Impl::DestroyMask() {
   mask_image_count = 0;
 }
 
+void XrScreen::Impl::DestroyGuard() {
+  DestroyChain(&guard_swapchain);
+  delete[] guard_images;
+  guard_images = nullptr;
+  guard_image_count = 0;
+  guard_ready = false;
+}
+
+// THE LAYER GUARD of this frame (layer_guard_math.h). The first call makes a
+// swapchain of kGuardSize by kGuardSize texels, writes clear texels (alpha
+// 0) into one image and releases it. Each frame after that names the
+// swapchain, and the runtime reads the image that was released last. The
+// quad is 1 mm across, so even a runtime that drew it would show nothing.
+// False when the guard cannot go out. Then the frame has none.
+bool XrScreen::Impl::SendGuard(XrCompositionLayerQuad* quad) {
+  const uint32_t kGuardSize = 4;
+  if (guard_failed) return false;
+  if (!guard_ready) {
+    const auto fail = [this](const char* why) {
+      DestroyGuard();
+      guard_failed = true;
+      log("  openxr: %s for the layer guard, so the frames have no guard",
+          why);
+      return false;
+    };
+    XrSwapchainCreateInfo info = {XR_TYPE_SWAPCHAIN_CREATE_INFO};
+    info.usageFlags = ChainUsage();
+    info.format = ChainFormat();
+    info.sampleCount = 1;
+    info.width = kGuardSize;
+    info.height = kGuardSize;
+    info.faceCount = 1;
+    info.arraySize = 1;
+    info.mipCount = 1;
+    if (!Check(xrCreateSwapchain(session, &info, &guard_swapchain),
+               "xrCreateSwapchain(guard)")) {
+      guard_swapchain = XR_NULL_HANDLE;
+      return fail("no swapchain");
+    }
+    guard_images = ChainImages(guard_swapchain, kGuardSize, kGuardSize,
+                               &guard_image_count);
+    if (guard_images == nullptr) return fail("no images");
+    uint32_t image = 0;
+    if (!Check(AcquireImage(guard_swapchain, &image),
+               "xrAcquireSwapchainImage(guard)")) {
+      return fail("no image to write");
+    }
+    XrSwapchainImageWaitInfo image_wait = {XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO};
+    image_wait.timeout = XR_INFINITE_DURATION;
+    const bool waited =
+        Check(xrWaitSwapchainImage(guard_swapchain, &image_wait),
+              "xrWaitSwapchainImage(guard)");
+    const bool with_vulkan = UploadsWithVulkan(guard_swapchain);
+    bool written = false;
+    if (waited && image < guard_image_count) {
+      // Clear is 0 in each byte, in each format the swapchain can have.
+      const uint8_t pixels[kGuardSize * kGuardSize * 4] = {};
+      if (with_vulkan) {
+        written = UploadVulkan(guard_swapchain, image, pixels, kGuardSize * 4,
+                               0, 0, static_cast<int32_t>(kGuardSize),
+                               static_cast<int32_t>(kGuardSize), false);
+      } else if (context != nullptr && guard_images[image] != nullptr) {
+        context->UpdateSubresource(guard_images[image], 0, nullptr, pixels,
+                                   kGuardSize * 4, 0);
+        written = true;
+      }
+    }
+    const bool released =
+        Check(ReleaseImage(guard_swapchain, !with_vulkan),
+              "xrReleaseSwapchainImage(guard)");
+    if (!written || !released) return fail("no clear picture");
+    guard_ready = true;
+  }
+  *quad = {XR_TYPE_COMPOSITION_LAYER_QUAD};
+  // The texels are clear, and the runtime blends by their alpha.
+  quad->layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
+  quad->space = space;
+  quad->eyeVisibility = XR_EYE_VISIBILITY_BOTH;
+  quad->subImage.swapchain = guard_swapchain;
+  quad->subImage.imageRect.offset = {0, 0};
+  quad->subImage.imageRect.extent = {static_cast<int32_t>(kGuardSize),
+                                     static_cast<int32_t>(kGuardSize)};
+  quad->subImage.imageArrayIndex = 0;
+  quad->pose.orientation = {0.0f, 0.0f, 0.0f, 1.0f};
+  quad->pose.position = {0.0f, 0.0f, -1.0f};
+  quad->size = {0.001f, 0.001f};
+  if (!logged_guard) {
+    logged_guard = true;
+    log("  openxr: the layer guard goes out as the first layer, a clear quad "
+        "of %u by %u texels, 1 mm across, before the projection layer",
+        kGuardSize, kGuardSize);
+  }
+  return true;
+}
+
 // The walls of the cut scene window for this frame: black with the alpha of
 // the frame goes into the next image of the swapchain, and `quads` gets the
 // four layers. False when the walls cannot go out. Then the frame has none.
@@ -3360,6 +3503,7 @@ void XrScreen::EndFrame() {
     if (g_have_staged_window) { p.window = g_staged_window; remote_->Call(bridge::Window); }
     g_have_staged_window = false;
     p.projection = projection_; p.half_angle = render_half_angle_; p.have_render_pose = have_render_pose_;
+    p.layer_guard = static_cast<uint32_t>(LayerGuard());
     for (int i = 0; i < 2; ++i) p.render_pose[i] = render_views_[i];
     p.distance = impl_->distance; p.screen_width = impl_->quad_width;
     if (!remote_->Call(bridge::End)) running_ = false;
@@ -3480,8 +3624,20 @@ bool XrScreen::BuildFrame() {
 
     const XrCompositionLayerBaseHeader** layers = b.layers;
     uint32_t layer_count = 0;
+    // THE LAYER GUARD goes under all the other layers. It is clear, so it
+    // shows nothing, and it makes the slots of wineopenxr large enough for
+    // the quads after it (layer_guard_math.h).
+    if (layer_guard_math::GuardFrame(
+            static_cast<int>(g_layer_guard), UnderWine(),
+            layer_guard_math::kFirstProjection) &&
+        s.SendGuard(&b.guard)) {
+      layers[layer_count++] =
+          reinterpret_cast<const XrCompositionLayerBaseHeader*>(&b.guard);
+    }
     layers[layer_count++] =
         reinterpret_cast<const XrCompositionLayerBaseHeader*>(&projection);
+    // The first layer of the interface panel, after the projection layer.
+    const uint32_t panel_first = layer_count;
     // THE LAYERS FOR THE VIDEO: each quad below goes into the record too,
     // in the same order.
     if (g_video_wanted) VideoBegin(false);
@@ -3538,13 +3694,13 @@ bool XrScreen::BuildFrame() {
           video->panel_image = s.video_panel_image;
         }
       }
-      if (layer_count > 1) {
+      if (layer_count > panel_first) {
         b.with_panel = true;
         ++s.panel_frames;
         if (!s.logged_panel) {
           s.logged_panel = true;
           s.log("  openxr: the interface goes out as %u quad layer(s) over the "
-                "projection layer", layer_count - 1);
+                "projection layer", layer_count - panel_first);
         }
       }
     }
@@ -3803,50 +3959,66 @@ void XrScreen::FinishFrame() {
   Impl& s = *impl_;
   const Impl::Built& b = s.built;
   if (!s.Check(b.result, "xrEndFrame")) {
+    // THE BLAME LIST (layer_guard_math.h). A refused frame shows nothing,
+    // so one kind of card of that frame must not go in the next one. The
+    // newest kind in the frame stops first, and the interface panel stops
+    // last. A frame of a screen can have only the keyboard and the subtitle
+    // card.
+    uint32_t in_frame = 0;
     if (b.world) {
-      // The runtime refused a frame. A refused frame shows nothing, so a
-      // card of that frame must not go in the next one. The newest kind goes
-      // first: the ring, then the subtitle card. A frame that fails with
-      // neither takes the hint cards away.
-      if (b.with_card[kCardKeyboard]) {
-        g_card_failed[kCardKeyboard] = true;
-        s.log("  openxr: the runtime refused a frame with the keyboard, so "
-              "the keyboard does not show");
-      } else if (b.with_card[kCardRing]) {
-        g_card_failed[kCardRing] = true;
-        s.log("  openxr: the runtime refused a frame with the ring, so the "
-              "ring does not show. Its items still act");
-      } else if (b.with_card[kCardSubtitles]) {
-        g_card_failed[kCardSubtitles] = true;
-        s.log("  openxr: the runtime refused a frame with the subtitle card, "
-              "so the subtitles stay in the eye pictures");
-      } else if (b.with_card[kCardHintPointing] ||
-                 b.with_card[kCardHintOther] ||
-                 b.with_card[kCardHintButton0] ||
-                 b.with_card[kCardHintButton0 + 1] ||
-                 b.with_card[kCardHintButton0 + 2] ||
-                 b.with_card[kCardHintButton0 + 3]) {
-        for (int i = 0; i < kCards; ++i) {
-          if (IsHintCard(i)) g_card_failed[i] = true;
-        }
-        s.log("  openxr: the runtime refused a frame with a hint card, so the "
-              "hints stay in the eye pictures");
-      } else if (b.with_panel && !g_panel_refused) {
-        g_panel_refused = true;
-        s.log("  openxr: the runtime refused a frame with the interface "
-              "panel, so the menus go back to the eye pictures");
+      for (int i = 0; i < kCards; ++i) {
+        if (b.with_card[i]) in_frame |= layer_guard_math::CardBit(i);
       }
-    } else if (b.with_card[kCardKeyboard]) {
-      g_card_failed[kCardKeyboard] = true;
+    } else {
+      if (b.with_card[kCardKeyboard]) {
+        in_frame |= layer_guard_math::CardBit(kCardKeyboard);
+      }
+      if (b.with_subtitles) {
+        in_frame |= layer_guard_math::CardBit(kCardSubtitles);
+      }
+    }
+    const int entry = layer_guard_math::BlameNext(
+        in_frame, b.world && b.with_panel, g_panel_refused);
+    const uint32_t stop = layer_guard_math::BlameCards(entry);
+    for (int i = 0; i < kCards; ++i) {
+      if ((stop & layer_guard_math::CardBit(i)) != 0) g_card_failed[i] = true;
+    }
+    if (entry == layer_guard_math::kBlamePanel) {
+      g_panel_refused = true;
+      s.log("  openxr: the runtime refused a frame with the interface "
+            "panel, so the menus go back to the eye pictures");
+    } else if (entry == layer_guard_math::kBlameNone) {
+      // Nothing in the frame can stop.
+    } else if (!b.world && stop == layer_guard_math::CardBit(kCardKeyboard)) {
       s.log("  openxr: the runtime refused a frame of a screen with the "
             "keyboard, so the keyboard does not show");
-    } else if (b.with_subtitles) {
-      // A refused frame shows nothing, so the card must not go in the next
-      // one. The subtitles then stay in the picture of the window.
-      g_card_failed[kCardSubtitles] = true;
+    } else if (!b.world) {
+      // The subtitles then stay in the picture of the window.
       s.log("  openxr: the runtime refused a frame of the cut scene window "
             "with the subtitle card, so the subtitles stay in the eye "
             "pictures");
+    } else if (stop == layer_guard_math::CardBit(kCardKeyboard)) {
+      s.log("  openxr: the runtime refused a frame with the keyboard, so "
+            "the keyboard does not show");
+    } else if (stop == layer_guard_math::CardBit(kCardRing)) {
+      s.log("  openxr: the runtime refused a frame with the ring, so the "
+            "ring does not show. Its items still act");
+    } else if (stop == layer_guard_math::CardBit(kCardSubtitles)) {
+      s.log("  openxr: the runtime refused a frame with the subtitle card, "
+            "so the subtitles stay in the eye pictures");
+    } else if (stop == layer_guard_math::HintCards()) {
+      s.log("  openxr: the runtime refused a frame with a hint card, so the "
+            "hints stay in the eye pictures");
+    } else {
+      // A kind with one card: the newer kinds.
+      int card = 0;
+      while (card < kCards - 1 &&
+             stop != layer_guard_math::CardBit(card)) {
+        ++card;
+      }
+      s.log("  openxr: the runtime refused a frame with the %s, so the %s "
+            "stay in the eye pictures",
+            kCardName[card], kCardHolds[card]);
     }
   }
   s.end_ticks +=
@@ -4352,6 +4524,7 @@ void XrScreen::Stop() {
     if (was_started) g_have_staged_card[i] = false;
   }
   s.DestroyMask();
+  s.DestroyGuard();
   if (was_started) g_have_staged_window = false;
   g_have_video = false;
   // The action spaces go before the session.

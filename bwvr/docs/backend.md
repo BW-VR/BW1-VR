@@ -36,6 +36,7 @@ Other docs: `software-tnl.md` (the CPU transform and the camera matrix),
 | `src/mod/vr_start.cpp` | The tries to start the headset session on a thread of the mod, and the frame watch of the tries (`vr_start`) |
 | `src/vr/xr_screen.cpp` | The OpenXR session, the frames, the input and the layers |
 | `src/vr/refresh_rate_math.h` | The refresh rate that `refresh_rate_hz` asks for, and the pace of the runtime in each report (`xr_screen.cpp`) |
+| `src/vr/layer_guard_math.h` | When a frame gets the layer guard, and which kind of card stops after a refused frame (`layer_guard`) |
 | `src/vr/bridge/client.cpp`, `host.cpp`, `protocol.h` | The x64 host for Steam Frame and its client in the mod (`xr_bridge`) |
 | `src/mod/gpu_bridge.cpp` | Shared textures, Direct3D 9 to Direct3D 11 copy, depth format hook |
 | `src/mod/frame_send.cpp` | The way of the eye pictures to the headset: when the mod waits for the GPU, and on which thread (`frame_send`) |
@@ -871,6 +872,63 @@ Known limits:
   All controls, the haptics, the loss of the device and long sessions are
   not tested.
 - A desktop run does not start OpenXR, so it cannot show the host.
+
+### The layer guard
+
+Code: `XrScreen::Impl::SendGuard` and `BuildFrame` in `src/vr/xr_screen.cpp`,
+the pure math in `src/vr/layer_guard_math.h`, and the checks in
+`test/controller_math/layer_guard_checks.h`.
+
+Under Wine and Proton, wineopenxr copies the layers of a frame into slots
+that each have the size of the first layer
+(`convert_XrCompositionLayerBaseHeader_pointer_array_win64_to_host` in
+`wineopenxr/openxr_thunks.c`, and the same in its win32 variant). A quad
+layer is larger than a projection layer. With the projection layer first,
+each quad goes into a slot that is too small, and the next quad writes over
+its pose and its size. One quad after the projection layer goes through.
+With two quads or more, each `xrEndFrame` fails with
+`XR_ERROR_POSE_INVALID`. The ray card and the card of the end of the ray
+give two quads more over the interface panel. See
+<https://github.com/ValveSoftware/Proton/issues/10280>.
+
+The guard puts one tiny quad first in each frame of the world, before the
+projection layer. Then each slot has the size of a quad. The quad has a
+swapchain of its own, 4 by 4 texels, with clear texels (alpha 0) and the
+alpha blend flag. It is 1 mm across, with a unit quaternion. The first
+frame with the guard writes the clear texels into one image and releases
+it. Each frame after that names the swapchain, and the runtime reads that
+image. The write goes into the swapchain of Direct3D 11, or through the
+Vulkan upload or the relay of Direct3D 11 in a session with Vulkan, as for
+the walls of the cut scene window. A frame of a screen has a quad first
+already, so it gets no guard. When the swapchain or its image cannot be
+made, the log says so, and the frames have no guard.
+
+The key `layer_guard`:
+
+- 0: no guard.
+- 1 (the default): the guard only when the process runs under Wine or
+  Proton. The mod looks for the export `wine_get_version` of `ntdll.dll`.
+- 2: the guard on each runtime, for a test on Windows.
+
+The log has one line at the start of the session: the value, whether Wine
+or Proton was found, and whether the guard is on. The debug page switch
+"Layer guard" changes the value at the next frame. With `xr_bridge=1` the
+mod sends the value to the host at the start of the session and with each
+frame. The host looks for Wine itself and writes its line in
+`bwvr-host.log`.
+
+A refused frame shows nothing. So after each refused frame one kind of
+card stops (`CardFailed`), and the log names it. The newest kind in the
+frame stops first: the sheet of the gestures, the ring of the right eye,
+the Creature card, the card of the end of the ray, the ray card, the bubble
+card, the keyboard, the ring, the subtitle card, and then all the hint
+cards. The interface panel stops last.
+
+Known limits:
+
+- No run of the mod under Proton showed the guard yet.
+- `layer_guard=2` on Windows is the A/B in a headset. A desktop run does
+  not start OpenXR, so it cannot show the guard.
 
 ## The end of the mod
 
@@ -6299,6 +6357,7 @@ keys that the launcher sets.
 | `vr_start` | 1 | Where the tries to start the headset session run. 0: on the frame thread, with a new instance for each try. 1: on a thread of the mod, with one instance for all tries. 2: on that thread, with a new instance for each try. See "The start of the headset session" |
 | `vr_start_test_hang_try`, `vr_start_test_hang_ms`, `vr_start_test_fail_session` | 0, 0, 0 | Test keys. See the same section |
 | `xr_bridge` | 0 | 0: the mod uses the OpenXR runtime of the PC. 1: the x64 host in `bwvr-host` runs the OpenXR session. See "The x64 host for Steam Frame" |
+| `layer_guard` | 1 | 1: under Wine or Proton a tiny clear quad goes first in each frame of the world, so wineopenxr keeps each quad layer whole. 0: no guard. 2: the guard on each runtime, for a test. The debug page switch "Layer guard". See "The layer guard" |
 | `play_mode` | 4 | See "Keys for v1.0" |
 | `screen_distance_cm`, `screen_width_cm` | 200, 260 | The quad in the window modes |
 | `eye_separation_milli` | 0 | 0 asks the headset |

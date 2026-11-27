@@ -123,6 +123,7 @@ bool RemoteScreen::Card(int index, const CardLayer& card) {
   out.texture_width = card.texture_width; out.texture_height = card.texture_height;
   memcpy(out.rect, card.rect, sizeof(out.rect)); memcpy(out.position, card.position, sizeof(out.position));
   memcpy(out.orientation, card.orientation, sizeof(out.orientation)); out.width = card.width; out.height = card.height;
+  out.eye = card.eye;
   const uint64_t bytes = static_cast<uint64_t>(card.texture_width) * card.texture_height * 4;
   if (out.visible && bytes > bridge::kPayload) { healthy_ = false; log_("xr bridge    : card too large"); return false; }
   packet->payload_bytes = out.visible ? static_cast<uint32_t>(bytes) : 0;

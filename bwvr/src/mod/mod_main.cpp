@@ -1906,6 +1906,11 @@ void ReadSettings() {
   bwvr::XrScreen::SetCardSending(
       GetPrivateProfileIntA("bwvr", "card_edge_clear", 1, path) != 0,
       GetPrivateProfileIntA("bwvr", "card_mips", 1, path) != 0);
+  // THE LAYER GUARD (docs/backend.md, "The layer guard"). 1: under Wine or
+  // Proton a clear quad goes first in each frame of the world. 0: no guard.
+  // 2: the guard on each runtime.
+  bwvr::XrScreen::SetLayerGuard(static_cast<int>(
+      GetPrivateProfileIntA("bwvr", "layer_guard", 1, path)));
   bwvr::XrScreen::SetCardTestSave(
       static_cast<int>(
           GetPrivateProfileIntA("bwvr", "card_send_test_save", 0, path)),
@@ -3470,6 +3475,22 @@ int XrHoldValue() {
   if (g_screen == nullptr) return kDebugCannot;
   return g_screen->HoldMs();
 }
+
+// The switch of layer_guard on the debug page (docs/backend.md, "The layer
+// guard"): 0, 1, 2, then 0 again. It changes the next frame, also through
+// the bridge.
+void LayerGuardChange(const char* by) {
+  const int now = (bwvr::XrScreen::LayerGuard() + 1) % 3;
+  bwvr::XrScreen::SetLayerGuard(now);
+  ControllersGesturePulse(0.5f, now != 0 ? 0.30f : 0.08f);
+  ModLog("test key     : %s, layer_guard is %d now: %s", by, now,
+         now == 0   ? "no guard"
+         : now == 1 ? "the guard only under Wine or Proton"
+                    : "the guard on each runtime");
+}
+
+// The value of layer_guard for the debug page.
+int LayerGuardValue() { return bwvr::XrScreen::LayerGuard(); }
 
 void ModLog(const char* format, ...) {
   if (g_log == nullptr) return;

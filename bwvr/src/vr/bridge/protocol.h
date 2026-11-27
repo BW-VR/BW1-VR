@@ -3,7 +3,7 @@
 #include <stddef.h>
 
 namespace bwvr::bridge {
-constexpr uint32_t kMagic = 0x42575242, kVersion = 4;
+constexpr uint32_t kMagic = 0x42575242, kVersion = 5;
 constexpr uint32_t kPayload = 32 * 1024 * 1024;
 enum Command : uint32_t { Instance = 1, System, Session, Begin, EyeTexture,
   EyePixels, PanelTexture, Panels, Card, Window, End, Haptic, Stop, Probe };
@@ -15,6 +15,7 @@ struct CardInfo {
   uint32_t visible, texture_width, texture_height;
   int32_t rect[4];
   float position[3], orientation[4], width, height;
+  int32_t eye;  // CardLayer::eye: 0 both eyes, 1 the left eye, 2 the right eye
 };
 struct State {
   uint32_t running, render, focus, panel_ready, recenter;
@@ -34,6 +35,7 @@ struct Packet {
   uint64_t shared_handle;
   float distance, screen_width, half_angle, amplitude, duration;
   uint32_t projection, have_render_pose;
+  uint32_t layer_guard;  // XrScreen::SetLayerGuard, at Session and at each End
   EyeView render_pose[2];
   PanelQuad panels[kPanelQuads];
   CardInfo card;
@@ -43,4 +45,5 @@ struct Packet {
 };
 #pragma pack(pop)
 static_assert(offsetof(Packet, shared_handle) == 56, "Handle alignment");
+static_assert(sizeof(CardInfo) == 68, "Card ABI");
 }

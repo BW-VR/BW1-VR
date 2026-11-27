@@ -215,6 +215,8 @@ int XrVulkanUploadValue();
 void XrVulkanUploadToggle(const char* by);
 int XrHoldValue();
 void XrHoldToggle(const char* by);
+int LayerGuardValue();
+void LayerGuardChange(const char* by);
 int FileReadAheadValue();
 void FileReadAheadToggle(const char* by);
 // The Hand (hand_direct.cpp, hand_exact.cpp, hand_feel.cpp, hand_model.cpp,
@@ -663,6 +665,8 @@ const Switch kSwitches[] = {
      L"each eye|one wait|2nd thread"},
     {kGroupRender, L"Frame hold", L"Hold of the frame, ms", "xr_hold_ms",
      XrHoldValue, XrHoldToggle, L""},
+    {kGroupRender, L"Layer guard", L"Clear first quad, Wine and Proton",
+     "layer_guard", LayerGuardValue, LayerGuardChange, L"off|Wine|always"},
     {kGroupRender, L"Real time", L"Real frame time after the eyes",
      "frame_time_real", FrameTimeValue, FrameTimeToggle, L"kept|real"},
     {kGroupRender, L"SSE loops", L"Vertex loops with SSE", "fast_transform",
@@ -1252,6 +1256,10 @@ const wchar_t* const kTips[] = {
     // Frame hold
     L"When the game gives no frame for this many ms, a thread sends the last "
     L"frame again. 0 is off. A step goes to 0 and back.",
+    // Layer guard
+    L"A tiny clear quad goes first in each frame, so that Proton keeps each "
+    L"quad layer whole. Wine: only under Wine or Proton. Always: on each "
+    L"runtime, for a test. The change starts at the next frame.",
     // Real time
     L"Real: after the eye passes, the game gets the real time of the frame. "
     L"Kept: it gets the time from before the passes.",

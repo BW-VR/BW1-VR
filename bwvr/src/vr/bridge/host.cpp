@@ -85,6 +85,7 @@ int wmain(int argc, wchar_t** argv) {
         case Session: {
           if (!p->width || !p->height || p->width > 8192 || p->height > 8192 || (p->eyes != 1 && p->eyes != 2)) { p->result = -1; break; }
           screen.SetPlacement(p->distance, p->screen_width); screen.EnablePanel(p->panel_enabled != 0);
+          bwvr::XrScreen::SetLayerGuard(static_cast<int>(p->layer_guard));
           if (!screen.StartSession(p->width, p->height, p->eyes)) { p->result = 0; break; }
           auto* device = static_cast<ID3D11Device*>(screen.D3D11Device());
           device->GetImmediateContext(&context);
@@ -148,12 +149,14 @@ int wmain(int argc, wchar_t** argv) {
           layer.texture_width = p->card.texture_width; layer.texture_height = p->card.texture_height;
           memcpy(layer.rect, p->card.rect, sizeof(layer.rect)); memcpy(layer.position, p->card.position, sizeof(layer.position));
           memcpy(layer.orientation, p->card.orientation, sizeof(layer.orientation)); layer.width = p->card.width; layer.height = p->card.height;
+          layer.eye = p->card.eye;
           screen.StageCard(p->index, layer); break;
         }
         case Window: screen.StageWindow(p->window); break;
         case End:
           if (!frame_open) { p->result = -1; break; }
           screen.SetProjection(p->projection != 0); screen.SetRenderHalfAngle(p->half_angle);
+          bwvr::XrScreen::SetLayerGuard(static_cast<int>(p->layer_guard));
           screen.SetPlacement(p->distance, p->screen_width);
           if (p->have_render_pose) for (int i = 0; i < 2; ++i)
             screen.SetRenderPose(i, p->render_pose[i].position, p->render_pose[i].orientation);

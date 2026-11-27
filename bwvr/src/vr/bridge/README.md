@@ -90,7 +90,11 @@ ownership between processes. Full eye and hand state, display time, input
 focus and recenter events return at BeginFrame. The game sends render poses,
 projection options, panels, cards, cut scene windows and haptics. CPU image
 fallback and card payloads have a 32 MiB limit per request. Card pixels
-remain alive in the host until EndFrame.
+remain alive in the host until EndFrame. Each card also carries its eye
+field: both eyes, the left eye only or the right eye only. So the ring of
+the right eye shows only to the right eye. The game also sends the value of
+`layer_guard` at the session start and with each frame. The host looks for
+Wine itself and writes its layer guard line in `bwvr-host.log`.
 
 Submission is synchronous in bridge mode, including when `frame_send=2`.
 The native threaded submission remains available with `xr_bridge=0`.

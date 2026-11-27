@@ -41,6 +41,29 @@ correct. Through SteamVR as the OpenXR runtime, the game shows a double
 picture, and the cause is not known yet (issue
 [#12](https://github.com/BW-VR/BW1-VR/issues/12)).
 
+### Linux with WiVRn (experimental)
+
+A player runs the mod on a Linux PC and streams it to a Quest 3 with WiVRn.
+The setup uses Steam (not the Flatpak), the Flatpak of WiVRn and Proton
+Experimental. SteamVR is not necessary. The mod needs no change and no
+special value in `bwvr.ini`: the default renderer, Vulkan, is the one that
+works.
+
+1. Install the game and the mod in the Proton prefix of the game, as on
+   Windows.
+2. In Steam, add these launch options to the shortcut of the game:
+
+   ```text
+   PROTON_USE_WOW64=1 WINEDLLOVERRIDES="ddraw=n,b;openxr_loader=n" PRESSURE_VESSEL_IMPORT_OPENXR_1_RUNTIMES=1 PRESSURE_VESSEL_FILESYSTEMS_RW=/var/lib/flatpak/app/io.github.wivrn.wivrn %command%
+   ```
+
+3. Connect the Quest 3 to WiVRn.
+4. Start the game from Steam.
+
+The `PRESSURE_VESSEL` values let the runtime of Steam find the OpenXR
+runtime of the WiVRn Flatpak. `WINEDLLOVERRIDES` makes Proton load the
+`ddraw.dll` and the `openxr_loader.dll` of the mod.
+
 ## 1. Set up a clean copy of the game
 
 The mod does not contain the game. No store sells Black & White today, so you

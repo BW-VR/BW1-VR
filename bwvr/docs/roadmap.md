@@ -691,6 +691,8 @@ game as it is.
   and the quads in a headset.
 - **N17. Headset coverage.** Quest 3 through Virtual Desktop and Steam Frame
   through Proton have game coverage. Other headsets and runtimes need tests.
+  A Quest 3 through WiVRn on Linux (Proton Experimental, `backend=vulkan`)
+  runs the game, from a player's report (README.md).
   A Pimax Crystal with the runtime Pimax OpenXR shows a correct picture,
   from a player's report. The same headset through SteamVR/OpenXR shows a
   double picture in play, with the local runtime and with the x64 host
